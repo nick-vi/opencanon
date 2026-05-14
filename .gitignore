@@ -1,0 +1,14 @@
+node_modules/
+tmp/
+.DS_Store
+.opencanon/cache/
+.opencanon/daemon.json
+.opencanon/daemon.log
+.opencanon/setup.json
+.opencanon/*.sqlite
+.opencanon/*.sqlite-shm
+.opencanon/*.sqlite-wal
+.agents/skills/opencanon/runtime/
+packages/ui/dist/
+packages/engine/binaries/
+crates/*/target/

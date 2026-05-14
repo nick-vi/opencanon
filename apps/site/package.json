@@ -1,0 +1,20 @@
+{
+  "name": "@opencanon/site",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@lucide/svelte": "1.14.0",
+    "@sveltejs/adapter-static": "3.0.10",
+    "@sveltejs/kit": "2.59.1",
+    "@sveltejs/vite-plugin-svelte": "4.0.4",
+    "svelte": "5.55.5",
+    "vite": "5.4.21"
+  }
+}

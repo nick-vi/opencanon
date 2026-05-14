@@ -1,0 +1,11 @@
+[
+  {
+    "id": "company-read-model",
+    "applies": ["src/db/dal/company.ts"],
+    "changePolicy": {
+      "requiresDecision": true
+    },
+    "docs": ["examples/conventions/docs/opencanon/canon/impact.md#impact-surfaces"],
+    "decisionIds": ["impact-surfaces-current"]
+  }
+]

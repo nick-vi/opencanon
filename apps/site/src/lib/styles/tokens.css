@@ -1,0 +1,142 @@
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/source-serif-4-regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/source-serif-4-medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/source-serif-4-semibold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/atkinson-hyperlegible-regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/atkinson-hyperlegible-bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/martian-mono-regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/martian-mono-semibold.ttf") format("truetype");
+}
+
+:root {
+  --font-serif: "Source Serif 4", "Iowan Old Style", "Palatino Linotype",
+    Palatino, "URW Palladio L", Georgia, serif;
+  --font-sans: "Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Martian Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+
+  --c-paper: oklch(0.966 0.003 270);
+  --c-surface: oklch(0.988 0.002 270);
+  --c-panel: oklch(0.936 0.004 270);
+  --c-paper-deep: oklch(0.904 0.006 270);
+  --c-rule: oklch(0.82 0.008 270);
+  --c-rule-soft: oklch(0.886 0.006 270);
+  --c-rule-strong: oklch(0.66 0.012 270);
+  --c-ink: oklch(0.18 0.006 270);
+  --c-ink-soft: oklch(0.34 0.008 270);
+  --c-ink-mute: oklch(0.52 0.01 270);
+  --c-mark: oklch(0.48 0.14 31);
+  --c-mark-soft: oklch(0.66 0.12 34);
+  --c-mark-bg: oklch(0.925 0.04 38);
+  --c-code-bg: oklch(0.17 0.006 270);
+  --c-code-head: oklch(0.22 0.008 270);
+  --c-code-line: oklch(0.25 0.01 270);
+  --c-code: oklch(0.91 0.006 270);
+  --c-code-gutter: oklch(0.56 0.01 270);
+  --c-code-comment: oklch(0.68 0.014 270);
+  --c-code-string: oklch(0.79 0.105 74);
+  --c-code-keyword: oklch(0.75 0.12 42);
+  --c-code-number: oklch(0.78 0.09 215);
+  --c-code-path: oklch(0.78 0.065 245);
+
+  --measure: 64ch;
+  --measure-wide: 78ch;
+  --step-0: 1rem;
+  --step-1: 1.0625rem;
+  --step-2: 1.25rem;
+  --step-3: 1.5rem;
+  --step-4: 2rem;
+  --step-5: 2.75rem;
+  --step-6: 3.75rem;
+
+  --leading-tight: 1.2;
+  --leading-body: 1.55;
+  --leading-loose: 1.7;
+
+  --radius-1: 4px;
+  --radius-2: 6px;
+  --shadow-pop: 0 18px 38px color-mix(in oklch, var(--c-ink), transparent 86%);
+  --motion-fast: 160ms;
+  --motion-base: 240ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+  --space-9: 6.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-paper: oklch(0.16 0.006 270);
+    --c-surface: oklch(0.19 0.006 270);
+    --c-panel: oklch(0.235 0.008 270);
+    --c-paper-deep: oklch(0.12 0.006 270);
+    --c-rule: oklch(0.33 0.012 270);
+    --c-rule-soft: oklch(0.27 0.01 270);
+    --c-rule-strong: oklch(0.44 0.014 270);
+    --c-ink: oklch(0.91 0.006 270);
+    --c-ink-soft: oklch(0.76 0.008 270);
+    --c-ink-mute: oklch(0.6 0.01 270);
+    --c-mark: oklch(0.7 0.13 34);
+    --c-mark-soft: oklch(0.55 0.1 34);
+    --c-mark-bg: oklch(0.27 0.047 34);
+    --c-code-bg: oklch(0.115 0.006 270);
+    --c-code-head: oklch(0.165 0.006 270);
+    --c-code-line: oklch(0.2 0.008 270);
+    --c-code: oklch(0.91 0.006 270);
+    --c-code-gutter: oklch(0.52 0.01 270);
+  }
+}

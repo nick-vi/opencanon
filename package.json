@@ -1,0 +1,46 @@
+{
+  "name": "opencanon",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.13",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "opencanon": "bun .agents/skills/opencanon/scripts/opencanon.ts",
+    "build:engine": "cd packages/engine && bun run build",
+    "build:skill-runtime": "bun scripts/build-opencanon-skill-runtime.ts",
+    "build:skill": "bun run ui:build && bun run build:engine && bun run build:skill-runtime",
+    "check:engine": "cd packages/engine && bun run check",
+    "check:ci": "bun run build:skill && bun run check:engine && cargo clippy --manifest-path crates/opencanon-engine/Cargo.toml --tests -- -D warnings && cargo fmt --manifest-path crates/opencanon-engine/Cargo.toml -- --check && bun run test:tree && bun run test:ui && bun run opencanon context --check && bun run opencanon validate --check-fixtures && bun run opencanon validate --project && bun run opencanon doctor && bun run release:manifest -- --asset-dir packages/engine/binaries --out-dir tmp/opencanon-release-check --channel stable --require-runtime --clean && bun run rehearse:install -- --manifest tmp/opencanon-release-check/opencanon-runtime-manifest.json",
+    "ui:build": "cd packages/ui && bun run build",
+    "ui:dev": "cd packages/ui && bun run dev",
+    "dev": "bun run opencanon dev",
+    "site:dev": "cd apps/site && bun run dev",
+    "site:build": "cd apps/site && bun run build",
+    "site:preview": "cd apps/site && bun run preview",
+    "sync:vscode-icons": "node scripts/sync-vscode-icons.mjs",
+    "release:manifest": "bun scripts/create-opencanon-release.ts",
+    "rehearse:install": "bun scripts/rehearse-opencanon-install.ts",
+    "test:tree": "vitest run tests/contracts.test.ts tests/core-utils.test.ts packages/daemon/test/*.test.ts tests/tree.test.ts tests/validator.test.ts tests/feedback.test.ts tests/init.test.ts tests/release.test.ts tests/setup.test.ts tests/bundle.test.ts tests/ui-vscode-icons.test.ts tests/unit/company.test.ts",
+    "test:ui": "bun run ui:build && bun tests/ui-smoke.ts",
+    "check": "bun run test:tree && bun run test:ui && bun run opencanon context --check && bun run opencanon validate --check-fixtures && bun run opencanon validate --project && bun run opencanon doctor",
+    "test": "bun run check"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "@types/node": "25.7.0",
+    "playwright": "1.60.0",
+    "vitest": "4.1.6"
+  },
+  "dependencies": {
+    "@opencanon/cli": "workspace:*",
+    "@opencanon/core": "workspace:*",
+    "@opencanon/daemon": "workspace:*",
+    "@opencanon/engine": "workspace:*",
+    "@opencanon/validators": "workspace:*"
+  }
+}

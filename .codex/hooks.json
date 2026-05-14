@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$(git rev-parse --show-toplevel)/.agents/skills/opencanon/scripts/opencanon.ts\" hook codex",
+            "statusMessage": "Running OpenCanon feedback"
+          }
+        ]
+      }
+    ]
+  }
+}

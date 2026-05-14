@@ -1,0 +1,48 @@
+{
+  "docsDir": "examples/conventions/docs/opencanon",
+  "decisionsPath": "examples/conventions/docs/opencanon/decisions.json",
+  "validatorsPath": "examples/conventions/validators/index.ts",
+  "fixturesDir": "examples/conventions/fixtures",
+  "impactSurfacesPath": "examples/conventions/docs/opencanon/impact-surfaces.json",
+  "proposedImpactNotesPath": "examples/conventions/docs/opencanon/proposed-impact-notes.json",
+  "baselinePath": ".opencanon/baseline.json",
+  "cacheDir": ".opencanon/cache",
+  "fileDiscovery": "git",
+  "entrypoints": [
+    "src/api/routes/**/*.ts"
+  ],
+  "publicSurfaces": [
+    "src/api/routes/**/*.ts"
+  ],
+  "generated": [],
+  "externalTools": {},
+  "maxFiles": 20000,
+  "maxFileSizeKb": 512,
+  "projectFilePatterns": [
+    "src/**/*.{ts,tsx,js,jsx,py,svelte,css,scss,sass,less,json,md}",
+    "tests/**/*.{ts,tsx,js,jsx,py,svelte,css,scss,sass,less,json,md}",
+    "packages/**/*.{ts,tsx,js,jsx,svelte,css,scss,sass,less,json,md}",
+    "apps/site/**/*.{ts,tsx,js,jsx,svelte,css,scss,sass,less,json,md}",
+    "scripts/**/*.{ts,js,mjs}",
+    ".agents/skills/opencanon/**/*.{ts,md,json}",
+    "crates/opencanon-engine/src/**/*.rs"
+  ],
+  "ignore": [
+    "node_modules/**",
+    ".git/**",
+    "packages/**/node_modules/**",
+    "packages/engine/binaries/**",
+    "packages/ui/dist/**",
+    "packages/ui/src/generated/**",
+    "apps/site/node_modules/**",
+    "apps/site/.svelte-kit/**",
+    "apps/site/build/**",
+    ".agents/skills/opencanon/runtime/**",
+    ".opencanon/**",
+    "tmp/**",
+    "crates/*/target/**"
+  ],
+  "requiredPackageScripts": [
+    "opencanon"
+  ]
+}

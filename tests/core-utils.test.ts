@@ -1,0 +1,246 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "vitest";
+import { getGitFileDiff, getGitFileHistory, lazy, normalizeMarkdownHeading, parseMarkdownDoc, resolveDocsReferences, resolveInsideRoot, resource, safeRelativePath } from "@opencanon/core";
+
+test("lazy caches sync values and can reset", () => {
+  let calls = 0;
+  const getValue = lazy(() => {
+    calls += 1;
+    return { calls };
+  });
+
+  const first = getValue();
+  const second = getValue();
+
+  assert.equal(calls, 1);
+  assert.equal(first, second);
+  assert.equal(getValue.isReady(), true);
+
+  getValue.reset();
+
+  assert.equal(getValue.isReady(), false);
+  assert.equal(getValue().calls, 2);
+});
+
+test("safe path utilities reject traversal outside the root", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-safe-path-"));
+  const outsideDir = mkdtempSync(path.join(tmpdir(), "opencanon-safe-path-outside-"));
+
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    symlinkSync(outsideDir, path.join(rootDir, "linked"));
+
+    assert.deepEqual(safeRelativePath("./src/index.ts"), { ok: true, path: "src/index.ts" });
+    assert.equal(safeRelativePath("../secret.txt").ok, false);
+    assert.equal(safeRelativePath("/tmp/secret.txt").ok, false);
+    assert.equal(safeRelativePath("C:/secret.txt").ok, false);
+
+    const resolved = resolveInsideRoot(rootDir, "src/index.ts");
+    assert.equal(resolved.ok, true);
+    if (resolved.ok) assert.equal(resolved.absolutePath, path.join(rootDir, "src/index.ts"));
+    assert.equal(resolveInsideRoot(rootDir, "../secret.txt").ok, false);
+    assert.equal(resolveInsideRoot(rootDir, "linked/secret.txt").ok, false);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("lazy deduplicates in-flight async work and retries after failure", async () => {
+  let calls = 0;
+  let release: ((value: string) => void) | undefined;
+  const getValue = lazy(async () => {
+    calls += 1;
+    return new Promise<string>((resolve) => {
+      release = resolve;
+    });
+  });
+
+  const first = getValue();
+  const second = getValue();
+  assert.equal(first, second);
+  assert.equal(getValue.isReady(), false);
+
+  release?.("ready");
+  assert.equal(await first, "ready");
+  assert.equal(await second, "ready");
+  assert.equal(calls, 1);
+  assert.equal(getValue.isReady(), true);
+
+  let attempts = 0;
+  const getRetried = lazy(async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("first failure");
+    return "ok";
+  });
+
+  await assert.rejects(() => getRetried(), /first failure/);
+  assert.equal(await getRetried(), "ok");
+  assert.equal(attempts, 2);
+});
+
+test("lazy reset prevents stale in-flight results from becoming ready", async () => {
+  let releaseFirst: ((value: string) => void) | undefined;
+  let releaseSecond: ((value: string) => void) | undefined;
+  let calls = 0;
+  const getValue = lazy(async () => {
+    calls += 1;
+    return new Promise<string>((resolve) => {
+      if (calls === 1) releaseFirst = resolve;
+      else releaseSecond = resolve;
+    });
+  });
+
+  const first = getValue();
+  getValue.reset();
+  const second = getValue();
+
+  releaseFirst?.("stale");
+  assert.equal(await first, "stale");
+  assert.equal(getValue.isReady(), false);
+
+  releaseSecond?.("fresh");
+  assert.equal(await second, "fresh");
+  assert.equal(await getValue(), "fresh");
+  assert.equal(calls, 2);
+});
+
+test("resource initializes lazily, disposes, and reinitializes", async () => {
+  let initCalls = 0;
+  let disposeCalls = 0;
+  const managed = resource({
+    init() {
+      initCalls += 1;
+      return { id: initCalls };
+    },
+    dispose() {
+      disposeCalls += 1;
+    },
+  });
+
+  const first = await managed.get();
+  const second = await managed.get();
+
+  assert.equal(first, second);
+  assert.equal(first.id, 1);
+  assert.equal(managed.isReady(), true);
+
+  await managed.dispose();
+
+  assert.equal(disposeCalls, 1);
+  assert.equal(managed.isReady(), false);
+  assert.equal((await managed.get()).id, 2);
+});
+
+test("markdown doc refs resolve normalized headings without section ids", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-docrefs-"));
+  try {
+    mkdirSync(path.join(rootDir, "docs"), { recursive: true });
+    writeFileSync(path.join(rootDir, "docs/decisions.json"), "[]\n");
+    writeFileSync(path.join(rootDir, "docs/canon.md"), ["# Canon", "", "## API Routes!", "", "Routes call services.", "", "## API Routes!", "", "Duplicate heading."].join("\n"));
+
+    const snippets = parseMarkdownDoc("## Café Routes!\n\nBody\n\n## Café Routes!\n", "docs/canon.md");
+    assert.equal(normalizeMarkdownHeading("`API` Routes!"), "api-routes");
+    assert.deepEqual(
+      snippets.map((snippet) => snippet.slug),
+      ["cafe-routes", "cafe-routes-1"],
+    );
+
+    const resolved = resolveDocsReferences(
+      { rootDir, decisionsPath: path.join(rootDir, "docs/decisions.json") },
+      ["docs/canon.md#api-routes"],
+      new Map([["docs/canon.md#api-routes", ["route-decision"]]]),
+    );
+
+    assert.equal(resolved.length, 1);
+    assert.equal(resolved[0].heading, "API Routes!");
+    assert.equal(resolved[0].decisionIds[0], "route-decision");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("resource shares in-flight init and waits before dispose", async () => {
+  let release: ((value: { id: number }) => void) | undefined;
+  let initCalls = 0;
+  let disposeCalls = 0;
+  const managed = resource({
+    init() {
+      initCalls += 1;
+      return new Promise<{ id: number }>((resolve) => {
+        release = resolve;
+      });
+    },
+    dispose() {
+      disposeCalls += 1;
+    },
+  });
+
+  const first = managed.get();
+  const second = managed.get();
+  assert.equal(first, second);
+
+  const disposing = managed.dispose();
+  release?.({ id: 1 });
+
+  assert.deepEqual(await first, { id: 1 });
+  await disposing;
+
+  assert.equal(initCalls, 1);
+  assert.equal(disposeCalls, 1);
+  assert.equal(managed.isReady(), false);
+});
+
+test("git file history includes commit metadata and file diff", () => {
+  if (spawnSync("git", ["--version"], { encoding: "utf8" }).status !== 0) return;
+
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-history-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    runGit(rootDir, ["init"]);
+    runGit(rootDir, ["config", "user.name", "OpenCanon Test"]);
+    runGit(rootDir, ["config", "user.email", "test@example.com"]);
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = 1;\n");
+    runGit(rootDir, ["add", "src/company.ts"]);
+    runGit(rootDir, ["commit", "-m", "add company"]);
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = 2;\n");
+    runGit(rootDir, ["add", "src/company.ts"]);
+    runGit(rootDir, ["commit", "-m", "update company"]);
+
+    const history = getGitFileHistory(rootDir, ["src/company.ts"], 2);
+    const commit = history.histories[0]?.commits[0];
+    const diff = getGitFileDiff(rootDir, "src/company.ts", commit?.fullHash ?? "");
+
+    assert.equal(history.diagnostics.length, 0);
+    assert.equal(commit?.author, "OpenCanon Test");
+    assert.equal(commit?.subject, "update company");
+    assert.equal(commit?.fullHash.length, 40);
+    assert.equal(diff.diagnostics.length, 0);
+    assert.equal(diff.beforeContent, "export const company = 1;\n");
+    assert.equal(diff.afterContent, "export const company = 2;\n");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+function runGit(rootDir: string, args: string[]): void {
+  const result = spawnSync("git", args, { cwd: rootDir, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+}
+
+test("resource does not register process signal handlers by default", async () => {
+  const before = process.listenerCount("SIGTERM");
+  const managed = resource({
+    init: () => "value",
+    dispose: () => undefined,
+  });
+
+  await managed.get();
+
+  assert.equal(process.listenerCount("SIGTERM"), before);
+  await managed.dispose();
+});
