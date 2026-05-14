@@ -1,0 +1,41 @@
+.registryTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.registryTable thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elev);
+  text-align: left;
+  font-weight: 600;
+  color: var(--fg-muted);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+}
+.registryTable tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.registryTable tbody tr {
+  cursor: pointer;
+}
+.registryTable tbody tr:hover td {
+  background: var(--bg-row-hover);
+}
+.registryRoot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+.registryRoot span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@opencanon/engine",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "napi": {
+    "binaryName": "opencanon",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --manifest-path ../../crates/opencanon-engine/Cargo.toml --output-dir binaries --platform --release",
+    "check": "cargo test --manifest-path ../../crates/opencanon-engine/Cargo.toml"
+  },
+  "dependencies": {
+    "@opencanon/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.6.2"
+  }
+}

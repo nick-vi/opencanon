@@ -1,0 +1,16 @@
+{
+  "name": "@opencanon/daemon",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@opencanon/core": "workspace:*",
+    "@opencanon/engine": "workspace:*",
+    "@opencanon/validators": "workspace:*",
+    "cac": "7.0.0"
+  }
+}

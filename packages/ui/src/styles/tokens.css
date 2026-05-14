@@ -1,0 +1,110 @@
+:root {
+  --color-ink-1: oklch(96% 0.005 238);
+  --color-ink-2: oklch(86% 0.009 238);
+  --color-ink-3: oklch(63% 0.012 238);
+  --color-surface-1: oklch(13.7% 0.007 238);
+  --color-surface-2: oklch(16.8% 0.008 238);
+  --color-surface-3: oklch(19.8% 0.009 238);
+  --color-surface-hover: oklch(23% 0.011 238);
+  --color-surface-selected: oklch(25.8% 0.018 176);
+  --color-border-1: oklch(27.5% 0.01 238);
+  --color-border-2: oklch(36% 0.014 238);
+  --color-accent: oklch(73% 0.096 176);
+
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-9: 20px;
+  --space-10: 24px;
+
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --code-font-size: 12.5px;
+  --code-line-height: 1.55;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
+
+  --surface-canvas: var(--color-surface-1);
+  --surface-raised: var(--color-surface-2);
+  --surface-inset: oklch(12.2% 0.006 238);
+  --surface-control: oklch(18.6% 0.009 238);
+  --surface-control-hover: oklch(23.6% 0.012 238);
+  --surface-row: var(--color-surface-3);
+  --surface-row-hover: var(--color-surface-hover);
+  --surface-row-selected: var(--color-surface-selected);
+  --text-strong: var(--color-ink-1);
+  --text-default: var(--color-ink-2);
+  --text-muted: var(--color-ink-3);
+  --border-subtle: var(--color-border-1);
+  --border-strong: var(--color-border-2);
+  --accent: var(--color-accent);
+
+  --focus-ring: color-mix(in oklch, var(--accent) 74%, white 26%);
+  --shadow-menu: 0 18px 36px color-mix(in oklch, black 34%, transparent);
+  --duration-fast: 150ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --control-height-xs: 24px;
+  --control-height-sm: 28px;
+  --control-height-md: 30px;
+  --control-radius: var(--radius-md);
+  --control-gap: var(--space-3);
+  --control-pad-x: var(--space-5);
+
+  --row-h-top-bar: 38px;
+  --row-h-pane-header: 36px;
+  --row-h-status-bar: 24px;
+  --row-h: 28px;
+  --pane-header-h: var(--row-h-pane-header);
+
+  --surface-pane-primary: var(--color-surface-1);
+  --surface-pane-side: var(--color-surface-2);
+
+  --bg: var(--surface-canvas);
+  --bg-elev: var(--surface-raised);
+  --bg-row: var(--surface-row);
+  --bg-row-hover: var(--surface-row-hover);
+  --bg-row-selected: var(--surface-row-selected);
+  --border: var(--border-subtle);
+  --fg: var(--text-default);
+  --fg-muted: var(--text-muted);
+  --fg-strong: var(--text-strong);
+
+  --syntax-comment: oklch(60% 0.014 238);
+  --syntax-definition: oklch(83% 0.046 202);
+  --syntax-keyword: oklch(77% 0.055 278);
+  --syntax-link: oklch(78% 0.068 194);
+  --syntax-literal: oklch(78% 0.058 84);
+  --syntax-muted: oklch(64% 0.014 238);
+  --syntax-name: oklch(86% 0.012 238);
+  --syntax-property: oklch(80% 0.035 212);
+  --syntax-string: oklch(77% 0.056 150);
+  --syntax-type: oklch(80% 0.048 292);
+
+  --severity-error-fg: oklch(74% 0.12 25);
+  --severity-error-bg: oklch(24% 0.052 25);
+  --severity-warning-fg: oklch(82% 0.095 84);
+  --severity-warning-bg: oklch(25% 0.05 84);
+  --severity-info-fg: oklch(76% 0.07 194);
+  --severity-info-bg: oklch(23% 0.035 194);
+
+  --status-running: oklch(75% 0.105 148);
+  --status-unhealthy: oklch(82% 0.095 84);
+  --status-stale: var(--text-muted);
+  --status-current: var(--accent);
+  --status-error: var(--severity-error-fg);
+  --status-loading: var(--text-muted);
+}

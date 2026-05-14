@@ -1,0 +1,403 @@
+[
+  {
+    "id": "dal-transaction-flow",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "DAL functions accept optional transactions",
+    "topics": ["dal", "api-route"],
+    "applies": [
+      "src/db/dal/**/*.{ts,tsx}",
+      "src/services/**/*.{ts,tsx}",
+      "src/api/routes/**/*.{ts,tsx}",
+      "packages/*/src/db/dal/**/*.{ts,tsx}",
+      "packages/*/src/services/**/*.{ts,tsx}",
+      "packages/*/src/api/routes/**/*.{ts,tsx}"
+    ],
+    "validatorIds": ["dal-transaction-param", "no-route-dal-import", "service-no-db-client"],
+    "docs": ["examples/conventions/docs/opencanon/canon/architecture.md#dal", "examples/conventions/docs/opencanon/canon/architecture.md#api-routes"],
+    "summary": "Database access functions accept an optional transaction/client so services can compose multi-step writes atomically.",
+    "rationale": [
+      "Services often need multi-step writes to commit or roll back as one unit.",
+      "Routes should stay HTTP-focused and not know persistence details.",
+      "One transaction-aware DAL pattern is cleaner than parallel transactional/non-transactional helpers."
+    ],
+    "required": [
+      "DAL functions accept tx?: DatabaseClient as their final optional parameter.",
+      "DAL functions use const client = tx ?? db().",
+      "Services pass tx through composed write flows.",
+      "Routes call services for workflows instead of composing persistence directly."
+    ],
+    "replaced": [
+      "DAL functions always calling db() internally.",
+      "Route handlers composing multi-step persistence directly."
+    ],
+    "agentPolicy": [
+      "Use the required pattern for new code.",
+      "When touched code uses the replaced pattern, refactor the touched flow to the required pattern.",
+      "Do not add internal shims, aliases, compatibility wrappers, deprecated paths, or parallel APIs."
+    ],
+    "exceptions": [
+      "Database migrations and persisted data.",
+      "Public API contracts already consumed outside the repo.",
+      "External integration formats."
+    ],
+    "examples": [
+      "src/db/dal/company.ts shows the transaction-aware DAL shape.",
+      "src/api/routes/companies.ts shows a route calling a service instead of DAL."
+    ]
+  },
+  {
+    "id": "service-db-boundary",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Services compose DAL instead of direct DB clients",
+    "topics": ["service", "dal"],
+    "applies": ["src/services/**/*.{ts,tsx}", "packages/*/src/services/**/*.{ts,tsx}"],
+    "validatorIds": ["service-no-db-client"],
+    "docs": ["examples/conventions/docs/opencanon/canon/architecture.md#services"],
+    "summary": "Services own workflow composition but should use DAL modules for persistence details.",
+    "rationale": [
+      "DAL modules keep table/query details in one layer.",
+      "Services stay focused on business sequencing and transactions."
+    ],
+    "required": [
+      "Services call DAL functions for reads and writes.",
+      "Services pass tx through multi-step workflows.",
+      "Services do not import DB clients or table definitions for direct queries."
+    ],
+    "replaced": [
+      "Services calling db() directly for ordinary persistence.",
+      "Services mixing workflow code with table/query construction."
+    ],
+    "agentPolicy": [
+      "When touching service code that calls db(), move the query into a DAL function.",
+      "Do not add service-local query helpers as compatibility shims."
+    ],
+    "exceptions": [
+      "Transaction orchestration may create or receive tx, but query construction still belongs in DAL.",
+      "Migrations and one-off maintenance scripts outside src/services."
+    ]
+  },
+  {
+    "id": "import-boundaries-current",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Imports preserve local ownership boundaries",
+    "topics": ["imports", "folder-structure"],
+    "applies": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
+    "validatorIds": ["no-deep-relative-imports"],
+    "docs": ["examples/conventions/docs/opencanon/canon/architecture.md#imports"],
+    "summary": "Deep relative imports are treated as a boundary smell because they make layer ownership implicit.",
+    "rationale": [
+      "Agents tend to copy nearby imports.",
+      "Deep relative paths make it hard to see whether a dependency direction is intentional."
+    ],
+    "required": [
+      "Use local same-folder imports for private helpers.",
+      "Use package aliases or approved barrels for cross-layer imports.",
+      "Keep relative imports shallow."
+    ],
+    "replaced": [
+      "Imports that climb multiple parent directories to reach another layer."
+    ],
+    "agentPolicy": [
+      "When touching a deep relative import, replace it with the current approved import surface.",
+      "Do not create new barrels just to preserve stale import paths."
+    ],
+    "exceptions": [
+      "Small colocated tests may use one parent traversal when the repo convention allows it."
+    ]
+  },
+  {
+    "id": "comments-current",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Comments describe current intent",
+    "topics": ["comments"],
+    "applies": ["src/**/*.{ts,tsx,py}", "tests/**/*.{ts,tsx,py}"],
+    "validatorIds": ["no-stale-intent-comments", "no-shim-files", "shim-requires-expiry", "deprecated-requires-replacement"],
+    "docs": ["examples/conventions/docs/opencanon/canon/lifecycle.md#comments"],
+    "summary": "Comments should explain current behavior, not preserve stale compatibility narratives.",
+    "rationale": [
+      "Agents may treat comments as live instructions.",
+      "Legacy/deprecation/shim comments invite preserving old paths instead of cleaning touched code."
+    ],
+    "required": [
+      "Use comments for non-obvious current intent.",
+      "Remove comments that justify legacy, deprecated, shim, or backward-compatibility paths when refactoring touched code."
+    ],
+    "replaced": [
+      "Comments that instruct agents to keep stale compatibility code around."
+    ],
+    "agentPolicy": [
+      "If a touched comment describes a legacy/shim/deprecated path, refactor the touched flow and remove the stale comment.",
+      "Do not add compatibility comments for internal code."
+    ],
+    "exceptions": [
+      "External public API migrations and persisted data migrations may document compatibility constraints explicitly."
+    ]
+  },
+  {
+    "id": "const-object-enums",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Use const objects instead of native TypeScript enums",
+    "topics": ["type-patterns"],
+    "applies": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
+    "validatorIds": ["no-native-enums", "repeated-domain-literals"],
+    "docs": ["examples/conventions/docs/opencanon/canon/lifecycle.md#type-patterns"],
+    "summary": "Enum-like values use JavaScript const objects plus a derived union type instead of native TypeScript enums.",
+    "rationale": [
+      "Const objects are plain JavaScript and avoid TypeScript enum runtime semantics.",
+      "The pattern keeps value casing and type naming visible to agents and reviewers."
+    ],
+    "required": [
+      "Use PascalCase names for enum-like const objects.",
+      "Use PascalCase keys.",
+      "Use string literal values.",
+      "Export a matching derived union type with the same name."
+    ],
+    "replaced": [
+      "Native enum and const enum declarations."
+    ],
+    "agentPolicy": [
+      "Replace touched native enums with const object plus derived union type.",
+      "Only apply automatic rewrites when member names and string values can be preserved exactly."
+    ],
+    "exceptions": [
+      "External generated TypeScript definitions outside source ownership."
+    ],
+    "examples": [
+      "export const CompanyStatus = { Active: \"active\" } as const;",
+      "export type CompanyStatus = (typeof CompanyStatus)[keyof typeof CompanyStatus];"
+    ]
+  },
+  {
+    "id": "schema-contract-boundary",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Schemas define contracts at package boundaries",
+    "topics": ["schema", "api-route"],
+    "applies": ["src/contracts/**/*.{ts,tsx}", "src/db/schema/**/*.{ts,tsx}", "src/api/routes/**/*.{ts,tsx}"],
+    "validatorIds": ["no-db-schema-in-contracts", "duplicate-boundary-literals"],
+    "docs": ["examples/conventions/docs/opencanon/canon/architecture.md#schemas", "examples/conventions/docs/opencanon/canon/architecture.md#api-routes"],
+    "summary": "Validation schemas and DTO contracts live at boundaries; internals use typed domain objects.",
+    "rationale": [
+      "Boundary schemas stabilize request/response contracts.",
+      "Database table definitions are persistence details and should not leak into public DTO modules."
+    ],
+    "required": [
+      "Route inputs are validated at the API boundary.",
+      "DTO schemas are exported from the contract layer.",
+      "Database schemas stay in the database layer.",
+      "Services translate between contract DTOs and persistence records."
+    ],
+    "replaced": [
+      "Inline route-only schemas duplicated across handlers.",
+      "Importing database table definitions into public contract modules."
+    ],
+    "agentPolicy": [
+      "Move duplicated boundary schemas to the contract layer when touching that flow.",
+      "Keep database schema details out of public DTO modules.",
+      "Refactor touched imports to the current boundary direction."
+    ],
+    "exceptions": [
+      "One-off test fixtures.",
+      "Small local schemas for private route query parsing."
+    ]
+  },
+  {
+    "id": "tests-follow-risk",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Tests scale with blast radius",
+    "topics": ["testing"],
+    "applies": ["tests/**/*.{ts,tsx,py}", "src/**/*.test.{ts,tsx,py}"],
+    "validatorIds": [],
+    "docs": ["examples/conventions/docs/opencanon/canon/testing.md#testing"],
+    "summary": "Narrow changes get focused unit tests; shared behavior and cross-layer workflows need broader tests.",
+    "rationale": [
+      "Tests should catch regressions at the same boundary where the risk was introduced."
+    ],
+    "required": [
+      "Unit tests cover local branching and data mapping.",
+      "Integration tests cover database/service contracts.",
+      "Route tests cover validation and response shape.",
+      "Use the project test script instead of a tool-specific shortcut."
+    ],
+    "replaced": [
+      "Only testing the happy path after changing shared behavior.",
+      "Testing third-party libraries instead of local integration behavior."
+    ],
+    "agentPolicy": [
+      "Add or update tests near the changed behavior.",
+      "When refactoring touched stale patterns, update tests in the same pass.",
+      "Do not preserve old test helpers if all touched call sites can move cleanly."
+    ],
+    "exceptions": [
+      "Pure docs-only edits.",
+      "Mechanical formatting-only changes."
+    ]
+  },
+  {
+    "id": "python-module-boundaries",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Python modules use package imports instead of sys.path mutation",
+    "topics": ["python"],
+    "applies": ["src/python/**/*.py"],
+    "validatorIds": ["python-no-sys-path-mutation", "python-no-bare-except"],
+    "docs": ["examples/conventions/docs/opencanon/canon/language-python.md#python"],
+    "summary": "Python code should use normal package/module configuration rather than mutating sys.path at runtime.",
+    "rationale": [
+      "Runtime path mutation hides dependency boundaries.",
+      "Package imports are easier for tests, agents, and tooling to reason about."
+    ],
+    "required": [
+      "Use package imports.",
+      "Configure module paths in the runner, test config, or packaging metadata.",
+      "Keep imports stable and visible at file top level."
+    ],
+    "replaced": [
+      "Calling sys.path.append(...) or sys.path.insert(...) inside source modules."
+    ],
+    "agentPolicy": [
+      "When touching Python code with sys.path mutation, replace it with package imports.",
+      "Do not add import-path shims inside source files."
+    ],
+    "exceptions": [
+      "Standalone one-off scripts outside source packages."
+    ]
+  },
+  {
+    "id": "folder-structure-current",
+    "date": "2026-04-28",
+    "status": "current",
+    "title": "Folders use approved responsibility names",
+    "topics": ["folder-structure", "service"],
+    "applies": ["src/**", "tests/**", "packages/*/src/**"],
+    "validatorIds": ["no-dumpster-folders", "folder-file-naming"],
+    "docs": ["examples/conventions/docs/opencanon/canon/structure.md#folder-structure", "examples/conventions/docs/opencanon/canon/architecture.md#services"],
+    "summary": "Folders should communicate ownership and layer responsibility instead of becoming dumping grounds.",
+    "rationale": [
+      "Agents copy folder names they see.",
+      "Ambiguous folders make ownership and import direction harder to infer."
+    ],
+    "required": [
+      "Use existing layer folders before creating new top-level folders.",
+      "Use the `*.service.ts` or `*.service.tsx` suffix for service implementation files.",
+      "Choose folder names by responsibility, not short-lived intent.",
+      "Add a decision before introducing a new broad folder category."
+    ],
+    "replaced": [
+      "misc, helpers, common, temp, new, draft as source folder names.",
+      "Unsuffixed service implementation files such as src/services/company.ts."
+    ],
+    "agentPolicy": [
+      "Do not create dumping-ground folders.",
+      "If touched files live in a dumping-ground folder, move the touched flow to the current structure."
+    ],
+    "exceptions": [
+      "Third-party generated output outside source ownership."
+    ]
+  },
+  {
+    "id": "impact-surfaces-current",
+    "date": "2026-05-14",
+    "status": "current",
+    "title": "Impact surfaces describe sensitive downstream effects",
+    "topics": ["impact", "testing"],
+    "applies": ["src/**/*.{ts,tsx,py}", "tests/**/*.{ts,tsx,py}"],
+    "validatorIds": ["sensitive-change-requires-decision"],
+    "docs": ["examples/conventions/docs/opencanon/canon/impact.md#impact-surfaces"],
+    "summary": "Sensitive files and domain resources are linked through impact surfaces so agents can see downstream effects before changing them.",
+    "rationale": [
+      "Import graphs miss domain dependencies such as data, events, jobs, permissions, and external contracts.",
+      "Agents need explicit risk context before changing sensitive surfaces."
+    ],
+    "required": [
+      "Enforced impact surfaces link docs and decisions.",
+      "Sensitive changes satisfy the surface change policy.",
+      "Agent-discovered impact notes remain proposed until reviewed."
+    ],
+    "agentPolicy": [
+      "When touching persistent data, events, permissions, jobs, contracts, or high-risk domain logic, check existing impact surfaces.",
+      "Update or propose impact notes only when grounded in concrete evidence.",
+      "Do not enforce guessed downstream relationships."
+    ],
+    "exceptions": [
+      "Exploratory proposed impact notes may exist without enforcement."
+    ]
+  },
+  {
+    "id": "framework-package-boundaries",
+    "date": "2026-05-19",
+    "status": "current",
+    "title": "Framework packages depend inward only",
+    "topics": ["imports", "folder-structure"],
+    "applies": ["packages/*/src/**/*.{ts,tsx}"],
+    "validatorIds": ["framework-package-boundaries"],
+    "docs": ["examples/conventions/docs/opencanon/canon/architecture.md#framework-packages"],
+    "summary": "OpenCanon framework package imports follow the package responsibility graph.",
+    "rationale": [
+      "Core contracts should stay reusable without pulling in CLI, daemon, UI, or engine code.",
+      "Package-level direction keeps runtime, validation, and UI concerns independently testable.",
+      "Agents can safely add files when the allowed dependency direction is explicit."
+    ],
+    "required": [
+      "Core does not import other framework packages.",
+      "Validators and engine may import core only.",
+      "Daemon may import core, engine, and validators.",
+      "CLI may import core and daemon.",
+      "UI source does not import framework runtime packages directly."
+    ],
+    "replaced": [
+      "Cross-package imports based on convenience rather than package responsibility.",
+      "UI code importing runtime package internals instead of using daemon APIs or local DTOs."
+    ],
+    "agentPolicy": [
+      "When adding a framework package import, check the package responsibility graph first.",
+      "Move shared contracts into core instead of importing upward.",
+      "Keep UI communication through daemon APIs or explicit local DTOs."
+    ],
+    "exceptions": [
+      "Tests may import package internals when testing that package directly.",
+      "Release and rehearsal scripts may import source modules as build orchestration."
+    ]
+  },
+  {
+    "id": "hardcoded-secrets-and-config",
+    "date": "2026-05-19",
+    "status": "current",
+    "title": "Secrets and environment config stay out of source literals",
+    "topics": ["security", "configuration"],
+    "applies": ["src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}", "apps/site/src/**/*.{ts,svelte}"],
+    "validatorIds": ["no-secret-like-literals", "no-hardcoded-config-values"],
+    "docs": ["examples/conventions/docs/opencanon/canon/security.md#hardcoded-secrets-and-config"],
+    "summary": "Source code should not contain live-looking secrets or environment-specific configuration literals.",
+    "rationale": [
+      "Committed secrets are difficult to revoke reliably after publication.",
+      "Hardcoded URLs, hosts, and ports make deployment environments harder to change.",
+      "Agents may copy literal values unless config ownership is explicit."
+    ],
+    "required": [
+      "Use secret managers or environment variables for credentials.",
+      "Use named config objects or project settings for environment-specific values.",
+      "Keep allowed placeholders clearly synthetic."
+    ],
+    "replaced": [
+      "API keys, tokens, passwords, client secrets, or private keys committed in source.",
+      "Deployment-specific URLs, hosts, and ports embedded directly in runtime code."
+    ],
+    "agentPolicy": [
+      "When adding code that needs a credential, add a config lookup and document the expected variable name instead of committing a value.",
+      "When adding an environment-specific URL, host, or port, prefer a named config surface.",
+      "Keep test fixtures and examples synthetic."
+    ],
+    "exceptions": [
+      "Loopback development defaults may be allowlisted.",
+      "Tests, fixtures, and docs may use clearly synthetic placeholder values.",
+      "Public release URLs may be allowlisted when they identify published artifacts rather than environment secrets."
+    ]
+  }
+]

@@ -1,0 +1,359 @@
+.inspectorTabs {
+  align-items: center;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  height: var(--control-height-sm);
+  margin-left: auto;
+  overflow: hidden;
+}
+.inspectorTab {
+  align-items: center;
+  border-radius: 0;
+  color: var(--fg-muted);
+  display: inline-flex;
+  font-size: var(--fs-sm);
+  gap: var(--space-2);
+  height: calc(var(--control-height-sm) - 2px);
+  justify-content: center;
+  min-width: 0;
+  padding: 0 var(--space-3);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+.inspectorTab + .inspectorTab {
+  border-left: 1px solid var(--border);
+}
+.inspectorTab:hover {
+  background: var(--surface-control-hover);
+  color: var(--fg);
+}
+.inspectorTab.active {
+  background: var(--bg-row-selected);
+  color: var(--fg-strong);
+}
+.inspectorTab svg {
+  flex: 0 0 auto;
+}
+.inspectorTabCount {
+  align-items: center;
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  height: 15px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 16px;
+  padding: 0 4px;
+}
+.inspectorTabCount.hasCount {
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border-color: color-mix(in oklch, var(--accent) 30%, var(--border) 70%);
+  color: var(--fg);
+}
+.inspectorBody {
+  background: var(--bg);
+}
+
+.findingRow {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: start;
+  gap: var(--space-5);
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.findingRow:hover {
+  background: var(--bg-row-hover);
+}
+.findingIcon {
+  margin-top: 2px;
+}
+.findingMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.findingHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.findingValidator {
+  color: var(--fg-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+.findingLoc {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.findingMessage {
+  font-size: var(--fs-sm);
+}
+.findingFix {
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+}
+
+.severityTag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  text-transform: lowercase;
+}
+.severity-error .findingIcon {
+  color: var(--severity-error-fg);
+}
+.severity-warning .findingIcon {
+  color: var(--severity-warning-fg);
+}
+.severity-info .findingIcon {
+  color: var(--severity-info-fg);
+}
+.severityTag.severity-error {
+  background: var(--severity-error-bg);
+  color: var(--severity-error-fg);
+}
+.severityTag.severity-warning {
+  background: var(--severity-warning-bg);
+  color: var(--severity-warning-fg);
+}
+.severityTag.severity-info {
+  background: var(--severity-info-bg);
+  color: var(--severity-info-fg);
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.historySummary {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  gap: var(--space-5);
+  min-width: 0;
+  min-height: 34px;
+  padding: 8px 14px;
+}
+.historySummary span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.historyCommits {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.historyRow {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: 18px 1fr;
+  padding: 11px 14px;
+  text-align: left;
+  width: 100%;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.historyRow:hover {
+  background: var(--bg-row-hover);
+}
+.historyRow.active {
+  background: var(--bg-row-selected);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+.historyIcon {
+  color: var(--fg-muted);
+  margin-top: 2px;
+}
+.historyMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.historyMeta {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.commitHash {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+.commitDate {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.commitAuthor {
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commitSubject {
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+.historyNotice {
+  border-bottom: 1px solid var(--border);
+  color: var(--severity-warning-fg);
+  font-size: var(--fs-sm);
+  padding: 9px 12px;
+}
+.mainDiff {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.mainDiffHeader {
+  align-items: center;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  display: flex;
+  font-size: var(--fs-xs);
+  gap: var(--space-6);
+  justify-content: flex-end;
+  min-height: 34px;
+  padding: 3px var(--space-5) 3px var(--space-6);
+}
+.mainDiffActions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+.mainDiffEmpty {
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+  padding: 12px;
+}
+.diffModeControl {
+  margin-left: 0;
+}
+.diffRenderSurface {
+  background: var(--bg);
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--code-font-size);
+  line-height: var(--code-line-height);
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+}
+.codeMirrorDiff,
+.codeMirrorDiff .cm-mergeView {
+  height: 100%;
+  min-height: 0;
+}
+.codeMirrorDiffSplit .cm-mergeView {
+  overflow: auto;
+}
+.codeMirrorDiff .cm-mergeViewEditors {
+  min-height: 100%;
+}
+.codeMirrorDiff .cm-mergeViewEditor + .cm-mergeViewEditor {
+  border-left: 1px solid var(--border);
+}
+.codeMirrorDiff .cm-editor {
+  background: var(--bg);
+  font-size: var(--code-font-size);
+}
+.codeMirrorDiff .cm-line {
+  line-height: var(--code-line-height);
+}
+.codeMirrorDiff .cm-scroller {
+  min-height: 100%;
+}
+.codeMirrorDiff .cm-changedLine,
+.codeMirrorDiff .cm-inlineChangedLine {
+  background-color: color-mix(in oklch, var(--status-running) 12%, transparent);
+}
+.codeMirrorDiff .cm-merge-a .cm-changedLine,
+.codeMirrorDiff .cm-deletedChunk {
+  background-color: color-mix(in oklch, var(--severity-error-fg) 12%, transparent);
+}
+.codeMirrorDiff .cm-changedText,
+.codeMirrorDiff .cm-inlineChangedText {
+  background: color-mix(in oklch, var(--status-running) 28%, transparent);
+}
+.codeMirrorDiff .cm-merge-a .cm-changedText,
+.codeMirrorDiff .cm-deletedText {
+  background: color-mix(in oklch, var(--severity-error-fg) 28%, transparent);
+}
+.codeMirrorDiff .cm-changedLineGutter {
+  background: var(--status-running);
+}
+.codeMirrorDiff .cm-merge-a .cm-changedLineGutter,
+.codeMirrorDiff .cm-deletedLineGutter {
+  background: var(--severity-error-fg);
+}
+.codeMirrorDiff .cm-collapsedLines {
+  background: var(--bg-elev);
+  border-block: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  padding: 4px 10px;
+}
+
+.statusTag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+.statusTag.status-running {
+  color: var(--status-running);
+  border-color: color-mix(in oklch, var(--status-running) 42%, var(--border) 58%);
+}
+.statusTag.status-current {
+  color: var(--status-current);
+  border-color: color-mix(in oklch, var(--status-current) 48%, var(--border) 52%);
+}
+.statusTag.status-unhealthy {
+  color: var(--status-unhealthy);
+  border-color: color-mix(in oklch, var(--status-unhealthy) 42%, var(--border) 58%);
+}
+.statusTag.status-stale {
+  color: var(--status-stale);
+  border-color: var(--border-strong);
+}
+.statusTag.status-error {
+  color: var(--status-error);
+  border-color: color-mix(in oklch, var(--status-error) 48%, var(--border) 52%);
+}
+.statusTag.status-loading {
+  color: var(--status-loading);
+  border-color: var(--border-strong);
+}
+

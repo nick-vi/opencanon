@@ -1,0 +1,218 @@
+.validatorPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.validatorPanelSummary {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  gap: var(--space-5);
+  min-height: 34px;
+  padding: 8px 14px;
+}
+.validatorStudioLink {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  color: var(--fg-muted);
+  display: inline-flex;
+  gap: var(--space-3);
+  height: var(--control-height-xs);
+  margin-left: auto;
+  padding: 0 var(--space-4);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+.validatorStudioLink:hover {
+  background: var(--surface-control-hover);
+  color: var(--fg-strong);
+}
+.validatorPanelList {
+  border-bottom: 1px solid var(--border);
+  max-height: 42vh;
+  overflow: auto;
+}
+.validatorRow {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: 1fr auto;
+  padding: 11px 14px;
+  text-align: left;
+  width: 100%;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.validatorRow:hover {
+  background: var(--bg-row-hover);
+}
+.validatorRow.active {
+  background: var(--bg-row-selected);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+.validatorRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.validatorRowHead {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.validatorId {
+  color: var(--fg-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.validatorSummary {
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+.validatorMeta {
+  color: var(--fg-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  gap: 8px;
+}
+.validatorFindingCount {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  min-width: 22px;
+  padding: 1px 6px;
+  text-align: center;
+}
+.validatorFindingCount.hasFindings {
+  background: var(--severity-warning-bg);
+  border-color: color-mix(in oklch, var(--severity-warning-fg) 36%, var(--border) 64%);
+  color: var(--severity-warning-fg);
+}
+.validatorDetail {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 14px 40px;
+}
+.validatorDetailHeader {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-bottom: 14px;
+}
+.validatorDetailTitle {
+  color: var(--fg-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.validatorDetailSummary {
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  margin-top: 5px;
+  max-width: 74ch;
+}
+.validatorFacts {
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 14px 0;
+}
+.validatorPanel .validatorFacts {
+  grid-template-columns: 1fr;
+}
+.validatorFact {
+  background: var(--bg-elev);
+  min-width: 0;
+  padding: 10px 12px;
+}
+.validatorFactLabel {
+  align-items: center;
+  color: var(--fg-muted);
+  display: flex;
+  font-size: var(--fs-xs);
+  gap: 6px;
+  text-transform: uppercase;
+}
+.validatorFactValue {
+  color: var(--fg-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.validatorSection {
+  border-bottom: 1px solid var(--border);
+  padding: 14px 0;
+}
+.validatorSectionTitle {
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.appliesList,
+.referenceList,
+.validatorFindings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.appliesGroup,
+.referenceItem {
+  align-items: center;
+  color: var(--fg);
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.referenceItem svg {
+  color: var(--fg-muted);
+  flex: 0 0 auto;
+}
+.validatorFinding {
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: 18px 1fr auto;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+.validatorFinding:hover {
+  background: var(--bg-row-hover);
+  border-color: var(--border-strong);
+}
+.validatorFindingBody {
+  min-width: 0;
+}
+.validatorEmpty {
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
