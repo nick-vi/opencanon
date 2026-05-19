@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "opencanon-site",
+  "account_id": "a7eb4ad5aa38bff74a4fe3a69a416382",
+  "compatibility_date": "2026-05-19",
+  "workers_dev": false,
+  "assets": {
+    "directory": "./build"
+  }
+}
