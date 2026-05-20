@@ -33,6 +33,15 @@ const engineBindingSuffixes: Record<string, string> = {
   "linux-x64": "linux-x64-gnu",
   "win32-x64": "win32-x64-msvc",
 };
+const generatedIgnoreEntries = [
+  ".opencanon/daemon.json",
+  ".opencanon/daemon.log",
+  ".opencanon/setup.json",
+  ".opencanon/*.sqlite",
+  ".opencanon/*.sqlite-shm",
+  ".opencanon/*.sqlite-wal",
+  ".agents/skills/opencanon/runtime/",
+];
 
 export type DoctorCheck = {
   id: string;
@@ -97,6 +106,19 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
           ? "Cache directory is not ignored by Git."
           : "Cache ignore rules could not be fully verified.",
     details: cacheIgnore.diagnostics,
+  });
+
+  const generatedIgnore = validateGeneratedIgnore(paths);
+  checks.push({
+    id: "generated-ignore",
+    status: generatedIgnore.status,
+    message:
+      generatedIgnore.status === DoctorStatus.Pass
+        ? "Generated daemon state and runtime artifacts are ignored by Git."
+        : generatedIgnore.status === DoctorStatus.Fail
+          ? "Generated daemon state or runtime artifacts are not ignored by Git."
+          : "Generated artifact ignore rules could not be fully verified.",
+    details: generatedIgnore.diagnostics,
   });
 
   const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
@@ -218,6 +240,7 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
   };
   const precommit = params.report.checks.find((check) => check.id === "precommit");
   const cacheIgnore = params.report.checks.find((check) => check.id === "cache-ignore");
+  const generatedIgnore = params.report.checks.find((check) => check.id === "generated-ignore");
 
   if (cacheIgnore?.status === DoctorStatus.Fail) {
     if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
@@ -226,6 +249,18 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
       result.selectedFixes += 1;
       if (!params.dryRun) {
         ensureGitignoreEntry(params.paths);
+        result.appliedFixes += 1;
+      }
+    }
+  }
+
+  if (generatedIgnore?.status === DoctorStatus.Fail) {
+    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
+      result.skipped.push("generated-ignore: safe fix outside requested mode.");
+    } else {
+      result.selectedFixes += 1;
+      if (!params.dryRun) {
+        ensureGitignoreEntries(params.paths.rootDir, generatedIgnoreEntries);
         result.appliedFixes += 1;
       }
     }
@@ -320,19 +355,51 @@ function validateCacheIgnore(paths: ContextPaths): {
   };
 }
 
+function validateGeneratedIgnore(paths: ContextPaths): {
+  status: DoctorStatus;
+  diagnostics: string[];
+} {
+  if (!getGitRoot(paths.rootDir)) {
+    return {
+      status: DoctorStatus.Warn,
+      diagnostics: ["No Git repository detected; cannot verify generated artifact ignore rules."],
+    };
+  }
+  const probes = [
+    ".opencanon/daemon.json",
+    ".opencanon/daemon.log",
+    ".opencanon/setup.json",
+    ".opencanon/state.sqlite",
+    ".opencanon/state.sqlite-shm",
+    ".opencanon/state.sqlite-wal",
+    ".agents/skills/opencanon/runtime/cli.js",
+  ];
+  const missing = probes.filter((probe) => spawnSync("git", [GitArg.Directory, paths.rootDir, "check-ignore", "--quiet", "--", probe]).status !== 0);
+  if (missing.length === 0) return { status: DoctorStatus.Pass, diagnostics: [] };
+  return {
+    status: DoctorStatus.Fail,
+    diagnostics: [`Add generated OpenCanon entries to .gitignore: ${generatedIgnoreEntries.join(", ")}. Unignored probes: ${missing.join(", ")}.`],
+  };
+}
+
 function cacheIgnoreEntry(paths: ContextPaths): string {
   return `${relative(paths.rootDir, paths.cacheDir).replace(/\/$/, "")}/`;
 }
 
 function ensureGitignoreEntry(paths: ContextPaths): void {
-  const gitignorePath = path.join(paths.rootDir, ".gitignore");
   const entry = cacheIgnoreEntry(paths);
+  ensureGitignoreEntries(paths.rootDir, [entry]);
+}
+
+function ensureGitignoreEntries(rootDir: string, entries: string[]): void {
+  const gitignorePath = path.join(rootDir, ".gitignore");
   const current = existsSync(gitignorePath) ? readFileSync(gitignorePath, doctorTextEncoding) : "";
   const lines = current.split(/\r?\n/).map((line) => line.trim());
-  if (lines.includes(entry)) return;
+  const missingEntries = entries.filter((entry) => !lines.includes(entry));
+  if (missingEntries.length === 0) return;
 
   const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
-  writeFileSync(gitignorePath, `${current}${prefix}${entry}\n`);
+  writeFileSync(gitignorePath, `${current}${prefix}${missingEntries.join("\n")}\n`);
 }
 
 function validateValidators(validators: Validator[]): string[] {

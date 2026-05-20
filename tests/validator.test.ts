@@ -1334,16 +1334,23 @@ test("doctor reports and fixes unignored cache files", () => {
     const paths = createPaths(rootDir);
     const report = buildDoctorReport({ paths, decisions: [], validators: [] });
     const check = report.checks.find((item) => item.id === "cache-ignore");
+    const generatedCheck = report.checks.find((item) => item.id === "generated-ignore");
 
     assert.equal(check?.status, "fail");
     assert(check?.details?.some((detail) => detail.includes(".opencanon/cache/")));
+    assert.equal(generatedCheck?.status, "fail");
+    assert(generatedCheck?.details?.some((detail) => detail.includes(".agents/skills/opencanon/runtime/")));
 
     const fix = applyDoctorFixes({ paths, report, mode: "safe", dryRun: false });
     assert.equal(fix.diagnostics.length, 0);
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
+    const gitignore = readFileSync(path.join(rootDir, ".gitignore"), "utf8");
+    assert(gitignore.includes(".opencanon/cache/"));
+    assert(gitignore.includes(".opencanon/*.sqlite"));
+    assert(gitignore.includes(".agents/skills/opencanon/runtime/"));
 
     const fixedReport = buildDoctorReport({ paths, decisions: [], validators: [] });
     assert.equal(fixedReport.checks.find((item) => item.id === "cache-ignore")?.status, "pass");
+    assert.equal(fixedReport.checks.find((item) => item.id === "generated-ignore")?.status, "pass");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

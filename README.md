@@ -36,7 +36,7 @@ bun run opencanon doctor
 - `graph` inspects deterministic caller, callee, and impact edges.
 - `validate` runs validators against files, changed files, fixtures, or the whole project.
 - `feedback` runs validators and renders concise text intended to be fed back into an agent after edits.
-- `doctor` checks setup, effective config, validator coverage, dependency pins, hooks, daemon runtime prerequisites, generated cache ignore rules, and external tool declarations.
+- `doctor` checks setup, effective config, validator coverage, dependency pins, hooks, daemon runtime prerequisites, generated artifact ignore rules, and external tool declarations.
 
 Run `bun run opencanon <command> --help` for command-specific options.
 
@@ -160,9 +160,9 @@ Add `opencanon.config.json` only when a repository needs to override those defau
 }
 ```
 
-When the effective discovery mode is `git`, OpenCanon requires a Git repository and never silently falls back to filesystem traversal. Git discovery respects `.gitignore`, then OpenCanon applies `projectFilePatterns`, `ignore`, `maxFiles`, and `maxFileSizeKb`. `validate --changed` and `feedback --changed` use the same project scope before running validators. Use `fileDiscovery: "filesystem"` as an explicit override for tests, benchmarks, or non-Git experiments. Parser results are cached under `cacheDir`; `init` and `setup` add the ignore rule, and `doctor` verifies it.
+When the effective discovery mode is `git`, OpenCanon requires a Git repository and never silently falls back to filesystem traversal. Git discovery respects `.gitignore`, then OpenCanon applies `projectFilePatterns`, `ignore`, `maxFiles`, and `maxFileSizeKb`. `validate --changed` and `feedback --changed` use the same project scope before running validators. Use `fileDiscovery: "filesystem"` as an explicit override for tests, benchmarks, or non-Git experiments. Parser results are cached under `cacheDir`; `init` and `setup` add ignore rules for cache, daemon state, setup state, SQLite state, and installed runtime artifacts, and `doctor` verifies them.
 
-Invalid config is a hard failure for normal `context` and `validate` commands. `doctor` reports the same diagnostics and can repair the cache ignore entry with `--fix safe`.
+Invalid config is a hard failure for normal `context` and `validate` commands. `doctor` reports the same diagnostics and can repair generated artifact ignore entries with `--fix safe`.
 
 `externalTools` declares trusted project-local tool aliases for validators and bundles. OpenCanon does not install those CLIs globally. Bundle installs can add the alias, docs, decisions, validators, and owned helper files. Bundles may expose typed `options` for project-specific paths, names, strictness, or other bounded values; the CLI validates those options and interpolates `{{optionName}}` placeholders before writing. Local bundles may be TypeScript modules. Remote bundles must be JSON data files, must use HTTPS, and must be pinned with `--sha256 <hash>`; OpenCanon does not execute remote TypeScript. Bundle-owned file targets are rejected for repo control and generated state paths such as `.git`, `.opencanon`, `node_modules`, package manifests, and lockfiles. Review `inspect`, `plan`, and `--dry-run` output before installing third-party bundles. `doctor` validates declarations by default; use `doctor --run-external-tools` to execute configured `versionArgs`. Missing tools default to `error`; use `missingSeverity: "warning"` or `"ignore"` when a tool is optional.
 
