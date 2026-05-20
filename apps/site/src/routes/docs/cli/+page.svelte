@@ -6,6 +6,11 @@ opencanon context --list-exceptions`;
   const rulesCommands = `opencanon rules --validator service-no-db-client
 opencanon rules --decision service-db-boundary
 opencanon rules --tree --validator service-no-db-client`;
+  const graphCommands = `opencanon search loadCompany --kind symbol --symbol-kind function --scope "src/services/**"
+opencanon symbols loadCompany --kind function --scope "src/services/**"
+opencanon graph callers loadCompany
+opencanon graph callees loadCompany
+opencanon refactor rename-symbol loadCompany fetchCompany --file src/services/company.service.ts --format json`;
   const validateCommands = `opencanon validate --changed
 opencanon validate --project --profile
 opencanon validate --check-fixtures
@@ -51,6 +56,13 @@ opencanon db reset --confirm`;
 <p>
   Lists validator summaries, scopes, decisions, and fixture coverage.
   <code>--tree</code> shows the file scope.
+</p>
+
+<h2>Graph Search</h2>
+<CodeBlock title="graph-search" language="shell" code={graphCommands} />
+<p>
+  Searches the indexed TS/JS graph, filters symbols by kind and file scope, and
+  inspects caller/callee edges before a change or refactor.
 </p>
 
 <h2>Validate</h2>

@@ -86,6 +86,9 @@ export type NoUnusedExportsOptions = FindingOptions & {
   in: string[];
   allow?: Array<string | RegExp>;
   kinds?: Array<"function" | "class" | "method" | "variable" | "type" | "interface" | "enum" | "property" | "unknown">;
+  entrypoints?: string[];
+  publicSurfaces?: string[];
+  ignoreConfiguredPublicSurfaces?: boolean;
 };
 
 export type MigrationReferencesOptions = FindingOptions & {

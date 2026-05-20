@@ -127,10 +127,13 @@ export const noUnusedExports = createValidatorFactory<NoUnusedExportsOptions>((o
   facts: ["symbols", "references"],
   decisionIds: options.decisionIds,
   summary: optionSummary(options, `Exports in ${joinPatterns(options.in)} must have a known project reference.`),
-  validate({ ctx }) {
+  validate({ ctx, runtime }) {
     const allowed = list(options.allow);
     const kinds = new Set(options.kinds ?? []);
     const targetPaths = new Set(ctx.targetFiles.map((file) => file.path));
+    const entrypoints = [...runtime.paths.entrypoints, ...(options.entrypoints ?? [])];
+    const publicSurfaces = [...(options.ignoreConfiguredPublicSurfaces ? [] : runtime.paths.publicSurfaces), ...(options.publicSurfaces ?? [])];
+    const publicPatterns = [...entrypoints, ...publicSurfaces];
 
     return ctx.graph
       .symbols()
@@ -138,6 +141,7 @@ export const noUnusedExports = createValidatorFactory<NoUnusedExportsOptions>((o
       .filter((symbol) => targetPaths.has(symbol.file.path))
       .filter((symbol) => kinds.size === 0 || kinds.has(symbol.kind))
       .filter((symbol) => !allowed.some((pattern) => valueMatches(symbol.name, pattern)))
+      .filter((symbol) => !matchesAny(runtime, symbol.file.path, path.posix.basename(symbol.file.path), publicPatterns))
       .filter((symbol) => ctx.graph.callers(symbol).length === 0)
       .map((symbol) =>
         symbol.file.report({

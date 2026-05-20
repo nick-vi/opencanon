@@ -170,6 +170,10 @@ bun run opencanon rules --tree
 bun run opencanon rules --tree --ascii --no-color
 bun run opencanon search <query>
 bun run opencanon search <query> --kind symbol --format json
+bun run opencanon search <query> --kind symbol --symbol-kind function --scope "src/domain/**"
+bun run opencanon symbols <query> --kind function --scope "src/domain/**"
+bun run opencanon graph callers <symbol>
+bun run opencanon graph callees <symbol>
 bun run opencanon context --list-topics
 bun run opencanon context --list-exceptions
 bun run opencanon context --files <paths...>

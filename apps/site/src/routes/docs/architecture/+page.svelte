@@ -55,6 +55,14 @@ docs/opencanon/
   benchmarks; OpenCanon never silently falls back from Git to filesystem.
 </p>
 
+<h2>Graph Index</h2>
+<p>
+  The engine extracts TS/JS symbols, references, calls, imports, literals, and
+  duplicates into local SQLite state. CLI graph commands and validators read
+  the same index, so scoped searches, caller/callee inspection, and
+  graph-backed validators share one source of repository facts.
+</p>
+
 <h2>Strict prerequisites</h2>
 <p>
   Daemon-backed commands are strict about prerequisites: Bun runtime version,

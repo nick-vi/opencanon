@@ -213,7 +213,7 @@ Commands:
   dev        Start the daemon and serve the built UI.
   baseline   Show or update the known findings baseline.
   bundle     Inspect, plan, install, or update canon bundles.
-  symbols    Search the deterministic TS/JS code symbol graph.
+  symbols    Search the deterministic TS/JS code symbol graph by query, kind, or scope.
   graph      Inspect deterministic callers, callees, and impact edges.
   refactor   Plan or apply deterministic symbol/import/file refactors.
 

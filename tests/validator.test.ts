@@ -482,19 +482,52 @@ test("noUnusedExports reports exported symbols without graph callers", async () 
   }
 });
 
+test("noUnusedExports ignores configured public surfaces", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-unused-public-surface-"));
+  try {
+    mkdirSync(path.join(rootDir, "src/api"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/api/public.ts"), "export function publicCompany() { return true; }\n");
+    writeFileSync(path.join(rootDir, "src/internal.ts"), "export function internalCompany() { return false; }\n");
+    const validator = resolveValidators(
+      noUnusedExports({
+        id: "no-unused-exports",
+        topics: ["dead-code"],
+        severity: "warning",
+        in: ["src/**/*.ts"],
+        publicSurfaces: ["src/api/**"],
+        message: "Exported symbol has no known project caller.",
+      }),
+    ).validators[0];
+    const ctx = createValidationContext({
+      rootDir,
+      files: ["src/api/public.ts", "src/internal.ts"],
+      targetFiles: ["src/api/public.ts", "src/internal.ts"],
+      validator,
+    });
+
+    const findings = await validator.validate({ ctx, runtime: createRuntime(createPaths(rootDir), []) });
+    assert.deepEqual(
+      findings.map((finding) => `${finding.file}:${finding.line}:${finding.message}`),
+      ["src/internal.ts:1:Exported symbol has no known project caller."],
+    );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("migrationReferences downgrades baseline-known matches", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-migration-ref-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
-    writeFileSync(path.join(rootDir, "src/old.ts"), "legacyApi();\nlegacyApi();\n");
+    writeFileSync(path.join(rootDir, "src/old.ts"), "oldApi();\noldApi();\n");
     const validator = resolveValidators(
       migrationReferences({
-        id: "legacy-api-migration",
+        id: "old-api-migration",
         topics: ["migration"],
         severity: "error",
         in: ["src/**/*.ts"],
-        pattern: "\\blegacyApi\\(",
-        message: "legacyApi is migrated; use currentApi.",
+        pattern: "\\boldApi\\(",
+        message: "oldApi is replaced; use currentApi.",
       }),
     ).validators[0];
     const ctx = createValidationContext({
@@ -510,7 +543,7 @@ test("migrationReferences downgrades baseline-known matches", async () => {
     mkdirSync(path.join(rootDir, ".opencanon"), { recursive: true });
     writeFileSync(
       path.join(rootDir, ".opencanon/baseline.json"),
-      JSON.stringify({ version: 1, findings: [{ key: "legacy-api-migration\u0000src/old.ts\u00001\u0000legacyApi is migrated; use currentApi.", validatorId: "legacy-api-migration", file: "src/old.ts", line: 1, message: "legacyApi is migrated; use currentApi." }] }),
+      JSON.stringify({ version: 1, findings: [{ key: "old-api-migration\u0000src/old.ts\u00001\u0000oldApi is replaced; use currentApi.", validatorId: "old-api-migration", file: "src/old.ts", line: 1, message: "oldApi is replaced; use currentApi." }] }),
     );
     const knownCtx = createValidationContext({
       rootDir,

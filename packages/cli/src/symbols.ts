@@ -1,10 +1,11 @@
-import { fail, resolveRootDir, type CodeReference, type CodeSymbol } from "@opencanon/core";
+import { fail, matchesAny, resolveRootDir, type CodeReference, type CodeSymbol } from "@opencanon/core";
 import { openCodeGraph } from "./code-graph.ts";
 
 type SymbolsQuery = {
   query?: string;
   inPath?: string;
   kind?: string;
+  scopes: string[];
   limit: number;
   references: boolean;
   help: boolean;
@@ -20,23 +21,24 @@ export async function runSymbolsCommand(args = Bun.argv.slice(2), cwd = process.
   const rootDir = resolveRootDir(cwd);
   const graph = openCodeGraph(rootDir);
   try {
+    const engineLimit = query.scopes.length > 0 ? Math.max(query.limit * 10, 500) : query.limit;
     if (query.references) {
       const result = graph.store.project.searchReferences({
         query: query.query,
         path: query.inPath,
         kind: query.kind,
-        limit: query.limit,
+        limit: engineLimit,
       });
-      printReferences(result.references, graph.sourceFiles.length, query);
+      printReferences(filterReferences(result.references, query), graph.sourceFiles.length, query);
       return;
     }
     const result = graph.store.project.searchSymbols({
       query: query.query,
       path: query.inPath,
       kind: query.kind,
-      limit: query.limit,
+      limit: engineLimit,
     });
-    printSymbols(result.symbols, graph.sourceFiles.length, query);
+    printSymbols(filterSymbols(result.symbols, query), graph.sourceFiles.length, query);
   } finally {
     graph.close();
   }
@@ -46,6 +48,7 @@ function parseArgs(args: string[]): SymbolsQuery {
   let query: string | undefined;
   let inPath: string | undefined;
   let kind: string | undefined;
+  const scopes: string[] = [];
   let limit = 50;
   let references = false;
   let help = false;
@@ -66,6 +69,13 @@ function parseArgs(args: string[]): SymbolsQuery {
       index += 1;
       continue;
     }
+    if (arg === "--scope") {
+      const value = args[index + 1];
+      if (!value) fail("Missing value for --scope.");
+      scopes.push(value);
+      index += 1;
+      continue;
+    }
     if (arg === "--references") {
       references = true;
       continue;
@@ -82,7 +92,19 @@ function parseArgs(args: string[]): SymbolsQuery {
   }
   if (positional.length > 1) fail(`Unexpected symbols arguments: ${positional.slice(1).join(", ")}`);
   query = positional[0];
-  return { query, inPath, kind, limit, references, help };
+  return { query, inPath, kind, scopes, limit, references, help };
+}
+
+function filterSymbols(symbols: CodeSymbol[], query: SymbolsQuery): CodeSymbol[] {
+  return symbols.filter((symbol) => inScope(symbol.path, query.scopes)).slice(0, query.limit);
+}
+
+function filterReferences(references: CodeReference[], query: SymbolsQuery): CodeReference[] {
+  return references.filter((reference) => inScope(reference.path, query.scopes)).slice(0, query.limit);
+}
+
+function inScope(file: string, scopes: string[]): boolean {
+  return scopes.length === 0 || matchesAny(file, scopes);
 }
 
 function printSymbols(symbols: CodeSymbol[], sourceCount: number, query: SymbolsQuery): void {
@@ -113,10 +135,12 @@ function printHelp(): void {
   opencanon symbols <query>
   opencanon symbols --in src/file.ts
   opencanon symbols <query> --kind function --limit 20
+  opencanon symbols <query> --kind function --scope "src/domain/**"
   opencanon symbols <query> --references
 
 Options:
   --in <path>      Restrict results to a single file path.
+  --scope <glob>   Restrict results to matching file globs. Repeatable.
   --kind <kind>    Filter by symbol or reference kind.
   --references     Search indexed references instead of symbols.
   --limit <n>      Maximum results to return (default 50, max 500).

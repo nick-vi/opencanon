@@ -19,7 +19,8 @@ bun .agents/skills/opencanon/scripts/opencanon.ts setup --yes --hooks codex
 bun run opencanon context --files src/services/company.service.ts
 bun run opencanon rules --validator service-no-db-client
 bun run opencanon search loadCompany
-bun run opencanon symbols loadCompany
+bun run opencanon search loadCompany --kind symbol --symbol-kind function --scope "src/services/**"
+bun run opencanon symbols loadCompany --kind function --scope "src/services/**"
 bun run opencanon graph callers loadCompany
 bun run opencanon validate --changed
 bun run opencanon feedback --changed
@@ -28,8 +29,8 @@ bun run opencanon doctor
 
 - `context` loads the docs, decisions, validators, and optional git history relevant to files or topics.
 - `rules` lists validator summaries, scopes, decisions, and fixture coverage.
-- `search` searches symbols, decisions, validators, and docs with deterministic fuzzy matching.
-- `symbols` searches the local TS/JS code graph.
+- `search` searches symbols, decisions, validators, and docs with deterministic fuzzy matching; symbol searches can be narrowed by symbol kind and path scope.
+- `symbols` searches the local TS/JS code graph and supports path scopes for boundary-focused function lists.
 - `graph` inspects deterministic caller, callee, and impact edges.
 - `validate` runs validators against files, changed files, fixtures, or the whole project.
 - `feedback` runs validators and renders concise text intended to be fed back into an agent after edits.
@@ -206,6 +207,12 @@ Validator results can be synchronous or asynchronous. The CLI awaits all validat
 Finding resolution policy: any validation finding must be addressed before an agent completes the task. Agents fix code to match current decisions, fix bugged validators with fixtures when the validator is wrong, or ask the user before changing a decision. `error` findings are blocking and make the CLI exit nonzero. `warning` findings are non-blocking by default; the CLI exits zero unless `--strict-warnings` is used. Markdown validation output includes a decision-update request template and points to `context --list-exceptions` for auditing documented exceptions.
 
 Curated factories are optional imports from the skill barrel. They are never auto-enabled; the local validator file remains the source of truth. Available factories include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
+
+`noUnusedExports` uses `ctx.graph.callers()` and respects configured `entrypoints` and `publicSurfaces` so exported API files are not treated as dead code. A validator can add per-rule `entrypoints` or `publicSurfaces` when the project has additional public modules.
+
+`migrationReferences` supports migration linkage: configure the old symbol or pattern, keep known matches in the baseline as warnings, and fail new matches as errors. This lets a repository deny new usage of an old API without requiring a single cleanup commit.
+
+For DRY and boundary reviews, combine graph/search commands with validators. `opencanon search <name> --kind symbol --symbol-kind function --scope "src/domain/**"` finds similar functions in a boundary, while `opencanon graph callers <symbol>` and `opencanon graph callees <symbol>` show existing call flow before changing or extracting code.
 
 Fixes can include structured edits or an advisory command. `--fix` applies only structured edits; command fixes are printed for the agent and are never executed by OpenCanon.
 

@@ -28,7 +28,8 @@
 <h2>Validators</h2>
 <p>
   Validators are TypeScript functions. They read facts from the daemon and
-  return findings. Fixtures pin each validator's behavior.
+  return findings. They can use graph facts for symbol search, callers,
+  callees, references, and impact. Fixtures pin each validator's behavior.
 </p>
 
 <h2>Findings</h2>
@@ -41,7 +42,7 @@
   <li><code>severity</code>: <code>error</code> or <code>warn</code>.</li>
   <li><code>location</code>: file, line, and optional span.</li>
   <li><code>decision</code>: the decision the rule backs.</li>
-  <li><code>fix</code>: an optional structured edit, when one is safe.</li>
+  <li><code>fix</code>: optional structured edits or an advisory command.</li>
 </ul>
 
 <h2>Daemon</h2>

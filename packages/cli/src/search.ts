@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { CodeSymbol, Validator } from "@opencanon/core";
-import { fail, listFiles, relative, resolveRootDir, type ContextPaths, type Decision, type Format } from "@opencanon/core";
+import { fail, listFiles, matchesAny, relative, resolveRootDir, type ContextPaths, type Decision, type Format } from "@opencanon/core";
 import { openCodeGraph } from "./code-graph.ts";
 import { loadProjectContext } from "./project.ts";
 
@@ -9,6 +9,8 @@ type SearchKind = "all" | "symbol" | "decision" | "validator" | "doc";
 type SearchQuery = {
   query: string;
   kind: SearchKind;
+  symbolKind?: string;
+  scopes: string[];
   limit: number;
   format: Format;
   help: boolean;
@@ -56,6 +58,7 @@ function collectSearchResults(
   if (query.kind === "all" || query.kind === "validator") results.push(...searchValidators(rootDir, query.query, input.validators, input.paths.validatorsPath));
   if (query.kind === "all" || query.kind === "doc") results.push(...searchDocs(rootDir, query.query, input.paths.docsDir));
   return results
+    .filter((result) => inScope(result.path, query.scopes))
     .sort((left, right) => right.score - left.score || left.kind.localeCompare(right.kind) || left.path.localeCompare(right.path) || left.title.localeCompare(right.title))
     .slice(0, query.limit);
 }
@@ -63,11 +66,16 @@ function collectSearchResults(
 function searchSymbols(rootDir: string, query: SearchQuery): SearchResult[] {
   const graph = openCodeGraph(rootDir);
   try {
-    const symbols = graph.store.project.searchSymbols({ query: query.query, limit: Math.max(query.limit * 4, 50) }).symbols;
+    const engineLimit = Math.max(query.limit * (query.scopes.length > 0 ? 10 : 4), 50);
+    const symbols = graph.store.project.searchSymbols({ query: query.query, kind: query.symbolKind, limit: engineLimit }).symbols;
     return symbols.map((symbol) => symbolResult(symbol, query.query));
   } finally {
     graph.close();
   }
+}
+
+function inScope(file: string, scopes: string[]): boolean {
+  return scopes.length === 0 || matchesAny(file, scopes);
 }
 
 function symbolResult(symbol: CodeSymbol, query: string): SearchResult {
@@ -166,6 +174,8 @@ function isSubsequence(needle: string, haystack: string): boolean {
 
 function parseArgs(args: string[]): SearchQuery {
   let kind: SearchKind = "all";
+  let symbolKind: string | undefined;
+  const scopes: string[] = [];
   let limit = 50;
   let format: Format = "markdown";
   let help = false;
@@ -180,6 +190,20 @@ function parseArgs(args: string[]): SearchQuery {
       const value = args[index + 1] as SearchKind | undefined;
       if (!value || !["all", "symbol", "decision", "validator", "doc"].includes(value)) fail(`Invalid --kind: ${String(value)}`);
       kind = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--symbol-kind") {
+      const value = args[index + 1];
+      if (!value) fail("Missing value for --symbol-kind.");
+      symbolKind = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--scope") {
+      const value = args[index + 1];
+      if (!value) fail("Missing value for --scope.");
+      scopes.push(value);
       index += 1;
       continue;
     }
@@ -200,9 +224,9 @@ function parseArgs(args: string[]): SearchQuery {
     if (arg.startsWith("--")) fail(`Unknown search option: ${arg}`);
     positional.push(arg);
   }
-  if (help) return { query: "", kind, limit, format, help };
+  if (help) return { query: "", kind, symbolKind, scopes, limit, format, help };
   if (positional.length !== 1) fail("Expected one search query.");
-  return { query: positional[0], kind, limit, format, help };
+  return { query: positional[0], kind, symbolKind, scopes, limit, format, help };
 }
 
 function printResults(query: SearchQuery, results: SearchResult[]): void {
@@ -221,10 +245,13 @@ function printHelp(): void {
   console.log(`Usage:
   opencanon search <query>
   opencanon search <query> --kind symbol
+  opencanon search <query> --kind symbol --symbol-kind function --scope "src/domain/**"
   opencanon search <query> --kind decision --format json
 
 Options:
   --kind <kind>    all, symbol, decision, validator, or doc (default all).
+  --symbol-kind    Restrict symbol results to a graph symbol kind.
+  --scope <glob>   Restrict result paths to matching file globs. Repeatable.
   --limit <n>      Maximum results to return (default 50, max 500).
   --format <fmt>   markdown or json.
 `);

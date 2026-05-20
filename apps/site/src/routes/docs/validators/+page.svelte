@@ -24,6 +24,42 @@ export default defineValidator({
       }));
   },
 });`;
+  const factoryExample = `import { defineValidator, migrationReferences, noUnusedExports } from "../index.ts";
+
+export default defineValidator({
+  id: "project-validators",
+  validators: [
+    migrationReferences({
+      id: "legacy-api-migration",
+      topics: ["migration"],
+      severity: "error",
+      in: ["src/**/*.ts"],
+      pattern: "\\\\blegacyApi\\\\(",
+      message: "legacyApi is migrated; use currentApi.",
+    }),
+    noUnusedExports({
+      id: "no-unused-exports",
+      topics: ["dead-code"],
+      severity: "warning",
+      in: ["src/**/*.ts"],
+      publicSurfaces: ["src/api/**"],
+      message: "Exported symbol has no known project caller.",
+    }),
+  ],
+});`;
+  const graphExample = `validate({ ctx }) {
+  return ctx.graph.callers("loadCompany").map((edge) =>
+    edge.source.file.report({
+      line: edge.source.line,
+      message: "loadCompany callers must use the new service boundary.",
+      fix: {
+        safety: "manual",
+        command: "opencanon graph callees loadCompany",
+        description: "Inspect downstream side effects before changing this call.",
+      },
+    }),
+  );
+}`;
 </script>
 
 <svelte:head><title>Validators | OpenCanon</title></svelte:head>
@@ -41,6 +77,23 @@ export default defineValidator({
 <p>
   Validators receive <code>ctx.facts</code>. Facts are extracted by the engine
   binary and cached by the daemon.
+</p>
+
+<h2>Graph-aware rules</h2>
+<CodeBlock title="graph-validator.ts" language="ts" code={graphExample} />
+<p>
+  Validators can use <code>ctx.graph</code> for symbols, references, callers,
+  callees, and impact edges. Command fixes are advisory: OpenCanon prints them
+  for an agent but never executes them through <code>--fix</code>.
+</p>
+
+<h2>Curated factories</h2>
+<CodeBlock title="validators/index.ts" language="ts" code={factoryExample} />
+<p>
+  Curated factories are opt-in. <code>migrationReferences</code> links old API
+  usage to the baseline so existing matches can warn while new matches fail.
+  <code>noUnusedExports</code> uses graph callers and respects configured
+  entrypoints and public surfaces.
 </p>
 
 <h2>Fixtures</h2>
