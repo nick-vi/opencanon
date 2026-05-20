@@ -82,6 +82,57 @@ test("refactor plans rename symbols and apply text edits", () => {
   }
 });
 
+test("refactor plans can use graph ranges for symbol rename", () => {
+  const plan = renameSymbol({
+    rootDir: "/repo",
+    from: "loadCompany",
+    to: "getCompany",
+    graphOnly: true,
+    symbols: [
+      {
+        id: "symbol",
+        path: "src/company.ts",
+        language: "typescript",
+        kind: "function",
+        name: "loadCompany",
+        qualifiedName: "src/company.ts::loadCompany",
+        exported: true,
+        range: {
+          start: { line: 1, column: 17, byte: 16 },
+          end: { line: 1, column: 28, byte: 27 },
+        },
+      },
+    ],
+    references: [
+      {
+        id: "reference",
+        path: "src/route.ts",
+        language: "typescript",
+        name: "loadCompany",
+        kind: "import-named",
+        source: "../company",
+        range: {
+          start: { line: 1, column: 10, byte: 9 },
+          end: { line: 1, column: 21, byte: 20 },
+        },
+        provenance: "oxc",
+        confidence: "syntactic",
+      },
+    ],
+  });
+
+  assert.equal(plan.diagnostics.length, 0);
+  assert.deepEqual(
+    plan.edits.map((edit) => `${edit.file}:${edit.range.startLine}:${edit.range.startColumn}`),
+    ["src/company.ts:1:17", "src/route.ts:1:10"],
+  );
+});
+
+test("refactor graph-only rename reports missing graph references", () => {
+  const plan = renameSymbol({ rootDir: "/repo", from: "loadCompany", to: "getCompany", graphOnly: true });
+  assert(plan.diagnostics.includes("No graph references found for symbol: loadCompany"));
+});
+
 test("refactor plans update imports for file moves", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-refactor-move-"));
   try {

@@ -1,6 +1,8 @@
 import { cac } from "cac";
 import {
   applyRefactorPlan,
+  createPaths,
+  discoverProjectFiles,
   fail,
   moveDir,
   moveFile,
@@ -12,6 +14,7 @@ import {
   type Format,
   type RefactorPlan,
 } from "@opencanon/core";
+import { openProjectStore } from "@opencanon/daemon";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
 type RefactorQuery = {
@@ -21,6 +24,7 @@ type RefactorQuery = {
   format: Format;
   files: string[];
   includes: string[];
+  graphOnly: boolean;
   help: boolean;
 };
 
@@ -53,9 +57,10 @@ function parseArgs(args: string[]): RefactorQuery {
   cli.option("--format <format>", "Output format.");
   cli.option("--file <path>", "Restrict planning to a file. Repeatable.");
   cli.option("--include <path>", "Restrict file discovery to a directory. Repeatable.");
+  cli.option("--graph-only", "Use graph references only for symbol rename.");
   const parsed = cli.parse(["node", "opencanon", ...rest], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["help", "h", "apply", "format", "file", "include"]);
+  rejectUnknownOptions(options, ["help", "h", "apply", "format", "file", "include", "graphOnly"]);
   return {
     command,
     args: parsed.args.map(String),
@@ -63,6 +68,7 @@ function parseArgs(args: string[]): RefactorQuery {
     format: formatOption(options.format),
     files: stringValues(options.file),
     includes: stringValues(options.include),
+    graphOnly: booleanOption(options.graphOnly),
     help: booleanOption(options.help) || booleanOption(options.h) || command === "" || command === "help",
   };
 }
@@ -70,7 +76,7 @@ function parseArgs(args: string[]): RefactorQuery {
 function createPlan(query: RefactorQuery, common: { rootDir: string; files: string[]; include: string[] }): RefactorPlan {
   if (query.command === "rename-symbol") {
     assertArgCount(query, 2);
-    return renameSymbol({ ...common, from: query.args[0], to: query.args[1] });
+    return renameSymbol({ ...common, from: query.args[0], to: query.args[1], ...graphRenameInputs(common.rootDir, query.args[0]), graphOnly: query.graphOnly });
   }
   if (query.command === "update-imports") {
     assertArgCount(query, 2);
@@ -97,6 +103,47 @@ function createPlan(query: RefactorQuery, common: { rootDir: string; files: stri
     });
   }
   fail(`Unknown refactor command: ${query.command}`);
+}
+
+function graphRenameInputs(rootDir: string, name: string): Pick<Parameters<typeof renameSymbol>[0], "symbols" | "references"> {
+  const paths = createPaths(rootDir);
+  const discovery = discoverProjectFiles(paths);
+  if (discovery.failed) return {};
+  const store = openProjectStore({ rootDir, paths });
+  try {
+    const sourceFiles = discovery.files.filter(isOxcSourceFile);
+    const scan = store.scanAndDiff(discovery.files);
+    const graphIsEmpty = store.project.searchSymbols({ limit: 1 }).symbols.length === 0;
+    const changedSource = (graphIsEmpty ? sourceFiles : scan.changedFiles).filter(isOxcSourceFile);
+    const deletedSource = scan.deletedFiles.filter(isOxcSourceFile);
+    if (changedSource.length > 0 || deletedSource.length > 0) {
+      store.project.indexCodeGraph({
+        files: scan.files
+          .filter((file) => changedSource.includes(file.path))
+          .map((file) => ({ path: file.path, contentHash: file.contentHash, language: languageForFile(file.path) })),
+        deletedFiles: deletedSource,
+      });
+    }
+    return {
+      symbols: store.project.searchSymbols({ query: name, limit: 500 }).symbols,
+      references: store.project.searchReferences({ query: name, limit: 1000 }).references,
+    };
+  } finally {
+    store.close();
+  }
+}
+
+const oxcExtensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
+
+function isOxcSourceFile(file: string): boolean {
+  return oxcExtensions.some((extension) => file.endsWith(extension));
+}
+
+function languageForFile(file: string): "typescript" | "tsx" | "javascript" | "jsx" {
+  if (file.endsWith(".tsx")) return "tsx";
+  if (file.endsWith(".jsx")) return "jsx";
+  if (file.endsWith(".mts") || file.endsWith(".cts") || file.endsWith(".ts")) return "typescript";
+  return "javascript";
 }
 
 function assertArgCount(query: RefactorQuery, count: number): void {
@@ -136,6 +183,7 @@ function printHelp(): void {
 Options:
   --file <path>       Restrict planning to a file. Repeatable.
   --include <path>    Restrict discovery to a directory. Repeatable.
+  --graph-only        Use graph references only for symbol rename.
   --apply             Apply the planned edits and file moves.
   --format json       Output JSON.
 `);

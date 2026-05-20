@@ -356,6 +356,7 @@ fn indexes_code_graph_for_typescript_files() {
     assert_eq!(invoice["kind"], "function");
     assert_eq!(invoice["exported"], true);
     assert_eq!(invoice["range"]["start"]["line"], 2);
+    assert_eq!(invoice["range"]["start"]["column"], 17);
     assert!(invoice["id"].as_str().unwrap().len() >= 32);
 
     let references = project

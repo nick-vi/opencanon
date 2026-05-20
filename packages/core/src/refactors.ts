@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import path from "node:path";
 import { listFiles } from "./discovery.ts";
 import { resolveInsideRoot } from "./paths.ts";
+import type { CodeReference, CodeSymbol } from "./contracts.ts";
 import type { TextEdit } from "./validator-types.ts";
 
 const TextEncoding = "utf8";
@@ -36,14 +37,19 @@ export function renameSymbol(input: {
   to: string;
   files?: string[];
   include?: string[];
+  symbols?: CodeSymbol[];
+  references?: CodeReference[];
+  graphOnly?: boolean;
 }): RefactorPlan {
   const diagnostics = validateIdentifierPair(input.from, input.to);
   const files = projectFiles(input.rootDir, input.files, input.include);
-  const edits = diagnostics.length > 0 ? [] : files.flatMap((file) => renameSymbolEdits(input.rootDir, file, input.from, input.to));
+  const graphEdits = diagnostics.length > 0 ? [] : graphRenameEdits(input.from, input.to, input.symbols ?? [], input.references ?? []);
+  const textEdits = diagnostics.length > 0 || input.graphOnly ? [] : files.flatMap((file) => renameSymbolEdits(input.rootDir, file, input.from, input.to));
+  if (input.graphOnly && graphEdits.length === 0) diagnostics.push(`No graph references found for symbol: ${input.from}`);
   return {
     kind: "rename-symbol",
     summary: `Rename symbol ${input.from} to ${input.to}.`,
-    edits,
+    edits: uniqueEdits([...graphEdits, ...textEdits]),
     fileMoves: [],
     diagnostics,
   };
@@ -229,6 +235,41 @@ function renameSymbolEdits(rootDir: string, file: string, from: string, to: stri
   const text = readProjectText(rootDir, file);
   if (text === null) return [];
   return matchEdits(file, text, identifierPattern(from), to);
+}
+
+function graphRenameEdits(from: string, to: string, symbols: CodeSymbol[], references: CodeReference[]): TextEdit[] {
+  const symbolEdits = symbols
+    .filter((symbol) => symbol.name === from)
+    .map((symbol) => rangeEdit(symbol.path, symbol.range, to));
+  const referenceEdits = references
+    .filter((reference) => reference.name === from)
+    .map((reference) => rangeEdit(reference.path, reference.range, to));
+  return [...symbolEdits, ...referenceEdits];
+}
+
+function rangeEdit(file: string, range: CodeSymbol["range"], replacement: string): TextEdit {
+  return {
+    file,
+    range: {
+      startLine: range.start.line,
+      startColumn: range.start.column,
+      endLine: range.end.line,
+      endColumn: range.end.column,
+    },
+    replacement,
+  };
+}
+
+function uniqueEdits(edits: TextEdit[]): TextEdit[] {
+  const seen = new Set<string>();
+  const result: TextEdit[] = [];
+  for (const edit of edits) {
+    const key = `${edit.file}:${edit.range.startLine}:${edit.range.startColumn}:${edit.range.endLine}:${edit.range.endColumn}:${edit.replacement}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(edit);
+  }
+  return result;
 }
 
 function replaceStringLiteralEdits(rootDir: string, file: string, from: string, to: string): TextEdit[] {

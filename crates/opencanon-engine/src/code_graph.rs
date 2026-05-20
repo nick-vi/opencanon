@@ -549,7 +549,7 @@ impl<'a> GraphCollector<'a> {
         name: &str,
         exported: bool,
         signature: Option<String>,
-        outer: Span,
+        _outer: Span,
         identifier: Span,
     ) {
         let key = (
@@ -561,7 +561,7 @@ impl<'a> GraphCollector<'a> {
         if !self.seen_names.insert(key) {
             return;
         }
-        let range = self.line_index.range(outer);
+        let range = self.line_index.range(identifier);
         let qualified_name = format!("{}::{name}", self.path);
         self.nodes.push(ExtractedNode {
             kind: kind.to_string(),
