@@ -13,6 +13,8 @@ bun .agents/skills/opencanon/scripts/opencanon.ts setup --yes --hooks codex
 
 `setup` is safe to rerun. It scaffolds missing OpenCanon files, installs requested feedback hooks, validates the context, runs doctor checks, runs project validation, verifies daemon prerequisites, and starts the project daemon unless `--no-daemon` is used.
 
+Commit the scaffolded docs, decisions, validators, fixtures, hook config, skill wrapper files, `skills-lock.json`, and package script. Do not commit `.agents/skills/opencanon/runtime/` or `.opencanon/` generated state; setup installs runtime assets locally from the release manifest and adds the generated paths to `.gitignore`.
+
 ## Daily Use
 
 ```bash
@@ -63,11 +65,11 @@ bun run opencanon daemon stop
 bun run opencanon dev
 ```
 
-`daemon start` runs the current project's daemon in the background and registers it in `~/.opencanon/daemons.json`; project-local state remains under `.opencanon/`. Normal `context`, `rules`, `validate`, `feedback`, and hook commands reuse that daemon when it is running, or start an isolated in-process ephemeral daemon for the single request. `dev` starts the daemon and serves the UI.
+`daemon start` runs the current project's daemon in the background and registers it in `~/.opencanon/daemons.json`; project-local generated state remains under `.opencanon/` and is ignored by Git. Normal `context`, `rules`, `validate`, `feedback`, and hook commands reuse that daemon when it is running, or start an isolated in-process ephemeral daemon for the single request. `dev` starts the daemon and serves the UI.
 
 ## Runtime Updates
 
-Engine runtime installation is manifest-driven. The CLI detects the current target from `process.platform` and `process.arch`, selects that target in the manifest, verifies the downloaded asset's SHA-256, and writes the canonical engine binary path atomically. Manifest and asset URLs must be HTTPS, `file:`, or local paths. The agent may run the command, but the CLI owns target selection, URL resolution, checksum verification, and install path.
+Engine runtime installation is manifest-driven and local to each checkout. The CLI detects the current target from `process.platform` and `process.arch`, selects that target in the manifest, verifies the downloaded asset's SHA-256, and writes the canonical engine binary path atomically under the ignored `.agents/skills/opencanon/runtime/` directory. Manifest and asset URLs must be HTTPS, `file:`, or local paths. The agent may run the command, but the CLI owns target selection, URL resolution, checksum verification, and install path.
 
 ```bash
 bun run opencanon update check --manifest ./opencanon-runtime-manifest.json

@@ -36,7 +36,9 @@ opencanon daemon start`;
 <p>
   Repo state lives under <code>.opencanon/</code>. The supervisor registry lives
   in <code>~/.opencanon/daemons.json</code>. Parser caches belong in Git ignore;
-  <code>doctor --fix safe</code> can add the ignore entry.
+  <code>doctor --fix safe</code> can add the ignore entry. Runtime assets under
+  <code>.agents/skills/opencanon/runtime/</code> are release artifacts installed
+  into each checkout, not repository source.
 </p>
 
 <h2>Engine Runtime</h2>

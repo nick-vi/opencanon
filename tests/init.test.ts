@@ -61,6 +61,9 @@ test("init creates scaffold, agent brief, package script, and requested hooks", 
     assert(readFileSync(path.join(rootDir, ".opencode/plugins/opencanon.ts"), "utf8").includes(".agents/skills/opencanon/scripts/opencode-plugin.ts"));
     assert(readFileSync(path.join(rootDir, "tmp/opencanon-init-plan.md"), "utf8").includes("OpenCanon Agent Setup Brief"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/setup.json"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/*.sqlite"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
     assert.equal(JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf8")).scripts.opencanon, "bun .agents/skills/opencanon/scripts/opencanon.ts");
 
     const localScript = path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts");

@@ -60,12 +60,18 @@
   Run setup in the repository root. It creates starter
   docs, decisions, validators, fixtures, cache ignores, and optional hooks.
 </p>
+<p>
+  Commit the docs, decisions, validators, fixtures, hook config, skill wrapper
+  files, <code>skills-lock.json</code>, and package script. Runtime assets under
+  <code>.agents/skills/opencanon/runtime/</code> and generated state under
+  <code>.opencanon/</code> stay local and ignored.
+</p>
 <CodeBlock title="initialize" language="shell" code={INIT_COMMAND} />
 
 <h2>Start the daemon</h2>
 <p>
   The daemon runs per repository. Repo state lives under
-  <code>.opencanon/</code>; the supervisor registry lives at
+  <code>.opencanon/</code> and is ignored by Git; the supervisor registry lives at
   <code>~/.opencanon/daemons.json</code>.
 </p>
 <CodeBlock title="daemon" language="shell" code={DAEMON_COMMAND} />

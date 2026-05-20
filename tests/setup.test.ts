@@ -39,6 +39,9 @@ test("setup scaffolds missing files, installs requested hooks, validates, and wr
     assert(existsSync(path.join(rootDir, "tmp/opencanon-init-plan.md")));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/setup.json"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/*.sqlite"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/daemon.log"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
     const setupState = JSON.parse(readFileSync(path.join(rootDir, ".opencanon/setup.json"), "utf8")) as { status: string; steps: unknown[] };
     assert.equal(setupState.status, "warn");
     assert(setupState.steps.length >= payload.steps.length);
@@ -54,6 +57,7 @@ test("setup scaffolds missing files, installs requested hooks, validates, and wr
     assert.equal(rerunPayload.steps.find((step) => step.id === "scaffold")?.status, "skip");
     assert.equal(rerunPayload.steps.find((step) => step.id === "cache-ignore")?.status, "pass");
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

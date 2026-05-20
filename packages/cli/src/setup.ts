@@ -57,6 +57,14 @@ const SetupOptionName = {
 } as const;
 
 const SetupStateFile = ".opencanon/setup.json";
+const generatedStateIgnoreEntries = [
+  ".opencanon/daemon.json",
+  ".opencanon/daemon.log",
+  ".opencanon/*.sqlite",
+  ".opencanon/*.sqlite-shm",
+  ".opencanon/*.sqlite-wal",
+  ".agents/skills/opencanon/runtime/",
+];
 
 type SetupQuery = {
   dryRun: boolean;
@@ -455,14 +463,14 @@ function ensureCacheIgnored(rootDir: string, dryRun: boolean): SetupStep {
 }
 
 function ensureSetupStateIgnored(rootDir: string, dryRun: boolean): SetupStep {
-  return ensureGitignoreEntryStep({
+  return ensureGitignoreEntriesStep({
     rootDir,
-    entry: SetupStateFile,
+    entries: [SetupStateFile, ...generatedStateIgnoreEntries],
     dryRun,
     id: SetupStepId.SetupStateIgnore,
-    presentMessage: `${SetupStateFile} is ignored by Git.`,
-    dryRunMessage: `${SetupStateFile} would be added to .gitignore.`,
-    writtenMessage: `${SetupStateFile} added to .gitignore.`,
+    presentMessage: "Generated OpenCanon state and runtime files are ignored by Git.",
+    dryRunMessage: "Generated OpenCanon state and runtime ignore entries would be added to .gitignore.",
+    writtenMessage: "Generated OpenCanon state and runtime ignore entries added to .gitignore.",
   });
 }
 
@@ -475,10 +483,23 @@ function ensureGitignoreEntryStep(params: {
   dryRunMessage: string;
   writtenMessage: string;
 }): SetupStep {
+  return ensureGitignoreEntriesStep({ ...params, entries: [params.entry] });
+}
+
+function ensureGitignoreEntriesStep(params: {
+  rootDir: string;
+  entries: string[];
+  dryRun: boolean;
+  id: SetupStepId;
+  presentMessage: string;
+  dryRunMessage: string;
+  writtenMessage: string;
+}): SetupStep {
   const gitignorePath = path.join(params.rootDir, ".gitignore");
   const current = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
   const lines = current.split(/\r?\n/).map((line) => line.trim());
-  if (lines.includes(params.entry)) {
+  const missingEntries = params.entries.filter((entry) => !lines.includes(entry));
+  if (missingEntries.length === 0) {
     return {
       id: params.id,
       status: SetupStatus.Pass,
@@ -488,7 +509,7 @@ function ensureGitignoreEntryStep(params: {
 
   if (!params.dryRun) {
     const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
-    writeAtomicTextFileSync(gitignorePath, `${current}${prefix}${params.entry}\n`);
+    writeAtomicTextFileSync(gitignorePath, `${current}${prefix}${missingEntries.join("\n")}\n`);
   }
   return {
     id: params.id,

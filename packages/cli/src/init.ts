@@ -33,6 +33,15 @@ type InitFileAction = (typeof InitFileAction)[keyof typeof InitFileAction];
 const EmptyFileContent = "";
 const OpenCanonCommandName = "opencanon";
 const Utf8Encoding = "utf8";
+const generatedGitignoreEntries = [
+  ".opencanon/daemon.json",
+  ".opencanon/daemon.log",
+  ".opencanon/setup.json",
+  ".opencanon/*.sqlite",
+  ".opencanon/*.sqlite-shm",
+  ".opencanon/*.sqlite-wal",
+  ".agents/skills/opencanon/runtime/",
+];
 
 export type InitQuery = {
   yes: boolean;
@@ -181,7 +190,7 @@ export function runInit(rootDir: string, query: InitQuery): InitResult {
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts", cliScriptTemplate(), query, diagnostics, 0o755));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/scripts/opencode-plugin.ts", opencodePluginTemplate(), query, diagnostics));
   files.push(...copyBundledRuntimeFiles(rootDir, query, diagnostics));
-  files.push(writeGitignoreEntry(rootDir, `${query.cacheDir.replace(/\/$/, "")}/`, query));
+  files.push(writeGitignoreEntries(rootDir, [`${query.cacheDir.replace(/\/$/, "")}/`, ...generatedGitignoreEntries], query));
   files.push(writePackageScript(rootDir, query, diagnostics));
 
   const agentBrief = query.agent ? agentBriefTemplate(query) : undefined;
@@ -331,17 +340,18 @@ function toSlash(file: string): string {
   return file.split(path.sep).join("/");
 }
 
-function writeGitignoreEntry(rootDir: string, entry: string, query: Pick<InitQuery, "dryRun">): InitFileResult {
+function writeGitignoreEntries(rootDir: string, entries: string[], query: Pick<InitQuery, "dryRun">): InitFileResult {
   const relativePath = ".gitignore";
   const filePath = path.join(rootDir, relativePath);
   const exists = existsSync(filePath);
   const current = exists ? readFileSync(filePath, Utf8Encoding) : EmptyFileContent;
   const lines = current.split(/\r?\n/).map((line) => line.trim());
-  if (lines.includes(entry)) return { path: relativePath, action: InitFileAction.Unchanged };
+  const missingEntries = entries.filter((entry) => !lines.includes(entry));
+  if (missingEntries.length === 0) return { path: relativePath, action: InitFileAction.Unchanged };
 
   if (!query.dryRun) {
     const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
-    writeFileSync(filePath, `${current}${prefix}${entry}\n`);
+    writeFileSync(filePath, `${current}${prefix}${missingEntries.join("\n")}\n`);
   }
   return { path: relativePath, action: exists ? InitFileAction.Update : InitFileAction.Create };
 }
