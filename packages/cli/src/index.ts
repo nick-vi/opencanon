@@ -13,6 +13,7 @@ import { runFeedbackCommand, runHookCommand } from "./feedback.ts";
 import { runInitCommand } from "./init.ts";
 import { loadProjectContext } from "./project.ts";
 import { runContextCommand } from "./context.ts";
+import { runRefactorCommand } from "./refactor.ts";
 import { runRulesCommand } from "./rules.ts";
 import { runSetupCommand } from "./setup.ts";
 import { runSymbolsCommand } from "./symbols.ts";
@@ -109,6 +110,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
+  if (command === "refactor") {
+    await runRefactorCommand(rest, cwd);
+    return;
+  }
+
   fail(`Unknown command: ${command}`);
 }
 
@@ -177,6 +183,7 @@ function printHelp(): void {
   opencanon baseline check
   opencanon bundle install <bundle.ts|bundle.json> --option key=value
   opencanon symbols <query>
+  opencanon refactor rename-symbol <from> <to>
 
 Commands:
   context    Load scoped docs, decisions, validators, and git evidence.
@@ -193,6 +200,7 @@ Commands:
   baseline   Show or update the known findings baseline.
   bundle     Inspect, plan, install, or update canon bundles.
   symbols    Search the deterministic TS/JS code symbol graph.
+  refactor   Plan or apply deterministic symbol/import/file refactors.
 
 Maintenance:
   db         Inspect or reset generated daemon state.

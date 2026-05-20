@@ -1,10 +1,24 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { getGitFileDiff, getGitFileHistory, lazy, normalizeMarkdownHeading, parseMarkdownDoc, resolveDocsReferences, resolveInsideRoot, resource, safeRelativePath } from "@opencanon/core";
+import {
+  applyRefactorPlan,
+  getGitFileDiff,
+  getGitFileHistory,
+  lazy,
+  moveFile,
+  normalizeMarkdownHeading,
+  parseMarkdownDoc,
+  renameSymbol,
+  resolveDocsReferences,
+  resolveInsideRoot,
+  resource,
+  safeRelativePath,
+  updateImports,
+} from "@opencanon/core";
 
 test("lazy caches sync values and can reset", () => {
   let calls = 0;
@@ -47,6 +61,56 @@ test("safe path utilities reject traversal outside the root", () => {
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
     rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("refactor plans rename symbols and apply text edits", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-refactor-rename-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return loadCompany.name;\n}\n");
+
+    const plan = renameSymbol({ rootDir, from: "loadCompany", to: "getCompany", files: ["src/company.ts"] });
+    assert.equal(plan.diagnostics.length, 0);
+    assert.equal(plan.edits.length, 2);
+
+    const result = applyRefactorPlan({ rootDir, plan });
+    assert.equal(result.appliedEdits, 2);
+    assert.equal(readFileSync(path.join(rootDir, "src/company.ts"), "utf8"), "export function getCompany() {\n  return getCompany.name;\n}\n");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("refactor plans update imports for file moves", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-refactor-move-"));
+  try {
+    mkdirSync(path.join(rootDir, "src/services"), { recursive: true });
+    mkdirSync(path.join(rootDir, "src/domain"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/domain/company.ts"), "export const company = true;\n");
+    writeFileSync(path.join(rootDir, "src/services/company.ts"), "import { company } from \"../domain/company\";\nexport { company };\n");
+
+    const importPlan = updateImports({
+      rootDir,
+      from: "src/domain/company.ts",
+      to: "src/domain/customer.ts",
+      files: ["src/services/company.ts"],
+    });
+    assert.equal(importPlan.edits[0]?.replacement, "../domain/customer");
+
+    const movePlan = moveFile({
+      rootDir,
+      from: "src/domain/company.ts",
+      to: "src/domain/customer.ts",
+      files: ["src/services/company.ts"],
+    });
+    const result = applyRefactorPlan({ rootDir, plan: movePlan });
+    assert.equal(result.appliedEdits, 1);
+    assert.equal(result.movedFiles, 1);
+    assert.equal(existsSync(path.join(rootDir, "src/domain/customer.ts")), true);
+    assert.equal(readFileSync(path.join(rootDir, "src/services/company.ts"), "utf8"), "import { company } from \"../domain/customer\";\nexport { company };\n");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
   }
 });
 
