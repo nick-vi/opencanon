@@ -14,6 +14,7 @@ import {
   validateFindings,
   writeAtomicTextFileSync,
   type Validator,
+  type ValidatorDefinition,
 } from "@opencanon/core";
 import {
   fileNames,
@@ -52,13 +53,11 @@ import type {
   StudioFixtureRun,
   StudioFixtureRunCase,
   StudioFixtureSet,
+  StudioOption as StudioOptionValue,
   StudioPreview,
   StudioRequest,
   StudioValidatorSummary,
 } from "./studio-types.ts";
-type StudioFixtureCase = (typeof StudioFixtureCase)[keyof typeof StudioFixtureCase];
-type StudioFactoryId = (typeof StudioFactoryId)[keyof typeof StudioFactoryId];
-type StudioOption = (typeof StudioOption)[keyof typeof StudioOption];
 const commonFields: StudioFieldDescriptor[] = [
   { key: StudioOption.Id, label: "Validator id", kind: StudioFieldKind.Text, required: true, placeholder: "no-unsafe-db-imports" },
   { key: StudioOption.Topics, label: "Topics", kind: StudioFieldKind.Lines, required: true, placeholder: "imports" },
@@ -777,7 +776,7 @@ function renderOptions(factory: StudioFactory, options: Record<string, unknown>)
   return `{\n${lines.join("\n")}\n}`;
 }
 
-function sourceValueForOption(factory: StudioFactory, field: StudioOption, options: Record<string, unknown>): unknown {
+function sourceValueForOption(factory: StudioFactory, field: StudioOptionValue, options: Record<string, unknown>): unknown {
   const descriptor = factory.fields.find((item) => item.key === field);
   if (field === StudioOption.Topics || field === StudioOption.DecisionIds || field === StudioOption.Docs) {
     const value = stringListOption(options, field);
@@ -835,7 +834,7 @@ function baseFactoryOptions(options: Record<string, unknown>) {
   };
 }
 
-function sourceFieldName(field: StudioOption): string {
+function sourceFieldName(field: StudioOptionValue): string {
   if (field === StudioOption.HeaderLines) return "maxHeaderLines";
   return field === StudioOption.FixDescription ? "fix" : field;
 }
@@ -871,29 +870,31 @@ function fixtureFiles(value: unknown): StudioFixtureFile[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((file): file is Record<string, unknown> => isRecord(file))
-    .filter((file) => typeof file.path === "string" && typeof file.content === "string")
-    .map((file) => ({ path: normalizeFixturePath(file.path), content: file.content }));
+    .flatMap((file) => {
+      if (typeof file.path !== "string" || typeof file.content !== "string") return [];
+      return [{ path: normalizeFixturePath(file.path), content: file.content }];
+    });
 }
 
-function stringOption(options: Record<string, unknown>, key: StudioOption): string {
+function stringOption(options: Record<string, unknown>, key: StudioOptionValue): string {
   const value = optionalStringOption(options, key);
   if (!value) throw new Error(`${key} is required.`);
   return value;
 }
 
-function optionalStringOption(options: Record<string, unknown>, key: StudioOption): string | undefined {
+function optionalStringOption(options: Record<string, unknown>, key: StudioOptionValue): string | undefined {
   const value = options[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function stringListOption(options: Record<string, unknown>, key: StudioOption): string[] {
+function stringListOption(options: Record<string, unknown>, key: StudioOptionValue): string[] {
   const value = options[key];
   if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
   if (typeof value === "string") return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
   return [];
 }
 
-function regexListOption(options: Record<string, unknown>, key: StudioOption): RegExp[] {
+function regexListOption(options: Record<string, unknown>, key: StudioOptionValue): RegExp[] {
   return stringListOption(options, key).map(parseRegex);
 }
 
@@ -918,14 +919,14 @@ function parseRegex(value: string): RegExp {
   return new RegExp(trimmed);
 }
 
-function numberOption(options: Record<string, unknown>, key: StudioOption, fallback: number): number {
+function numberOption(options: Record<string, unknown>, key: StudioOptionValue, fallback: number): number {
   const value = options[key];
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return fallback;
 }
 
-function booleanOption(options: Record<string, unknown>, key: StudioOption, fallback: boolean): boolean {
+function booleanOption(options: Record<string, unknown>, key: StudioOptionValue, fallback: boolean): boolean {
   const value = options[key];
   return typeof value === "boolean" ? value : fallback;
 }

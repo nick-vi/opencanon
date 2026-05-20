@@ -163,7 +163,7 @@ function parseConfigOverrides(input: unknown): { ok: true; overrides: ContextCon
   for (const field of numberConfigFields) {
     const value = input[field];
     if (value === undefined) continue;
-    if (!Number.isInteger(value) || value < 0) {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
       diagnostics.push(settingsDiagnostic(`${field} must be a non-negative integer.`));
       continue;
     }

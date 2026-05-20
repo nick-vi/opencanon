@@ -51,11 +51,11 @@ export async function withDaemonClient<T>(cwd: string, callback: (client: Daemon
     const headers = authToken ? daemonAuthHeaders(authToken) : undefined;
 
     return await callback({
-      async get<T>(path) {
+      async get<T>(path: string) {
         const response = await fetch(`${url}${path}`, { headers });
         return parseDaemonResponse<T>(response);
       },
-      async post<T>(path, body) {
+      async post<T>(path: string, body: unknown) {
         const response = await fetch(`${url}${path}`, {
           method: "POST",
           headers: { ...headers, "content-type": "application/json; charset=utf-8" },

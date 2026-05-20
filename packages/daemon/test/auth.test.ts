@@ -29,12 +29,12 @@ test("daemon auth accepts bearer headers and limits query tokens to explicit opt
   const route = new URL("http://127.0.0.1:4767/api/snapshot");
   const bootstrap = new URL(`http://127.0.0.1:4767/?token=${token}`);
 
-  assert.equal(isAuthorizedDaemonRequest(new Request(route), route, token), false);
-  assert.equal(isAuthorizedDaemonRequest(new Request(route, { headers: daemonAuthHeaders(token) }), route, token), true);
-  assert.equal(isAuthorizedDaemonRequest(new Request(route, { headers: { cookie: daemonAuthCookieHeader(token, false) } }), route, token), true);
-  assert.equal(isAuthorizedDaemonRequest(new Request(route, { headers: { cookie: "opencanon_daemon_token=%E0%A4%A" } }), route, token), false);
-  assert.equal(isAuthorizedDaemonRequest(new Request(route), route, token, { allowQueryToken: true }), false);
-  assert.equal(isAuthorizedDaemonRequest(new Request(bootstrap), bootstrap, token, { allowQueryToken: true }), true);
+  assert.equal(isAuthorizedDaemonRequest(new Request(route.toString()), route, token), false);
+  assert.equal(isAuthorizedDaemonRequest(new Request(route.toString(), { headers: daemonAuthHeaders(token) }), route, token), true);
+  assert.equal(isAuthorizedDaemonRequest(new Request(route.toString(), { headers: { cookie: daemonAuthCookieHeader(token, false) } }), route, token), true);
+  assert.equal(isAuthorizedDaemonRequest(new Request(route.toString(), { headers: { cookie: "opencanon_daemon_token=%E0%A4%A" } }), route, token), false);
+  assert.equal(isAuthorizedDaemonRequest(new Request(route.toString()), route, token, { allowQueryToken: true }), false);
+  assert.equal(isAuthorizedDaemonRequest(new Request(bootstrap.toString()), bootstrap, token, { allowQueryToken: true }), true);
 });
 
 test("daemon auth rejects empty configured tokens", () => {
@@ -42,8 +42,8 @@ test("daemon auth rejects empty configured tokens", () => {
 
   assert.equal(usableDaemonAuthToken(""), undefined);
   assert.equal(usableDaemonAuthToken("   "), undefined);
-  assert.equal(isAuthorizedDaemonRequest(new Request(route, { headers: { authorization: "Bearer " } }), route, ""), false);
-  assert.equal(isAuthorizedDaemonRequest(new Request(route), route, "", { allowQueryToken: true }), false);
+  assert.equal(isAuthorizedDaemonRequest(new Request(route.toString(), { headers: { authorization: "Bearer " } }), route, ""), false);
+  assert.equal(isAuthorizedDaemonRequest(new Request(route.toString()), route, "", { allowQueryToken: true }), false);
 });
 
 test("daemon host binding requires explicit remote opt-in", () => {

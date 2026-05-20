@@ -39,7 +39,9 @@ type RuleSummary = {
   command: string;
 };
 
-type RuleValidator = Pick<Validator, "id" | "severity" | "scope" | "facts" | "summary" | "topics" | "appliesScopes" | "decisionIds" | "docs" | "visuals">;
+type RuleValidator = Pick<Validator, "id" | "severity" | "scope" | "facts" | "summary" | "topics" | "appliesScopes" | "decisionIds" | "docs"> & {
+  visuals: unknown[];
+};
 
 type TreeRenderOptions = {
   ascii: boolean;
@@ -117,9 +119,18 @@ function summarizeRule(fixturesDir: string, validator: RuleValidator): RuleSumma
       invalid: hasFixtureFiles(fixturesDir, validator.id, "invalid"),
       fixed: hasFixtureFiles(fixturesDir, validator.id, "fixed"),
     },
-    visuals: validator.visuals,
+    visuals: validator.visuals.filter(isValidatorVisual),
     command: `bun run opencanon validate --validator ${validator.id} --project`,
   };
+}
+
+function isValidatorVisual(value: unknown): value is ValidatorVisual {
+  if (!isRecord(value) || value.kind !== "tree") return false;
+  return isRecord(value.definition);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function selectRuleValidators(validators: RuleValidator[], query: { topics: string[]; validatorIds: string[]; decisionIds: string[] }): RuleValidator[] {

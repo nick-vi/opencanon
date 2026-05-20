@@ -145,7 +145,7 @@ async function promptInitQuery(defaults: InitQuery): Promise<InitQuery> {
       validatorsPath: await promptString(rl, "Validators path", defaults.validatorsPath),
       fixturesDir: await promptString(rl, "Fixtures directory", defaults.fixturesDir),
       cacheDir: await promptString(rl, "Cache directory", defaults.cacheDir),
-      fileDiscovery: fileDiscoveryOption(await promptString(rl, "File discovery (git/filesystem)", defaults.fileDiscovery)),
+      fileDiscovery: fileDiscoveryOption(await promptString(rl, "File discovery (git/filesystem)", defaults.fileDiscovery), defaults.fileDiscovery),
       hooks: hooksOption(await promptString(rl, "Feedback hooks (none/codex/claude/opencode/all)", defaults.hooks.join(",") || "none")),
     };
   } finally {
@@ -154,7 +154,7 @@ async function promptInitQuery(defaults: InitQuery): Promise<InitQuery> {
 }
 
 async function promptString(rl: ReturnType<typeof createInterface>, label: string, fallback: string): Promise<string> {
-  const value = (await rl.question(`${label} [${fallback}]: `)).trim();
+  const value = (await rl.question(`${label} [${fallback}]: `, {})).trim();
   return value || fallback;
 }
 
@@ -228,6 +228,7 @@ function initConfigOverrides(rootDir: string, query: InitQuery): Record<string, 
 function defaultInitQuery(rootDir: string): Omit<InitQuery, "yes" | "agent" | "dryRun" | "force" | "format" | "hooks"> {
   const defaults = createDefaultConfig(rootDir);
   return {
+    missingOnly: false,
     docsDir: defaults.docsDir,
     validatorsPath: defaults.validatorsPath,
     fixturesDir: defaults.fixturesDir,
@@ -244,7 +245,7 @@ function writeManagedFile(
   rootDir: string,
   relativePath: string,
   content: string,
-  query: Pick<InitQuery, "dryRun" | "force">,
+  query: Pick<InitQuery, "dryRun" | "force" | "missingOnly">,
   diagnostics: string[],
   mode?: number,
 ): InitFileResult {
@@ -268,7 +269,7 @@ function copyManagedFile(
   rootDir: string,
   sourcePath: string,
   relativePath: string,
-  query: Pick<InitQuery, "dryRun" | "force">,
+  query: Pick<InitQuery, "dryRun" | "force" | "missingOnly">,
   diagnostics: string[],
 ): InitFileResult {
   const filePath = path.join(rootDir, relativePath);

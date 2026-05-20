@@ -88,7 +88,7 @@ export const StudioFieldGroup = {
   Scope: "scope",
 } as const;
 
-export const StudioFieldGroups = [
+export const StudioFieldGroups: Array<{ id: string; label: string; keys: StudioOption[] }> = [
   {
     id: StudioFieldGroup.Identity,
     label: "Identity",

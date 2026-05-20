@@ -56,7 +56,7 @@ export type ApiSuccess<T> = {
   data: T;
 };
 
-const postApiRoutes = new Set([
+const postApiRoutes = new Set<string>([
   ApiRoute.Feedback,
   ApiRoute.HookFeedback,
   ApiRoute.Index,
@@ -65,7 +65,7 @@ const postApiRoutes = new Set([
   ApiRoute.StudioValidatorsRunFixtures,
   ApiRoute.Validate,
 ]);
-const publicApiRoutes = new Set([ApiRoute.Health]);
+const publicApiRoutes = new Set<string>([ApiRoute.Health]);
 
 type DiagnosticCode = (typeof diagnosticCodes)[keyof typeof diagnosticCodes];
 type DaemonError = { ok: false; diagnostics: unknown[] };
