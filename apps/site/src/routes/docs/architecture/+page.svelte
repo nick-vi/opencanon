@@ -2,17 +2,27 @@
   import CodeBlock from '$lib/components/CodeBlock.svelte';
 
   const layoutTree = `.agents/skills/opencanon/
-  scripts/opencanon.ts        # entrypoint, imports runtime/cli.js
-  runtime/                    # bundled CLI, core APIs, validators,
-                              # daemon, UI assets, engine binary
-  index.ts                    # validator authoring barrel
+├─ scripts/
+│  └─ opencanon.ts
+├─ runtime/
+│  ├─ cli.js
+│  ├─ core/
+│  ├─ validators/
+│  ├─ daemon/
+│  ├─ ui/
+│  └─ engine/
+└─ index.ts
 
 docs/opencanon/
-  decisions.json              # decisions register
-  canon/*.md                  # normal Markdown headings linked from decisions
+├─ decisions.json
+└─ canon/
+   └─ *.md
 
-.opencanon/                   # per-repo state (gitignored)
-~/.opencanon/daemons.json     # supervisor registry`;
+.opencanon/
+└─ cache/
+
+~/.opencanon/
+└─ daemons.json`;
 </script>
 
 <svelte:head><title>Architecture | OpenCanon</title></svelte:head>

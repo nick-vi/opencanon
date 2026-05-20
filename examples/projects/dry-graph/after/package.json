@@ -1,0 +1,8 @@
+{
+  "name": "dry-graph-after",
+  "type": "module",
+  "scripts": {
+    "opencanon": "opencanon",
+    "test": "bun test"
+  }
+}

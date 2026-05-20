@@ -24,7 +24,7 @@ export default defineValidator({
       }));
   },
 });`;
-  const factoryExample = `import { defineValidator, migrationReferences, noUnusedExports } from "../index.ts";
+  const factoryExample = `import { defineValidator, migrationReferences, noUnusedExports, similarFunctionNames } from "../index.ts";
 
 export default defineValidator({
   id: "project-validators",
@@ -35,6 +35,8 @@ export default defineValidator({
       severity: "error",
       in: ["src/**/*.ts"],
       pattern: "\\\\boldApi\\\\(",
+      replacement: "currentApi(",
+      fixSafety: "suggested",
       message: "oldApi is replaced; use currentApi.",
     }),
     noUnusedExports({
@@ -44,6 +46,14 @@ export default defineValidator({
       in: ["src/**/*.ts"],
       publicSurfaces: ["src/api/**"],
       message: "Exported symbol has no known project caller.",
+    }),
+    similarFunctionNames({
+      id: "similar-functions",
+      topics: ["dry"],
+      severity: "warning",
+      in: ["src/**/*.ts"],
+      requireSharedCallees: true,
+      message: "Similar function surfaces may duplicate behavior.",
     }),
   ],
 });`;
@@ -91,9 +101,11 @@ export default defineValidator({
 <CodeBlock title="validators/index.ts" language="ts" code={factoryExample} />
 <p>
   Curated factories are opt-in. <code>migrationReferences</code> links old API
-  usage to the baseline so existing matches can warn while new matches fail.
+  usage to the baseline so existing matches can warn while new matches fail, and
+  can emit structured replacement fixes when a replacement is configured.
   <code>noUnusedExports</code> uses graph callers and respects configured
-  entrypoints and public surfaces.
+  entrypoints and public surfaces. <code>similarFunctionNames</code> uses symbol
+  and callee facts to flag likely DRY overlaps inside a scope.
 </p>
 
 <h2>Fixtures</h2>

@@ -146,7 +146,7 @@ Only add validators for mechanically checkable rules. Do not change the CLI outp
 
 Distributed skills import the bundled CLI from `runtime/`. In the source checkout, the skill script and authoring barrel fall back to workspace packages when the ignored generated runtime is absent. Framework behavior belongs in the development packages and generated runtime bundle, not in repo-local validator files. The skill root `index.ts` is the stable local authoring barrel for validators.
 
-Curated validator factories are opt-in helpers exposed through the skill barrel. Import them explicitly in the local validators file; do not enable hidden default policies. Available helpers include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
+Curated validator factories are opt-in helpers exposed through the skill barrel. Import them explicitly in the local validators file; do not enable hidden default policies. Available helpers include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `similarFunctionNames`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
 
 ```ts
 import { fileNames, noImports } from "../index.ts";
@@ -203,6 +203,7 @@ bun run opencanon validate --project --profile
 bun run opencanon validate --check-fixtures --validator <id>
 bun run opencanon validate --check-fixtures
 bun run opencanon bundle inspect <bundle.ts|bundle.json>
+bun run opencanon bundle list
 bun run opencanon bundle plan <bundle.ts|bundle.json> --option key=value
 bun run opencanon bundle install <bundle.ts|bundle.json> --option key=value
 bun run opencanon bundle inspect https://example.com/opencanon.bundle.json --sha256 <hash>

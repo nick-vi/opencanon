@@ -1,0 +1,7 @@
+{
+  "name": "migration-control-before",
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  }
+}

@@ -18,7 +18,7 @@ export const migrationReferences = createValidatorFactory<MigrationReferencesOpt
           line: match.line,
           column: match.column,
           message: options.message,
-          fix: options.fix ?? manualFix("Use the replacement pattern documented by this migration rule."),
+          fix: options.fix ?? migrationFix(file.path, match.line, match.column, match.text, options),
           docs: options.docs,
         });
         finding.severity = ctx.baseline.isKnown(finding) ? (options.existingSeverity ?? "warning") : (options.newSeverity ?? options.severity);
@@ -27,3 +27,23 @@ export const migrationReferences = createValidatorFactory<MigrationReferencesOpt
     );
   },
 }));
+
+function migrationFix(file: string, line: number, column: number, text: string, options: MigrationReferencesOptions) {
+  if (!options.replacement) return manualFix("Use the replacement pattern documented by this migration rule.");
+  return {
+    safety: options.fixSafety ?? "suggested",
+    description: "Replace this migrated reference with the configured current pattern.",
+    edits: [
+      {
+        file,
+        range: {
+          startLine: line,
+          startColumn: column,
+          endLine: line,
+          endColumn: column + text.length,
+        },
+        replacement: options.replacement,
+      },
+    ],
+  };
+}

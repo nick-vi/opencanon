@@ -236,6 +236,16 @@ export function applyRefactorPlan(input: { rootDir: string; plan: RefactorPlan; 
   return { dryRun, appliedEdits, movedFiles, files: [...files].sort(), diagnostics };
 }
 
+export const fixes = {
+  renameSymbol,
+  moveFile,
+  moveDir,
+  updateImports,
+  renamePackage,
+  splitModule,
+  apply: applyRefactorPlan,
+} as const;
+
 function renameSymbolEdits(rootDir: string, file: string, from: string, to: string): TextEdit[] {
   const text = readProjectText(rootDir, file);
   if (text === null) return [];

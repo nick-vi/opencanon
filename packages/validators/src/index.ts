@@ -4,6 +4,7 @@ export {
   requiredFunctionParam,
   requireExportPattern,
   noUnusedExports,
+  similarFunctionNames,
   noNativeEnums,
   noHardcodedConfigValues,
   noSecretLikeLiterals,

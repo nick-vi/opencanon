@@ -124,16 +124,29 @@
   }
   pre {
     margin: 0;
-    padding: var(--space-4) 0;
+    --gutter-width: 3.25rem;
+    padding: var(--space-3) 0;
     border: 0;
     border-radius: 0;
     background: transparent;
     color: var(--c-code);
-    font-size: 0.86rem;
-    line-height: 1.58;
+    font-size: 0.78rem;
+    line-height: 1.5;
     overflow-x: auto;
+    position: relative;
+  }
+  pre::before {
+    background: var(--c-rule);
+    bottom: 0;
+    content: "";
+    left: var(--gutter-width);
+    position: absolute;
+    top: 0;
+    width: 1px;
+    z-index: 2;
   }
   code {
+    position: relative;
     display: block;
     min-width: max-content;
     padding: 0;
@@ -142,20 +155,24 @@
     line-height: inherit;
   }
   .line {
-    display: block;
-    min-height: 1.55em;
-    padding: 0 var(--space-4);
+    display: grid;
+    grid-template-columns: var(--gutter-width) max-content;
+    min-height: 1.5em;
+    position: relative;
+    z-index: 1;
   }
   .line:hover { background: var(--c-code-line); }
   .gutter {
-    display: inline-block;
-    width: 2.3rem;
-    margin-right: var(--space-4);
+    display: block;
+    padding: 0 0.65rem 0 var(--space-4);
     color: var(--c-code-gutter);
     text-align: right;
     user-select: none;
   }
-  .source { white-space: pre; }
+  .source {
+    padding-left: 0.75rem;
+    white-space: pre;
+  }
   .tok-comment { color: var(--c-code-comment); }
   .tok-string { color: var(--c-code-string); }
   .tok-keyword,
@@ -174,13 +191,18 @@
   @media (max-width: 640px) {
     .code-head { padding-left: var(--space-3); }
     pre {
-      font-size: 0.88rem;
-      line-height: 1.62;
+      --gutter-width: 2.75rem;
+      font-size: 0.74rem;
+      line-height: 1.48;
     }
-    .line { padding: 0 var(--space-3); }
+    .line {
+      min-height: 1.48em;
+    }
     .gutter {
-      width: 1.8rem;
-      margin-right: var(--space-3);
+      padding: 0 0.55rem 0 var(--space-3);
+    }
+    .source {
+      padding-left: 0.65rem;
     }
   }
 </style>

@@ -22,6 +22,7 @@ export {
   noNativeEnums,
   noSecretLikeLiterals,
   noUnusedExports,
+  similarFunctionNames,
   migrationReferences,
   repeatedLiterals,
   requireExportPattern,

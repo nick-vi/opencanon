@@ -25,7 +25,8 @@ opencanon daemon stop
 opencanon daemon check`;
   const diagnosticCommands = `opencanon doctor
 opencanon benchmark --sizes 1000,10000,50000`;
-  const bundleCommands = `opencanon bundle inspect ./opencanon.bundle.ts
+  const bundleCommands = `opencanon bundle list
+opencanon bundle inspect ./opencanon.bundle.ts
 opencanon bundle plan ./opencanon.bundle.ts --option sourceRoot=src
 opencanon bundle install ./opencanon.bundle.ts --option sourceRoot=src`;
   const updateCommands = `opencanon update check --manifest ./opencanon-runtime-manifest.json
@@ -80,8 +81,9 @@ opencanon db reset --confirm`;
 <h2>Bundles</h2>
 <CodeBlock title="bundle" language="shell" code={bundleCommands} />
 <p>
-  Bundles inspect, plan, and install docs, decisions, validators, impact
-  surfaces, external tool declarations, and owned files.
+  Bundles list local examples, inspect metadata, plan installs, and install docs,
+  decisions, validators, impact surfaces, external tool declarations, and owned
+  files.
 </p>
 
 <h2>Runtime Updates</h2>

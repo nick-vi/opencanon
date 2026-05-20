@@ -283,7 +283,7 @@ export {
 export type { FixApplicationResult, FixMode } from "./fixes.ts";
 export { applyFindingFixes, FixModeValue, isFixAllowed } from "./fixes.ts";
 export type { RefactorApplyResult, RefactorFileMove, RefactorPlan, RefactorPlanKind } from "./refactors.ts";
-export { applyRefactorPlan, moveDir, moveFile, renamePackage, renameSymbol, splitModule, updateImports } from "./refactors.ts";
+export { applyRefactorPlan, fixes, moveDir, moveFile, renamePackage, renameSymbol, splitModule, updateImports } from "./refactors.ts";
 export type {
   EnumMemberInfo,
   ExportInfo,

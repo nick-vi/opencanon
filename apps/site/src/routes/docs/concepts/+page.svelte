@@ -45,6 +45,14 @@
   <li><code>fix</code>: optional structured edits or an advisory command.</li>
 </ul>
 
+<h2>Fix Plans</h2>
+<p>
+  Fix and refactor helpers are plan-first. Validators can attach structured
+  edits, and the core <code>fixes</code> namespace can plan symbol renames, file
+  moves, import updates, package renames, and module splits before anything is
+  written.
+</p>
+
 <h2>Daemon</h2>
 <p>
   The daemon watches the repository, extracts facts, stores SQLite state, and

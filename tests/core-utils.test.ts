@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "vitest";
 import {
   applyRefactorPlan,
+  fixes,
   getGitFileDiff,
   getGitFileHistory,
   lazy,
@@ -81,6 +82,17 @@ test("refactor plans rename symbols and apply text edits", () => {
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
+});
+
+test("fixes namespace exposes plan-then-apply refactor APIs", () => {
+  const plan = fixes.renameSymbol({ rootDir: "/repo", from: "loadCompany", to: "getCompany", graphOnly: true });
+  assert.equal(plan.kind, "rename-symbol");
+  assert.equal(typeof fixes.moveFile, "function");
+  assert.equal(typeof fixes.moveDir, "function");
+  assert.equal(typeof fixes.updateImports, "function");
+  assert.equal(typeof fixes.renamePackage, "function");
+  assert.equal(typeof fixes.splitModule, "function");
+  assert.equal(typeof fixes.apply, "function");
 });
 
 test("refactor plans can use graph ranges for symbol rename", () => {

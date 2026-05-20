@@ -37,6 +37,7 @@ import {
   requiredFileSibling,
   requiredFunctionParam,
   restrictedSymbols,
+  similarFunctionNames,
 } from "@opencanon/validators";
 
 test("validator definitions reject unknown keys generically", () => {
@@ -554,6 +555,84 @@ test("migrationReferences downgrades baseline-known matches", async () => {
     });
     const next = await validator.validate({ ctx: knownCtx, runtime: createRuntime(createPaths(rootDir), []) });
     assert.deepEqual(next.map((finding) => finding.severity), ["warning", "error"]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("migrationReferences can emit structured replacement fixes", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-migration-fix-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/old.ts"), "oldApi();\n");
+    const validator = resolveValidators(
+      migrationReferences({
+        id: "old-api-migration",
+        topics: ["migration"],
+        severity: "error",
+        in: ["src/**/*.ts"],
+        pattern: "\\boldApi",
+        replacement: "currentApi",
+        fixSafety: "safe",
+        message: "oldApi is replaced; use currentApi.",
+      }),
+    ).validators[0];
+    const ctx = createValidationContext({
+      rootDir,
+      paths: createPaths(rootDir),
+      files: ["src/old.ts"],
+      targetFiles: ["src/old.ts"],
+      validator,
+    });
+    const findings = await validator.validate({ ctx, runtime: createRuntime(createPaths(rootDir), []) });
+    const fix = applyFindingFixes({ rootDir, findings, mode: FixModeValue.Safe, dryRun: false });
+
+    assert.equal(fix.appliedEdits, 1);
+    assert.equal(readFileSync(path.join(rootDir, "src/old.ts"), "utf8"), "currentApi();\n");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("similarFunctionNames reports graph-backed likely DRY overlaps", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-similar-functions-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(rootDir, "src/company.ts"),
+      [
+        "function normalizeCompany() { return true; }",
+        "export function loadCompany() {",
+        "  return normalizeCompany();",
+        "}",
+        "export function fetchCompany() {",
+        "  return normalizeCompany();",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const validator = resolveValidators(
+      similarFunctionNames({
+        id: "similar-functions",
+        topics: ["dry"],
+        severity: "warning",
+        in: ["src/**/*.ts"],
+        requireSharedCallees: true,
+        message: "Similar function surfaces may duplicate behavior.",
+      }),
+    ).validators[0];
+    const ctx = createValidationContext({
+      rootDir,
+      files: ["src/company.ts"],
+      targetFiles: ["src/company.ts"],
+      validator,
+    });
+    const findings = await validator.validate({ ctx, runtime: createRuntime(createPaths(rootDir), []) });
+
+    assert.deepEqual(
+      findings.map((finding) => `${finding.file}:${finding.line}:${finding.message}`),
+      ["src/company.ts:2:Similar function surfaces may duplicate behavior. Similar functions: loadCompany and fetchCompany share callees normalizeCompany."],
+    );
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

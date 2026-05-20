@@ -12,7 +12,6 @@
 
   function parseTree(value) {
     const rawLines = value.replace(/^\n/, '').replace(/\n$/, '').split('\n');
-    const indentUnit = resolveIndentUnit(rawLines);
     const parsed = [];
 
     for (const [index, raw] of rawLines.entries()) {
@@ -21,8 +20,7 @@
         continue;
       }
 
-      const indent = raw.match(/^\s*/)?.[0].length ?? 0;
-      const body = raw.slice(indent).trimEnd();
+      const body = raw.trimEnd();
       const commentOnly = body.match(/^#\s?(.*)$/);
       if (commentOnly && parsed.length > 0) {
         const previous = parsed[parsed.length - 1];
@@ -30,15 +28,16 @@
         continue;
       }
 
-      const parts = body.match(/^(.*?)(?:\s+#\s?(.*))?$/);
-      const name = (parts?.[1] ?? body).trimEnd();
+      const parsedLine = parseTreeLine(body);
+      const parts = parsedLine.name.match(/^(.*?)(?:\s+#\s?(.*))?$/);
+      const name = (parts?.[1] ?? parsedLine.name).trimEnd();
       const note = parts?.[2] ?? '';
-      const depth = Math.max(0, Math.floor(indent / indentUnit));
 
       parsed.push({
         id: `tree-${index}`,
         blank: false,
-        depth,
+        prefixCells: prefixCells(parsedLine.prefix),
+        depth: prefixCells(parsedLine.prefix).length,
         kind: entryKind(name),
         name,
         note
@@ -48,11 +47,23 @@
     return parsed;
   }
 
-  function resolveIndentUnit(lines) {
-    const widths = lines
-      .map((line) => line.match(/^\s*/)?.[0].length ?? 0)
-      .filter((width) => width > 0);
-    return Math.max(1, Math.min(...widths, 4));
+  function parseTreeLine(line) {
+    const match = line.match(/^((?:(?:│  |   ))*(?:├─ |└─ ))(.+)$/);
+    if (!match) return { prefix: '', name: line };
+    return { prefix: match[1], name: match[2] };
+  }
+
+  function prefixCells(prefix) {
+    if (!prefix) return [];
+    const cells = [];
+    for (let offset = 0; offset < prefix.length; offset += 3) {
+      const chunk = prefix.slice(offset, offset + 3);
+      if (chunk === '│  ') cells.push('pipe');
+      else if (chunk === '├─ ') cells.push('tee');
+      else if (chunk === '└─ ') cells.push('elbow');
+      else cells.push('empty');
+    }
+    return cells;
   }
 
   function entryKind(name) {
@@ -68,9 +79,13 @@
       <div
         class={`tree-row tree-${row.kind}`}
         role="listitem"
-        style={`padding-left: ${14 + row.depth * 22}px`}
+        style={`--tree-depth: ${row.depth}`}
       >
-        <span class="tree-guide" class:root={row.depth === 0} aria-hidden="true"></span>
+        <span class="tree-prefix" aria-hidden="true">
+          {#each row.prefixCells as cell}
+            <span class={`tree-cell tree-cell-${cell}`}></span>
+          {/each}
+        </span>
         <span class="tree-node" aria-hidden="true">
           {#if row.kind === TreeEntryKind.Directory}
             <Folder size={14} strokeWidth={1.8} />
@@ -90,53 +105,80 @@
     padding: var(--space-4) 0;
     color: var(--c-code);
     font-family: var(--font-mono);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     overflow-x: auto;
   }
   .tree-row {
+    --tree-cell: 1.55rem;
+    --tree-icon: 1.25rem;
     align-items: center;
-    column-gap: 0.55rem;
     display: grid;
-    grid-template-columns: 1rem 1rem max-content minmax(12rem, 1fr);
-    min-height: 1.7rem;
+    grid-template-columns:
+      calc(var(--tree-depth) * var(--tree-cell))
+      var(--tree-icon)
+      max-content
+      minmax(0, 1fr);
+    line-height: 1.6;
+    min-height: 1.6rem;
     min-width: max-content;
+    padding-left: var(--space-4);
     padding-right: var(--space-4);
   }
   .tree-row:hover {
     background: var(--c-code-line);
   }
-  .tree-guide {
+  .tree-prefix {
+    color: var(--c-code-gutter);
+    display: inline-flex;
+    align-self: stretch;
     height: 100%;
-    opacity: 0.7;
+    width: calc(var(--tree-depth) * var(--tree-cell));
+  }
+  .tree-cell {
+    flex: 0 0 var(--tree-cell);
     position: relative;
-    width: 1rem;
   }
-  .tree-guide::before,
-  .tree-guide::after {
-    background: color-mix(in oklch, var(--c-code-gutter), transparent 35%);
+  .tree-cell-pipe::before,
+  .tree-cell-tee::before,
+  .tree-cell-elbow::before {
+    background: var(--c-code-gutter);
     content: "";
+    left: calc(var(--tree-cell) / 2);
+    opacity: 0.72;
     position: absolute;
-  }
-  .tree-guide::before {
-    height: 1px;
-    left: 0.3rem;
-    top: 50%;
-    width: 0.55rem;
-  }
-  .tree-guide::after {
-    bottom: 0;
-    left: 0.3rem;
-    top: 0;
     width: 1px;
   }
-  .tree-guide.root::before,
-  .tree-guide.root::after {
-    display: none;
+  .tree-cell-pipe::before,
+  .tree-cell-tee::before {
+    bottom: 0;
+    top: 0;
+  }
+  .tree-cell-elbow::before {
+    top: 0;
+    height: 50%;
+  }
+  .tree-cell-tee::after,
+  .tree-cell-elbow::after {
+    background: var(--c-code-gutter);
+    content: "";
+    height: 1px;
+    left: calc(var(--tree-cell) / 2);
+    opacity: 0.72;
+    position: absolute;
+    top: 50%;
+    width: calc(var(--tree-cell) / 2);
   }
   .tree-node {
+    align-items: center;
     color: var(--c-code-gutter);
-    display: inline-grid;
-    place-items: center;
+    display: inline-flex;
+    justify-content: center;
+    width: var(--tree-icon);
+  }
+  .tree-node :global(svg) {
+    display: block;
+    height: 0.9rem;
+    width: 0.9rem;
   }
   .tree-directory .tree-node,
   .tree-directory .tree-name {
@@ -144,13 +186,14 @@
   }
   .tree-name {
     color: var(--c-code);
+    padding-left: 0.45rem;
     white-space: pre;
   }
   .tree-note {
     color: var(--c-code-comment);
     font-family: var(--font-sans);
     font-size: 0.78rem;
-    line-height: 1.45;
+    margin-left: 0.6rem;
     max-width: 52ch;
     white-space: normal;
   }
@@ -158,9 +201,9 @@
     height: var(--space-3);
   }
   @media (max-width: 640px) {
-    .tree-render { font-size: 0.78rem; }
+    .tree-render { font-size: 0.74rem; }
     .tree-row {
-      grid-template-columns: 0.8rem 1rem max-content minmax(10rem, 1fr);
+      padding-left: var(--space-3);
       padding-right: var(--space-3);
     }
   }

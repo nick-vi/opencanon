@@ -5,6 +5,7 @@
     Boxes,
     Cpu,
     Download,
+    FileCode,
     GitBranch,
     Layers,
     Network,
@@ -23,6 +24,7 @@
     boxes: Boxes,
     cpu: Cpu,
     download: Download,
+    fileCode: FileCode,
     gitBranch: GitBranch,
     layers: Layers,
     network: Network,
@@ -69,75 +71,99 @@
 
 <style>
   .docs-shell {
-    max-width: 78rem;
+    max-width: 76rem;
     margin: 0 auto;
-    padding: var(--space-6) var(--space-6) var(--space-7);
+    padding: var(--space-5) var(--space-6) var(--space-7);
     display: grid;
-    grid-template-columns: 16rem minmax(0, 1fr);
-    gap: var(--space-7);
+    grid-template-columns: 14.5rem minmax(0, 1fr);
+    gap: var(--space-6);
   }
   .docs-nav {
     position: sticky;
-    top: var(--space-5);
+    top: var(--space-4);
     align-self: start;
     min-width: 0;
   }
-  .group + .group { margin-top: var(--space-5); }
+  .docs-nav nav {
+    padding: 0;
+  }
+  .group {
+    padding: 0.35rem 0;
+  }
+  .group + .group {
+    border-top: 1px solid var(--c-rule);
+  }
   .group-title {
-    margin: 0 0 var(--space-2) 0;
+    margin: 0 0 0.22rem 0;
+    padding: 0.18rem 0.45rem;
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: 0.4rem;
+    color: var(--c-ink-mute);
   }
   .docs-nav ul { list-style: none; padding: 0; margin: 0; }
-  .docs-nav li { padding: 0.18rem 0; }
+  .docs-nav li { padding: 0.05rem 0; }
   .docs-nav a {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: 0.45rem;
     text-decoration: none;
     color: var(--c-ink-soft);
-    font-size: 0.92rem;
-    padding: 0.34rem 0.5rem;
+    font-size: 0.84rem;
+    line-height: 1.25;
+    padding: 0.42rem 0.5rem;
     border: 1px solid transparent;
     border-radius: var(--radius-1);
+    transition:
+      background var(--motion-fast) var(--motion-ease),
+      border-color var(--motion-fast) var(--motion-ease),
+      color var(--motion-fast) var(--motion-ease);
   }
   .docs-nav a:hover {
     color: var(--c-ink);
-    background: var(--c-surface);
+    background: var(--c-paper);
   }
   .docs-nav a.current {
     color: var(--c-mark);
-    border-color: var(--c-rule);
-    background: var(--c-surface);
+    border-color: color-mix(in oklch, var(--c-mark), var(--c-rule) 70%);
+    background: var(--c-paper);
   }
   .docs-body {
-    max-width: var(--measure-wide);
+    max-width: 72ch;
     min-width: 0;
+    font-size: 0.94rem;
+    line-height: 1.52;
   }
   .docs-body :global(h1) {
-    font-size: var(--step-4);
-    margin-bottom: var(--space-3);
+    font-size: 1.72rem;
+    margin: 0 0 var(--space-2);
     line-height: 1.1;
     letter-spacing: 0;
   }
   .docs-body :global(h2) {
-    font-size: var(--step-3);
-    margin: var(--space-7) 0 var(--space-3);
-    padding-top: var(--space-4);
+    font-size: 1.2rem;
+    margin: var(--space-6) 0 var(--space-2);
+    padding-top: var(--space-3);
     border-top: 1px solid var(--c-rule);
   }
   .docs-body :global(h3) {
-    font-size: var(--step-2);
-    margin: var(--space-5) 0 var(--space-2);
+    font-size: 1rem;
+    margin: var(--space-4) 0 var(--space-2);
   }
-  .docs-body :global(p) { max-width: var(--measure); }
+  .docs-body :global(p),
+  .docs-body :global(li) {
+    line-height: 1.52;
+  }
+  .docs-body :global(p) {
+    margin: 0 0 var(--space-3);
+    max-width: var(--measure);
+  }
   .docs-body :global(ul), .docs-body :global(ol) { max-width: var(--measure); }
   .docs-body :global(.lead) {
-    font-size: var(--step-2);
+    font-size: 1rem;
     color: var(--c-ink-soft);
-    max-width: 50ch;
-    margin-bottom: var(--space-5);
+    max-width: 54ch;
+    margin-bottom: var(--space-4);
   }
 
   @media (max-width: 820px) {
@@ -148,13 +174,13 @@
     .docs-nav {
       position: static;
       width: 100%;
-      margin-bottom: var(--space-5);
+      margin-bottom: var(--space-4);
     }
     .docs-nav nav {
       display: flex;
       gap: var(--space-2);
       overflow-x: auto;
-      padding-bottom: var(--space-2);
+      padding: 0 0 var(--space-2);
       scrollbar-width: thin;
       -webkit-overflow-scrolling: touch;
     }
@@ -174,7 +200,7 @@
     }
     .docs-nav ul {
       display: flex;
-      gap: var(--space-2);
+      gap: 0.35rem;
       flex: 0 0 auto;
     }
     .docs-nav li {
@@ -183,7 +209,7 @@
     }
     .docs-nav a {
       white-space: nowrap;
-      min-height: 2.25rem;
+      min-height: 2rem;
     }
   }
 </style>

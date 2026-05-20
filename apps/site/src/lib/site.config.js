@@ -30,7 +30,8 @@ export const SITE = {
       icon: 'layers',
       items: [
         { href: '/docs/concepts', label: 'Concepts', icon: 'boxes' },
-        { href: '/docs/validators', label: 'Validators', icon: 'shield' }
+        { href: '/docs/validators', label: 'Validators', icon: 'shield' },
+        { href: '/docs/examples', label: 'Examples', icon: 'fileCode' }
       ]
     },
     {

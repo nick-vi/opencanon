@@ -218,6 +218,16 @@ test("bundle install rejects unsafe bundle-owned file targets", () => {
 });
 
 test("security hardcoding example bundle is inspectable", () => {
+  const list = spawnSync("bun", [cli, "bundle", "list", "--format", "json"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  assert.equal(list.status, 0, list.stderr || list.stdout);
+  const listed = JSON.parse(list.stdout) as { bundles: Array<{ id: string; ref: string }> };
+  assert(listed.bundles.some((bundle) => bundle.id === "dry-graph" && bundle.ref === "examples/bundles/dry-graph.bundle.ts"));
+  assert(listed.bundles.some((bundle) => bundle.id === "migration-control" && bundle.ref === "examples/bundles/migration-control.bundle.ts"));
+  assert(listed.bundles.some((bundle) => bundle.id === "security-hardcoding" && bundle.ref === "examples/bundles/security-hardcoding.bundle.ts"));
+
   const inspect = spawnSync("bun", [cli, "bundle", "inspect", "examples/bundles/security-hardcoding.bundle.ts", "--format", "json"], {
     cwd: process.cwd(),
     encoding: "utf8",
@@ -227,4 +237,21 @@ test("security hardcoding example bundle is inspectable", () => {
   assert.equal(inspected.id, "security-hardcoding");
   assert.deepEqual(inspected.validators, ["no-secret-like-literals", "no-hardcoded-config-values"]);
   assert.deepEqual(inspected.installables.docs, ["docs/opencanon/canon/security.md#hardcoded-secrets-and-config"]);
+});
+
+test("migration and dry example bundles are inspectable", () => {
+  for (const [bundleRef, expectedId] of [
+    ["examples/bundles/migration-control.bundle.ts", "migration-control"],
+    ["examples/bundles/dry-graph.bundle.ts", "dry-graph"],
+  ] as const) {
+    const inspect = spawnSync("bun", [cli, "bundle", "inspect", bundleRef, "--format", "json"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+    assert.equal(inspect.status, 0, inspect.stderr || inspect.stdout);
+    const inspected = JSON.parse(inspect.stdout) as { id: string; installables: { docs: string[]; files: string[] } };
+    assert.equal(inspected.id, expectedId);
+    assert(inspected.installables.docs.length > 0);
+    assert(inspected.installables.files.some((file) => file.includes(".agents/skills/opencanon/validators/")));
+  }
 });

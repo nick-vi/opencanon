@@ -1,7 +1,7 @@
 import { createValidatorFactory } from "@opencanon/core";
 import type { Finding, LiteralContext } from "@opencanon/core";
 import { edgeMatches, importedSymbolName, list, literalIgnored, manualFix, optionSummary, regexMatches, escapeRegex, firstCodeLineNumber, joinPatterns, matchesAny, paramsContain, safeEnumReplacement, valueMatches, interpolateSibling } from "../shared.ts";
-import type { FileNameOptions, NoImportsOptions, NoForbiddenImportsOptions, NoDeepRelativeImportsOptions, RequiredFunctionParamOptions, RequiredFileSiblingOptions, NoBarrelCrossBoundaryOptions, NoLayerCallOptions, RequireExportPatternOptions, NoUnusedExportsOptions, NoNativeEnumsOptions, RepeatedLiteralsOptions, RestrictedSymbolsOptions, NoSecretLikeLiteralsOptions, NoHardcodedConfigValuesOptions } from "../shared.ts";
+import type { FileNameOptions, NoImportsOptions, NoForbiddenImportsOptions, NoDeepRelativeImportsOptions, RequiredFunctionParamOptions, RequiredFileSiblingOptions, NoBarrelCrossBoundaryOptions, NoLayerCallOptions, RequireExportPatternOptions, NoUnusedExportsOptions, SimilarFunctionNamesOptions, NoNativeEnumsOptions, RepeatedLiteralsOptions, RestrictedSymbolsOptions, NoSecretLikeLiteralsOptions, NoHardcodedConfigValuesOptions } from "../shared.ts";
 import path from "node:path";
 
 export const fileNames = createValidatorFactory<FileNameOptions>((options) => ({
@@ -155,6 +155,54 @@ export const noUnusedExports = createValidatorFactory<NoUnusedExportsOptions>((o
   },
 }));
 
+export const similarFunctionNames = createValidatorFactory<SimilarFunctionNamesOptions>((options) => ({
+  id: options.id,
+  topics: options.topics,
+  applies: options.in,
+  severity: options.severity,
+  scope: "project",
+  facts: ["symbols", "calls"],
+  decisionIds: options.decisionIds,
+  summary: optionSummary(options, `Function names in ${joinPatterns(options.in)} should not describe duplicate or near-duplicate behavior.`),
+  validate({ ctx }) {
+    const minSimilarity = options.minSimilarity ?? 0.82;
+    const targetPaths = new Set(ctx.targetFiles.map((file) => file.path));
+    const allow = options.allow ?? [];
+    const functions = ctx.graph
+      .symbols()
+      .filter((symbol) => symbol.kind === "function" || symbol.kind === "method")
+      .filter((symbol) => targetPaths.has(symbol.file.path))
+      .filter((symbol) => !allow.some((pattern) => valueMatches(symbol.name, pattern)));
+    const findings: Finding[] = [];
+    const reported = new Set<string>();
+
+    for (let leftIndex = 0; leftIndex < functions.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < functions.length; rightIndex += 1) {
+        const left = functions[leftIndex];
+        const right = functions[rightIndex];
+        const similarity = nameSimilarity(left.name, right.name);
+        if (similarity < minSimilarity) continue;
+        const sharedCallees = sharedCalleeNames(ctx.graph.callees(left), ctx.graph.callees(right));
+        if (options.requireSharedCallees && sharedCallees.length === 0) continue;
+        const key = [left.file.path, left.name, right.file.path, right.name].sort().join("\0");
+        if (reported.has(key)) continue;
+        reported.add(key);
+        findings.push(
+          left.file.report({
+            line: left.line,
+            column: left.column,
+            message: `${options.message} Similar functions: ${left.name} and ${right.name}${sharedCallees.length > 0 ? ` share callees ${sharedCallees.join(", ")}` : ""}.`,
+            fix: options.fix ?? manualFix("Compare these functions and merge, rename, or extract the shared behavior if they are duplicates."),
+            docs: options.docs,
+          }),
+        );
+      }
+    }
+
+    return findings;
+  },
+}));
+
 export const noNativeEnums = createValidatorFactory<NoNativeEnumsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
@@ -202,6 +250,42 @@ export const noNativeEnums = createValidatorFactory<NoNativeEnumsOptions>((optio
     return findings;
   },
 }));
+
+function nameSimilarity(left: string, right: string): number {
+  const leftName = normalizeIdentifier(left);
+  const rightName = normalizeIdentifier(right);
+  if (!leftName || !rightName) return 0;
+  if (leftName === rightName) return 1;
+  const distance = levenshteinDistance(leftName, rightName);
+  return 1 - distance / Math.max(leftName.length, rightName.length);
+}
+
+function normalizeIdentifier(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/\b(?:get|set|load|fetch|read|write|create|update|delete|remove|handle|process|do)\b/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function levenshteinDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: right.length + 1 }, () => 0);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(current[rightIndex - 1] + 1, previous[rightIndex] + 1, previous[rightIndex - 1] + cost);
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
+}
+
+function sharedCalleeNames(left: Array<{ target: { name: string } }>, right: Array<{ target: { name: string } }>): string[] {
+  const rightNames = new Set(right.map((edge) => edge.target.name));
+  return [...new Set(left.map((edge) => edge.target.name).filter((name) => rightNames.has(name)))].sort();
+}
 
 export const repeatedLiterals = createValidatorFactory<RepeatedLiteralsOptions>((options) => ({
   id: options.id,

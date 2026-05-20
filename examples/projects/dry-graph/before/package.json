@@ -1,0 +1,7 @@
+{
+  "name": "dry-graph-before",
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  }
+}

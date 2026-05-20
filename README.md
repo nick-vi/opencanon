@@ -46,12 +46,15 @@ Bundles install or enrich docs, decisions, validators, impact surfaces, external
 
 ```bash
 bun run opencanon bundle inspect ./opencanon.bundle.ts
+bun run opencanon bundle list
 bun run opencanon bundle plan ./opencanon.bundle.ts --option sourceRoot=src
 bun run opencanon bundle install ./opencanon.bundle.ts --option sourceRoot=src
 bun run opencanon bundle inspect https://example.com/opencanon.bundle.json --sha256 <hash>
 ```
 
 Bundles may declare typed `options`; pass values with repeated `--option key=value`. Local bundles may be TypeScript modules or JSON data files. Remote bundles must be JSON data files, must use HTTPS, and must be pinned with `--sha256 <hash>`; OpenCanon does not execute remote TypeScript.
+
+Project-level before/after examples live under `examples/projects/`. They show the expected repository shape after an agent applies a bundle or convention: source edits, docs, decisions, validators, and fixtures.
 
 ## Runtime
 
@@ -208,15 +211,17 @@ Validator results can be synchronous or asynchronous. The CLI awaits all validat
 
 Finding resolution policy: any validation finding must be addressed before an agent completes the task. Agents fix code to match current decisions, fix bugged validators with fixtures when the validator is wrong, or ask the user before changing a decision. `error` findings are blocking and make the CLI exit nonzero. `warning` findings are non-blocking by default; the CLI exits zero unless `--strict-warnings` is used. Markdown validation output includes a decision-update request template and points to `context --list-exceptions` for auditing documented exceptions.
 
-Curated factories are optional imports from the skill barrel. They are never auto-enabled; the local validator file remains the source of truth. Available factories include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
+Curated factories are optional imports from the skill barrel. They are never auto-enabled; the local validator file remains the source of truth. Available factories include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `similarFunctionNames`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
 
 `noUnusedExports` uses `ctx.graph.callers()` and respects configured `entrypoints` and `publicSurfaces` so exported API files are not treated as dead code. A validator can add per-rule `entrypoints` or `publicSurfaces` when the project has additional public modules.
 
-`migrationReferences` supports migration linkage: configure the old symbol or pattern, keep known matches in the baseline as warnings, and fail new matches as errors. This lets a repository deny new usage of an old API without requiring a single cleanup commit.
+`migrationReferences` supports migration linkage: configure the old symbol or pattern, keep known matches in the baseline as warnings, fail new matches as errors, and optionally provide a structured replacement fix. This lets a repository deny new usage of an old API without requiring a single cleanup commit.
 
-For DRY and boundary reviews, combine graph/search commands with validators. `opencanon search <name> --kind symbol --symbol-kind function --scope "src/domain/**"` finds similar functions in a boundary, while `opencanon graph callers <symbol>` and `opencanon graph callees <symbol>` show existing call flow before changing or extracting code.
+For DRY and boundary reviews, combine graph/search commands with validators. `opencanon search <name> --kind symbol --symbol-kind function --scope "src/domain/**"` finds similar functions in a boundary, while `opencanon graph callers <symbol>` and `opencanon graph callees <symbol>` show existing call flow before changing or extracting code. `similarFunctionNames` can turn those graph signals into a reusable validator for likely duplicate function surfaces.
 
 Fixes can include structured edits or an advisory command. `--fix` applies only structured edits; command fixes are printed for the agent and are never executed by OpenCanon.
+
+Refactor helpers are plan-first. The core API exports both individual helpers and `fixes.renameSymbol()`, `fixes.moveFile()`, `fixes.moveDir()`, `fixes.updateImports()`, `fixes.renamePackage()`, and `fixes.splitModule()`. Each returns a plan with diagnostics, edits, and file moves; writing happens only through explicit apply.
 
 `externalCommand` and `externalDiagnostics` resolve `externalTools` aliases before spawning. Their `args` and `cwd` support `{root}`, `{config}`, `{cache}`, `{files}`, `{targetFiles}`, `{changed}`, `{analysisFiles}`, and `{projectFiles}`. Exact file-list tokens expand to multiple command arguments, and configured working directories must resolve inside the project root.
 

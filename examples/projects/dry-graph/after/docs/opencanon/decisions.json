@@ -1,0 +1,18 @@
+[
+  {
+    "id": "graph-backed-dry-current",
+    "date": "2026-05-20",
+    "status": "current",
+    "title": "DRY validators use graph and literal facts",
+    "topics": ["dry", "code-quality"],
+    "applies": ["src/**/*.ts"],
+    "summary": "Repeated literals and likely duplicate function surfaces are checked from structured facts.",
+    "rationale": ["Agents need precise DRY signals that are scoped to code boundaries and call flow."],
+    "required": ["Review repeated domain literals and similar function surfaces before adding new copies."],
+    "replaced": [],
+    "agentPolicy": ["Prefer extracting shared behavior or naming constants when graph-backed DRY validators report findings."],
+    "exceptions": [],
+    "docs": ["docs/opencanon/canon/dry.md#graph-backed-dry"],
+    "validatorIds": ["repeated-domain-literals", "similar-functions"]
+  }
+]

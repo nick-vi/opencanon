@@ -9,6 +9,7 @@ import {
   createPaths,
   fail,
   loadConfig,
+  listFiles,
   normalizeMarkdownHeading,
   relative,
   resolveInsideRoot,
@@ -59,6 +60,10 @@ type BundlePlanResult = BundleInspectResult & {
   remote: boolean;
 };
 
+type BundleListResult = {
+  bundles: Array<BundleInspectResult & { ref: string }>;
+};
+
 const BundleWriteAction = {
   Create: "create",
   Update: "update",
@@ -96,6 +101,10 @@ export async function runBundleCommand(args = Bun.argv.slice(2), cwd = process.c
     await runBundleInspectCommand(rest, cwd);
     return;
   }
+  if (command === "list") {
+    await runBundleListCommand(rest, cwd);
+    return;
+  }
   if (command === "plan") {
     await runBundlePlanCommand(rest, cwd);
     return;
@@ -109,6 +118,26 @@ export async function runBundleCommand(args = Bun.argv.slice(2), cwd = process.c
     return;
   }
   fail(`Unknown bundle command: ${command}`);
+}
+
+async function runBundleListCommand(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon bundle list");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--format <format>", "Output format.");
+
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, [BundleCliOption.Help, BundleCliOption.H, BundleCliOption.Format]);
+  if (booleanOption(options.help) || booleanOption(options.h)) {
+    printBundleHelp();
+    return;
+  }
+  if (parsed.args.length > 0) fail(`Unexpected bundle list arguments: ${parsed.args.join(", ")}`);
+
+  const rootDir = resolveRootDir(cwd);
+  const result = await listLocalBundles(rootDir);
+  if (formatOption(options.format) === "json") console.log(JSON.stringify(result, null, 2));
+  else console.log(renderBundleListResult(result));
 }
 
 async function runBundleInspectCommand(args: string[], cwd: string): Promise<void> {
@@ -267,6 +296,18 @@ async function loadBundle(rootDir: string, bundlePath: string, options: { sha256
   if (path.extname(absolute) === ".json") return loadLocalJsonBundle(absolute);
   const module = await import(`${pathToFileURL(absolute).href}?mtime=${Date.now()}`);
   return CanonBundleSchema.parse(module.default ?? module.bundle ?? module);
+}
+
+async function listLocalBundles(rootDir: string): Promise<BundleListResult> {
+  const bundleFiles = listFiles(path.join(rootDir, "examples/bundles"), (file) => /\.bundle\.(?:json|ts)$/i.test(file));
+  const bundles = [];
+  for (const file of bundleFiles) {
+    const ref = relative(rootDir, file);
+    const bundle = await loadBundle(rootDir, ref);
+    bundles.push({ ref, ...inspectBundle(bundle) });
+  }
+  bundles.sort((left, right) => left.id.localeCompare(right.id));
+  return { bundles };
 }
 
 function loadLocalJsonBundle(bundlePath: string): CanonBundle {
@@ -479,6 +520,20 @@ function renderPlanResult(result: BundlePlanResult): string {
   ].join("\n");
 }
 
+function renderBundleListResult(result: BundleListResult): string {
+  if (result.bundles.length === 0) return "# OpenCanon Bundles\n\nNo local example bundles found.";
+  return [
+    "# OpenCanon Bundles",
+    "",
+    ...result.bundles.flatMap((bundle) => [
+      `- ${bundle.id} (${bundle.ref})`,
+      `  - topics: ${bundle.topics.length > 0 ? bundle.topics.join(", ") : EmptyValue}`,
+      `  - validators: ${bundle.validators.length > 0 ? bundle.validators.join(", ") : EmptyValue}`,
+      ...(bundle.description ? [`  - ${bundle.description}`] : []),
+    ]),
+  ].join("\n");
+}
+
 function renderOptionDefinitions(options: Record<string, CanonBundleOption>): string[] {
   const entries = Object.entries(options);
   if (entries.length === 0) return [`- ${EmptyValue}`];
@@ -608,11 +663,13 @@ function formatBundleOptionValue(value: CanonBundleOptionValue): string {
 function printBundleHelp(): void {
   console.log(`Usage:
   bun run opencanon bundle inspect <bundle.ts|bundle.json>
+  bun run opencanon bundle list
   bun run opencanon bundle plan <bundle.ts|bundle.json> [--option key=value]
   bun run opencanon bundle install <bundle.ts|bundle.json> [--option key=value]
   bun run opencanon bundle install https://example.com/bundle.json --sha256 <hash>
 
 Commands:
+  list     Show local example bundles available from this checkout.
   inspect  Show bundle metadata, options, and installable assets.
   plan     Render a deterministic install plan.
   install  Install or update docs, decisions, impact surfaces, config, and files from a canon bundle.

@@ -91,9 +91,18 @@ export type NoUnusedExportsOptions = FindingOptions & {
   ignoreConfiguredPublicSurfaces?: boolean;
 };
 
+export type SimilarFunctionNamesOptions = FindingOptions & {
+  in: string[];
+  minSimilarity?: number;
+  requireSharedCallees?: boolean;
+  allow?: Array<string | RegExp>;
+};
+
 export type MigrationReferencesOptions = FindingOptions & {
   in: string[];
   pattern: string | RegExp;
+  replacement?: string;
+  fixSafety?: FixSafety;
   existingSeverity?: "warning" | "error";
   newSeverity?: "warning" | "error";
 };
