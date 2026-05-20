@@ -30,12 +30,12 @@ export default defineValidator({
   id: "project-validators",
   validators: [
     migrationReferences({
-      id: "legacy-api-migration",
+      id: "old-api-migration",
       topics: ["migration"],
       severity: "error",
       in: ["src/**/*.ts"],
-      pattern: "\\\\blegacyApi\\\\(",
-      message: "legacyApi is migrated; use currentApi.",
+      pattern: "\\\\boldApi\\\\(",
+      message: "oldApi is replaced; use currentApi.",
     }),
     noUnusedExports({
       id: "no-unused-exports",
