@@ -10,8 +10,6 @@ export const SITE = {
   repo,
   repoSlug: `${repo.owner}/${repo.name}`,
   repoUrl: `https://github.com/${repo.owner}/${repo.name}`,
-  cloneUrl: `https://github.com/${repo.owner}/${repo.name}`,
-  skillPath: '~/.agents/skills/opencanon',
   bunVersion: '1.3.13',
   nav: [
     { href: '/docs/install', label: 'Docs', icon: 'book' },
@@ -51,9 +49,6 @@ export const SITE = {
     }
   ]
 };
-
-export const INSTALL_COMMAND = `git clone ${SITE.cloneUrl} \\
-  ${SITE.skillPath}`;
 
 export const SKILLS_INSTALL_COMMAND = `npx skills add ${SITE.repoSlug} --skill opencanon -a codex -y`;
 

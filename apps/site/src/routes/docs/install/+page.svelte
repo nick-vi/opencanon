@@ -3,7 +3,6 @@
   import {
     DAEMON_COMMAND,
     INIT_COMMAND,
-    INSTALL_COMMAND,
     RELEASE_MANIFEST_URL,
     SKILL_COMMAND,
     SITE,
@@ -34,18 +33,14 @@
 
 <h2>Add the skill</h2>
 <p>
-  Use the skills.sh CLI when installing from the public skill directory.
+  Use the skills.sh CLI to install the OpenCanon skill into the current
+  repository.
 </p>
 <CodeBlock title="skills.sh" language="shell" code={SKILLS_INSTALL_COMMAND} />
 <p>
-  You can also clone the repo into your agent host's skills directory. The
-  skill includes the CLI, validators, daemon, UI assets, and engine runtime.
-  Bun is the runtime, not a package installation step.
-</p>
-<CodeBlock title={SITE.repoSlug} language="shell" code={INSTALL_COMMAND} />
-<p>
-  For non-default agent hosts, point the clone at the directory the host scans
-  for skills.
+  The installed skill bootstraps the CLI, validators, daemon, UI assets, and
+  engine runtime from the signed release assets during setup. Bun is the
+  runtime, not a package installation step.
 </p>
 
 <h2>Install engine runtime</h2>

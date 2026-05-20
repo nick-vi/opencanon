@@ -148,14 +148,42 @@
     .docs-nav {
       position: static;
       width: 100%;
-      margin-bottom: var(--space-6);
+      margin-bottom: var(--space-5);
     }
-    .docs-nav nav,
-    .group,
-    .docs-nav ul,
+    .docs-nav nav {
+      display: flex;
+      gap: var(--space-2);
+      overflow-x: auto;
+      padding-bottom: var(--space-2);
+      scrollbar-width: thin;
+      -webkit-overflow-scrolling: touch;
+    }
+    .group {
+      display: contents;
+    }
+    .group-title {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .docs-nav ul {
+      display: flex;
+      gap: var(--space-2);
+      flex: 0 0 auto;
+    }
     .docs-nav li {
-      width: 100%;
-      min-width: 0;
+      flex: 0 0 auto;
+      padding: 0;
+    }
+    .docs-nav a {
+      white-space: nowrap;
+      min-height: 2.25rem;
     }
   }
 </style>

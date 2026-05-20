@@ -129,6 +129,8 @@
     border-radius: 0;
     background: transparent;
     color: var(--c-code);
+    font-size: 0.86rem;
+    line-height: 1.58;
     overflow-x: auto;
   }
   code {
@@ -136,6 +138,8 @@
     min-width: max-content;
     padding: 0;
     background: transparent;
+    font-size: inherit;
+    line-height: inherit;
   }
   .line {
     display: block;
@@ -169,6 +173,10 @@
   }
   @media (max-width: 640px) {
     .code-head { padding-left: var(--space-3); }
+    pre {
+      font-size: 0.88rem;
+      line-height: 1.62;
+    }
     .line { padding: 0 var(--space-3); }
     .gutter {
       width: 1.8rem;

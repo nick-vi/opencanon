@@ -1,6 +1,8 @@
 # OpenCanon
 
-OpenCanon keeps AI-agent code changes aligned with repository conventions. It uses scoped docs, decision records, validators, findings, and health checks.
+OpenCanon keeps AI-agent code changes aligned with repository conventions. It uses scoped docs, decision records, validators, findings, and local health checks.
+
+Website: https://opencanon.dev/
 
 ## Setup
 
@@ -73,18 +75,10 @@ The release also writes `<channel>.json` and `latest.json` with the same schema 
 
 ## Skill Install
 
-OpenCanon can be installed through the skills.sh CLI after the repository is
-publicly listed:
+Install OpenCanon through the skills.sh CLI:
 
 ```bash
 npx skills add nick-vi/opencanon --skill opencanon -a codex -y
-```
-
-You can also clone the repository directly into the skill directory your agent
-host scans:
-
-```bash
-git clone https://github.com/nick-vi/opencanon ~/.agents/skills/opencanon
 ```
 
 Minimal manifest shape:
@@ -275,21 +269,19 @@ bun run opencanon setup --yes --no-daemon
 bun run opencanon setup --dry-run
 ```
 
-`setup` is non-interactive and safe to rerun. It calls the deterministic scaffold path for missing files, optionally installs the current-platform engine binary from `--manifest`, writes `tmp/opencanon-init-plan.md` for the current agent when a scaffold is created, validates the OpenCanon context, runs doctor, runs project validation, checks the pinned Bun/engine daemon prerequisites, starts the supervised daemon by default, and records generated setup state in `.opencanon/setup.json`.
+`setup` is non-interactive and safe to rerun. It calls the deterministic scaffold path for missing files, installs the current-platform engine binary from a release manifest when one is supplied by the installed skill or `--manifest`, writes `tmp/opencanon-init-plan.md` for the current agent when a scaffold is created, validates the OpenCanon context, runs doctor, runs project validation, checks the pinned Bun/engine daemon prerequisites, starts the supervised daemon by default, and records generated setup state in `.opencanon/setup.json`.
 
 ## Init
 
-Use `init` for deterministic setup:
+Use `init` only for lower-level scaffold work. Normal first-run setup should use `setup`.
 
 ```bash
 bun run opencanon init
 bun run opencanon init --yes
-bun run opencanon init --agent
-bun run opencanon init --agent --hooks codex,claude,opencode
 bun run opencanon init --yes --dry-run
 ```
 
-`init --agent` creates `tmp/opencanon-init-plan.md` and prints the same brief in CLI output. The CLI does not call an AI model; it creates the scaffold and gives the current agent a precise extraction task.
+`init` creates the scaffold without running the full setup checks, hook install, runtime update, doctor, validation, or daemon start.
 
 ## Validator Testing
 
