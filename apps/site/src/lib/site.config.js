@@ -60,4 +60,4 @@ export const DAEMON_COMMAND = `bun run opencanon daemon start
 bun run opencanon daemon status
 bun run opencanon daemon open`;
 
-export const RELEASE_MANIFEST_URL = `https://github.com/${repo.owner}/${repo.name}/releases/download/v0.1.0/opencanon-runtime-manifest.json`;
+export const RELEASE_MANIFEST_URL = `https://github.com/${repo.owner}/${repo.name}/releases/download/v0.2.0/opencanon-runtime-manifest.json`;

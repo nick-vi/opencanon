@@ -1,6 +1,6 @@
 {
   "name": "opencanon",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -23,6 +23,7 @@
     "site:build": "cd apps/site && bun run build",
     "site:preview": "cd apps/site && bun run preview",
     "sync:vscode-icons": "node scripts/sync-vscode-icons.mjs",
+    "release:prepare": "bun scripts/prepare-opencanon-release.ts",
     "release:manifest": "bun scripts/create-opencanon-release.ts",
     "rehearse:install": "bun scripts/rehearse-opencanon-install.ts",
     "check:types": "tsc --noEmit",
