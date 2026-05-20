@@ -622,6 +622,33 @@ export const SearchSymbolsResultSchema = z.object({
 });
 export type SearchSymbolsResult = z.infer<typeof SearchSymbolsResultSchema>;
 
+export const SearchReferencesRequestSchema = z.object({
+  query: z.string().min(1).optional(),
+  path: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  limit: z.number().int().min(1).max(1000).optional(),
+});
+export type SearchReferencesRequest = z.input<typeof SearchReferencesRequestSchema>;
+
+export const CodeReferenceSchema = z.object({
+  id: z.string().min(1),
+  path: z.string().min(1),
+  language: z.string().min(1),
+  name: z.string().min(1),
+  kind: z.string().min(1),
+  source: z.string().nullable().optional(),
+  range: SymbolRangeSchema,
+  provenance: z.string().min(1),
+  confidence: z.string().min(1),
+});
+export type CodeReference = z.infer<typeof CodeReferenceSchema>;
+
+export const SearchReferencesResultSchema = z.object({
+  references: z.array(CodeReferenceSchema),
+});
+export type SearchReferencesResult = z.infer<typeof SearchReferencesResultSchema>;
+
 export const DaemonSuccessSchema = z.object({
   ok: z.literal(true),
   data: z.unknown(),

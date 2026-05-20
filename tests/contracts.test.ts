@@ -11,6 +11,8 @@ import {
   EngineProjectStatusSchema,
   OpenCanonError,
   OpenProjectRequestSchema,
+  SearchReferencesRequestSchema,
+  SearchReferencesResultSchema,
   ScanAndDiffResultSchema,
   ValidateRequestSchema,
   ValidatorContractSchema,
@@ -144,6 +146,34 @@ test("engine project contract parses fact requests and results", () => {
     ],
   });
   assert.equal(result.files[0].imports[0].source, "./dal");
+});
+
+test("code reference contracts parse indexed references", () => {
+  assert.deepEqual(SearchReferencesRequestSchema.parse({ query: "logger", limit: 20 }), {
+    query: "logger",
+    limit: 20,
+  });
+
+  const result = SearchReferencesResultSchema.parse({
+    references: [
+      {
+        id: "ref",
+        path: "src/company.ts",
+        language: "typescript",
+        name: "logger",
+        kind: "import-named",
+        source: "./log",
+        range: {
+          start: { line: 1, column: 10, byte: 9 },
+          end: { line: 1, column: 16, byte: 15 },
+        },
+        provenance: "oxc",
+        confidence: "syntactic",
+      },
+    ],
+  });
+
+  assert.equal(result.references[0].source, "./log");
 });
 
 test("daemon request and response contracts have deterministic defaults", () => {

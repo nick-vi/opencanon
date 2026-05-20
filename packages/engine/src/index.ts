@@ -17,6 +17,8 @@ import {
   OpenCanonError,
   ScanAndDiffRequestSchema,
   ScanAndDiffResultSchema,
+  SearchReferencesRequestSchema,
+  SearchReferencesResultSchema,
   SearchSymbolsRequestSchema,
   SearchSymbolsResultSchema,
   WatcherEventBatchSchema,
@@ -35,6 +37,8 @@ import {
   type OpenProjectRequest,
   type ScanAndDiffRequest,
   type ScanAndDiffResult,
+  type SearchReferencesRequest,
+  type SearchReferencesResult,
   type SearchSymbolsRequest,
   type SearchSymbolsResult,
   type WatcherEventBatch,
@@ -63,6 +67,7 @@ export type EngineProject = {
   buildRepoGraph(request: ProjectBuildRepoGraphRequest): BuildRepoGraphResult;
   indexCodeGraph(request: IndexCodeGraphRequest): IndexCodeGraphResult;
   searchSymbols(request: SearchSymbolsRequest): SearchSymbolsResult;
+  searchReferences(request: SearchReferencesRequest): SearchReferencesResult;
   startWatcher(request: WatcherStartRequest, onBatch: (batch: WatcherEventBatch) => void): WatcherStartResult;
   drainWatcherEvents(): WatcherEventBatch[];
   stopWatcher(): void;
@@ -83,6 +88,7 @@ type EngineProjectJsonBinding = {
   buildRepoGraphJson(request: string): string;
   indexCodeGraphJson(request: string): string;
   searchSymbolsJson(request: string): string;
+  searchReferencesJson(request: string): string;
   startWatcherJson(request: string, callback: (error: unknown, batchJson?: string) => void): string;
   drainWatcherEventsJson(): string;
   stopWatcher(): void;
@@ -178,6 +184,8 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
       IndexCodeGraphResultSchema.parse(parseJson(callEngine(() => project.indexCodeGraphJson(JSON.stringify(IndexCodeGraphRequestSchema.parse(request)))))),
     searchSymbols: (request) =>
       SearchSymbolsResultSchema.parse(parseJson(callEngine(() => project.searchSymbolsJson(JSON.stringify(SearchSymbolsRequestSchema.parse(request)))))),
+    searchReferences: (request) =>
+      SearchReferencesResultSchema.parse(parseJson(callEngine(() => project.searchReferencesJson(JSON.stringify(SearchReferencesRequestSchema.parse(request)))))),
     startWatcher: (request, onBatch) =>
       WatcherStartResultSchema.parse(
         parseJson(

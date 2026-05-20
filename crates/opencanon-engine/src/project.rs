@@ -22,8 +22,8 @@ use crate::constants::{
 use crate::contracts::{
     BuildRepoGraphRequest, ExtractFactsRequest, FactDiagnostic, IndexCodeGraphRequest,
     ListEventsRequest, OpenProjectRequest, ResolvedProjectSettings, ScanAndDiffRequest,
-    SearchSymbolsRequest, StartWatcherRequest, WatcherStartResult, WatcherStatus,
-    WriteEventRequest,
+    SearchReferencesRequest, SearchSymbolsRequest, StartWatcherRequest, WatcherStartResult,
+    WatcherStatus, WriteEventRequest,
 };
 use crate::facts::{package_nodes, scan_file_facts};
 use crate::json::{decode, encode, napi_error, notify_error, sqlite_error};
@@ -450,6 +450,91 @@ impl EngineProjectHandle {
             symbols.push(row.map_err(|error| sqlite_error("Could not decode symbol row", error))?);
         }
         encode(&json!({ "symbols": symbols }))
+    }
+
+    #[napi(js_name = "searchReferencesJson")]
+    pub fn search_references_json(&self, request: String) -> napi::Result<String> {
+        let request: SearchReferencesRequest = decode(&request)?;
+        let limit = request.limit.unwrap_or(100).clamp(1, 1000) as i64;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+
+        let mut sql = String::from(
+            "select id, path, language, reference_name, reference_kind, source,
+                    start_line, start_column, start_byte, end_line, end_column, end_byte,
+                    provenance, confidence
+             from unresolved_references where 1 = 1",
+        );
+        let mut bind: Vec<rusqlite::types::Value> = Vec::new();
+        let mut next = 1;
+        if let Some(query) = request
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            sql.push_str(&format!(" and reference_name = ?{next}"));
+            bind.push(query.to_string().into());
+            next += 1;
+        }
+        if let Some(path) = request.path.as_deref() {
+            sql.push_str(&format!(" and path = ?{next}"));
+            bind.push(path.to_string().into());
+            next += 1;
+        }
+        if let Some(source) = request.source.as_deref() {
+            sql.push_str(&format!(" and source = ?{next}"));
+            bind.push(source.to_string().into());
+            next += 1;
+        }
+        if let Some(kind) = request.kind.as_deref() {
+            sql.push_str(&format!(" and reference_kind = ?{next}"));
+            bind.push(kind.to_string().into());
+            next += 1;
+        }
+        sql.push_str(&format!(
+            " order by path, start_line, start_column limit ?{next}"
+        ));
+        bind.push(limit.into());
+
+        let mut statement = conn
+            .prepare(&sql)
+            .map_err(|error| sqlite_error("Could not prepare reference search", error))?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(bind), |row| {
+                Ok(json!({
+                  "id": row.get::<_, String>(0)?,
+                  "path": row.get::<_, String>(1)?,
+                  "language": row.get::<_, String>(2)?,
+                  "name": row.get::<_, String>(3)?,
+                  "kind": row.get::<_, String>(4)?,
+                  "source": row.get::<_, Option<String>>(5)?,
+                  "range": {
+                    "start": {
+                      "line": row.get::<_, i64>(6)?,
+                      "column": row.get::<_, i64>(7)?,
+                      "byte": row.get::<_, i64>(8)?,
+                    },
+                    "end": {
+                      "line": row.get::<_, i64>(9)?,
+                      "column": row.get::<_, i64>(10)?,
+                      "byte": row.get::<_, i64>(11)?,
+                    },
+                  },
+                  "provenance": row.get::<_, String>(12)?,
+                  "confidence": row.get::<_, String>(13)?,
+                }))
+            })
+            .map_err(|error| sqlite_error("Could not run reference search", error))?;
+
+        let mut references = Vec::new();
+        for row in rows {
+            references
+                .push(row.map_err(|error| sqlite_error("Could not decode reference row", error))?);
+        }
+        encode(&json!({ "references": references }))
     }
 
     #[napi]

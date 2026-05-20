@@ -357,6 +357,14 @@ fn indexes_code_graph_for_typescript_files() {
     assert_eq!(invoice["exported"], true);
     assert_eq!(invoice["range"]["start"]["line"], 2);
     assert!(invoice["id"].as_str().unwrap().len() >= 32);
+
+    let references = project
+        .search_references_json(json!({ "query": "logger" }).to_string())
+        .unwrap();
+    let references: Value = serde_json::from_str(&references).unwrap();
+    assert_eq!(references["references"][0]["name"], "logger");
+    assert_eq!(references["references"][0]["kind"], "import-named");
+    assert_eq!(references["references"][0]["source"], "./log");
 }
 
 #[test]
