@@ -1,15 +1,14 @@
-import { createPaths, discoverProjectFiles, fail, resolveRootDir, type CodeSymbol } from "@opencanon/core";
-import { openProjectStore } from "@opencanon/daemon";
+import { fail, resolveRootDir, type CodeReference, type CodeSymbol } from "@opencanon/core";
+import { openCodeGraph } from "./code-graph.ts";
 
 type SymbolsQuery = {
   query?: string;
   inPath?: string;
   kind?: string;
   limit: number;
+  references: boolean;
   help: boolean;
 };
-
-const oxcExtensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
 
 export async function runSymbolsCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
@@ -19,38 +18,27 @@ export async function runSymbolsCommand(args = Bun.argv.slice(2), cwd = process.
   }
 
   const rootDir = resolveRootDir(cwd);
-  const paths = createPaths(rootDir);
-  const store = openProjectStore({ rootDir, paths });
+  const graph = openCodeGraph(rootDir);
   try {
-    const discovery = discoverProjectFiles(paths);
-    if (discovery.failed) fail(discovery.diagnostics.join("\n"));
-
-    const sourceFiles = discovery.files.filter(isOxcSourceFile);
-    const scan = store.scanAndDiff(discovery.files);
-    const graphIsEmpty = store.project.searchSymbols({ limit: 1 }).symbols.length === 0;
-    const changedSource = (graphIsEmpty ? sourceFiles : scan.changedFiles).filter(isOxcSourceFile);
-    const deletedSource = scan.deletedFiles.filter(isOxcSourceFile);
-    if (changedSource.length > 0 || deletedSource.length > 0) {
-      const indexFiles = scan.files
-        .filter((file) => changedSource.includes(file.path))
-        .map((file) => ({ path: file.path, contentHash: file.contentHash, language: languageForFile(file.path) }));
-      store.project.indexCodeGraph({
-        files: indexFiles,
-        deletedFiles: deletedSource,
-        parserVersion: "",
-        extractorVersion: "",
+    if (query.references) {
+      const result = graph.store.project.searchReferences({
+        query: query.query,
+        path: query.inPath,
+        kind: query.kind,
+        limit: query.limit,
       });
+      printReferences(result.references, graph.sourceFiles.length, query);
+      return;
     }
-
-    const result = store.project.searchSymbols({
+    const result = graph.store.project.searchSymbols({
       query: query.query,
       path: query.inPath,
       kind: query.kind,
       limit: query.limit,
     });
-    printSymbols(result.symbols, sourceFiles.length, query);
+    printSymbols(result.symbols, graph.sourceFiles.length, query);
   } finally {
-    store.close();
+    graph.close();
   }
 }
 
@@ -59,6 +47,7 @@ function parseArgs(args: string[]): SymbolsQuery {
   let inPath: string | undefined;
   let kind: string | undefined;
   let limit = 50;
+  let references = false;
   let help = false;
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -77,6 +66,10 @@ function parseArgs(args: string[]): SymbolsQuery {
       index += 1;
       continue;
     }
+    if (arg === "--references") {
+      references = true;
+      continue;
+    }
     if (arg === "--limit") {
       const value = Number(args[index + 1]);
       if (!Number.isInteger(value) || value < 1 || value > 500) fail(`Invalid --limit: ${args[index + 1]}`);
@@ -89,7 +82,7 @@ function parseArgs(args: string[]): SymbolsQuery {
   }
   if (positional.length > 1) fail(`Unexpected symbols arguments: ${positional.slice(1).join(", ")}`);
   query = positional[0];
-  return { query, inPath, kind, limit, help };
+  return { query, inPath, kind, limit, references, help };
 }
 
 function printSymbols(symbols: CodeSymbol[], sourceCount: number, query: SymbolsQuery): void {
@@ -103,15 +96,16 @@ function printSymbols(symbols: CodeSymbol[], sourceCount: number, query: Symbols
   }
 }
 
-function isOxcSourceFile(file: string): boolean {
-  return oxcExtensions.some((extension) => file.endsWith(extension));
-}
-
-function languageForFile(file: string): "typescript" | "tsx" | "javascript" | "jsx" {
-  if (file.endsWith(".tsx")) return "tsx";
-  if (file.endsWith(".jsx")) return "jsx";
-  if (file.endsWith(".mts") || file.endsWith(".cts") || file.endsWith(".ts")) return "typescript";
-  return "javascript";
+function printReferences(references: CodeReference[], sourceCount: number, query: SymbolsQuery): void {
+  if (references.length === 0) {
+    const filter = query.query ?? query.inPath ?? "<all>";
+    console.log(`# No references match ${filter} across ${sourceCount} source files.`);
+    return;
+  }
+  for (const reference of references) {
+    const source = reference.source ? ` source=${reference.source}` : "";
+    console.log(`${reference.kind} ${reference.name} ${reference.path}:${reference.range.start.line}:${reference.range.start.column}${source}`);
+  }
 }
 
 function printHelp(): void {
@@ -119,10 +113,12 @@ function printHelp(): void {
   opencanon symbols <query>
   opencanon symbols --in src/file.ts
   opencanon symbols <query> --kind function --limit 20
+  opencanon symbols <query> --references
 
 Options:
   --in <path>      Restrict results to a single file path.
-  --kind <kind>    Filter by symbol kind (function, class, variable, type, interface, enum).
+  --kind <kind>    Filter by symbol or reference kind.
+  --references     Search indexed references instead of symbols.
   --limit <n>      Maximum results to return (default 50, max 500).
 `);
 }

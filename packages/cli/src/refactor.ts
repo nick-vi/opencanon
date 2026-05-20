@@ -1,8 +1,6 @@
 import { cac } from "cac";
 import {
   applyRefactorPlan,
-  createPaths,
-  discoverProjectFiles,
   fail,
   moveDir,
   moveFile,
@@ -14,7 +12,7 @@ import {
   type Format,
   type RefactorPlan,
 } from "@opencanon/core";
-import { openProjectStore } from "@opencanon/daemon";
+import { openCodeGraph } from "./code-graph.ts";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
 type RefactorQuery = {
@@ -106,44 +104,15 @@ function createPlan(query: RefactorQuery, common: { rootDir: string; files: stri
 }
 
 function graphRenameInputs(rootDir: string, name: string): Pick<Parameters<typeof renameSymbol>[0], "symbols" | "references"> {
-  const paths = createPaths(rootDir);
-  const discovery = discoverProjectFiles(paths);
-  if (discovery.failed) return {};
-  const store = openProjectStore({ rootDir, paths });
+  const graph = openCodeGraph(rootDir);
   try {
-    const sourceFiles = discovery.files.filter(isOxcSourceFile);
-    const scan = store.scanAndDiff(discovery.files);
-    const graphIsEmpty = store.project.searchSymbols({ limit: 1 }).symbols.length === 0;
-    const changedSource = (graphIsEmpty ? sourceFiles : scan.changedFiles).filter(isOxcSourceFile);
-    const deletedSource = scan.deletedFiles.filter(isOxcSourceFile);
-    if (changedSource.length > 0 || deletedSource.length > 0) {
-      store.project.indexCodeGraph({
-        files: scan.files
-          .filter((file) => changedSource.includes(file.path))
-          .map((file) => ({ path: file.path, contentHash: file.contentHash, language: languageForFile(file.path) })),
-        deletedFiles: deletedSource,
-      });
-    }
     return {
-      symbols: store.project.searchSymbols({ query: name, limit: 500 }).symbols,
-      references: store.project.searchReferences({ query: name, limit: 1000 }).references,
+      symbols: graph.store.project.searchSymbols({ query: name, limit: 500 }).symbols,
+      references: graph.store.project.searchReferences({ query: name, limit: 1000 }).references,
     };
   } finally {
-    store.close();
+    graph.close();
   }
-}
-
-const oxcExtensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
-
-function isOxcSourceFile(file: string): boolean {
-  return oxcExtensions.some((extension) => file.endsWith(extension));
-}
-
-function languageForFile(file: string): "typescript" | "tsx" | "javascript" | "jsx" {
-  if (file.endsWith(".tsx")) return "tsx";
-  if (file.endsWith(".jsx")) return "jsx";
-  if (file.endsWith(".mts") || file.endsWith(".cts") || file.endsWith(".ts")) return "typescript";
-  return "javascript";
 }
 
 function assertArgCount(query: RefactorQuery, count: number): void {
