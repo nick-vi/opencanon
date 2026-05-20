@@ -7,6 +7,7 @@ import type { TextEdit } from "./validator-types.ts";
 
 const TextEncoding = "utf8";
 const SourceExtensions = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".svelte"] as const;
+const PackageRenameExtensions = [...SourceExtensions, ".json", ".jsonc", ".lock"] as const;
 
 export type RefactorPlanKind = "rename-symbol" | "update-imports" | "move-file" | "move-dir" | "rename-package" | "split-module";
 
@@ -124,7 +125,7 @@ export function renamePackage(input: {
   include?: string[];
 }): RefactorPlan {
   const diagnostics = input.from.trim() && input.to.trim() ? [] : ["package names must be non-empty."];
-  const files = projectFiles(input.rootDir, input.files, input.include);
+  const files = projectFiles(input.rootDir, input.files, input.include, (file) => hasExtension(file, PackageRenameExtensions) || path.basename(file) === "bun.lock");
   const edits = diagnostics.length > 0 ? [] : files.flatMap((file) => replaceStringLiteralEdits(input.rootDir, file, input.from, input.to));
   return {
     kind: "rename-package",
@@ -326,10 +327,10 @@ function textEditForOffsets(file: string, text: string, start: number, end: numb
   };
 }
 
-function projectFiles(rootDir: string, files?: string[], include?: string[]): string[] {
-  if (files && files.length > 0) return files.map(normalizeProjectPath).filter(isSourcePath);
+function projectFiles(rootDir: string, files?: string[], include?: string[], predicate = isSourcePath): string[] {
+  if (files && files.length > 0) return files.map(normalizeProjectPath).filter(predicate);
   const roots = include && include.length > 0 ? include : ["."];
-  return roots.flatMap((root) => listFiles(path.join(rootDir, root), (file) => isSourcePath(file), shouldSkipDirectory).map((file) => path.relative(rootDir, file))).map(normalizeProjectPath);
+  return roots.flatMap((root) => listFiles(path.join(rootDir, root), predicate, shouldSkipDirectory).map((file) => path.relative(rootDir, file))).map(normalizeProjectPath);
 }
 
 function shouldSkipDirectory(dir: string): boolean {
@@ -387,7 +388,11 @@ function validateProjectPath(rootDir: string, value: string, label: string): str
 }
 
 function isSourcePath(file: string): boolean {
-  return SourceExtensions.some((extension) => file.endsWith(extension));
+  return hasExtension(file, SourceExtensions);
+}
+
+function hasExtension(file: string, extensions: readonly string[]): boolean {
+  return extensions.some((extension) => file.endsWith(extension));
 }
 
 function normalizeProjectPath(file: string): string {

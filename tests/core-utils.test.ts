@@ -12,6 +12,7 @@ import {
   moveFile,
   normalizeMarkdownHeading,
   parseMarkdownDoc,
+  renamePackage,
   renameSymbol,
   resolveDocsReferences,
   resolveInsideRoot,
@@ -153,6 +154,28 @@ test("refactor plans can use graph ranges for symbol rename", () => {
 test("refactor graph-only rename reports missing graph references", () => {
   const plan = renameSymbol({ rootDir: "/repo", from: "loadCompany", to: "getCompany", graphOnly: true });
   assert(plan.diagnostics.includes("No graph references found for symbol: loadCompany"));
+});
+
+test("refactor package rename includes package manifests", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-refactor-package-"));
+  try {
+    mkdirSync(path.join(rootDir, "packages/core"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ dependencies: { "@old/core": "workspace:*" } }, null, 2));
+    writeFileSync(path.join(rootDir, "packages/core/package.json"), JSON.stringify({ name: "@old/core" }, null, 2));
+
+    const plan = renamePackage({ rootDir, from: "@old/core", to: "@new/core" });
+    assert.deepEqual(
+      plan.edits.map((edit) => edit.file).sort(),
+      ["package.json", "packages/core/package.json"],
+    );
+
+    const result = applyRefactorPlan({ rootDir, plan });
+    assert.equal(result.appliedEdits, 2);
+    assert(readFileSync(path.join(rootDir, "package.json"), "utf8").includes("@new/core"));
+    assert(readFileSync(path.join(rootDir, "packages/core/package.json"), "utf8").includes("@new/core"));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
 });
 
 test("refactor plans update imports for file moves", () => {
