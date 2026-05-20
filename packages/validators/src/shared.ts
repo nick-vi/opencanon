@@ -82,6 +82,12 @@ export type RequireExportPatternOptions = FindingOptions & {
   kinds?: ExportInfo["kind"][];
 };
 
+export type NoUnusedExportsOptions = FindingOptions & {
+  in: string[];
+  allow?: Array<string | RegExp>;
+  kinds?: Array<"function" | "class" | "method" | "variable" | "type" | "interface" | "enum" | "property" | "unknown">;
+};
+
 export type NoNativeEnumsOptions = {
   in: string[];
   message?: string;

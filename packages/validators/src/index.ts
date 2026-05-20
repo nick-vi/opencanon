@@ -3,6 +3,7 @@ export {
   requiredFileSibling,
   requiredFunctionParam,
   requireExportPattern,
+  noUnusedExports,
   noNativeEnums,
   noHardcodedConfigValues,
   noSecretLikeLiterals,

@@ -30,6 +30,7 @@ import {
   noSecretLikeLiterals,
   noBypassComments,
   noHeaderComments,
+  noUnusedExports,
   repeatedLiterals,
   requireExportPattern,
   requiredFileSibling,
@@ -408,6 +409,42 @@ test("validation context exposes graph callers and callees", () => {
     assert.equal(callees.length, 1);
     assert.equal(callees[0].target.name, "loadCompany");
     assert.equal(ctx.graph.impact("loadCompany").length, 1);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("noUnusedExports reports exported symbols without graph callers", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-unused-export-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(rootDir, "src/company.ts"),
+      ["export function usedCompany() {", "  return true;", "}", "", "export function unusedCompany() {", "  return false;", "}", ""].join("\n"),
+    );
+    writeFileSync(path.join(rootDir, "src/route.ts"), "import { usedCompany } from './company';\nusedCompany();\n");
+    const validator = noUnusedExports({
+      id: "no-unused-exports",
+      topics: ["dead-code"],
+      severity: "warning",
+      in: ["src/**/*.ts"],
+      message: "Exported symbol has no known project caller.",
+    });
+    const resolved = resolveValidators(validator);
+    assert.deepEqual(resolved.diagnostics, []);
+    const [definition] = resolved.validators;
+    const ctx = createValidationContext({
+      rootDir,
+      files: ["src/company.ts", "src/route.ts"],
+      targetFiles: ["src/company.ts", "src/route.ts"],
+      validator: definition,
+    });
+
+    const findings = await definition.validate({ ctx, runtime: createRuntime(createPaths(rootDir), []) });
+    assert.deepEqual(
+      findings.map((finding) => `${finding.file}:${finding.line}:${finding.message}`),
+      ["src/company.ts:5:Exported symbol has no known project caller."],
+    );
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

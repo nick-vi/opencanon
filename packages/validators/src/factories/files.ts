@@ -1,7 +1,7 @@
 import { createValidatorFactory } from "@opencanon/core";
 import type { Finding, LiteralContext } from "@opencanon/core";
 import { edgeMatches, importedSymbolName, list, literalIgnored, manualFix, optionSummary, regexMatches, escapeRegex, firstCodeLineNumber, joinPatterns, matchesAny, paramsContain, safeEnumReplacement, valueMatches, interpolateSibling } from "../shared.ts";
-import type { FileNameOptions, NoImportsOptions, NoForbiddenImportsOptions, NoDeepRelativeImportsOptions, RequiredFunctionParamOptions, RequiredFileSiblingOptions, NoBarrelCrossBoundaryOptions, NoLayerCallOptions, RequireExportPatternOptions, NoNativeEnumsOptions, RepeatedLiteralsOptions, RestrictedSymbolsOptions, NoSecretLikeLiteralsOptions, NoHardcodedConfigValuesOptions } from "../shared.ts";
+import type { FileNameOptions, NoImportsOptions, NoForbiddenImportsOptions, NoDeepRelativeImportsOptions, RequiredFunctionParamOptions, RequiredFileSiblingOptions, NoBarrelCrossBoundaryOptions, NoLayerCallOptions, RequireExportPatternOptions, NoUnusedExportsOptions, NoNativeEnumsOptions, RepeatedLiteralsOptions, RestrictedSymbolsOptions, NoSecretLikeLiteralsOptions, NoHardcodedConfigValuesOptions } from "../shared.ts";
 import path from "node:path";
 
 export const fileNames = createValidatorFactory<FileNameOptions>((options) => ({
@@ -115,6 +115,39 @@ export const requireExportPattern = createValidatorFactory<RequireExportPatternO
         }),
       ];
     });
+  },
+}));
+
+export const noUnusedExports = createValidatorFactory<NoUnusedExportsOptions>((options) => ({
+  id: options.id,
+  topics: options.topics,
+  applies: options.in,
+  severity: options.severity,
+  scope: "project",
+  facts: ["symbols", "references"],
+  decisionIds: options.decisionIds,
+  summary: optionSummary(options, `Exports in ${joinPatterns(options.in)} must have a known project reference.`),
+  validate({ ctx }) {
+    const allowed = list(options.allow);
+    const kinds = new Set(options.kinds ?? []);
+    const targetPaths = new Set(ctx.targetFiles.map((file) => file.path));
+
+    return ctx.graph
+      .symbols()
+      .filter((symbol) => symbol.exported)
+      .filter((symbol) => targetPaths.has(symbol.file.path))
+      .filter((symbol) => kinds.size === 0 || kinds.has(symbol.kind))
+      .filter((symbol) => !allowed.some((pattern) => valueMatches(symbol.name, pattern)))
+      .filter((symbol) => ctx.graph.callers(symbol).length === 0)
+      .map((symbol) =>
+        symbol.file.report({
+          line: symbol.line,
+          column: symbol.column,
+          message: options.message,
+          fix: options.fix ?? manualFix("Remove the export, make it private, or add the missing project reference/entrypoint rule."),
+          docs: options.docs,
+        }),
+      );
   },
 }));
 
