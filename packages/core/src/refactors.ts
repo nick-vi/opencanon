@@ -42,8 +42,9 @@ export function renameSymbol(input: {
   graphOnly?: boolean;
 }): RefactorPlan {
   const diagnostics = validateIdentifierPair(input.from, input.to);
-  const files = projectFiles(input.rootDir, input.files, input.include);
-  const graphEdits = diagnostics.length > 0 ? [] : graphRenameEdits(input.from, input.to, input.symbols ?? [], input.references ?? []);
+  const discoveredFiles = projectFiles(input.rootDir, input.files, input.include);
+  const files = discoveredFiles.length > 0 || input.files || input.include ? discoveredFiles : graphFiles(input.symbols ?? [], input.references ?? []);
+  const graphEdits = diagnostics.length > 0 ? [] : graphRenameEdits(input.from, input.to, input.symbols ?? [], input.references ?? [], files);
   const textEdits = diagnostics.length > 0 || input.graphOnly ? [] : files.flatMap((file) => renameSymbolEdits(input.rootDir, file, input.from, input.to));
   if (input.graphOnly && graphEdits.length === 0) diagnostics.push(`No graph references found for symbol: ${input.from}`);
   return {
@@ -237,14 +238,19 @@ function renameSymbolEdits(rootDir: string, file: string, from: string, to: stri
   return matchEdits(file, text, identifierPattern(from), to);
 }
 
-function graphRenameEdits(from: string, to: string, symbols: CodeSymbol[], references: CodeReference[]): TextEdit[] {
+function graphRenameEdits(from: string, to: string, symbols: CodeSymbol[], references: CodeReference[], files: string[]): TextEdit[] {
+  const allowedFiles = new Set(files.map(normalizeProjectPath));
   const symbolEdits = symbols
-    .filter((symbol) => symbol.name === from)
+    .filter((symbol) => symbol.name === from && allowedFiles.has(normalizeProjectPath(symbol.path)))
     .map((symbol) => rangeEdit(symbol.path, symbol.range, to));
   const referenceEdits = references
-    .filter((reference) => reference.name === from)
+    .filter((reference) => reference.name === from && allowedFiles.has(normalizeProjectPath(reference.path)))
     .map((reference) => rangeEdit(reference.path, reference.range, to));
   return [...symbolEdits, ...referenceEdits];
+}
+
+function graphFiles(symbols: CodeSymbol[], references: CodeReference[]): string[] {
+  return [...new Set([...symbols.map((symbol) => symbol.path), ...references.map((reference) => reference.path)].map(normalizeProjectPath))].sort();
 }
 
 function rangeEdit(file: string, range: CodeSymbol["range"], replacement: string): TextEdit {

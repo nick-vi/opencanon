@@ -310,7 +310,7 @@ fn indexes_code_graph_for_typescript_files() {
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(
         root.join("src/billing.ts"),
-        "import { logger } from \"./log\";\nexport function createInvoice(): number { return 1; }\nexport class InvoiceService {}\nexport const FLAG = 1;\nexport interface Invoice { id: string }\nexport type Amount = number;\n",
+        "import { logger } from \"./log\";\nexport function createInvoice(): number { return logger.info(1); }\nexport class InvoiceService {}\nexport const FLAG = 1;\nexport interface Invoice { id: string }\nexport type Amount = number;\n",
     )
     .unwrap();
 
@@ -366,6 +366,11 @@ fn indexes_code_graph_for_typescript_files() {
     assert_eq!(references["references"][0]["name"], "logger");
     assert_eq!(references["references"][0]["kind"], "import-named");
     assert_eq!(references["references"][0]["source"], "./log");
+    assert!(references["references"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reference| reference["kind"] == "identifier"));
 }
 
 #[test]

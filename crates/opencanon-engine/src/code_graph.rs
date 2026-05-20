@@ -2,12 +2,16 @@ use std::collections::HashSet;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    BindingPattern, Class, Declaration, ExportAllDeclaration, ExportDefaultDeclaration,
-    ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression, Function, ImportDeclaration,
-    ImportDeclarationSpecifier, ModuleExportName, Program, VariableDeclaration, VariableDeclarator,
+    BindingPattern, CallExpression, Class, Declaration, ExportAllDeclaration,
+    ExportDefaultDeclaration, ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression,
+    Function, IdentifierReference, ImportDeclaration, ImportDeclarationSpecifier, ModuleExportName,
+    TSEnumDeclaration, TSInterfaceDeclaration, TSTypeAliasDeclaration, VariableDeclaration,
+    VariableDeclarator,
 };
+use oxc_ast_visit::{walk, Visit};
 use oxc_parser::Parser;
-use oxc_span::{SourceType, Span};
+use oxc_span::{GetSpan, SourceType, Span};
+use oxc_syntax::scope::ScopeFlags;
 use serde::{Deserialize, Serialize};
 
 pub(crate) trait CodeExtractor {
@@ -219,7 +223,7 @@ impl CodeExtractor for OxcExtractor {
             unresolved: Vec::new(),
             seen_names: HashSet::new(),
         };
-        collector.visit_program(&parse_result.program);
+        Visit::visit_program(&mut collector, &parse_result.program);
 
         if collector.nodes.is_empty() && collector.unresolved.is_empty() && diagnostics.is_empty() {
             diagnostics.push(CodeDiagnostic {
@@ -248,68 +252,6 @@ struct GraphCollector<'a> {
 }
 
 impl<'a> GraphCollector<'a> {
-    fn visit_program<'src>(&mut self, program: &Program<'src>) {
-        for statement in program.body.iter() {
-            match statement {
-                oxc_ast::ast::Statement::FunctionDeclaration(function) => {
-                    self.push_function(function, false);
-                }
-                oxc_ast::ast::Statement::ClassDeclaration(class) => {
-                    self.push_class(class, false);
-                }
-                oxc_ast::ast::Statement::VariableDeclaration(declaration) => {
-                    self.push_variable_declaration(declaration, false);
-                }
-                oxc_ast::ast::Statement::TSTypeAliasDeclaration(declaration) => {
-                    let span = declaration.id.span;
-                    self.push_node(
-                        "type",
-                        declaration.id.name.as_str(),
-                        false,
-                        None,
-                        declaration.span,
-                        span,
-                    );
-                }
-                oxc_ast::ast::Statement::TSInterfaceDeclaration(declaration) => {
-                    let span = declaration.id.span;
-                    self.push_node(
-                        "interface",
-                        declaration.id.name.as_str(),
-                        false,
-                        None,
-                        declaration.span,
-                        span,
-                    );
-                }
-                oxc_ast::ast::Statement::TSEnumDeclaration(declaration) => {
-                    let span = declaration.id.span;
-                    self.push_node(
-                        "enum",
-                        declaration.id.name.as_str(),
-                        false,
-                        None,
-                        declaration.span,
-                        span,
-                    );
-                }
-                oxc_ast::ast::Statement::ImportDeclaration(declaration) => {
-                    self.push_import(declaration);
-                }
-                oxc_ast::ast::Statement::ExportNamedDeclaration(export) => {
-                    self.push_export_named(export);
-                }
-                oxc_ast::ast::Statement::ExportDefaultDeclaration(export) => {
-                    self.push_export_default(export);
-                }
-                oxc_ast::ast::Statement::ExportAllDeclaration(export) => {
-                    self.push_export_all(export);
-                }
-                _ => {}
-            }
-        }
-    }
-
     fn push_function(&mut self, function: &Function, exported: bool) {
         let Some(id) = &function.id else { return };
         let signature = signature_text(
@@ -572,6 +514,123 @@ impl<'a> GraphCollector<'a> {
             range,
             disambiguator: format!("{}-{}", identifier.start, identifier.end),
         });
+    }
+
+    fn push_reference(
+        &mut self,
+        name: String,
+        kind: &str,
+        source: Option<String>,
+        span: Span,
+        confidence: &str,
+    ) {
+        if name.is_empty() {
+            return;
+        }
+        self.unresolved.push(ExtractedUnresolved {
+            reference_name: name,
+            reference_kind: kind.to_string(),
+            source,
+            range: self.line_index.range(span),
+            provenance: "oxc".to_string(),
+            confidence: confidence.to_string(),
+        });
+    }
+}
+
+impl<'source> Visit<'source> for GraphCollector<'_> {
+    fn visit_import_declaration(&mut self, import: &ImportDeclaration<'source>) {
+        self.push_import(import);
+        walk::walk_import_declaration(self, import);
+    }
+
+    fn visit_export_named_declaration(&mut self, export: &ExportNamedDeclaration<'source>) {
+        self.push_export_named(export);
+        walk::walk_export_named_declaration(self, export);
+    }
+
+    fn visit_export_default_declaration(&mut self, export: &ExportDefaultDeclaration<'source>) {
+        self.push_export_default(export);
+        walk::walk_export_default_declaration(self, export);
+    }
+
+    fn visit_export_all_declaration(&mut self, export: &ExportAllDeclaration<'source>) {
+        self.push_export_all(export);
+        walk::walk_export_all_declaration(self, export);
+    }
+
+    fn visit_function(&mut self, function: &Function<'source>, flags: ScopeFlags) {
+        self.push_function(function, false);
+        walk::walk_function(self, function, flags);
+    }
+
+    fn visit_class(&mut self, class: &Class<'source>) {
+        self.push_class(class, false);
+        walk::walk_class(self, class);
+    }
+
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'source>) {
+        self.push_variable_declarator(declarator, false);
+        walk::walk_variable_declarator(self, declarator);
+    }
+
+    fn visit_ts_type_alias_declaration(&mut self, declaration: &TSTypeAliasDeclaration<'source>) {
+        self.push_node(
+            "type",
+            declaration.id.name.as_str(),
+            false,
+            None,
+            declaration.span,
+            declaration.id.span,
+        );
+        walk::walk_ts_type_alias_declaration(self, declaration);
+    }
+
+    fn visit_ts_interface_declaration(&mut self, declaration: &TSInterfaceDeclaration<'source>) {
+        self.push_node(
+            "interface",
+            declaration.id.name.as_str(),
+            false,
+            None,
+            declaration.span,
+            declaration.id.span,
+        );
+        walk::walk_ts_interface_declaration(self, declaration);
+    }
+
+    fn visit_ts_enum_declaration(&mut self, declaration: &TSEnumDeclaration<'source>) {
+        self.push_node(
+            "enum",
+            declaration.id.name.as_str(),
+            false,
+            None,
+            declaration.span,
+            declaration.id.span,
+        );
+        walk::walk_ts_enum_declaration(self, declaration);
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'source>) {
+        let callee = call.callee.span().source_text(self.text).trim().to_string();
+        let name = callee
+            .rsplit(['.', '#'])
+            .next()
+            .unwrap_or(&callee)
+            .trim()
+            .to_string();
+        self.push_reference(name, "call", None, call.callee.span(), "syntactic");
+        walk::walk_call_expression(self, call);
+    }
+
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'source>) {
+        self.push_reference(
+            identifier.name.to_string(),
+            "identifier",
+            None,
+            identifier.span,
+            "syntactic",
+        );
+        walk::walk_identifier_reference(self, identifier);
     }
 }
 

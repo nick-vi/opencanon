@@ -126,6 +126,28 @@ test("refactor plans can use graph ranges for symbol rename", () => {
     plan.edits.map((edit) => `${edit.file}:${edit.range.startLine}:${edit.range.startColumn}`),
     ["src/company.ts:1:17", "src/route.ts:1:10"],
   );
+
+  const scoped = renameSymbol({
+    rootDir: "/repo",
+    from: "loadCompany",
+    to: "getCompany",
+    graphOnly: true,
+    files: ["src/company.ts"],
+    symbols: plan.edits.map((edit, index) => ({
+      id: `symbol-${index}`,
+      path: edit.file,
+      language: "typescript",
+      kind: "function",
+      name: "loadCompany",
+      qualifiedName: `${edit.file}::loadCompany`,
+      exported: true,
+      range: {
+        start: { line: edit.range.startLine, column: edit.range.startColumn, byte: 0 },
+        end: { line: edit.range.endLine, column: edit.range.endColumn, byte: 0 },
+      },
+    })),
+  });
+  assert.deepEqual(scoped.edits.map((edit) => edit.file), ["src/company.ts"]);
 });
 
 test("refactor graph-only rename reports missing graph references", () => {
