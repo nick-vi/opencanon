@@ -21,12 +21,19 @@ const packagePaths = [
   "packages/ui/package.json",
   "packages/validators/package.json",
 ];
+const rustPackagePath = "crates/opencanon-engine/Cargo.toml";
+const rustLockPath = "crates/opencanon-engine/Cargo.lock";
+const engineConstantsPath = "crates/opencanon-engine/src/constants.rs";
 
 for (const packagePath of packagePaths) {
   updateJson(packagePath, (json) => {
     json.version = version;
   });
 }
+
+replaceInFile(rustPackagePath, /^version = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"$/m, `version = "${version}"`);
+replaceInFile(engineConstantsPath, /ENGINE_VERSION: &str = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"/, `ENGINE_VERSION: &str = "${version}"`);
+replaceRustLockPackageVersion(rustLockPath, "opencanon-engine", version);
 
 replaceInFile(
   ".agents/skills/opencanon/scripts/opencanon.ts",
@@ -86,4 +93,17 @@ function updateChangelog(tagName: string, date: string): void {
   }
 
   writeFileSync(changelogPath, `# Changelog\n\n${entry}${changelog.replace(/^# Changelog\n?/, "")}`);
+}
+
+function replaceRustLockPackageVersion(relativePath: string, packageName: string, nextVersion: string): void {
+  const filePath = path.join(rootDir, relativePath);
+  const before = readFileSync(filePath, "utf8");
+  const pattern = new RegExp(`(\\[\\[package\\]\\]\\nname = "${escapeRegExp(packageName)}"\\nversion = ")\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(")`);
+  const after = before.replace(pattern, `$1${nextVersion}$2`);
+  if (after === before) throw new Error(`No Cargo.lock version entry updated for ${packageName}.`);
+  writeFileSync(filePath, after);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
