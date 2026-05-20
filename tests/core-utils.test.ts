@@ -156,6 +156,33 @@ test("refactor graph-only rename reports missing graph references", () => {
   assert(plan.diagnostics.includes("No graph references found for symbol: loadCompany"));
 });
 
+test("refactor graph-only rename blocks ambiguous declarations", () => {
+  const symbol = {
+    path: "src/company.ts",
+    language: "typescript",
+    kind: "function" as const,
+    name: "loadCompany",
+    exported: true,
+    range: {
+      start: { line: 1, column: 17, byte: 16 },
+      end: { line: 1, column: 28, byte: 27 },
+    },
+  };
+  const plan = renameSymbol({
+    rootDir: "/repo",
+    from: "loadCompany",
+    to: "getCompany",
+    graphOnly: true,
+    symbols: [
+      { ...symbol, id: "one", qualifiedName: "src/company.ts::loadCompany" },
+      { ...symbol, id: "two", path: "src/other.ts", qualifiedName: "src/other.ts::loadCompany" },
+    ],
+  });
+
+  assert(plan.diagnostics.includes("Ambiguous graph rename for symbol loadCompany: 2 declarations match."));
+  assert.equal(plan.edits.length, 0);
+});
+
 test("refactor package rename includes package manifests", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-refactor-package-"));
   try {

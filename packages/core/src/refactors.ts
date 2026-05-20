@@ -45,6 +45,9 @@ export function renameSymbol(input: {
   const diagnostics = validateIdentifierPair(input.from, input.to);
   const discoveredFiles = projectFiles(input.rootDir, input.files, input.include);
   const files = discoveredFiles.length > 0 || input.files || input.include ? discoveredFiles : graphFiles(input.symbols ?? [], input.references ?? []);
+  const allowedFiles = new Set(files.map(normalizeProjectPath));
+  const matchingSymbols = (input.symbols ?? []).filter((symbol) => symbol.name === input.from && allowedFiles.has(normalizeProjectPath(symbol.path)));
+  if (input.graphOnly && matchingSymbols.length > 1) diagnostics.push(`Ambiguous graph rename for symbol ${input.from}: ${matchingSymbols.length} declarations match.`);
   const graphEdits = diagnostics.length > 0 ? [] : graphRenameEdits(input.from, input.to, input.symbols ?? [], input.references ?? [], files);
   const textEdits = diagnostics.length > 0 || input.graphOnly ? [] : files.flatMap((file) => renameSymbolEdits(input.rootDir, file, input.from, input.to));
   if (input.graphOnly && graphEdits.length === 0) diagnostics.push(`No graph references found for symbol: ${input.from}`);

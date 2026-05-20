@@ -310,13 +310,21 @@ fn indexes_code_graph_for_typescript_files() {
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(
         root.join("src/billing.ts"),
-        "import { logger } from \"./log\";\nfunction helper(): number { return 1; }\nexport function createInvoice(): number { logger.info(1); return helper(); }\nexport class InvoiceService {}\nexport const FLAG = 1;\nexport interface Invoice { id: string }\nexport type Amount = number;\n",
+        "import { logger } from \"./log\";\nimport defaultFormatter from \"./format\";\nfunction helper(): number { return 1; }\nexport function createInvoice(): number { logger.info(defaultFormatter()); return helper(); }\nexport class InvoiceService {}\nexport const FLAG = 1;\nexport interface Invoice { id: string }\nexport type Amount = number;\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/log.ts"), "export function logger() {}\n").unwrap();
+    fs::write(
+        root.join("src/format.ts"),
+        "export default function format() { return 1; }\n",
     )
     .unwrap();
 
     let project = open_test_project(&root);
     let _ = project
-        .scan_and_diff_json(json!({ "files": ["src/billing.ts"] }).to_string())
+        .scan_and_diff_json(
+            json!({ "files": ["src/billing.ts", "src/log.ts", "src/format.ts"] }).to_string(),
+        )
         .unwrap();
     let indexed = project
         .index_code_graph_json(
@@ -324,6 +332,14 @@ fn indexes_code_graph_for_typescript_files() {
                 "files": [{
                     "path": "src/billing.ts",
                     "contentHash": "hash",
+                    "language": "typescript"
+                }, {
+                    "path": "src/log.ts",
+                    "contentHash": "hash-log",
+                    "language": "typescript"
+                }, {
+                    "path": "src/format.ts",
+                    "contentHash": "hash-format",
                     "language": "typescript"
                 }],
                 "parserVersion": "test-parser",
@@ -355,7 +371,7 @@ fn indexes_code_graph_for_typescript_files() {
         .unwrap();
     assert_eq!(invoice["kind"], "function");
     assert_eq!(invoice["exported"], true);
-    assert_eq!(invoice["range"]["start"]["line"], 3);
+    assert_eq!(invoice["range"]["start"]["line"], 4);
     assert_eq!(invoice["range"]["start"]["column"], 17);
     assert!(invoice["id"].as_str().unwrap().len() >= 32);
 
@@ -385,6 +401,32 @@ fn indexes_code_graph_for_typescript_files() {
         .any(
             |edge| edge["source"]["name"] == "createInvoice" && edge["target"]["name"] == "helper"
         ));
+
+    let import_edges = project
+        .search_graph_edges_json(
+            json!({ "query": "logger", "direction": "incoming", "kind": "identifier" }).to_string(),
+        )
+        .unwrap();
+    let import_edges: Value = serde_json::from_str(&import_edges).unwrap();
+    assert!(import_edges["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edge| edge["source"]["name"] == "createInvoice"
+            && edge["target"]["path"] == "src/log.ts"));
+
+    let default_edges = project
+        .search_graph_edges_json(
+            json!({ "query": "format", "direction": "incoming", "kind": "call" }).to_string(),
+        )
+        .unwrap();
+    let default_edges: Value = serde_json::from_str(&default_edges).unwrap();
+    assert!(default_edges["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edge| edge["source"]["name"] == "createInvoice"
+            && edge["target"]["path"] == "src/format.ts"));
 }
 
 #[test]
