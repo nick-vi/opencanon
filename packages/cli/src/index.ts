@@ -16,6 +16,7 @@ import { loadProjectContext } from "./project.ts";
 import { runContextCommand } from "./context.ts";
 import { runRefactorCommand } from "./refactor.ts";
 import { runRulesCommand } from "./rules.ts";
+import { runSearchCommand } from "./search.ts";
 import { runSetupCommand } from "./setup.ts";
 import { runSymbolsCommand } from "./symbols.ts";
 import { runUpdateCommand } from "./update.ts";
@@ -58,6 +59,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
 
   if (command === "rules") {
     await runRulesCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "search") {
+    await runSearchCommand(rest, cwd);
     return;
   }
 
@@ -178,6 +184,7 @@ function printHelp(): void {
   opencanon setup --yes
   opencanon init --agent
   opencanon rules --validator <id>
+  opencanon search <query>
   opencanon validate --files <paths...>
   opencanon update check --manifest <path-or-url>
   opencanon feedback --files <paths...>
@@ -196,6 +203,7 @@ Commands:
   setup      First-run scaffold, hook install, validation, doctor, and daemon start.
   init       Scaffold OpenCanon skill files, validators, optional config, and agent setup brief.
   rules      List validator summaries, scopes, decisions, and fixture coverage.
+  search     Search symbols, decisions, validators, and docs deterministically.
   validate   Run validators against files, changed files, fixtures, or the project.
   update     Check or install verified engine runtime assets from a release manifest.
   feedback   Run validators and render concise agent feedback.

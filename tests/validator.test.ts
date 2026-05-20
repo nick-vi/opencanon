@@ -31,6 +31,7 @@ import {
   noBypassComments,
   noHeaderComments,
   noUnusedExports,
+  migrationReferences,
   repeatedLiterals,
   requireExportPattern,
   requiredFileSibling,
@@ -277,6 +278,37 @@ test("structured fixes reject paths outside the project root", () => {
   }
 });
 
+test("structured fixes expose command fixes without executing them", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-fix-command-"));
+  try {
+    writeFileSync(path.join(rootDir, "target.ts"), "export const value = 1;\n");
+    const result = applyFindingFixes({
+      rootDir,
+      mode: FixModeValue.Suggested,
+      dryRun: false,
+      findings: [
+        {
+          validatorId: "command-fix",
+          severity: "warning",
+          file: "target.ts",
+          line: 1,
+          message: "Run formatter.",
+          fix: {
+            safety: "suggested",
+            description: "Run the project formatter.",
+            command: "bun run format",
+          },
+        },
+      ],
+    });
+
+    assert.equal(result.appliedEdits, 0);
+    assert.equal(result.skipped[0].reason, "Fix command is advisory and is not auto-executed: bun run format");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("validator summary callbacks resolve from effective metadata", () => {
   const resolved = resolveValidators(
     defineValidator({
@@ -445,6 +477,50 @@ test("noUnusedExports reports exported symbols without graph callers", async () 
       findings.map((finding) => `${finding.file}:${finding.line}:${finding.message}`),
       ["src/company.ts:5:Exported symbol has no known project caller."],
     );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("migrationReferences downgrades baseline-known matches", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-migration-ref-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/old.ts"), "legacyApi();\nlegacyApi();\n");
+    const validator = resolveValidators(
+      migrationReferences({
+        id: "legacy-api-migration",
+        topics: ["migration"],
+        severity: "error",
+        in: ["src/**/*.ts"],
+        pattern: "\\blegacyApi\\(",
+        message: "legacyApi is migrated; use currentApi.",
+      }),
+    ).validators[0];
+    const ctx = createValidationContext({
+      rootDir,
+      paths: createPaths(rootDir),
+      files: ["src/old.ts"],
+      targetFiles: ["src/old.ts"],
+      validator,
+    });
+    const first = await validator.validate({ ctx, runtime: createRuntime(createPaths(rootDir), []) });
+    assert.deepEqual(first.map((finding) => finding.severity), ["error", "error"]);
+
+    mkdirSync(path.join(rootDir, ".opencanon"), { recursive: true });
+    writeFileSync(
+      path.join(rootDir, ".opencanon/baseline.json"),
+      JSON.stringify({ version: 1, findings: [{ key: "legacy-api-migration\u0000src/old.ts\u00001\u0000legacyApi is migrated; use currentApi.", validatorId: "legacy-api-migration", file: "src/old.ts", line: 1, message: "legacyApi is migrated; use currentApi." }] }),
+    );
+    const knownCtx = createValidationContext({
+      rootDir,
+      paths: createPaths(rootDir),
+      files: ["src/old.ts"],
+      targetFiles: ["src/old.ts"],
+      validator,
+    });
+    const next = await validator.validate({ ctx: knownCtx, runtime: createRuntime(createPaths(rootDir), []) });
+    assert.deepEqual(next.map((finding) => finding.severity), ["warning", "error"]);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

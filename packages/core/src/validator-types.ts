@@ -22,6 +22,7 @@ export type TextEdit = {
 export type FindingFix = {
   safety: FixSafety;
   description: string;
+  command?: string;
   edits?: TextEdit[];
 };
 

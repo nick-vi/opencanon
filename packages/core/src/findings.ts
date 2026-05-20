@@ -12,7 +12,7 @@ export function validateFindings(validator: Validator, findings: Finding[], cont
   const diagnostics: string[] = [];
   for (const finding of findings) {
     if (finding.validatorId !== validator.id) diagnostics.push(`Finding validatorId must be ${validator.id}.`);
-    if (finding.severity !== validator.severity) diagnostics.push(`Finding severity must be ${validator.severity}.`);
+    if (!["error", "warning"].includes(finding.severity)) diagnostics.push(`Finding from ${validator.id} has invalid severity.`);
     if (!finding.file) diagnostics.push(`Finding from ${validator.id} is missing file.`);
     if (!Number.isInteger(finding.line) || finding.line < 1) diagnostics.push(`Finding from ${validator.id} has invalid line.`);
     if (!finding.message) diagnostics.push(`Finding from ${validator.id} is missing message.`);
@@ -43,6 +43,9 @@ function validateFix(finding: Finding): string[] {
   const validSafety = new Set<FixSafety>(["safe", "suggested", "manual"]);
   if (!validSafety.has(finding.fix?.safety as FixSafety)) diagnostics.push(`Finding from ${finding.validatorId} has invalid fix safety.`);
   if (!finding.fix?.description) diagnostics.push(`Finding from ${finding.validatorId} fix is missing description.`);
+  if (finding.fix?.command !== undefined && (typeof finding.fix.command !== "string" || finding.fix.command.length === 0)) {
+    diagnostics.push(`Finding from ${finding.validatorId} fix command must be a non-empty string when present.`);
+  }
 
   for (const edit of finding.fix?.edits ?? []) {
     if (!edit.file) diagnostics.push(`Finding from ${finding.validatorId} has a fix edit without file.`);
@@ -59,4 +62,3 @@ function validateFix(finding: Finding): string[] {
 export function findingKey(finding: Pick<Finding, "validatorId" | "file" | "line" | "message">): string {
   return [finding.validatorId, finding.file, finding.line ?? 1, finding.message].join(FactKeySeparator);
 }
-

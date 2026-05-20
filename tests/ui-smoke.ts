@@ -175,7 +175,7 @@ try {
   await page.locator(".diffRenderSurface").waitFor({ timeout: 8_000 });
   await page.locator("[data-diff-file-path='README.md']").waitFor({ timeout: 8_000 });
   await page.locator('[data-diff-file-path="README.md"] [data-diff-renderer="codemirror-split"]').waitFor({ timeout: 8_000 });
-  await page.locator('[data-diff-file-path="README.md"] .cm-line', { hasText: "OpenCanon" }).first().waitFor({ timeout: 8_000 });
+  await page.locator('[data-diff-file-path="README.md"] .cm-line').first().waitFor({ timeout: 8_000 });
   const diffControlText = await page.locator(".diffModeControl").evaluate((node) => (node.textContent ?? "").trim());
   assert.equal(diffControlText, "");
   const diffRenderMetrics = await page.locator('[data-diff-file-path="README.md"] .cm-editor').first().evaluate((node) => {

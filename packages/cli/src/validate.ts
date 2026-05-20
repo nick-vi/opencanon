@@ -324,6 +324,7 @@ function renderFindings(result: ValidationResult): string {
     lines.push(`  ${finding.message}`);
     if (finding.fix) {
       lines.push(`  Fix (${finding.fix.safety}): ${finding.fix.description}`);
+      if (finding.fix.command) lines.push(`  Command: ${finding.fix.command}`);
       if (finding.fix.edits && finding.fix.edits.length > 0) lines.push(`  Edits: ${finding.fix.edits.length}`);
     }
     if (finding.decisionIds && finding.decisionIds.length > 0) lines.push(`  Decisions: ${finding.decisionIds.join(", ")}`);

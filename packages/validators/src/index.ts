@@ -16,3 +16,4 @@ export { noCommentMatches, noHeaderComments, noBypassComments, noForbiddenCalls,
 export { externalCommand, externalDiagnostics } from "./factories/external.ts";
 export { noBareExcept } from "./factories/python.ts";
 export { duplicateBoundaryLiterals, sensitiveChangePolicy } from "./factories/impact.ts";
+export { migrationReferences } from "./factories/migration.ts";

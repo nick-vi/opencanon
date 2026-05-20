@@ -348,7 +348,7 @@ impl EngineProjectHandle {
         }
         tx.execute("delete from code_edges", [])
             .map_err(|error| sqlite_error("Could not clear resolved code edges", error))?;
-        resolve_exact_code_edges(&tx)?;
+        resolve_exact_code_edges(&tx, &self.root_dir)?;
 
         tx.commit()
             .map_err(|error| sqlite_error("Could not commit graph index transaction", error))?;
@@ -952,7 +952,7 @@ fn code_symbol_json(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<
     }))
 }
 
-fn resolve_exact_code_edges(tx: &rusqlite::Transaction<'_>) -> napi::Result<()> {
+fn resolve_exact_code_edges(tx: &rusqlite::Transaction<'_>, root_dir: &str) -> napi::Result<()> {
     let nodes = load_resolver_nodes(tx)?;
     let references = load_resolver_references(tx)?;
     let mut nodes_by_file_name: HashMap<(String, String), Vec<ResolverNode>> = HashMap::new();
@@ -995,6 +995,7 @@ fn resolve_exact_code_edges(tx: &rusqlite::Transaction<'_>) -> napi::Result<()> 
         .iter()
         .map(|node| node.path.clone())
         .collect::<HashSet<_>>();
+    let module_resolver = ModuleResolver::new(root_dir, &indexed_paths);
 
     for reference in references
         .iter()
@@ -1010,7 +1011,7 @@ fn resolve_exact_code_edges(tx: &rusqlite::Transaction<'_>) -> napi::Result<()> 
             &exported_by_file_name,
             &nodes_by_name,
             &imports_by_file_name,
-            &indexed_paths,
+            &module_resolver,
         );
         let Some(target) = target else { continue };
         if source.id == target.id {
@@ -1112,7 +1113,7 @@ fn resolve_reference_target(
     exported_by_file_name: &HashMap<(String, String), Vec<ResolverNode>>,
     nodes_by_name: &HashMap<String, Vec<ResolverNode>>,
     imports_by_file_name: &HashMap<(String, String), Vec<ResolverReference>>,
-    indexed_paths: &HashSet<String>,
+    module_resolver: &ModuleResolver,
 ) -> Option<ResolverNode> {
     if let Some(same_file) =
         nodes_by_file_name.get(&(reference.path.clone(), reference.name.clone()))
@@ -1126,9 +1127,11 @@ fn resolve_reference_target(
     {
         let mut targets = Vec::new();
         for import in imports {
-            let Some(source_path) = import.source.as_deref().and_then(|source| {
-                resolve_relative_module_path(&reference.path, source, indexed_paths)
-            }) else {
+            let Some(source_path) = import
+                .source
+                .as_deref()
+                .and_then(|source| module_resolver.resolve(&reference.path, source))
+            else {
                 continue;
             };
             match import.kind.as_str() {
@@ -1177,6 +1180,96 @@ fn exported_nodes_for_path(
         .collect()
 }
 
+struct ModuleResolver {
+    indexed_paths: HashSet<String>,
+    aliases: Vec<TsAlias>,
+    workspaces: Vec<WorkspacePackage>,
+}
+
+struct TsAlias {
+    config_root: String,
+    base_dir: String,
+    pattern: String,
+    targets: Vec<String>,
+}
+
+struct WorkspacePackage {
+    name: String,
+    root: String,
+}
+
+impl ModuleResolver {
+    fn new(root_dir: &str, indexed_paths: &HashSet<String>) -> Self {
+        Self {
+            indexed_paths: indexed_paths.clone(),
+            aliases: read_ts_aliases(root_dir),
+            workspaces: read_workspace_packages(root_dir),
+        }
+    }
+
+    fn resolve(&self, from_path: &str, source: &str) -> Option<String> {
+        if source.starts_with('.') {
+            return resolve_relative_module_path(from_path, source, &self.indexed_paths);
+        }
+        self.resolve_alias(from_path, source)
+            .or_else(|| self.resolve_workspace(source))
+    }
+
+    fn resolve_alias(&self, from_path: &str, source: &str) -> Option<String> {
+        let mut aliases = self
+            .aliases
+            .iter()
+            .filter(|alias| {
+                alias.config_root.is_empty()
+                    || from_path == alias.config_root
+                    || from_path.starts_with(&format!("{}/", alias.config_root))
+            })
+            .collect::<Vec<_>>();
+        aliases.sort_by_key(|alias| std::cmp::Reverse(alias.config_root.len()));
+
+        for alias in aliases {
+            let Some(wildcard) = match_alias_pattern(&alias.pattern, source) else {
+                continue;
+            };
+            for target in alias.targets.iter() {
+                let target_path = target.replace('*', &wildcard);
+                let base = normalize_relative_path(&Path::new(&alias.base_dir).join(target_path));
+                if let Some(resolved) = resolve_candidate_path(&base, &self.indexed_paths) {
+                    return Some(resolved);
+                }
+            }
+        }
+        None
+    }
+
+    fn resolve_workspace(&self, source: &str) -> Option<String> {
+        let mut packages = self.workspaces.iter().collect::<Vec<_>>();
+        packages.sort_by_key(|package| std::cmp::Reverse(package.name.len()));
+        let package = packages.into_iter().find(|package| {
+            source == package.name || source.starts_with(&format!("{}/", package.name))
+        })?;
+        let subpath = if source == package.name {
+            ""
+        } else {
+            &source[package.name.len() + 1..]
+        };
+        let bases = if subpath.is_empty() {
+            vec![
+                format!("{}/src/index", package.root),
+                format!("{}/index", package.root),
+            ]
+        } else {
+            vec![
+                format!("{}/{}", package.root, subpath),
+                format!("{}/src/{}", package.root, subpath),
+            ]
+        };
+        bases
+            .iter()
+            .find_map(|base| resolve_candidate_path(base, &self.indexed_paths))
+    }
+}
+
 fn resolve_relative_module_path(
     from_path: &str,
     source: &str,
@@ -1206,6 +1299,23 @@ fn resolve_relative_module_path(
         .find(|candidate| indexed_paths.contains(candidate))
 }
 
+fn resolve_candidate_path(base: &str, indexed_paths: &HashSet<String>) -> Option<String> {
+    let candidates = [
+        base.to_string(),
+        format!("{base}.ts"),
+        format!("{base}.tsx"),
+        format!("{base}.js"),
+        format!("{base}.jsx"),
+        format!("{base}/index.ts"),
+        format!("{base}/index.tsx"),
+        format!("{base}/index.js"),
+        format!("{base}/index.jsx"),
+    ];
+    candidates
+        .into_iter()
+        .find(|candidate| indexed_paths.contains(candidate))
+}
+
 fn normalize_relative_path(path: &Path) -> String {
     let mut parts = Vec::new();
     for component in path.components() {
@@ -1220,6 +1330,197 @@ fn normalize_relative_path(path: &Path) -> String {
         }
     }
     parts.join("/")
+}
+
+fn read_ts_aliases(root_dir: &str) -> Vec<TsAlias> {
+    find_config_files(root_dir, |name| {
+        name.starts_with("tsconfig") && name.ends_with(".json")
+    })
+    .iter()
+    .flat_map(|file| {
+        let config = read_json(root_dir, file);
+        let Some(paths) = config
+            .get("compilerOptions")
+            .and_then(|value| value.get("paths"))
+            .and_then(|value| value.as_object())
+        else {
+            return Vec::new();
+        };
+        let config_root =
+            normalize_relative_path(Path::new(file).parent().unwrap_or_else(|| Path::new("")));
+        let normalized_root = if config_root == "." {
+            String::new()
+        } else {
+            config_root
+        };
+        let base_url = config
+            .get("compilerOptions")
+            .and_then(|value| value.get("baseUrl"))
+            .and_then(|value| value.as_str())
+            .unwrap_or(".");
+        let base_dir = normalize_relative_path(&Path::new(&normalized_root).join(base_url));
+
+        paths
+            .iter()
+            .filter_map(|(pattern, value)| {
+                let targets = value
+                    .as_array()?
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect::<Vec<_>>();
+                if targets.is_empty() {
+                    return None;
+                }
+                Some(TsAlias {
+                    config_root: normalized_root.clone(),
+                    base_dir: base_dir.clone(),
+                    pattern: pattern.clone(),
+                    targets,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .collect()
+}
+
+fn read_workspace_packages(root_dir: &str) -> Vec<WorkspacePackage> {
+    find_config_files(root_dir, |name| name == "package.json")
+        .iter()
+        .filter_map(|file| {
+            let json = read_json(root_dir, file);
+            let name = json.get("name").and_then(|value| value.as_str())?;
+            let root =
+                normalize_relative_path(Path::new(file).parent().unwrap_or_else(|| Path::new("")));
+            Some(WorkspacePackage {
+                name: name.to_string(),
+                root,
+            })
+        })
+        .collect()
+}
+
+fn find_config_files(root_dir: &str, matches_name: fn(&str) -> bool) -> Vec<String> {
+    let mut output = Vec::new();
+    collect_config_files(
+        Path::new(root_dir),
+        Path::new(""),
+        matches_name,
+        &mut output,
+    );
+    output.sort();
+    output
+}
+
+fn collect_config_files(
+    root_dir: &Path,
+    relative_dir: &Path,
+    matches_name: fn(&str) -> bool,
+    output: &mut Vec<String>,
+) {
+    let absolute_dir = root_dir.join(relative_dir);
+    let Ok(entries) = fs::read_dir(absolute_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if matches!(
+            name.as_str(),
+            "node_modules" | ".git" | ".opencanon" | "dist" | "build" | "coverage"
+        ) {
+            continue;
+        }
+        let relative_path = relative_dir.join(&name);
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_config_files(root_dir, &relative_path, matches_name, output);
+        } else if file_type.is_file() && matches_name(&name) {
+            output.push(normalize_relative_path(&relative_path));
+        }
+    }
+}
+
+fn read_json(root_dir: &str, file: &str) -> serde_json::Value {
+    let path = Path::new(root_dir).join(file);
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&strip_json_comments(&text)).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn strip_json_comments(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while let Some(char) = chars.next() {
+        if in_string {
+            output.push(char);
+            if escaped {
+                escaped = false;
+            } else if char == '\\' {
+                escaped = true;
+            } else if char == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if char == '"' {
+            in_string = true;
+            output.push(char);
+            continue;
+        }
+
+        if char == '/' {
+            match chars.peek().copied() {
+                Some('/') => {
+                    chars.next();
+                    for next in chars.by_ref() {
+                        if next == '\n' {
+                            output.push('\n');
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some('*') => {
+                    chars.next();
+                    let mut previous = '\0';
+                    for next in chars.by_ref() {
+                        if next == '\n' {
+                            output.push('\n');
+                        }
+                        if previous == '*' && next == '/' {
+                            break;
+                        }
+                        previous = next;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        output.push(char);
+    }
+
+    output
+}
+
+fn match_alias_pattern(pattern: &str, source: &str) -> Option<String> {
+    if !pattern.contains('*') {
+        return (pattern == source).then(String::new);
+    }
+    let mut parts = pattern.splitn(2, '*');
+    let prefix = parts.next().unwrap_or("");
+    let suffix = parts.next().unwrap_or("");
+    if !source.starts_with(prefix) || !source.ends_with(suffix) {
+        return None;
+    }
+    Some(source[prefix.len()..source.len() - suffix.len()].to_string())
 }
 
 fn insert_code_edge(

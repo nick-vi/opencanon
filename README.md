@@ -18,6 +18,7 @@ bun .agents/skills/opencanon/scripts/opencanon.ts setup --yes --hooks codex
 ```bash
 bun run opencanon context --files src/services/company.service.ts
 bun run opencanon rules --validator service-no-db-client
+bun run opencanon search loadCompany
 bun run opencanon symbols loadCompany
 bun run opencanon graph callers loadCompany
 bun run opencanon validate --changed
@@ -27,6 +28,7 @@ bun run opencanon doctor
 
 - `context` loads the docs, decisions, validators, and optional git history relevant to files or topics.
 - `rules` lists validator summaries, scopes, decisions, and fixture coverage.
+- `search` searches symbols, decisions, validators, and docs with deterministic fuzzy matching.
 - `symbols` searches the local TS/JS code graph.
 - `graph` inspects deterministic caller, callee, and impact edges.
 - `validate` runs validators against files, changed files, fixtures, or the whole project.
@@ -203,7 +205,9 @@ Validator results can be synchronous or asynchronous. The CLI awaits all validat
 
 Finding resolution policy: any validation finding must be addressed before an agent completes the task. Agents fix code to match current decisions, fix bugged validators with fixtures when the validator is wrong, or ask the user before changing a decision. `error` findings are blocking and make the CLI exit nonzero. `warning` findings are non-blocking by default; the CLI exits zero unless `--strict-warnings` is used. Markdown validation output includes a decision-update request template and points to `context --list-exceptions` for auditing documented exceptions.
 
-Curated factories are optional imports from the skill barrel. They are never auto-enabled; the local validator file remains the source of truth. Available factories include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
+Curated factories are optional imports from the skill barrel. They are never auto-enabled; the local validator file remains the source of truth. Available factories include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
+
+Fixes can include structured edits or an advisory command. `--fix` applies only structured edits; command fixes are printed for the agent and are never executed by OpenCanon.
 
 `externalCommand` and `externalDiagnostics` resolve `externalTools` aliases before spawning. Their `args` and `cwd` support `{root}`, `{config}`, `{cache}`, `{files}`, `{targetFiles}`, `{changed}`, `{analysisFiles}`, and `{projectFiles}`. Exact file-list tokens expand to multiple command arguments, and configured working directories must resolve inside the project root.
 

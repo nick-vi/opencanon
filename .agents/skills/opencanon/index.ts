@@ -21,6 +21,8 @@ export {
   noLayerCall,
   noNativeEnums,
   noSecretLikeLiterals,
+  noUnusedExports,
+  migrationReferences,
   repeatedLiterals,
   requireExportPattern,
   requiredFileSibling,

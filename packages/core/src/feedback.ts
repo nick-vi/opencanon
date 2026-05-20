@@ -146,6 +146,7 @@ export function renderFeedbackMarkdown(result: FeedbackResult, options: Feedback
         lines.push(`- [${finding.severity}] line ${finding.line} ${finding.validatorId}`);
         lines.push(`  ${finding.message}`);
         if (finding.fix) lines.push(`  Fix (${finding.fix.safety}): ${finding.fix.description}`);
+        if (finding.fix?.command) lines.push(`  Command: ${finding.fix.command}`);
         if (finding.decisionIds && finding.decisionIds.length > 0) lines.push(`  Decisions: ${finding.decisionIds.join(", ")}`);
         if (finding.docs && finding.docs.length > 0) lines.push(`  Docs: ${finding.docs.join(", ")}`);
         renderedFindings += 1;

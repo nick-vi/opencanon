@@ -140,13 +140,13 @@ Validator fixes are structured and safety-tagged:
 - `suggested`: plausible edit requiring explicit opt-in.
 - `manual`: diagnostic only.
 
-Use `fix: { safety, description, edits }` for automatic fixes. `--fix` only applies structured edits centrally; callback mutation is not part of the validator contract.
+Use `fix: { safety, description, edits }` for automatic fixes. `--fix` only applies structured edits centrally; callback mutation is not part of the validator contract. Use `fix: { safety, description, command }` for advisory command fixes; OpenCanon prints command fixes but never executes them during `--fix`.
 
 Only add validators for mechanically checkable rules. Do not change the CLI output contract or validator runtime unless the task is to improve the framework itself.
 
 Distributed skills import the bundled CLI from `runtime/`. In the source checkout, the skill script and authoring barrel fall back to workspace packages when the ignored generated runtime is absent. Framework behavior belongs in the development packages and generated runtime bundle, not in repo-local validator files. The skill root `index.ts` is the stable local authoring barrel for validators.
 
-Curated validator factories are opt-in helpers exposed through the skill barrel. Import them explicitly in the local validators file; do not enable hidden default policies. Available helpers include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
+Curated validator factories are opt-in helpers exposed through the skill barrel. Import them explicitly in the local validators file; do not enable hidden default policies. Available helpers include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, and `sensitiveChangePolicy`.
 
 ```ts
 import { fileNames, noImports } from "../index.ts";
@@ -168,6 +168,8 @@ bun run opencanon rules --validator <id>
 bun run opencanon rules --topic <topic>
 bun run opencanon rules --tree
 bun run opencanon rules --tree --ascii --no-color
+bun run opencanon search <query>
+bun run opencanon search <query> --kind symbol --format json
 bun run opencanon context --list-topics
 bun run opencanon context --list-exceptions
 bun run opencanon context --files <paths...>

@@ -430,6 +430,98 @@ fn indexes_code_graph_for_typescript_files() {
 }
 
 #[test]
+fn resolves_alias_and_workspace_import_graph_edges() {
+    let root = test_root("graph-alias-workspace");
+    fs::create_dir_all(root.join("src/core")).unwrap();
+    fs::create_dir_all(root.join("packages/tools/src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"root","workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("tsconfig.json"),
+        "{\n  // comments are valid in tsconfig files\n  \"compilerOptions\": { \"baseUrl\": \".\", \"paths\": { \"@core/*\": [\"src/core/*\"] } }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("packages/tools/package.json"),
+        r#"{"name":"@scope/tools"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/core/log.ts"),
+        "export function writeLog() { return true; }\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("packages/tools/src/index.ts"),
+        "export function formatTool() { return true; }\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/app.ts"),
+        "import { writeLog } from '@core/log';\nimport { formatTool } from '@scope/tools';\nexport function runApp() {\n  writeLog();\n  formatTool();\n}\n",
+    )
+    .unwrap();
+
+    let project = open_test_project(&root);
+    project
+        .scan_and_diff_json(
+            json!({ "files": ["src/app.ts", "src/core/log.ts", "packages/tools/src/index.ts", "package.json", "tsconfig.json", "packages/tools/package.json"] }).to_string(),
+        )
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [{
+                    "path": "src/app.ts",
+                    "contentHash": "hash-app",
+                    "language": "typescript"
+                }, {
+                    "path": "src/core/log.ts",
+                    "contentHash": "hash-log",
+                    "language": "typescript"
+                }, {
+                    "path": "packages/tools/src/index.ts",
+                    "contentHash": "hash-tools",
+                    "language": "typescript"
+                }],
+                "parserVersion": "test-parser",
+                "extractorVersion": "test-extractor"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    let alias_edges = project
+        .search_graph_edges_json(
+            json!({ "query": "writeLog", "direction": "incoming", "kind": "call" }).to_string(),
+        )
+        .unwrap();
+    let alias_edges: Value = serde_json::from_str(&alias_edges).unwrap();
+    assert!(alias_edges["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edge| edge["source"]["name"] == "runApp"
+            && edge["target"]["path"] == "src/core/log.ts"));
+
+    let workspace_edges = project
+        .search_graph_edges_json(
+            json!({ "query": "formatTool", "direction": "incoming", "kind": "call" }).to_string(),
+        )
+        .unwrap();
+    let workspace_edges: Value = serde_json::from_str(&workspace_edges).unwrap();
+    assert!(workspace_edges["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edge| edge["source"]["name"] == "runApp"
+            && edge["target"]["path"] == "packages/tools/src/index.ts"));
+}
+
+#[test]
 fn replaces_code_nodes_when_files_change() {
     let root = test_root("graph-replace");
     fs::create_dir_all(root.join("src")).unwrap();

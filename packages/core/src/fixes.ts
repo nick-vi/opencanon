@@ -68,7 +68,7 @@ export function applyFindingFixes(params: {
         line: finding.line,
         validatorId: finding.validatorId,
         safety: finding.fix.safety,
-        reason: "Fix has no structured edits.",
+        reason: finding.fix.command ? `Fix command is advisory and is not auto-executed: ${finding.fix.command}` : "Fix has no structured edits.",
       });
       continue;
     }

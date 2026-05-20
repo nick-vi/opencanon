@@ -88,6 +88,13 @@ export type NoUnusedExportsOptions = FindingOptions & {
   kinds?: Array<"function" | "class" | "method" | "variable" | "type" | "interface" | "enum" | "property" | "unknown">;
 };
 
+export type MigrationReferencesOptions = FindingOptions & {
+  in: string[];
+  pattern: string | RegExp;
+  existingSeverity?: "warning" | "error";
+  newSeverity?: "warning" | "error";
+};
+
 export type NoNativeEnumsOptions = {
   in: string[];
   message?: string;
