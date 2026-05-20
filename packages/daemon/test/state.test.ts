@@ -41,6 +41,7 @@ test("daemon store can use an isolated state path", () => {
           JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
+        searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
         startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
         drainWatcherEventsJson: () => JSON.stringify([]),
         stopWatcher: () => undefined,

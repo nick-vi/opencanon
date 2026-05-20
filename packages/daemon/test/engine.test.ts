@@ -68,6 +68,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
         JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
       searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
       searchReferencesJson: () => JSON.stringify({ references: [] }),
+      searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
       startWatcherJson: (_request: string, callback: (error: unknown, batchJson?: string) => void) => {
         callback(null, JSON.stringify({ rootDir: "/repo", paths: ["src/company.ts"], stale: false, timestamp: "123" }));
         return JSON.stringify({ running: true, debounceMs: 250, bufferCapacity: 128 });

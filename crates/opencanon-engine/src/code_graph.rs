@@ -126,6 +126,27 @@ pub(crate) fn compute_unresolved_id(
     hasher.finalize().to_hex().to_string()
 }
 
+pub(crate) fn compute_edge_id(
+    source_id: &str,
+    target_id: &str,
+    kind: &str,
+    path: &str,
+    start_byte: i64,
+) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"edge:v1\0");
+    hasher.update(source_id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(target_id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(kind.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(path.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(start_byte.to_le_bytes().as_slice());
+    hasher.finalize().to_hex().to_string()
+}
+
 struct LineIndex {
     starts: Vec<usize>,
 }

@@ -10,6 +10,7 @@ import { runBenchmarkCommand } from "./benchmark.ts";
 import { runBaselineCommand } from "./baseline.ts";
 import { runBundleCommand } from "./bundle.ts";
 import { runFeedbackCommand, runHookCommand } from "./feedback.ts";
+import { runGraphCommand } from "./graph.ts";
 import { runInitCommand } from "./init.ts";
 import { loadProjectContext } from "./project.ts";
 import { runContextCommand } from "./context.ts";
@@ -110,6 +111,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
+  if (command === "graph") {
+    await runGraphCommand(rest, cwd);
+    return;
+  }
+
   if (command === "refactor") {
     await runRefactorCommand(rest, cwd);
     return;
@@ -200,6 +206,7 @@ Commands:
   baseline   Show or update the known findings baseline.
   bundle     Inspect, plan, install, or update canon bundles.
   symbols    Search the deterministic TS/JS code symbol graph.
+  graph      Inspect deterministic callers, callees, and impact edges.
   refactor   Plan or apply deterministic symbol/import/file refactors.
 
 Maintenance:

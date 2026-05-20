@@ -11,8 +11,8 @@ use rusqlite::{params, Connection};
 use serde_json::json;
 
 use crate::code_graph::{
-    compute_node_id, compute_unresolved_id, CodeExtractionInput, CodeExtractor, ExtractedNode,
-    ExtractedUnresolved, OxcExtractor,
+    compute_edge_id, compute_node_id, compute_unresolved_id, CodeExtractionInput, CodeExtractor,
+    ExtractedNode, ExtractedUnresolved, OxcExtractor,
 };
 use crate::constants::{
     EXTRACTOR_VERSION, PARSER_VERSION, WATCHER_DEFAULT_BUFFER_CAPACITY,
@@ -22,8 +22,8 @@ use crate::constants::{
 use crate::contracts::{
     BuildRepoGraphRequest, ExtractFactsRequest, FactDiagnostic, IndexCodeGraphRequest,
     ListEventsRequest, OpenProjectRequest, ResolvedProjectSettings, ScanAndDiffRequest,
-    SearchReferencesRequest, SearchSymbolsRequest, StartWatcherRequest, WatcherStartResult,
-    WatcherStatus, WriteEventRequest,
+    SearchGraphEdgesRequest, SearchReferencesRequest, SearchSymbolsRequest, StartWatcherRequest,
+    WatcherStartResult, WatcherStatus, WriteEventRequest,
 };
 use crate::facts::{package_nodes, scan_file_facts};
 use crate::json::{decode, encode, napi_error, notify_error, sqlite_error};
@@ -269,6 +269,8 @@ impl EngineProjectHandle {
             .map_err(|error| sqlite_error("Could not start graph index transaction", error))?;
 
         for path in request.deleted_files.iter() {
+            tx.execute("delete from code_edges where path = ?1", params![path])
+                .map_err(|error| sqlite_error("Could not delete code edges", error))?;
             tx.execute("delete from code_nodes where path = ?1", params![path])
                 .map_err(|error| sqlite_error("Could not delete code nodes", error))?;
             tx.execute(
@@ -285,6 +287,8 @@ impl EngineProjectHandle {
 
         let mut indexed = Vec::new();
         for (file, result) in prepared.iter() {
+            tx.execute("delete from code_edges where path = ?1", params![file.path])
+                .map_err(|error| sqlite_error("Could not clear prior code edges", error))?;
             tx.execute("delete from code_nodes where path = ?1", params![file.path])
                 .map_err(|error| sqlite_error("Could not clear prior code nodes", error))?;
             tx.execute(
@@ -342,6 +346,9 @@ impl EngineProjectHandle {
                 }));
             }
         }
+        tx.execute("delete from code_edges", [])
+            .map_err(|error| sqlite_error("Could not clear resolved code edges", error))?;
+        resolve_exact_code_edges(&tx)?;
 
         tx.commit()
             .map_err(|error| sqlite_error("Could not commit graph index transaction", error))?;
@@ -535,6 +542,111 @@ impl EngineProjectHandle {
                 .push(row.map_err(|error| sqlite_error("Could not decode reference row", error))?);
         }
         encode(&json!({ "references": references }))
+    }
+
+    #[napi(js_name = "searchGraphEdgesJson")]
+    pub fn search_graph_edges_json(&self, request: String) -> napi::Result<String> {
+        let request: SearchGraphEdgesRequest = decode(&request)?;
+        let limit = request.limit.unwrap_or(100).clamp(1, 1000) as i64;
+        let direction = request.direction.as_deref().unwrap_or("both");
+        if !matches!(direction, "incoming" | "outgoing" | "both") {
+            return Err(napi_error(
+                "invalid-engine-payload",
+                "Graph edge direction must be incoming, outgoing, or both.",
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+
+        let mut sql = String::from(
+            "select e.id, e.kind, e.provenance, e.confidence, e.path, e.start_line, e.start_column, e.start_byte,
+                    source.id, source.path, source.language, source.kind, source.name, source.qualified_name,
+                    source.exported, source.signature, source.start_line, source.start_column, source.start_byte,
+                    source.end_line, source.end_column, source.end_byte,
+                    target.id, target.path, target.language, target.kind, target.name, target.qualified_name,
+                    target.exported, target.signature, target.start_line, target.start_column, target.start_byte,
+                    target.end_line, target.end_column, target.end_byte
+             from code_edges e
+             join code_nodes source on source.id = e.source_id
+             join code_nodes target on target.id = e.target_id
+             where 1 = 1",
+        );
+        let mut bind: Vec<rusqlite::types::Value> = Vec::new();
+        let mut next = 1;
+        if let Some(kind) = request.kind.as_deref() {
+            sql.push_str(&format!(" and e.kind = ?{next}"));
+            bind.push(kind.to_string().into());
+            next += 1;
+        }
+        if let Some(path) = request.path.as_deref() {
+            sql.push_str(&format!(" and e.path = ?{next}"));
+            bind.push(path.to_string().into());
+            next += 1;
+        }
+        if let Some(symbol_id) = request.symbol_id.as_deref() {
+            match direction {
+                "incoming" => sql.push_str(&format!(" and e.target_id = ?{next}")),
+                "outgoing" => sql.push_str(&format!(" and e.source_id = ?{next}")),
+                _ => sql.push_str(&format!(
+                    " and (e.source_id = ?{next} or e.target_id = ?{next})"
+                )),
+            }
+            bind.push(symbol_id.to_string().into());
+            next += 1;
+        }
+        if let Some(query) = request
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            match direction {
+                "incoming" => sql.push_str(&format!(" and target.name = ?{next}")),
+                "outgoing" => sql.push_str(&format!(" and source.name = ?{next}")),
+                _ => sql.push_str(&format!(
+                    " and (source.name = ?{next} or target.name = ?{next})"
+                )),
+            }
+            bind.push(query.to_string().into());
+            next += 1;
+        }
+        sql.push_str(&format!(
+            " order by e.path, e.start_line, e.start_column limit ?{next}"
+        ));
+        bind.push(limit.into());
+
+        let mut statement = conn
+            .prepare(&sql)
+            .map_err(|error| sqlite_error("Could not prepare graph edge search", error))?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(bind), |row| {
+                Ok(json!({
+                  "id": row.get::<_, String>(0)?,
+                  "kind": row.get::<_, String>(1)?,
+                  "provenance": row.get::<_, String>(2)?,
+                  "confidence": row.get::<_, String>(3)?,
+                  "path": row.get::<_, String>(4)?,
+                  "range": {
+                    "start": {
+                      "line": row.get::<_, Option<i64>>(5)?.unwrap_or(1),
+                      "column": row.get::<_, Option<i64>>(6)?.unwrap_or(1),
+                      "byte": row.get::<_, Option<i64>>(7)?.unwrap_or(0),
+                    }
+                  },
+                  "source": code_symbol_json(row, 8)?,
+                  "target": code_symbol_json(row, 22)?,
+                }))
+            })
+            .map_err(|error| sqlite_error("Could not run graph edge search", error))?;
+
+        let mut edges = Vec::new();
+        for row in rows {
+            edges
+                .push(row.map_err(|error| sqlite_error("Could not decode graph edge row", error))?);
+        }
+        encode(&json!({ "edges": edges }))
     }
 
     #[napi]
@@ -811,6 +923,90 @@ fn insert_code_node(
         ],
     )
     .map_err(|error| sqlite_error("Could not insert code node", error))?;
+    Ok(())
+}
+
+fn code_symbol_json(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<serde_json::Value> {
+    Ok(json!({
+      "id": row.get::<_, String>(offset)?,
+      "path": row.get::<_, String>(offset + 1)?,
+      "language": row.get::<_, String>(offset + 2)?,
+      "kind": row.get::<_, String>(offset + 3)?,
+      "name": row.get::<_, String>(offset + 4)?,
+      "qualifiedName": row.get::<_, String>(offset + 5)?,
+      "exported": row.get::<_, i64>(offset + 6)? != 0,
+      "signature": row.get::<_, Option<String>>(offset + 7)?,
+      "range": {
+        "start": {
+          "line": row.get::<_, i64>(offset + 8)?,
+          "column": row.get::<_, i64>(offset + 9)?,
+          "byte": row.get::<_, i64>(offset + 10)?,
+        },
+        "end": {
+          "line": row.get::<_, i64>(offset + 11)?,
+          "column": row.get::<_, i64>(offset + 12)?,
+          "byte": row.get::<_, i64>(offset + 13)?,
+        },
+      },
+      "score": null,
+    }))
+}
+
+fn resolve_exact_code_edges(tx: &rusqlite::Transaction<'_>) -> napi::Result<()> {
+    let mut statement = tx
+        .prepare(
+            "select r.path, r.reference_name, r.reference_kind, r.start_line, r.start_column, r.start_byte,
+                    source.id, target.id
+             from unresolved_references r
+             join code_nodes target on target.name = r.reference_name
+             join code_nodes source on source.id = (
+               select candidate.id from code_nodes candidate
+               where candidate.path = r.path and candidate.start_byte <= r.start_byte
+               order by candidate.start_byte desc limit 1
+             )
+             where r.reference_kind in ('call', 'identifier')
+               and (select count(*) from code_nodes n where n.name = r.reference_name) = 1
+               and source.id != target.id",
+        )
+        .map_err(|error| sqlite_error("Could not prepare graph edge resolver", error))?;
+    let rows = statement
+        .query_map([], |row| {
+            let path = row.get::<_, String>(0)?;
+            let reference_kind = row.get::<_, String>(2)?;
+            let start_byte = row.get::<_, i64>(5)?;
+            let source_id = row.get::<_, String>(6)?;
+            let target_id = row.get::<_, String>(7)?;
+            Ok((
+                compute_edge_id(&source_id, &target_id, &reference_kind, &path, start_byte),
+                path,
+                reference_kind,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                start_byte,
+                source_id,
+                target_id,
+            ))
+        })
+        .map_err(|error| sqlite_error("Could not resolve graph edges", error))?;
+
+    let mut edges = Vec::new();
+    for row in rows {
+        edges.push(row.map_err(|error| sqlite_error("Could not decode graph edge", error))?);
+    }
+    drop(statement);
+
+    for (id, path, kind, start_line, start_column, start_byte, source_id, target_id) in edges {
+        tx.execute(
+            "insert into code_edges(id, source_id, target_id, kind, provenance, confidence, path, start_line, start_column, start_byte, metadata)
+             values (?1, ?2, ?3, ?4, 'oxc', 'exact', ?5, ?6, ?7, ?8, '{}')
+             on conflict(id) do update set source_id = excluded.source_id, target_id = excluded.target_id,
+               kind = excluded.kind, provenance = excluded.provenance, confidence = excluded.confidence,
+               path = excluded.path, start_line = excluded.start_line, start_column = excluded.start_column,
+               start_byte = excluded.start_byte, metadata = excluded.metadata",
+            params![id, source_id, target_id, kind, path, start_line, start_column, start_byte],
+        )
+        .map_err(|error| sqlite_error("Could not insert code edge", error))?;
+    }
     Ok(())
 }
 

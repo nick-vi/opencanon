@@ -11,6 +11,8 @@ import {
   EngineProjectStatusSchema,
   OpenCanonError,
   OpenProjectRequestSchema,
+  SearchGraphEdgesRequestSchema,
+  SearchGraphEdgesResultSchema,
   SearchReferencesRequestSchema,
   SearchReferencesResultSchema,
   ScanAndDiffResultSchema,
@@ -174,6 +176,44 @@ test("code reference contracts parse indexed references", () => {
   });
 
   assert.equal(result.references[0].source, "./log");
+});
+
+test("code graph edge contracts parse resolved edges", () => {
+  assert.deepEqual(SearchGraphEdgesRequestSchema.parse({ query: "logger", direction: "incoming", limit: 20 }), {
+    query: "logger",
+    direction: "incoming",
+    limit: 20,
+  });
+
+  const symbol = {
+    id: "symbol",
+    path: "src/company.ts",
+    language: "typescript",
+    kind: "function",
+    name: "logger",
+    qualifiedName: "src/company.ts::logger",
+    exported: true,
+    range: {
+      start: { line: 1, column: 17, byte: 16 },
+      end: { line: 1, column: 23, byte: 22 },
+    },
+  };
+  const result = SearchGraphEdgesResultSchema.parse({
+    edges: [
+      {
+        id: "edge",
+        kind: "call",
+        provenance: "oxc",
+        confidence: "exact",
+        path: "src/company.ts",
+        range: { start: { line: 2, column: 3, byte: 32 } },
+        source: { ...symbol, id: "source", name: "run", qualifiedName: "src/company.ts::run" },
+        target: symbol,
+      },
+    ],
+  });
+
+  assert.equal(result.edges[0].target.name, "logger");
 });
 
 test("daemon request and response contracts have deterministic defaults", () => {

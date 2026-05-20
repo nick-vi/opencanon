@@ -229,3 +229,20 @@ pub(crate) struct SearchReferencesRequest {
     #[serde(default)]
     pub(crate) limit: Option<u32>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchGraphEdgesRequest {
+    #[serde(default)]
+    pub(crate) query: Option<String>,
+    #[serde(default)]
+    pub(crate) symbol_id: Option<String>,
+    #[serde(default)]
+    pub(crate) path: Option<String>,
+    #[serde(default)]
+    pub(crate) kind: Option<String>,
+    #[serde(default)]
+    pub(crate) direction: Option<String>,
+    #[serde(default)]
+    pub(crate) limit: Option<u32>,
+}

@@ -17,6 +17,8 @@ import {
   OpenCanonError,
   ScanAndDiffRequestSchema,
   ScanAndDiffResultSchema,
+  SearchGraphEdgesRequestSchema,
+  SearchGraphEdgesResultSchema,
   SearchReferencesRequestSchema,
   SearchReferencesResultSchema,
   SearchSymbolsRequestSchema,
@@ -37,6 +39,8 @@ import {
   type OpenProjectRequest,
   type ScanAndDiffRequest,
   type ScanAndDiffResult,
+  type SearchGraphEdgesRequest,
+  type SearchGraphEdgesResult,
   type SearchReferencesRequest,
   type SearchReferencesResult,
   type SearchSymbolsRequest,
@@ -68,6 +72,7 @@ export type EngineProject = {
   indexCodeGraph(request: IndexCodeGraphRequest): IndexCodeGraphResult;
   searchSymbols(request: SearchSymbolsRequest): SearchSymbolsResult;
   searchReferences(request: SearchReferencesRequest): SearchReferencesResult;
+  searchGraphEdges(request: SearchGraphEdgesRequest): SearchGraphEdgesResult;
   startWatcher(request: WatcherStartRequest, onBatch: (batch: WatcherEventBatch) => void): WatcherStartResult;
   drainWatcherEvents(): WatcherEventBatch[];
   stopWatcher(): void;
@@ -89,6 +94,7 @@ type EngineProjectJsonBinding = {
   indexCodeGraphJson(request: string): string;
   searchSymbolsJson(request: string): string;
   searchReferencesJson(request: string): string;
+  searchGraphEdgesJson(request: string): string;
   startWatcherJson(request: string, callback: (error: unknown, batchJson?: string) => void): string;
   drainWatcherEventsJson(): string;
   stopWatcher(): void;
@@ -186,6 +192,8 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
       SearchSymbolsResultSchema.parse(parseJson(callEngine(() => project.searchSymbolsJson(JSON.stringify(SearchSymbolsRequestSchema.parse(request)))))),
     searchReferences: (request) =>
       SearchReferencesResultSchema.parse(parseJson(callEngine(() => project.searchReferencesJson(JSON.stringify(SearchReferencesRequestSchema.parse(request)))))),
+    searchGraphEdges: (request) =>
+      SearchGraphEdgesResultSchema.parse(parseJson(callEngine(() => project.searchGraphEdgesJson(JSON.stringify(SearchGraphEdgesRequestSchema.parse(request)))))),
     startWatcher: (request, onBatch) =>
       WatcherStartResultSchema.parse(
         parseJson(
@@ -233,6 +241,8 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "buildRepoGraphJson",
     "indexCodeGraphJson",
     "searchSymbolsJson",
+    "searchReferencesJson",
+    "searchGraphEdgesJson",
     "startWatcherJson",
     "drainWatcherEventsJson",
     "stopWatcher",

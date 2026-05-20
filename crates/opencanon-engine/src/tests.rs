@@ -310,7 +310,7 @@ fn indexes_code_graph_for_typescript_files() {
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(
         root.join("src/billing.ts"),
-        "import { logger } from \"./log\";\nexport function createInvoice(): number { return logger.info(1); }\nexport class InvoiceService {}\nexport const FLAG = 1;\nexport interface Invoice { id: string }\nexport type Amount = number;\n",
+        "import { logger } from \"./log\";\nfunction helper(): number { return 1; }\nexport function createInvoice(): number { logger.info(1); return helper(); }\nexport class InvoiceService {}\nexport const FLAG = 1;\nexport interface Invoice { id: string }\nexport type Amount = number;\n",
     )
     .unwrap();
 
@@ -355,7 +355,7 @@ fn indexes_code_graph_for_typescript_files() {
         .unwrap();
     assert_eq!(invoice["kind"], "function");
     assert_eq!(invoice["exported"], true);
-    assert_eq!(invoice["range"]["start"]["line"], 2);
+    assert_eq!(invoice["range"]["start"]["line"], 3);
     assert_eq!(invoice["range"]["start"]["column"], 17);
     assert!(invoice["id"].as_str().unwrap().len() >= 32);
 
@@ -371,6 +371,20 @@ fn indexes_code_graph_for_typescript_files() {
         .unwrap()
         .iter()
         .any(|reference| reference["kind"] == "identifier"));
+
+    let edges = project
+        .search_graph_edges_json(
+            json!({ "query": "helper", "direction": "incoming", "kind": "call" }).to_string(),
+        )
+        .unwrap();
+    let edges: Value = serde_json::from_str(&edges).unwrap();
+    assert!(edges["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(
+            |edge| edge["source"]["name"] == "createInvoice" && edge["target"]["name"] == "helper"
+        ));
 }
 
 #[test]

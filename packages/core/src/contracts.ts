@@ -649,6 +649,35 @@ export const SearchReferencesResultSchema = z.object({
 });
 export type SearchReferencesResult = z.infer<typeof SearchReferencesResultSchema>;
 
+export const SearchGraphEdgesRequestSchema = z.object({
+  query: z.string().min(1).optional(),
+  symbolId: z.string().min(1).optional(),
+  path: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  direction: z.enum(["incoming", "outgoing", "both"]).optional(),
+  limit: z.number().int().min(1).max(1000).optional(),
+});
+export type SearchGraphEdgesRequest = z.input<typeof SearchGraphEdgesRequestSchema>;
+
+export const CodeGraphEdgeSchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  provenance: z.string().min(1),
+  confidence: z.string().min(1),
+  path: z.string().min(1),
+  range: z.object({
+    start: SymbolRangePositionSchema,
+  }),
+  source: CodeSymbolSchema,
+  target: CodeSymbolSchema,
+});
+export type CodeGraphEdge = z.infer<typeof CodeGraphEdgeSchema>;
+
+export const SearchGraphEdgesResultSchema = z.object({
+  edges: z.array(CodeGraphEdgeSchema),
+});
+export type SearchGraphEdgesResult = z.infer<typeof SearchGraphEdgesResultSchema>;
+
 export const DaemonSuccessSchema = z.object({
   ok: z.literal(true),
   data: z.unknown(),
