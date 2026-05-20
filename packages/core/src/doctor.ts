@@ -63,7 +63,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   const corePackageJson = readPackageJson(path.join(paths.rootDir, "packages/core/package.json"));
   const cliPackageJson = readPackageJson(path.join(paths.rootDir, "packages/cli/package.json"));
   const daemonPackageJson = readPackageJson(path.join(paths.rootDir, "packages/daemon/package.json"));
-  const nativePackageJson = readPackageJson(path.join(paths.rootDir, "packages/engine/package.json"));
+  const enginePackageJson = readPackageJson(path.join(paths.rootDir, "packages/engine/package.json"));
   const uiPackageJson = readPackageJson(path.join(paths.rootDir, "packages/ui/package.json"));
   const openCanonWorkspace = isOpenCanonFrameworkWorkspace(corePackageJson);
 
@@ -132,7 +132,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
     details: scriptDiagnostics,
   });
 
-  const dependencyDiagnostics = validateDependencyPin(packageJson, corePackageJson, cliPackageJson, daemonPackageJson, nativePackageJson, uiPackageJson);
+  const dependencyDiagnostics = validateDependencyPin(packageJson, corePackageJson, cliPackageJson, daemonPackageJson, enginePackageJson, uiPackageJson);
   checks.push({
     id: "dependencies",
     status: dependencyDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
@@ -382,7 +382,7 @@ function validateDependencyPin(
   corePackageJson: Record<string, any> | null,
   cliPackageJson: Record<string, any> | null,
   daemonPackageJson: Record<string, any> | null,
-  nativePackageJson: Record<string, any> | null,
+  enginePackageJson: Record<string, any> | null,
   uiPackageJson: Record<string, any> | null,
 ): string[] {
   if (!isOpenCanonFrameworkWorkspace(corePackageJson)) return [];
@@ -435,7 +435,7 @@ function validateDependencyPin(
     { name: "@codemirror/state", version: "6.6.0", packageJson: uiPackageJson },
     { name: "@codemirror/view", version: "6.42.1", packageJson: uiPackageJson },
     { name: "@lezer/highlight", version: "1.2.3", packageJson: uiPackageJson },
-    { name: "@napi-rs/cli", version: "3.6.2", packageJson: nativePackageJson },
+    { name: "@napi-rs/cli", version: "3.6.2", packageJson: enginePackageJson },
     { name: "@types/bun", version: "1.3.14", packageJson },
     { name: "@types/node", version: "25.7.0", packageJson },
     {

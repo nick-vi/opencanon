@@ -133,7 +133,7 @@ export async function buildDaemonSnapshot(input: { cwd: string; engine: Engine; 
     throw new Error(factDiagnostics.map((diagnostic) => diagnostic.message).join("\n"));
   }
 
-  const nativeGraph = input.store.project.buildRepoGraph({
+  const engineGraph = input.store.project.buildRepoGraph({
     facts: facts.files,
     packageManifests: discovery.files.filter((file) => path.basename(file) === "package.json"),
   }).graph;
@@ -148,7 +148,7 @@ export async function buildDaemonSnapshot(input: { cwd: string; engine: Engine; 
     },
   });
   const graph: RepoGraph = {
-    ...nativeGraph,
+    ...engineGraph,
     importEdges: validationContext.imports().map((edge) => ({
       from: edge.from.path,
       source: edge.source,
