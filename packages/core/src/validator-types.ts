@@ -1,5 +1,6 @@
 import type { FactKind, ValidatorScope } from "./contracts.ts";
 import type { Baseline, ContextPaths, Decision, ImpactSurface, ProposedImpactNote } from "./core.ts";
+import type { PatternExplanation } from "./globs.ts";
 import type { TreeDefinition } from "./tree.ts";
 import type { ExportInfo, FunctionInfo, ImportInfo, LiteralInfo, TypeScriptDeclaration } from "./typescript.ts";
 import type { PythonClassInfo, PythonFunctionInfo, PythonImportInfo } from "./python.ts";
@@ -287,3 +288,90 @@ export type ValidationContext = {
   report(input: ReportInput): Finding;
 };
 
+export type ValidatorRuntime = {
+  rootDir: string;
+  paths: ContextPaths;
+  decisions: {
+    all: Decision[];
+    byId(id: string): Decision | undefined;
+    byTopic(topic: string): Decision[];
+  };
+  matches(file: string, globs: string[]): boolean;
+  globs: {
+    matches(file: string, patterns: string[]): boolean;
+    explain(file: string, patterns: string[]): PatternExplanation[];
+  };
+  naming: {
+    isPascalCase(value: string): boolean;
+    isCamelCase(value: string): boolean;
+    isKebabCase(value: string): boolean;
+    isSnakeCase(value: string): boolean;
+    isScreamingSnakeCase(value: string): boolean;
+  };
+};
+
+export type ValidatorArgs = {
+  ctx: ValidationContext;
+  runtime: ValidatorRuntime;
+};
+
+export type ValidatorSummaryInput = {
+  id: string;
+  topics: string[];
+  applies: string[];
+  severity: Severity;
+  scope: ValidatorScope;
+  facts: FactKind[];
+  decisionIds: string[];
+  docs: string[];
+};
+
+export type ValidatorSummary = string | ((definition: ValidatorSummaryInput) => string);
+
+export type ValidatorVisual = {
+  kind: "tree";
+  title?: string;
+  definition: TreeDefinition;
+};
+
+export type ValidatorDefinition = {
+  id: string;
+  topics?: string[];
+  applies?: string[];
+  severity?: Severity;
+  scope?: ValidatorScope;
+  facts?: FactKind[];
+  decisionIds?: string[];
+  docs?: string[];
+  summary?: ValidatorSummary;
+  visuals?: ValidatorVisual[];
+  validate?(args: ValidatorArgs): Finding[] | Promise<Finding[]>;
+  validators?: ValidatorDefinition[];
+};
+
+export type ValidatorFactoryBaseOptions = {
+  id: string;
+  topics: string[];
+  severity: Severity;
+  decisionIds?: string[];
+  docs?: string[];
+  summary?: ValidatorSummary;
+};
+
+export type ValidatorFactory<TOptions extends Record<string, unknown> = Record<string, never>> = (
+  options: ValidatorFactoryBaseOptions & TOptions,
+) => ValidatorDefinition;
+
+export type Validator = {
+  id: string;
+  topics: string[];
+  appliesScopes: string[][];
+  severity: Severity;
+  scope: ValidatorScope;
+  facts: FactKind[];
+  decisionIds: string[];
+  docs: string[];
+  summary?: string;
+  visuals: ValidatorVisual[];
+  validate(args: ValidatorArgs): Finding[] | Promise<Finding[]>;
+};

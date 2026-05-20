@@ -15,6 +15,7 @@ import { loadProjectContext } from "./project.ts";
 import { runContextCommand } from "./context.ts";
 import { runRulesCommand } from "./rules.ts";
 import { runSetupCommand } from "./setup.ts";
+import { runSymbolsCommand } from "./symbols.ts";
 import { runUpdateCommand } from "./update.ts";
 import { runValidateCommand } from "./validate.ts";
 
@@ -103,6 +104,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
+  if (command === "symbols") {
+    await runSymbolsCommand(rest, cwd);
+    return;
+  }
+
   fail(`Unknown command: ${command}`);
 }
 
@@ -170,6 +176,7 @@ function printHelp(): void {
   opencanon dev
   opencanon baseline check
   opencanon bundle install <bundle.ts|bundle.json> --option key=value
+  opencanon symbols <query>
 
 Commands:
   context    Load scoped docs, decisions, validators, and git evidence.
@@ -185,6 +192,7 @@ Commands:
   dev        Start the daemon and serve the built UI.
   baseline   Show or update the known findings baseline.
   bundle     Inspect, plan, install, or update canon bundles.
+  symbols    Search the deterministic TS/JS code symbol graph.
 
 Maintenance:
   db         Inspect or reset generated daemon state.

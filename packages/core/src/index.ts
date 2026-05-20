@@ -10,7 +10,7 @@ export type {
   Format,
   ProposedImpactNote,
 } from "./context.ts";
-export type { FileDiscoveryMode, ProjectFileDiscovery } from "./discovery.ts";
+export type { ProjectFileDiscovery } from "./discovery.ts";
 export type { DocSnippet } from "./docs.ts";
 export {
   createDefaultConfig,
@@ -59,7 +59,6 @@ export type {
   DaemonHealth,
   DaemonResponse,
   DaemonState,
-  DiagnosticSeverity,
   DiagnosticFact,
   DomainEdge,
   DuplicateFact,
@@ -91,6 +90,7 @@ export type {
   Recommendation,
   RepoGraph,
   ResolvedProjectSettings,
+  ResolvedProjectSettingsInput,
   ScanAndDiffRequest,
   ScanAndDiffResult,
   SymbolFact,
@@ -102,6 +102,12 @@ export type {
   WatcherStartResult,
   WatcherStatus,
   WorkspaceNode,
+  IndexCodeGraphRequest,
+  IndexCodeGraphResult,
+  SearchSymbolsRequest,
+  SearchSymbolsResult,
+  CodeSymbol,
+  CodeSymbolKind,
 } from "./contracts.ts";
 export {
   AnnotationFactSchema,
@@ -168,6 +174,14 @@ export {
   WatcherStartResultSchema,
   WatcherStatusSchema,
   WorkspaceNodeSchema,
+  IndexCodeGraphRequestSchema,
+  IndexCodeGraphResultSchema,
+  SearchSymbolsRequestSchema,
+  SearchSymbolsResultSchema,
+  CodeSymbolSchema,
+  CodeSymbolKindSchema,
+  SymbolRangeSchema,
+  codeSymbolKindValues,
   factKindValues,
   canonBundleOptionTypeValues,
   diagnosticSeverityValues,
@@ -222,6 +236,11 @@ export type {
   TextEdit,
   FileRead,
   ValidationContext,
+  WorkspaceGraph,
+  WorkspaceKind,
+  WorkspacePackage,
+} from "./validator-types.ts";
+export type {
   Validator,
   ValidatorArgs,
   ValidatorDefinition,
@@ -232,9 +251,6 @@ export type {
   ValidatorSummary,
   ValidatorSummaryInput,
   ValidatorVisual,
-  WorkspaceGraph,
-  WorkspaceKind,
-  WorkspacePackage,
 } from "./validator.ts";
 export {
   createValidatorFactory,
@@ -267,7 +283,7 @@ export type {
 } from "./typescript.ts";
 export type { TreeBoundaryRule, TreeDefinition, TreeFileRules, TreeFolderRules, TreeGraphDefinition, TreeImportRules, TreeNode, TreePathDefinition } from "./tree.ts";
 export { tree, validateTree, validateTreeDefinition } from "./tree.ts";
-export type { DoctorCheck, DoctorFixResult, DoctorReport, DoctorStatus } from "./doctor.ts";
+export type { DoctorCheck, DoctorFixResult, DoctorReport } from "./doctor.ts";
 export { applyDoctorFixes, buildDoctorReport, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "./doctor.ts";
 export type { AnalysisCache } from "./cache.ts";
 export { getAnalysisCache } from "./cache.ts";
@@ -282,7 +298,7 @@ export type { ProjectContext } from "./project.ts";
 export { loadProjectContext, loadValidators } from "./project.ts";
 export type { FeedbackDedupeScope, FeedbackHost, FeedbackInput, FeedbackRenderOptions, FeedbackResult } from "./feedback.ts";
 export { formatFeedbackResult, renderFeedbackMarkdown, runFeedback } from "./feedback.ts";
-export type { HookFileAction, HookInspection, HookInstallFileResult, HookInstallHost, HookInstallResult, HookInstallScope } from "./hook-install.ts";
+export type { HookFileAction, HookInspection, HookInstallFileResult, HookInstallResult } from "./hook-install.ts";
 export {
   claudeHookConfig,
   codexHookConfig,

@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { AnalysisCache } from "./cache.ts";
 import { getAnalysisCache } from "./cache.ts";
-import type { ValidatorScope } from "./contracts.ts";
 import type { Baseline, ContextPaths, Decision, ImpactSurface, ProposedImpactNote } from "./core.ts";
 import { createPaths, explainGlobMatches, listFiles, listProjectFiles, matchesAny, normalizePath, relative } from "./core.ts";
 import { loadBaseline, loadImpactSurfaces, loadProposedImpactNotes } from "./core.ts";
@@ -14,9 +13,9 @@ import { buildAnnotationFacts, buildCallFacts, buildDuplicateFacts, buildExportF
 import { validateFindings, findingKey, type FindingValidationContext } from "./findings.ts";
 import { formatValidatorApplies, resolveValidators, validateValidatorDefinitions, validatorMatchesAnyFile, validatorMatchesFile } from "./validator-definitions.ts";
 import { validateTree } from "./tree.ts";
-import type { TreeDefinition } from "./tree.ts";
 
 export { validateFindings } from "./findings.ts";
+export type { FindingValidationContext } from "./findings.ts";
 export { formatValidatorApplies, resolveValidators, validateValidatorDefinitions, validatorMatchesAnyFile, validatorMatchesFile } from "./validator-definitions.ts";
 export type {
   BaselineApi,
@@ -50,6 +49,8 @@ export type {
   Validator,
   ValidatorArgs,
   ValidatorDefinition,
+  ValidatorFactory,
+  ValidatorFactoryBaseOptions,
   ValidatorRuntime,
   ValidatorSummary,
   ValidatorSummaryInput,
@@ -90,6 +91,8 @@ import type {
   Validator,
   ValidatorArgs,
   ValidatorDefinition,
+  ValidatorFactory,
+  ValidatorFactoryBaseOptions,
   ValidatorRuntime,
   ValidatorSummary,
   ValidatorSummaryInput,
@@ -103,99 +106,6 @@ const FactKeySeparator = "\u0000";
 
 type CacheableValidationContext = ValidationContext & {
   [flushCacheSymbol]?: () => void;
-};
-
-export type ValidatorRuntime = {
-  rootDir: string;
-  paths: ContextPaths;
-  decisions: {
-    all: Decision[];
-    byId(id: string): Decision | undefined;
-    byTopic(topic: string): Decision[];
-  };
-  matches(file: string, globs: string[]): boolean;
-  globs: {
-    matches(file: string, patterns: string[]): boolean;
-    explain(file: string, patterns: string[]): ReturnType<typeof explainGlobMatches>;
-  };
-  naming: {
-    isPascalCase(value: string): boolean;
-    isCamelCase(value: string): boolean;
-    isKebabCase(value: string): boolean;
-    isSnakeCase(value: string): boolean;
-    isScreamingSnakeCase(value: string): boolean;
-  };
-};
-
-export type ValidatorArgs = {
-  ctx: ValidationContext;
-  runtime: ValidatorRuntime;
-};
-
-export type ValidatorSummaryInput = {
-  id: string;
-  topics: string[];
-  applies: string[];
-  severity: Severity;
-  scope: ValidatorScope;
-  facts: FactKind[];
-  decisionIds: string[];
-  docs: string[];
-};
-
-export type ValidatorSummary = string | ((definition: ValidatorSummaryInput) => string);
-
-export type ValidatorVisual = {
-  kind: "tree";
-  title?: string;
-  definition: TreeDefinition;
-};
-
-export type ValidatorDefinition = {
-  id: string;
-  topics?: string[];
-  applies?: string[];
-  severity?: Severity;
-  scope?: ValidatorScope;
-  facts?: FactKind[];
-  decisionIds?: string[];
-  docs?: string[];
-  summary?: ValidatorSummary;
-  visuals?: ValidatorVisual[];
-  validate?(args: ValidatorArgs): Finding[] | Promise<Finding[]>;
-  validators?: ValidatorDefinition[];
-};
-
-export type ValidatorFactoryBaseOptions = {
-  id: string;
-  topics: string[];
-  severity: Severity;
-  decisionIds?: string[];
-  docs?: string[];
-  summary?: ValidatorSummary;
-};
-
-export type ValidatorFactory<TOptions extends Record<string, unknown> = Record<string, never>> = (
-  options: ValidatorFactoryBaseOptions & TOptions,
-) => ValidatorDefinition;
-
-export type Validator = {
-  id: string;
-  topics: string[];
-  appliesScopes: string[][];
-  severity: Severity;
-  scope: ValidatorScope;
-  facts: FactKind[];
-  decisionIds: string[];
-  docs: string[];
-  summary?: string;
-  visuals: ValidatorVisual[];
-  validate(args: ValidatorArgs): Finding[] | Promise<Finding[]>;
-};
-
-export type FindingValidationContext = {
-  paths: ContextPaths;
-  decisionIds: Set<string>;
 };
 
 export function defineValidator(definition: ValidatorDefinition): ValidatorDefinition {

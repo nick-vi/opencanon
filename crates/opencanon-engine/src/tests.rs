@@ -304,6 +304,342 @@ fn watcher_path_filter_normalizes_project_files_and_ignores_generated_paths() {
     );
 }
 
+#[test]
+fn indexes_code_graph_for_typescript_files() {
+    let root = test_root("graph-extract");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/billing.ts"),
+        "import { logger } from \"./log\";\nexport function createInvoice(): number { return 1; }\nexport class InvoiceService {}\nexport const FLAG = 1;\nexport interface Invoice { id: string }\nexport type Amount = number;\n",
+    )
+    .unwrap();
+
+    let project = open_test_project(&root);
+    let _ = project
+        .scan_and_diff_json(json!({ "files": ["src/billing.ts"] }).to_string())
+        .unwrap();
+    let indexed = project
+        .index_code_graph_json(
+            json!({
+                "files": [{
+                    "path": "src/billing.ts",
+                    "contentHash": "hash",
+                    "language": "typescript"
+                }],
+                "parserVersion": "test-parser",
+                "extractorVersion": "test-extractor"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let indexed: Value = serde_json::from_str(&indexed).unwrap();
+    assert_eq!(indexed["indexed"][0]["path"], "src/billing.ts");
+    assert!(indexed["indexed"][0]["nodes"].as_u64().unwrap() >= 5);
+
+    let symbols = project
+        .search_symbols_json(json!({ "query": "createInvoice" }).to_string())
+        .unwrap();
+    let symbols: Value = serde_json::from_str(&symbols).unwrap();
+    let names: Vec<&str> = symbols["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|symbol| symbol["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"createInvoice"));
+    let invoice = symbols["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|symbol| symbol["name"] == "createInvoice")
+        .unwrap();
+    assert_eq!(invoice["kind"], "function");
+    assert_eq!(invoice["exported"], true);
+    assert_eq!(invoice["range"]["start"]["line"], 2);
+    assert!(invoice["id"].as_str().unwrap().len() >= 32);
+}
+
+#[test]
+fn replaces_code_nodes_when_files_change() {
+    let root = test_root("graph-replace");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/a.ts"), "export function before() {}\n").unwrap();
+    let project = open_test_project(&root);
+    project
+        .scan_and_diff_json(json!({ "files": ["src/a.ts"] }).to_string())
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [{ "path": "src/a.ts", "contentHash": "h1", "language": "typescript" }],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    fs::write(root.join("src/a.ts"), "export function after() {}\n").unwrap();
+    project
+        .scan_and_diff_json(json!({ "files": ["src/a.ts"] }).to_string())
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [{ "path": "src/a.ts", "contentHash": "h2", "language": "typescript" }],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    let before = project
+        .search_symbols_json(json!({ "query": "before" }).to_string())
+        .unwrap();
+    let before: Value = serde_json::from_str(&before).unwrap();
+    assert!(before["symbols"].as_array().unwrap().is_empty());
+
+    let after = project
+        .search_symbols_json(json!({ "query": "after" }).to_string())
+        .unwrap();
+    let after: Value = serde_json::from_str(&after).unwrap();
+    assert_eq!(after["symbols"][0]["name"], "after");
+}
+
+#[test]
+fn deleting_files_cascades_graph_rows() {
+    let root = test_root("graph-delete");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/keep.ts"), "export const KEEP = 1;\n").unwrap();
+    fs::write(root.join("src/drop.ts"), "export function dropMe() {}\n").unwrap();
+    let project = open_test_project(&root);
+    project
+        .scan_and_diff_json(json!({ "files": ["src/keep.ts", "src/drop.ts"] }).to_string())
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [
+                    { "path": "src/keep.ts", "contentHash": "h", "language": "typescript" },
+                    { "path": "src/drop.ts", "contentHash": "h", "language": "typescript" }
+                ],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    fs::remove_file(root.join("src/drop.ts")).unwrap();
+    project
+        .scan_and_diff_json(json!({ "files": ["src/keep.ts"] }).to_string())
+        .unwrap();
+
+    let symbols = project
+        .search_symbols_json(json!({ "query": "dropMe" }).to_string())
+        .unwrap();
+    let parsed: Value = serde_json::from_str(&symbols).unwrap();
+    assert!(parsed["symbols"].as_array().unwrap().is_empty());
+
+    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let unresolved_count: i64 = conn
+        .query_row(
+            "select count(*) from unresolved_references where path = 'src/drop.ts'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let extraction_count: i64 = conn
+        .query_row(
+            "select count(*) from code_extractions where path = 'src/drop.ts'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unresolved_count, 0);
+    assert_eq!(extraction_count, 0);
+}
+
+#[test]
+fn default_export_bound_names_are_searchable() {
+    let root = test_root("graph-default-export");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/entry.ts"),
+        "function createInvoice() {}\nexport default createInvoice;\n",
+    )
+    .unwrap();
+    let project = open_test_project(&root);
+    project
+        .scan_and_diff_json(json!({ "files": ["src/entry.ts"] }).to_string())
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [{ "path": "src/entry.ts", "contentHash": "h", "language": "typescript" }],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    let symbols = project
+        .search_symbols_json(json!({ "query": "createInvoice" }).to_string())
+        .unwrap();
+    let parsed: Value = serde_json::from_str(&symbols).unwrap();
+    let names: Vec<&str> = parsed["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|symbol| symbol["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"createInvoice"));
+}
+
+#[test]
+fn anonymous_default_function_exports_are_classified_as_functions() {
+    let root = test_root("graph-default-expression");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/entry.ts"), "export default () => 1;\n").unwrap();
+    let project = open_test_project(&root);
+    project
+        .scan_and_diff_json(json!({ "files": ["src/entry.ts"] }).to_string())
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [{ "path": "src/entry.ts", "contentHash": "h", "language": "typescript" }],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    let symbols = project
+        .search_symbols_json(json!({ "query": "default" }).to_string())
+        .unwrap();
+    let parsed: Value = serde_json::from_str(&symbols).unwrap();
+    assert_eq!(parsed["symbols"][0]["kind"], "function");
+}
+
+#[test]
+fn graph_index_reports_read_failures_per_file() {
+    let root = test_root("graph-read-failed");
+    let project = open_test_project(&root);
+    let output = project
+        .index_code_graph_json(
+            json!({
+                "files": [{ "path": "src/missing.ts", "contentHash": "h", "language": "typescript" }],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let parsed: Value = serde_json::from_str(&output).unwrap();
+    assert!(parsed["indexed"].as_array().unwrap().is_empty());
+    assert_eq!(parsed["diagnostics"][0]["code"], "read-failed");
+}
+
+#[test]
+fn ignores_unsupported_languages_for_graph_extraction() {
+    let root = test_root("graph-unsupported");
+    fs::create_dir_all(root.join("docs")).unwrap();
+    fs::write(root.join("docs/notes.md"), "# notes\n").unwrap();
+    let project = open_test_project(&root);
+    project
+        .scan_and_diff_json(json!({ "files": ["docs/notes.md"] }).to_string())
+        .unwrap();
+    let output = project
+        .index_code_graph_json(
+            json!({
+                "files": [{ "path": "docs/notes.md", "contentHash": "h", "language": "markdown" }],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let parsed: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(parsed["indexed"][0]["nodes"], 0);
+    assert_eq!(parsed["indexed"][0]["supported"], false);
+    assert_eq!(
+        parsed["diagnostics"][0]["code"],
+        "unsupported-language-graph"
+    );
+}
+
+#[test]
+fn node_ids_are_stable_across_unrelated_file_changes() {
+    let root = test_root("graph-stable-ids");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/a.ts"), "export function alpha() {}\n").unwrap();
+    fs::write(root.join("src/b.ts"), "export function beta() {}\n").unwrap();
+    let project = open_test_project(&root);
+    project
+        .scan_and_diff_json(json!({ "files": ["src/a.ts", "src/b.ts"] }).to_string())
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [
+                    { "path": "src/a.ts", "contentHash": "h", "language": "typescript" },
+                    { "path": "src/b.ts", "contentHash": "h", "language": "typescript" }
+                ],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let first = project
+        .search_symbols_json(json!({ "query": "alpha" }).to_string())
+        .unwrap();
+    let first: Value = serde_json::from_str(&first).unwrap();
+    let alpha_id = first["symbols"][0]["id"].as_str().unwrap().to_string();
+
+    fs::write(
+        root.join("src/b.ts"),
+        "export function beta() { return 42; }\n",
+    )
+    .unwrap();
+    project
+        .scan_and_diff_json(json!({ "files": ["src/a.ts", "src/b.ts"] }).to_string())
+        .unwrap();
+    project
+        .index_code_graph_json(
+            json!({
+                "files": [
+                    { "path": "src/b.ts", "contentHash": "h2", "language": "typescript" }
+                ],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let second = project
+        .search_symbols_json(json!({ "query": "alpha" }).to_string())
+        .unwrap();
+    let second: Value = serde_json::from_str(&second).unwrap();
+    let alpha_id_second = second["symbols"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(alpha_id, alpha_id_second);
+}
+
+#[test]
+fn migration_002_applies_and_creates_graph_tables() {
+    let root = test_root("graph-migration");
+    let project = open_test_project(&root);
+    let status = project.status_json().unwrap();
+    let parsed: Value = serde_json::from_str(&status).unwrap();
+    let migrations = parsed["migrationsApplied"].as_array().unwrap();
+    assert!(migrations.iter().any(|version| version.as_u64() == Some(2)));
+    assert_eq!(parsed["schemaVersion"].as_u64(), Some(2));
+}
+
 fn test_root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("opencanon-engine-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);

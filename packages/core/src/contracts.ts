@@ -249,7 +249,12 @@ export const ImpactSurfaceSchema = z.object({
   dependsOn: z.array(z.string().min(1)).default([]),
   downstream: z.array(z.string().min(1)).default([]),
   risks: z.array(z.string().min(1)).default([]),
-  changePolicy: ChangePolicySchema.default({}),
+  changePolicy: ChangePolicySchema.default({
+    requiresTests: [],
+    requiresDocs: [],
+    requiresDecision: false,
+    reviewers: [],
+  }),
   docs: z.array(z.string().min(1)).default([]),
   decisionIds: z.array(z.string().min(1)).default([]),
   proposed: z.boolean().default(false),
@@ -436,13 +441,14 @@ export const ResolvedProjectSettingsSchema = z.object({
   configHash: z.string().min(1),
 });
 export type ResolvedProjectSettings = z.infer<typeof ResolvedProjectSettingsSchema>;
+export type ResolvedProjectSettingsInput = z.input<typeof ResolvedProjectSettingsSchema>;
 
 export const OpenProjectRequestSchema = z.object({
   rootDir: z.string().min(1),
   statePath: z.string().min(1),
   settings: ResolvedProjectSettingsSchema,
 });
-export type OpenProjectRequest = z.infer<typeof OpenProjectRequestSchema>;
+export type OpenProjectRequest = z.input<typeof OpenProjectRequestSchema>;
 
 export const WatcherStatusSchema = z.object({
   running: z.boolean(),
@@ -536,6 +542,85 @@ export const BuildRepoGraphResultSchema = z.object({
   graph: RepoGraphSchema,
 });
 export type BuildRepoGraphResult = z.infer<typeof BuildRepoGraphResultSchema>;
+
+export const IndexCodeGraphRequestSchema = z.object({
+  files: z.array(
+    z.object({
+      path: z.string().min(1),
+      contentHash: z.string().min(1),
+      language: LanguageSchema,
+    }),
+  ),
+  deletedFiles: z.array(z.string().min(1)).default([]),
+  parserVersion: z.string().default(""),
+  extractorVersion: z.string().default(""),
+});
+export type IndexCodeGraphRequest = z.input<typeof IndexCodeGraphRequestSchema>;
+
+export const IndexCodeGraphResultSchema = z.object({
+  indexed: z.array(
+    z.object({
+      path: z.string().min(1),
+      nodes: z.number().int().min(0),
+      unresolved: z.number().int().min(0),
+      supported: z.boolean(),
+    }),
+  ),
+  deleted: z.array(z.string().min(1)).default([]),
+  diagnostics: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        code: z.string().min(1),
+        message: z.string().min(1),
+        severity: z.string().min(1),
+      }),
+    )
+    .default([]),
+  parserVersion: z.string().min(1),
+  extractorVersion: z.string().min(1),
+});
+export type IndexCodeGraphResult = z.infer<typeof IndexCodeGraphResultSchema>;
+
+export const SearchSymbolsRequestSchema = z.object({
+  query: z.string().min(1).optional(),
+  path: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+});
+export type SearchSymbolsRequest = z.input<typeof SearchSymbolsRequestSchema>;
+
+export const codeSymbolKindValues = ["function", "class", "variable", "type", "interface", "enum", "export-default"] as const;
+export const CodeSymbolKindSchema = z.enum(codeSymbolKindValues);
+export type CodeSymbolKind = z.infer<typeof CodeSymbolKindSchema>;
+
+export const SymbolRangePositionSchema = z.object({
+  line: z.number().int().min(1),
+  column: z.number().int().min(1),
+  byte: z.number().int().min(0),
+});
+export const SymbolRangeSchema = z.object({
+  start: SymbolRangePositionSchema,
+  end: SymbolRangePositionSchema,
+});
+export const CodeSymbolSchema = z.object({
+  id: z.string().min(1),
+  path: z.string().min(1),
+  language: z.string().min(1),
+  kind: CodeSymbolKindSchema,
+  name: z.string().min(1),
+  qualifiedName: z.string().min(1),
+  exported: z.boolean(),
+  signature: z.string().nullable().optional(),
+  range: SymbolRangeSchema,
+  score: z.number().nullable().optional(),
+});
+export type CodeSymbol = z.infer<typeof CodeSymbolSchema>;
+
+export const SearchSymbolsResultSchema = z.object({
+  symbols: z.array(CodeSymbolSchema),
+});
+export type SearchSymbolsResult = z.infer<typeof SearchSymbolsResultSchema>;
 
 export const DaemonSuccessSchema = z.object({
   ok: z.literal(true),

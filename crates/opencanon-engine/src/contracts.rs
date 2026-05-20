@@ -181,3 +181,36 @@ pub(crate) struct FactDiagnostic {
     pub(crate) message: String,
     pub(crate) severity: String,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct IndexCodeGraphRequest {
+    pub(crate) files: Vec<IndexCodeGraphFile>,
+    #[serde(default)]
+    pub(crate) deleted_files: Vec<String>,
+    #[serde(default)]
+    pub(crate) parser_version: String,
+    #[serde(default)]
+    pub(crate) extractor_version: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct IndexCodeGraphFile {
+    pub(crate) path: String,
+    pub(crate) content_hash: String,
+    pub(crate) language: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchSymbolsRequest {
+    #[serde(default)]
+    pub(crate) query: Option<String>,
+    #[serde(default)]
+    pub(crate) path: Option<String>,
+    #[serde(default)]
+    pub(crate) kind: Option<String>,
+    #[serde(default)]
+    pub(crate) limit: Option<u32>,
+}

@@ -2,7 +2,7 @@ export type { DaemonServer, DaemonServerOptions } from "./server.ts";
 export { daemonAuthHeaders } from "./auth.ts";
 export { checkDaemonPrerequisites, startOpenCanonDaemon } from "./server.ts";
 export type { DaemonStore, StoreSnapshotInput, StoreState } from "./state.ts";
-export { createDaemonStore } from "./state.ts";
+export { createDaemonStore, openProjectStore } from "./state.ts";
 export type { DaemonPrerequisites } from "./runtime.ts";
 export { assertDaemonPrerequisites, daemonSchemaVersion, daemonVersionSummary, renderPrerequisiteFailure, requiredBunVersion } from "./runtime.ts";
 export type { DaemonSnapshot, RelatedCanon, RelatedCanonQuery } from "./snapshot.ts";

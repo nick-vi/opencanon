@@ -9,7 +9,7 @@ import {
   type RepoGraph,
   type ScanAndDiffResult,
 } from "@opencanon/core";
-import type { Engine, EngineProject } from "@opencanon/engine";
+import { loadEngine, type Engine, type EngineProject } from "@opencanon/engine";
 
 export type DaemonStore = {
   statePath: string;
@@ -36,6 +36,10 @@ export type StoreState = {
   graphHash?: string;
   lastIndexedAt?: string;
 };
+
+export function openProjectStore(input: { rootDir: string; paths: ContextPaths; statePath?: string }): DaemonStore {
+  return createDaemonStore({ ...input, engine: loadEngine() });
+}
 
 export function createDaemonStore(input: { rootDir: string; paths: ContextPaths; engine: Engine; statePath?: string }): DaemonStore {
   const statePath = input.statePath ?? path.join(input.rootDir, ".opencanon", "state.sqlite");

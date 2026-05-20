@@ -10,11 +10,15 @@ import {
   ExtractFactsResultSchema,
   EngineVersionSchema,
   EngineProjectStatusSchema,
+  IndexCodeGraphRequestSchema,
+  IndexCodeGraphResultSchema,
   OpenCanonErrorCodeSchema,
   OpenProjectRequestSchema,
   OpenCanonError,
   ScanAndDiffRequestSchema,
   ScanAndDiffResultSchema,
+  SearchSymbolsRequestSchema,
+  SearchSymbolsResultSchema,
   WatcherEventBatchSchema,
   WatcherStartRequestSchema,
   WatcherStartResultSchema,
@@ -26,9 +30,13 @@ import {
   type ExtractFactsResult,
   type EngineVersion,
   type EngineProjectStatus,
+  type IndexCodeGraphRequest,
+  type IndexCodeGraphResult,
   type OpenProjectRequest,
   type ScanAndDiffRequest,
   type ScanAndDiffResult,
+  type SearchSymbolsRequest,
+  type SearchSymbolsResult,
   type WatcherEventBatch,
   type WatcherStartRequest,
   type WatcherStartResult,
@@ -53,6 +61,8 @@ export type EngineProject = {
   scanAndDiff(request: ScanAndDiffRequest): ScanAndDiffResult;
   extractFacts(request: ProjectExtractFactsRequest): ExtractFactsResult;
   buildRepoGraph(request: ProjectBuildRepoGraphRequest): BuildRepoGraphResult;
+  indexCodeGraph(request: IndexCodeGraphRequest): IndexCodeGraphResult;
+  searchSymbols(request: SearchSymbolsRequest): SearchSymbolsResult;
   startWatcher(request: WatcherStartRequest, onBatch: (batch: WatcherEventBatch) => void): WatcherStartResult;
   drainWatcherEvents(): WatcherEventBatch[];
   stopWatcher(): void;
@@ -71,6 +81,8 @@ type EngineProjectJsonBinding = {
   scanAndDiffJson(request: string): string;
   extractFactsJson(request: string): string;
   buildRepoGraphJson(request: string): string;
+  indexCodeGraphJson(request: string): string;
+  searchSymbolsJson(request: string): string;
   startWatcherJson(request: string, callback: (error: unknown, batchJson?: string) => void): string;
   drainWatcherEventsJson(): string;
   stopWatcher(): void;
@@ -162,6 +174,10 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     extractFacts: (request) => ExtractFactsResultSchema.parse(parseJson(callEngine(() => project.extractFactsJson(JSON.stringify(ExtractFactsRequestSchema.parse(request)))))),
     buildRepoGraph: (request) =>
       BuildRepoGraphResultSchema.parse(parseJson(callEngine(() => project.buildRepoGraphJson(JSON.stringify(BuildRepoGraphRequestSchema.parse(request)))))),
+    indexCodeGraph: (request) =>
+      IndexCodeGraphResultSchema.parse(parseJson(callEngine(() => project.indexCodeGraphJson(JSON.stringify(IndexCodeGraphRequestSchema.parse(request)))))),
+    searchSymbols: (request) =>
+      SearchSymbolsResultSchema.parse(parseJson(callEngine(() => project.searchSymbolsJson(JSON.stringify(SearchSymbolsRequestSchema.parse(request)))))),
     startWatcher: (request, onBatch) =>
       WatcherStartResultSchema.parse(
         parseJson(
@@ -207,6 +223,8 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "scanAndDiffJson",
     "extractFactsJson",
     "buildRepoGraphJson",
+    "indexCodeGraphJson",
+    "searchSymbolsJson",
     "startWatcherJson",
     "drainWatcherEventsJson",
     "stopWatcher",

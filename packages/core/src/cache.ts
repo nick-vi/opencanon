@@ -68,10 +68,10 @@ export function getAnalysisCache(paths: ContextPaths): AnalysisCache {
   }
 
   const cache: AnalysisCache = {
-    get<T>(file, key) {
+    get<T>(file: string, key: string) {
       return recordFor(file)?.values[key] as T | undefined;
     },
-    set(file, key, value) {
+    set(file: string, key: string, value: unknown) {
       const record = recordFor(file);
       if (!record) return;
       record.values[key] = value;

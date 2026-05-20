@@ -4,7 +4,7 @@ import type { Finding, FindingFix, FixSafety, Validator } from "./validator-type
 const FactKeySeparator = "\u0000";
 
 export type FindingValidationContext = {
-  rootDir: string;
+  paths: Parameters<typeof validateDocsReference>[2]["paths"];
   decisionIds: Set<string>;
 };
 
@@ -59,5 +59,4 @@ function validateFix(finding: Finding): string[] {
 export function findingKey(finding: Pick<Finding, "validatorId" | "file" | "line" | "message">): string {
   return [finding.validatorId, finding.file, finding.line ?? 1, finding.message].join(FactKeySeparator);
 }
-
 

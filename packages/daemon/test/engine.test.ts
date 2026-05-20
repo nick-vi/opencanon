@@ -64,6 +64,9 @@ test("engine JSON binding is wrapped in typed contracts", () => {
           diagnostics: [],
         }),
       buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir: "/repo", graphHash: "graph", files: ["src/company.ts"] } }),
+      indexCodeGraphJson: () =>
+        JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
+      searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
       startWatcherJson: (_request: string, callback: (error: unknown, batchJson?: string) => void) => {
         callback(null, JSON.stringify({ rootDir: "/repo", paths: ["src/company.ts"], stale: false, timestamp: "123" }));
         return JSON.stringify({ running: true, debounceMs: 250, bufferCapacity: 128 });
@@ -107,5 +110,5 @@ test("engine JSON binding is wrapped in typed contracts", () => {
     }).files[0].parser,
     "oxc",
   );
-  assert.equal(project.buildRepoGraph({ facts: [] }).graph.graphHash, "graph");
+  assert.equal(project.buildRepoGraph({ facts: [], packageManifests: [] }).graph.graphHash, "graph");
 });

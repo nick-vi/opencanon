@@ -2,7 +2,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::constants::SCHEMA_VERSION;
 use crate::json::{napi_error, sqlite_error};
 
 struct Migration {
@@ -11,11 +10,25 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial",
-    sql: include_str!("migrations/001_initial.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial",
+        sql: include_str!("migrations/001_initial.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "code_graph",
+        sql: include_str!("migrations/002_code_graph.sql"),
+    },
+];
+
+pub(crate) fn schema_version() -> u32 {
+    MIGRATIONS
+        .last()
+        .map(|migration| migration.version)
+        .unwrap_or(0)
+}
 
 pub(crate) fn migrate_state(conn: &Connection) -> napi::Result<Vec<u32>> {
     conn.execute_batch(
@@ -33,11 +46,12 @@ pub(crate) fn migrate_state(conn: &Connection) -> napi::Result<Vec<u32>> {
             |row| row.get::<_, u32>(0),
         )
         .map_err(|error| sqlite_error("Could not read schema version", error))?;
-    if current_version > SCHEMA_VERSION {
+    let supported_version = schema_version();
+    if current_version > supported_version {
         return Err(napi_error(
             "sqlite-schema-mismatch",
             &format!(
-                "Project state schema {current_version} is newer than this engine supports ({SCHEMA_VERSION}). Run opencanon db reset --confirm to clear generated state or switch to a matching OpenCanon runtime."
+                "Project state schema {current_version} is newer than this engine supports ({supported_version}). Run opencanon db reset --confirm to clear generated state or switch to a matching OpenCanon runtime."
             ),
         ));
     }

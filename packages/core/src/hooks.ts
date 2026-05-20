@@ -60,7 +60,7 @@ export function normalizeHookPayload(
   cwdFallback = process.cwd(),
 ): { cwd: string; files: string[]; sessionId?: string; turnId?: string } {
   if (host === "opencode" && isRecord(payload) && isRecord(payload.input) && isRecord(payload.output)) {
-    return normalizeOpenCodePayload(payload, cwdFallback);
+    return normalizeOpenCodePayload({ input: payload.input, output: payload.output }, cwdFallback);
   }
 
   const record = isRecord(payload) ? payload : {};

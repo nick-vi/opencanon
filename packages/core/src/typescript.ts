@@ -395,20 +395,20 @@ function constObjectLineRanges(lines: string[]): Set<number> {
 
 function parseEnumMembers(lines: string[], firstLine: number): EnumMemberInfo[] {
   return lines
-    .map((line, index) => {
+    .flatMap((line, index) => {
       const match = line.trim().match(/^([A-Za-z_$][\w$]*)\s*(?:=\s*([^,]+))?,?$/);
-      if (!match) return null;
+      if (!match) return [];
       const rawValue = match[2]?.trim();
       const stringMatch = rawValue?.match(/^["']([^"']+)["']$/);
       const numberMatch = rawValue?.match(/^-?\d+(?:\.\d+)?$/);
-      return {
+      const member: EnumMemberInfo = {
         name: match[1],
         value: stringMatch?.[1] ?? rawValue,
         valueKind: stringMatch ? "string" : numberMatch ? "number" : rawValue ? "unknown" : "unknown",
         line: firstLine + index,
-      } satisfies EnumMemberInfo;
-    })
-    .filter((item): item is EnumMemberInfo => Boolean(item));
+      };
+      return [member];
+    });
 }
 
 function parseInitializer(text: string, firstLine: number): InitializerInfo {
