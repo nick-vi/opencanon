@@ -571,7 +571,7 @@ Each real validator should have:
 - valid and invalid fixtures under \`fixtures/<validator-id>/valid\` and \`fixtures/<validator-id>/invalid\`
 - optional fixed fixtures under \`fixtures/<validator-id>/fixed\` when structured fixes are provided
 
-Prefer \`ctx.facts.*\` for imports, exports, symbols, calls, literals, comments, references, annotations, diagnostics, and duplicates. Use \`ctx.impact.*\` for configured impact surfaces and proposed impact notes, and \`ctx.baseline.*\` for known findings.
+Prefer \`ctx.facts.*\` for imports, exports, symbols, calls, literals, comments, references, annotations, diagnostics, and duplicates. Use \`ctx.graph.*\` for graph-shaped symbols, references, callers, callees, and impact. Use \`ctx.impact.*\` for configured impact surfaces and proposed impact notes, and \`ctx.baseline.*\` for known findings.
 
 While editing one validator, run:
 

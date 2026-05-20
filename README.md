@@ -18,6 +18,8 @@ bun .agents/skills/opencanon/scripts/opencanon.ts setup --yes --hooks codex
 ```bash
 bun run opencanon context --files src/services/company.service.ts
 bun run opencanon rules --validator service-no-db-client
+bun run opencanon symbols loadCompany
+bun run opencanon graph callers loadCompany
 bun run opencanon validate --changed
 bun run opencanon feedback --changed
 bun run opencanon doctor
@@ -25,6 +27,8 @@ bun run opencanon doctor
 
 - `context` loads the docs, decisions, validators, and optional git history relevant to files or topics.
 - `rules` lists validator summaries, scopes, decisions, and fixture coverage.
+- `symbols` searches the local TS/JS code graph.
+- `graph` inspects deterministic caller, callee, and impact edges.
 - `validate` runs validators against files, changed files, fixtures, or the whole project.
 - `feedback` runs validators and renders concise text intended to be fed back into an agent after edits.
 - `doctor` checks setup, effective config, validator coverage, dependency pins, hooks, daemon runtime prerequisites, generated cache ignore rules, and external tool declarations.
@@ -185,6 +189,7 @@ export default defineValidator({
 - `ctx.files` exposes discovered project files.
 - `ctx.targetFiles` is the current validation scope matched by `applies` or CLI input.
 - `ctx.facts.*` is the canonical validator data API. It exposes `imports()`, `exports()`, `symbols()`, `calls()`, `literals()`, `comments()`, `references()`, `annotations()`, `diagnostics()`, and `duplicates()` over the current analysis scope, which defaults to `ctx.targetFiles` in CLI validation.
+- `ctx.graph.*` exposes graph-shaped `symbols()`, `references()`, `callers()`, `callees()`, and `impact()` over the same fact scope.
 - Import analysis resolves relative, TS path-alias, and workspace-package imports against discovered project files, even when only target files are parsed.
 - `ctx.impact.*` exposes configured impact surfaces, downstream domain edges, required checks, and proposed impact notes for touched files.
 - `ctx.baseline.*` exposes known findings from the configured baseline file.
