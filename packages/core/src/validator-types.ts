@@ -208,6 +208,22 @@ export type BaselineApi = {
   isKnown(finding: Pick<Finding, "validatorId" | "file" | "line" | "message">): boolean;
 };
 
+export type ProjectGraphEdge = {
+  source?: ProjectSymbolFact;
+  target: ProjectSymbolFact;
+  reference: ProjectReferenceFact;
+  kind: "call" | "reference";
+  confidence: "exact" | "ambiguous";
+};
+
+export type GraphApi = {
+  symbols(): ProjectSymbolFact[];
+  references(): ProjectReferenceFact[];
+  callers(symbol: string | ProjectSymbolFact): ProjectGraphEdge[];
+  callees(symbol: string | ProjectSymbolFact): ProjectGraphEdge[];
+  impact(symbol: string | ProjectSymbolFact): ProjectGraphEdge[];
+};
+
 export type FileRead = {
   path: string;
   file?: ProjectFile;
@@ -273,6 +289,7 @@ export type ValidationContext = {
   targetFiles: ProjectFile[];
   project: boolean;
   facts: FactsApi;
+  graph: GraphApi;
   impact: ImpactApi;
   baseline: BaselineApi;
   file(path: string): ProjectFile | undefined;

@@ -382,6 +382,37 @@ test("createValidatorFactory returns plain validator definitions", async () => {
   }
 });
 
+test("validation context exposes graph callers and callees", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-graph-context-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(rootDir, "src/company.ts"),
+      ["export function loadCompany() {", "  return true;", "}", "", "export function renderCompany() {", "  return loadCompany();", "}", ""].join("\n"),
+    );
+    const ctx = createValidationContext({
+      rootDir,
+      files: ["src/company.ts"],
+      targetFiles: ["src/company.ts"],
+      validator: { id: "graph-context", severity: "warning" },
+    });
+
+    const callers = ctx.graph.callers("loadCompany");
+    assert.equal(callers.length, 1);
+    assert.equal(callers[0].source?.name, "renderCompany");
+    assert.equal(callers[0].target.name, "loadCompany");
+    assert.equal(callers[0].kind, "call");
+    assert.equal(callers[0].confidence, "exact");
+
+    const callees = ctx.graph.callees("renderCompany");
+    assert.equal(callees.length, 1);
+    assert.equal(callees[0].target.name, "loadCompany");
+    assert.equal(ctx.graph.impact("loadCompany").length, 1);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("curated validators cover function params, siblings, and exports", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-curated-"));
   try {

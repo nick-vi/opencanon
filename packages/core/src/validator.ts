@@ -27,6 +27,7 @@ export type {
   FindingFix,
   FixSafety,
   FolderInfo,
+  GraphApi,
   ImpactApi,
   ImpactRequiredChecks,
   ImportEdge,
@@ -38,6 +39,7 @@ export type {
   ProjectDuplicateFact,
   ProjectExportFact,
   ProjectFile,
+  ProjectGraphEdge,
   ProjectLiteralFact,
   ProjectReferenceFact,
   ProjectSymbolFact,
@@ -69,6 +71,7 @@ import type {
   FindingFix,
   FixSafety,
   FolderInfo,
+  GraphApi,
   ImpactApi,
   ImpactRequiredChecks,
   ImportEdge,
@@ -80,6 +83,7 @@ import type {
   ProjectDuplicateFact,
   ProjectExportFact,
   ProjectFile,
+  ProjectGraphEdge,
   ProjectLiteralFact,
   ProjectReferenceFact,
   ProjectSymbolFact,
@@ -206,6 +210,7 @@ export function createValidationContext(params: {
   let annotationFactCache: ProjectAnnotationFact[] | undefined;
   let diagnosticFactCache: ProjectDiagnosticFact[] | undefined;
   let duplicateFactCache: ProjectDuplicateFact[] | undefined;
+  let graphEdgeCache: ProjectGraphEdge[] | undefined;
   let impactSurfaceCache: ImpactSurface[] | undefined;
   let proposedImpactNoteCache: ProposedImpactNote[] | undefined;
   let baselineCache: Baseline | undefined;
@@ -252,6 +257,26 @@ export function createValidationContext(params: {
       duplicates() {
         duplicateFactCache ??= buildDuplicateFacts(ctx.facts.literals());
         return duplicateFactCache;
+      },
+    },
+    graph: {
+      symbols() {
+        return ctx.facts.symbols();
+      },
+      references() {
+        return ctx.facts.references();
+      },
+      callers(symbol) {
+        const targets = graphSymbolMatches(ctx.facts.symbols(), symbol);
+        return graphEdges().filter((edge) => targets.includes(edge.target));
+      },
+      callees(symbol) {
+        const sources = graphSymbolMatches(ctx.facts.symbols(), symbol);
+        return graphEdges().filter((edge) => edge.source && sources.includes(edge.source));
+      },
+      impact(symbol) {
+        const matches = graphSymbolMatches(ctx.facts.symbols(), symbol);
+        return graphEdges().filter((edge) => matches.includes(edge.target) || (edge.source && matches.includes(edge.source)));
       },
     },
     impact: {
@@ -368,6 +393,10 @@ export function createValidationContext(params: {
       };
     },
   };
+  function graphEdges(): ProjectGraphEdge[] {
+    graphEdgeCache ??= buildGraphEdges(ctx.facts.symbols(), ctx.facts.references());
+    return graphEdgeCache;
+  }
   ctx[flushCacheSymbol] = () => cache?.flush();
   return ctx;
 }
@@ -393,6 +422,40 @@ export function createValidationContextFromFixture(params: {
 
 function surfacesForFiles(surfaces: ImpactSurface[], files: string[]): ImpactSurface[] {
   return surfaces.filter((surface) => files.some((file) => matchesAny(file, surface.applies)));
+}
+
+function buildGraphEdges(symbols: ProjectSymbolFact[], references: ProjectReferenceFact[]): ProjectGraphEdge[] {
+  const byName = new Map<string, ProjectSymbolFact[]>();
+  for (const symbol of symbols) {
+    byName.set(symbol.name, [...(byName.get(symbol.name) ?? []), symbol]);
+  }
+  return references
+    .filter((reference) => reference.kind === "call" || reference.kind === "identifier")
+    .flatMap((reference) => {
+      const targets = byName.get(reference.targetName ?? reference.name) ?? [];
+      if (targets.length === 0) return [];
+      const source = nearestPriorSymbol(symbols, reference.file.path, reference.line);
+      return targets
+        .filter((target) => source !== target)
+        .map((target) => ({
+          source,
+          target,
+          reference,
+          kind: reference.kind === "call" ? ("call" as const) : ("reference" as const),
+          confidence: targets.length === 1 ? ("exact" as const) : ("ambiguous" as const),
+        }));
+    });
+}
+
+function graphSymbolMatches(symbols: ProjectSymbolFact[], symbol: string | ProjectSymbolFact): ProjectSymbolFact[] {
+  if (typeof symbol !== "string") return [symbol];
+  return symbols.filter((item) => item.name === symbol);
+}
+
+function nearestPriorSymbol(symbols: ProjectSymbolFact[], file: string, line: number): ProjectSymbolFact | undefined {
+  return symbols
+    .filter((symbol) => symbol.file.path === file && symbol.line <= line)
+    .sort((left, right) => right.line - left.line)[0];
 }
 
 function buildDomainEdges(surfaces: ImpactSurface[]): DomainEdge[] {
