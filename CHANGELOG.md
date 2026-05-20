@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.2 - 2026-05-20
+
+- Ignored generated runtime and daemon state during setup/init so consumer repos commit only source scaffold files.
+
 ## v0.2.1 - 2026-05-20
 
 - Fixed release metadata so the engine binary reports the release version.
