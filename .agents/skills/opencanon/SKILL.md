@@ -17,7 +17,7 @@ bun run opencanon setup --yes --hooks codex
 
 Use the current host when known: `codex`, `claude`, or `opencode`. Omit `--hooks` when the host is unclear. Setup is deterministic: it scaffolds missing files, installs requested feedback hooks, validates context, runs doctor, runs project validation, starts the daemon, and writes generated setup state under `.opencanon/setup.json`.
 
-After setup, read the printed diagnostics and fix failed steps before editing code. If setup creates `tmp/opencanon-init-plan.md`, use that brief to extract repository conventions into docs, decisions, validators, and fixtures. Do not hand-edit generated runtime files when a setup or build command can update them.
+After setup, read the printed diagnostics and fix failed steps before editing code. Do not hand-edit generated runtime files when a setup or build command can update them.
 
 ## Workflow
 
@@ -161,8 +161,8 @@ bun run opencanon setup --yes
 bun run opencanon setup --yes --hooks codex
 bun run opencanon setup --yes --manifest <path-or-url>
 bun run opencanon init
-bun run opencanon init --agent
-bun run opencanon init --agent --hooks codex,claude,opencode
+bun run opencanon init --non-interactive
+bun run opencanon init --non-interactive --hooks codex,claude,opencode
 bun run opencanon rules
 bun run opencanon rules --validator <id>
 bun run opencanon rules --topic <topic>

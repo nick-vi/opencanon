@@ -1,4 +1,5 @@
 <script>
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import {
     BookOpen,
@@ -19,6 +20,8 @@
   let { children } = $props();
 
   const navGroups = SITE.docsNav;
+  const navItems = navGroups.flatMap((group) => group.items);
+  const currentHref = $derived(navItems.find((item) => item.href === page.url.pathname)?.href ?? navItems[0]?.href ?? '/docs/install');
   const icons = {
     book: BookOpen,
     boxes: Boxes,
@@ -33,10 +36,28 @@
     shield: ShieldCheck,
     terminal: Terminal
   };
+
+  function navigateDocs(event) {
+    const target = event.currentTarget.value;
+    if (target && target !== page.url.pathname) void goto(target);
+  }
 </script>
 
 <div class="docs-shell">
   <aside class="docs-nav" aria-label="Documentation">
+    <label class="mobile-doc-picker">
+      <span class="smallcaps">Docs</span>
+      <select value={currentHref} onchange={navigateDocs} aria-label="Documentation page">
+        {#each navGroups as group}
+          <optgroup label={group.title}>
+            {#each group.items as item}
+              <option value={item.href}>{item.label}</option>
+            {/each}
+          </optgroup>
+        {/each}
+      </select>
+    </label>
+
     <nav>
       {#each navGroups as group}
         {@const SectionIcon = icons[group.icon]}
@@ -86,6 +107,9 @@
   }
   .docs-nav nav {
     padding: 0;
+  }
+  .mobile-doc-picker {
+    display: none;
   }
   .group {
     padding: 0.35rem 0;
@@ -174,42 +198,42 @@
     .docs-nav {
       position: static;
       width: 100%;
-      margin-bottom: var(--space-4);
+      margin-bottom: var(--space-5);
+    }
+    .mobile-doc-picker {
+      display: grid;
+      gap: 0.35rem;
+    }
+    .mobile-doc-picker span {
+      color: var(--c-ink-mute);
+    }
+    .mobile-doc-picker select {
+      width: 100%;
+      min-height: 2.35rem;
+      border: 1px solid var(--c-rule);
+      border-radius: var(--radius-1);
+      background: var(--c-surface);
+      color: var(--c-ink);
+      padding: 0 2.1rem 0 0.75rem;
+      font: inherit;
+      font-size: 0.9rem;
+      line-height: 1.2;
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--c-ink-soft) 50%),
+        linear-gradient(135deg, var(--c-ink-soft) 50%, transparent 50%);
+      background-position:
+        calc(100% - 1rem) 50%,
+        calc(100% - 0.68rem) 50%;
+      background-size: 0.32rem 0.32rem;
+      background-repeat: no-repeat;
+    }
+    .mobile-doc-picker select:focus-visible {
+      outline: 2px solid color-mix(in oklch, var(--c-mark), transparent 40%);
+      outline-offset: 2px;
     }
     .docs-nav nav {
-      display: flex;
-      gap: var(--space-2);
-      overflow-x: auto;
-      padding: 0 0 var(--space-2);
-      scrollbar-width: thin;
-      -webkit-overflow-scrolling: touch;
-    }
-    .group {
-      display: contents;
-    }
-    .group-title {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-    .docs-nav ul {
-      display: flex;
-      gap: 0.35rem;
-      flex: 0 0 auto;
-    }
-    .docs-nav li {
-      flex: 0 0 auto;
-      padding: 0;
-    }
-    .docs-nav a {
-      white-space: nowrap;
-      min-height: 2rem;
+      display: none;
     }
   }
 </style>

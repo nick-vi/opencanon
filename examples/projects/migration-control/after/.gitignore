@@ -1,0 +1,7 @@
+.opencanon/cache/
+.opencanon/daemon.json
+.opencanon/daemon.log
+.opencanon/setup.json
+.opencanon/*.sqlite
+.opencanon/*.sqlite-shm
+.opencanon/*.sqlite-wal

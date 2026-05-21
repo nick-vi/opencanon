@@ -13,7 +13,7 @@ bun .agents/skills/opencanon/scripts/opencanon.ts setup --yes --hooks codex
 
 `setup` is safe to rerun. It scaffolds missing OpenCanon files, installs requested feedback hooks, validates the context, runs doctor checks, runs project validation, verifies daemon prerequisites, and starts the project daemon unless `--no-daemon` is used.
 
-Commit the scaffolded docs, decisions, validators, fixtures, hook config, skill wrapper files, `skills-lock.json`, and package script. Do not commit `.agents/skills/opencanon/runtime/` or `.opencanon/` generated state; setup installs runtime assets locally from the release manifest and adds the generated paths to `.gitignore`.
+Commit the scaffolded docs, decisions, validators, fixtures, hook config, skill wrapper files, `.agents/skills/opencanon/.gitignore`, `skills-lock.json`, and package script. Do not commit `.agents/skills/opencanon/runtime/` or `.opencanon/` generated state; setup installs runtime assets locally from the release manifest, adds repo state paths to the root `.gitignore`, and keeps runtime ignored from the skill folder.
 
 ## Daily Use
 
@@ -163,7 +163,7 @@ Add `opencanon.config.json` only when a repository needs to override those defau
 }
 ```
 
-When the effective discovery mode is `git`, OpenCanon requires a Git repository and never silently falls back to filesystem traversal. Git discovery respects `.gitignore`, then OpenCanon applies `projectFilePatterns`, `ignore`, `maxFiles`, and `maxFileSizeKb`. `validate --changed` and `feedback --changed` use the same project scope before running validators. Use `fileDiscovery: "filesystem"` as an explicit override for tests, benchmarks, or non-Git experiments. Parser results are cached under `cacheDir`; `init` and `setup` add ignore rules for cache, daemon state, setup state, SQLite state, and installed runtime artifacts, and `doctor` verifies them.
+When the effective discovery mode is `git`, OpenCanon requires a Git repository and never silently falls back to filesystem traversal. Git discovery respects `.gitignore`, then OpenCanon applies `projectFilePatterns`, `ignore`, `maxFiles`, and `maxFileSizeKb`. `validate --changed` and `feedback --changed` use the same project scope before running validators. Use `fileDiscovery: "filesystem"` as an explicit override for tests, benchmarks, or non-Git experiments. Parser results are cached under `cacheDir`; `init` and `setup` add root ignore rules for cache, daemon state, setup state, and SQLite state, plus a skill-local `.gitignore` for installed runtime artifacts. `doctor` verifies them.
 
 Invalid config is a hard failure for normal `context` and `validate` commands. `doctor` reports the same diagnostics and can repair generated artifact ignore entries with `--fix safe`.
 
@@ -292,7 +292,7 @@ bun run opencanon setup --yes --no-daemon
 bun run opencanon setup --dry-run
 ```
 
-`setup` is non-interactive and safe to rerun. It calls the deterministic scaffold path for missing files, installs the current-platform engine binary from a release manifest when one is supplied by the installed skill or `--manifest`, writes `tmp/opencanon-init-plan.md` for the current agent when a scaffold is created, validates the OpenCanon context, runs doctor, runs project validation, checks the pinned Bun/engine daemon prerequisites, starts the supervised daemon by default, and records generated setup state in `.opencanon/setup.json`.
+`setup` is non-interactive and safe to rerun. It calls the deterministic scaffold path for missing files, installs the current-platform engine binary from a release manifest when one is supplied by the installed skill or `--manifest`, validates the OpenCanon context, runs doctor, runs project validation, checks the pinned Bun/engine daemon prerequisites, starts the supervised daemon by default, and records generated setup state in `.opencanon/setup.json`.
 
 ## Init
 
@@ -300,11 +300,11 @@ Use `init` only for lower-level scaffold work. Normal first-run setup should use
 
 ```bash
 bun run opencanon init
-bun run opencanon init --yes
-bun run opencanon init --yes --dry-run
+bun run opencanon init --non-interactive
+bun run opencanon init --non-interactive --dry-run
 ```
 
-`init` creates the scaffold without running the full setup checks, hook install, runtime update, doctor, validation, or daemon start.
+`init` creates the scaffold without running the full setup checks, runtime update, doctor, validation, or daemon start. `--yes` is accepted as a short alias for `--non-interactive`.
 
 ## Validator Testing
 

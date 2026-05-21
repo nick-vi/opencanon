@@ -40,8 +40,8 @@ const generatedIgnoreEntries = [
   ".opencanon/*.sqlite",
   ".opencanon/*.sqlite-shm",
   ".opencanon/*.sqlite-wal",
-  ".agents/skills/opencanon/runtime/",
 ];
+const skillGeneratedIgnoreEntries = ["runtime/"];
 
 export type DoctorCheck = {
   id: string;
@@ -261,6 +261,7 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
       result.selectedFixes += 1;
       if (!params.dryRun) {
         ensureGitignoreEntries(params.paths.rootDir, generatedIgnoreEntries);
+        ensureGitignoreEntries(path.join(params.paths.rootDir, ".agents/skills/opencanon"), skillGeneratedIgnoreEntries);
         result.appliedFixes += 1;
       }
     }
@@ -378,7 +379,9 @@ function validateGeneratedIgnore(paths: ContextPaths): {
   if (missing.length === 0) return { status: DoctorStatus.Pass, diagnostics: [] };
   return {
     status: DoctorStatus.Fail,
-    diagnostics: [`Add generated OpenCanon entries to .gitignore: ${generatedIgnoreEntries.join(", ")}. Unignored probes: ${missing.join(", ")}.`],
+    diagnostics: [
+      `Add generated OpenCanon entries to .gitignore: ${generatedIgnoreEntries.join(", ")}; add ${skillGeneratedIgnoreEntries.join(", ")} to .agents/skills/opencanon/.gitignore. Unignored probes: ${missing.join(", ")}.`,
+    ],
   };
 }
 
@@ -399,6 +402,7 @@ function ensureGitignoreEntries(rootDir: string, entries: string[]): void {
   if (missingEntries.length === 0) return;
 
   const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
+  mkdirSync(path.dirname(gitignorePath), { recursive: true });
   writeFileSync(gitignorePath, `${current}${prefix}${missingEntries.join("\n")}\n`);
 }
 

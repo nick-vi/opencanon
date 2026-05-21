@@ -182,7 +182,7 @@ function printHelp(): void {
   console.log(`Usage:
   opencanon context --files <paths...>
   opencanon setup --yes
-  opencanon init --agent
+  opencanon init --non-interactive
   opencanon rules --validator <id>
   opencanon search <query>
   opencanon validate --files <paths...>
@@ -201,7 +201,7 @@ function printHelp(): void {
 Commands:
   context    Load scoped docs, decisions, validators, and git evidence.
   setup      First-run scaffold, hook install, validation, doctor, and daemon start.
-  init       Scaffold OpenCanon skill files, validators, optional config, and agent setup brief.
+  init       Scaffold OpenCanon skill files, validators, optional config, and ignore rules.
   rules      List validator summaries, scopes, decisions, and fixture coverage.
   search     Search symbols, decisions, validators, and docs deterministically.
   validate   Run validators against files, changed files, fixtures, or the project.

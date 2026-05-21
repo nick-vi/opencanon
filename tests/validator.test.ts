@@ -1418,14 +1418,14 @@ test("doctor reports and fixes unignored cache files", () => {
     assert.equal(check?.status, "fail");
     assert(check?.details?.some((detail) => detail.includes(".opencanon/cache/")));
     assert.equal(generatedCheck?.status, "fail");
-    assert(generatedCheck?.details?.some((detail) => detail.includes(".agents/skills/opencanon/runtime/")));
+    assert(generatedCheck?.details?.some((detail) => detail.includes(".agents/skills/opencanon/.gitignore")));
 
     const fix = applyDoctorFixes({ paths, report, mode: "safe", dryRun: false });
     assert.equal(fix.diagnostics.length, 0);
     const gitignore = readFileSync(path.join(rootDir, ".gitignore"), "utf8");
     assert(gitignore.includes(".opencanon/cache/"));
     assert(gitignore.includes(".opencanon/*.sqlite"));
-    assert(gitignore.includes(".agents/skills/opencanon/runtime/"));
+    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\n");
 
     const fixedReport = buildDoctorReport({ paths, decisions: [], validators: [] });
     assert.equal(fixedReport.checks.find((item) => item.id === "cache-ignore")?.status, "pass");

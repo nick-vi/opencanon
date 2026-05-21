@@ -1,10 +1,11 @@
 <script>
   import CodeBlock from '$lib/components/CodeBlock.svelte';
 
-  const layoutTree = `.agents/skills/opencanon/
+const layoutTree = `.agents/skills/opencanon/
+├─ .gitignore
 ├─ scripts/
 │  └─ opencanon.ts
-├─ runtime/
+├─ runtime/ # gitignored
 │  ├─ cli.js
 │  ├─ core/
 │  ├─ validators/
@@ -18,8 +19,9 @@ docs/opencanon/
 └─ canon/
    └─ *.md
 
+.gitignore
 .opencanon/
-└─ cache/
+└─ cache/ # gitignored
 
 ~/.opencanon/
 └─ daemons.json`;

@@ -37,14 +37,19 @@
    └─ orders.ts`,
       treeAfter: `migration-control/after
 ├─ package.json
+├─ .gitignore
 ├─ src/
 │  └─ orders.ts
 ├─ docs/opencanon/
 │  ├─ canon/migrations.md
 │  └─ decisions.json
+├─ .opencanon/
+│  └─ cache/ # gitignored
 └─ .agents/skills/opencanon/
+   ├─ .gitignore
    ├─ validators/migration-control.ts
-   └─ fixtures/old-api-migration/`,
+   ├─ fixtures/old-api-migration/
+   └─ runtime/ # gitignored`,
       finding: {
         rule: 'old-api-migration',
         severity: 'error',
@@ -124,14 +129,19 @@ oldApi();`
    └─ company.ts`,
       treeAfter: `dry-graph/after
 ├─ package.json
+├─ .gitignore
 ├─ src/
 │  └─ company.ts
 ├─ docs/opencanon/
 │  ├─ canon/dry.md
 │  └─ decisions.json
+├─ .opencanon/
+│  └─ cache/ # gitignored
 └─ .agents/skills/opencanon/
+   ├─ .gitignore
    ├─ validators/dry-graph.ts
-   └─ fixtures/similar-functions/`,
+   ├─ fixtures/similar-functions/
+   └─ runtime/ # gitignored`,
       finding: {
         rule: 'similar-functions',
         severity: 'warning',

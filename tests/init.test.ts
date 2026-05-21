@@ -36,22 +36,22 @@ test("init dry-run reports scaffold without writing files", () => {
   }
 });
 
-test("init creates scaffold, agent brief, package script, and requested hooks", () => {
+test("init creates scaffold, package script, and requested hooks", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-init-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(path.join(rootDir, "src/a.ts"), "export const a = 1;\n");
 
-    const result = spawnSync("bun", [script, "init", "--yes", "--agent", "--hooks", "opencode", "--file-discovery", "filesystem"], {
+    const result = spawnSync("bun", [script, "init", "--non-interactive", "--hooks", "opencode", "--file-discovery", "filesystem"], {
       cwd: rootDir,
       encoding: "utf8",
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert(result.stdout.includes("Agent Setup Brief"));
     assert.equal(existsSync(path.join(rootDir, "opencanon.config.json")), false);
     assert(readFileSync(path.join(rootDir, ".agents/skills/opencanon/SKILL.md"), "utf8").includes("Validator Authoring"));
+    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\n");
     assert(readFileSync(path.join(rootDir, ".agents/skills/opencanon/index.ts"), "utf8").includes("./runtime/validators.js"));
     assert(existsSync(path.join(rootDir, ".agents/skills/opencanon/runtime/cli.js")));
     assert(existsSync(path.join(rootDir, ".agents/skills/opencanon/runtime/engine", engineTarget, engineBindingName)));
@@ -59,11 +59,10 @@ test("init creates scaffold, agent brief, package script, and requested hooks", 
     assert(readFileSync(path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts"), "utf8").includes("runtime/cli.js"));
     assert(readFileSync(path.join(rootDir, ".agents/skills/opencanon/scripts/opencode-plugin.ts"), "utf8").includes("../runtime/cli.js"));
     assert(readFileSync(path.join(rootDir, ".opencode/plugins/opencanon.ts"), "utf8").includes(".agents/skills/opencanon/scripts/opencode-plugin.ts"));
-    assert(readFileSync(path.join(rootDir, "tmp/opencanon-init-plan.md"), "utf8").includes("OpenCanon Agent Setup Brief"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/setup.json"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/*.sqlite"));
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
+    assert(!readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
     assert.equal(JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf8")).scripts.opencanon, "bun .agents/skills/opencanon/scripts/opencanon.ts");
 
     const localScript = path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts");

@@ -38,7 +38,8 @@ opencanon daemon start`;
   in <code>~/.opencanon/daemons.json</code>. Parser caches belong in Git ignore;
   <code>doctor --fix safe</code> can add the ignore entry. Runtime assets under
   <code>.agents/skills/opencanon/runtime/</code> are release artifacts installed
-  into each checkout, not repository source.
+  into each checkout and ignored by the skill-local <code>.gitignore</code>, not
+  repository source.
 </p>
 
 <h2>Engine Runtime</h2>

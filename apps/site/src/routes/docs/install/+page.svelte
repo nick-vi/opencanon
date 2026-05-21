@@ -62,9 +62,11 @@
 </p>
 <p>
   Commit the docs, decisions, validators, fixtures, hook config, skill wrapper
-  files, <code>skills-lock.json</code>, and package script. Runtime assets under
-  <code>.agents/skills/opencanon/runtime/</code> and generated state under
-  <code>.opencanon/</code> stay local and ignored.
+  files, the skill-local <code>.gitignore</code>, <code>skills-lock.json</code>,
+  and package script. Runtime assets under
+  <code>.agents/skills/opencanon/runtime/</code> are ignored by
+  <code>.agents/skills/opencanon/.gitignore</code>. Generated state under
+  <code>.opencanon/</code> is ignored by the root <code>.gitignore</code>.
 </p>
 <CodeBlock title="initialize" language="shell" code={INIT_COMMAND} />
 

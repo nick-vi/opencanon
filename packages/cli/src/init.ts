@@ -40,12 +40,10 @@ const generatedGitignoreEntries = [
   ".opencanon/*.sqlite",
   ".opencanon/*.sqlite-shm",
   ".opencanon/*.sqlite-wal",
-  ".agents/skills/opencanon/runtime/",
 ];
 
 export type InitQuery = {
-  yes: boolean;
-  agent: boolean;
+  nonInteractive: boolean;
   dryRun: boolean;
   force: boolean;
   missingOnly: boolean;
@@ -66,12 +64,10 @@ type InitFileResult = {
 export type InitResult = {
   rootDir: string;
   dryRun: boolean;
-  agent: boolean;
   files: InitFileResult[];
   hooks: HookInstallResult[];
   diagnostics: string[];
   nextSteps: string[];
-  agentBrief?: string;
 };
 
 export async function runInitCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
@@ -87,8 +83,8 @@ export async function runInitCommand(args = Bun.argv.slice(2), cwd = process.cwd
 async function parseInitArgs(args: string[], rootDir: string): Promise<InitQuery> {
   const cli = cac("opencanon init");
   cli.option("-h, --help", "Show help.");
-  cli.option("--yes", "Use defaults without prompting.");
-  cli.option("--agent", "Create an agent setup brief after scaffolding.");
+  cli.option("--non-interactive", "Use defaults without prompting.");
+  cli.option("--yes", "Alias for --non-interactive.");
   cli.option("--dry-run", "Show files that would change without writing.");
   cli.option("--force", "Overwrite existing OpenCanon scaffold files.");
   cli.option("--format <format>", "Output format.");
@@ -105,7 +101,7 @@ async function parseInitArgs(args: string[], rootDir: string): Promise<InitQuery
     "help",
     "h",
     "yes",
-    "agent",
+    "nonInteractive",
     "dryRun",
     "force",
     "format",
@@ -125,8 +121,7 @@ async function parseInitArgs(args: string[], rootDir: string): Promise<InitQuery
 
   const defaults = defaultInitQuery(rootDir);
   const query: InitQuery = {
-    yes: booleanOption(options.yes),
-    agent: booleanOption(options.agent),
+    nonInteractive: booleanOption(options.nonInteractive) || booleanOption(options.yes),
     dryRun: booleanOption(options.dryRun),
     force: booleanOption(options.force),
     missingOnly: false,
@@ -139,8 +134,8 @@ async function parseInitArgs(args: string[], rootDir: string): Promise<InitQuery
     fileDiscovery: fileDiscoveryOption(options.fileDiscovery, defaults.fileDiscovery),
   };
 
-  if (query.yes || query.agent) return query;
-  if (!process.stdin.isTTY || !process.stdout.isTTY) fail("opencanon init is interactive by default. Use --yes or --agent for non-interactive setup.");
+  if (query.nonInteractive) return query;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) fail("opencanon init is interactive by default. Use --non-interactive or --yes.");
   return promptInitQuery(query);
 }
 
@@ -149,7 +144,7 @@ async function promptInitQuery(defaults: InitQuery): Promise<InitQuery> {
   try {
     return {
       ...defaults,
-      yes: true,
+      nonInteractive: true,
       docsDir: await promptString(rl, "Docs directory", defaults.docsDir),
       validatorsPath: await promptString(rl, "Validators path", defaults.validatorsPath),
       fixturesDir: await promptString(rl, "Fixtures directory", defaults.fixturesDir),
@@ -186,15 +181,13 @@ export function runInit(rootDir: string, query: InitQuery): InitResult {
   files.push(writeManagedFile(rootDir, query.validatorsPath, validatorsTemplate(), query, diagnostics));
   files.push(writeManagedFile(rootDir, path.join(query.fixturesDir, ".gitkeep"), EmptyFileContent, query, diagnostics));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/SKILL.md", skillTemplate(), query, diagnostics));
+  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/.gitignore", "runtime/\n", query, diagnostics));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/index.ts", skillBarrelTemplate(), query, diagnostics));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts", cliScriptTemplate(), query, diagnostics, 0o755));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/scripts/opencode-plugin.ts", opencodePluginTemplate(), query, diagnostics));
   files.push(...copyBundledRuntimeFiles(rootDir, query, diagnostics));
   files.push(writeGitignoreEntries(rootDir, [`${query.cacheDir.replace(/\/$/, "")}/`, ...generatedGitignoreEntries], query));
   files.push(writePackageScript(rootDir, query, diagnostics));
-
-  const agentBrief = query.agent ? agentBriefTemplate(query) : undefined;
-  if (agentBrief) files.push(writeManagedFile(rootDir, "tmp/opencanon-init-plan.md", agentBrief, query, diagnostics));
 
   const hooks = query.hooks.map((host) =>
     installHook({
@@ -209,12 +202,10 @@ export function runInit(rootDir: string, query: InitQuery): InitResult {
   return {
     rootDir,
     dryRun: query.dryRun,
-    agent: query.agent,
     files,
     hooks,
     diagnostics,
     nextSteps: nextSteps(query),
-    agentBrief,
   };
 }
 
@@ -234,7 +225,7 @@ function initConfigOverrides(rootDir: string, query: InitQuery): Record<string, 
   return config;
 }
 
-function defaultInitQuery(rootDir: string): Omit<InitQuery, "yes" | "agent" | "dryRun" | "force" | "format" | "hooks"> {
+function defaultInitQuery(rootDir: string): Omit<InitQuery, "nonInteractive" | "dryRun" | "force" | "format" | "hooks"> {
   const defaults = createDefaultConfig(rootDir);
   return {
     missingOnly: false,
@@ -407,7 +398,6 @@ function nextSteps(query: InitQuery): string[] {
     "Run bun run opencanon validate --check-fixtures.",
     "Run bun run opencanon doctor.",
   ];
-  if (query.agent) steps.unshift("Give tmp/opencanon-init-plan.md to the current coding agent and ask it to complete the convention extraction.");
   if (query.hooks.length === 0) steps.push("Install feedback hooks with bun run opencanon hook install --all --dry-run.");
   return steps;
 }
@@ -432,27 +422,19 @@ export function renderInitMarkdown(result: InitResult): string {
   lines.push("");
   lines.push("Next Steps:");
   for (const step of result.nextSteps) lines.push(`- ${step}`);
-  if (result.agentBrief) {
-    lines.push("");
-    lines.push("Agent Setup Brief:");
-    lines.push("```markdown");
-    lines.push(result.agentBrief.trimEnd());
-    lines.push("```");
-  }
   return lines.join("\n");
 }
 
 function printInitHelp(): void {
   console.log(`Usage:
   bun run opencanon init
-  bun run opencanon init --yes
-  bun run opencanon init --agent
-  bun run opencanon init --agent --hooks codex,claude,opencode
-  bun run opencanon init --yes --dry-run
+  bun run opencanon init --non-interactive
+  bun run opencanon init --non-interactive --hooks codex,claude,opencode
+  bun run opencanon init --non-interactive --dry-run
 
 Options:
-  --yes                       Use defaults without prompting.
-  --agent                     Scaffold and write an agent setup brief.
+  --non-interactive           Use defaults without prompting.
+  --yes                       Alias for --non-interactive.
   --dry-run                   Show files that would change without writing.
   --force                     Overwrite existing scaffold files.
   --format markdown|json      Output format. Default: markdown.
@@ -595,54 +577,6 @@ Before finishing, run:
 bun run opencanon context --check
 bun run opencanon validate --check-fixtures
 bun run opencanon validate --changed
-bun run opencanon daemon check
-bun run opencanon doctor
-\`\`\`
-`;
-}
-
-function agentBriefTemplate(query: InitQuery): string {
-  return `# OpenCanon Agent Setup Brief
-
-Set up repository conventions for OpenCanon.
-
-Read lazily and only as needed:
-
-- AGENTS.md or CLAUDE.md if present
-- README files
-- docs/**/*.md
-- existing lint, test, schema, DAL, service, route, and package-boundary conventions
-
-Create or update:
-
-- ${docsPath(query.docsDir, OpenCanonInitFile.Decisions)}
-- ${docsPath(query.docsDir, OpenCanonInitFile.Architecture)}
-- ${docsPath(query.docsDir, OpenCanonInitFile.Lifecycle)}
-- ${docsPath(query.docsDir, OpenCanonInitFile.Testing)}
-- ${docsPath(query.docsDir, OpenCanonInitFile.Impact)}
-- ${docsPath(query.docsDir, OpenCanonInitFile.Security)}
-- ${docsPath(query.docsDir, OpenCanonInitFile.ImpactSurfaces)}
-- ${docsPath(query.docsDir, OpenCanonInitFile.ProposedImpactNotes)}
-- ${query.validatorsPath}
-- ${query.fixturesDir}/<validator-id>/valid
-- ${query.fixturesDir}/<validator-id>/invalid
-- ${query.fixturesDir}/<validator-id>/fixed when a validator has structured fixes
-
-Rules:
-
-- Capture current conventions as decisions with docs refs to Markdown headings.
-- Add validators only for mechanically checkable conventions.
-- Prefer generic validator primitives and curated factories before bespoke parsing.
-- Do not add shims, legacy paths, compatibility aliases, or deprecation layers.
-- If code violates the new canon, treat that as expected signal and decide whether to refactor code or tune the validator.
-- Use \`opencanon daemon check\` before daemon work; daemon mode requires pinned Bun and a built engine binary.
-
-Validation commands:
-
-\`\`\`bash
-bun run opencanon context --check
-bun run opencanon validate --check-fixtures
-bun run opencanon validate --project
 bun run opencanon daemon check
 bun run opencanon doctor
 \`\`\`

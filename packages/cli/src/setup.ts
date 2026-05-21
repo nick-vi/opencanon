@@ -46,6 +46,7 @@ const SetupStepId = {
   ProjectValidation: "project-validation",
   RuntimeUpdate: "runtime-update",
   Scaffold: "scaffold",
+  SkillRuntimeIgnore: "skill-runtime-ignore",
   SetupStateIgnore: "setup-state-ignore",
   SetupState: "setup-state",
   Validation: "validation",
@@ -63,7 +64,6 @@ const generatedStateIgnoreEntries = [
   ".opencanon/*.sqlite",
   ".opencanon/*.sqlite-shm",
   ".opencanon/*.sqlite-wal",
-  ".agents/skills/opencanon/runtime/",
 ];
 
 type SetupQuery = {
@@ -85,7 +85,6 @@ type SetupInitSummary = {
   files: InitResult["files"];
   diagnostics: string[];
   nextSteps: string[];
-  agentBriefPath?: string;
 };
 
 type SetupResult = {
@@ -134,7 +133,6 @@ async function runSetup(cwd: string, query: SetupQuery): Promise<SetupResult> {
       files: initResult.files,
       diagnostics: initResult.diagnostics,
       nextSteps: initResult.nextSteps,
-      agentBriefPath: initResult.agentBrief ? "tmp/opencanon-init-plan.md" : undefined,
     };
     steps.push({
       id: SetupStepId.Scaffold,
@@ -170,6 +168,7 @@ async function runSetup(cwd: string, query: SetupQuery): Promise<SetupResult> {
 
   steps.push(ensureCacheIgnored(rootDir, query.dryRun));
   steps.push(ensureSetupStateIgnored(rootDir, query.dryRun));
+  steps.push(ensureSkillRuntimeIgnored(rootDir, query.dryRun));
 
   if (query.runtimeManifestSource) {
     steps.push(await installSetupRuntime(rootDir, query));
@@ -339,8 +338,7 @@ function parseSetupArgs(args: string[]): SetupQuery | null {
 function createSetupInitQuery(rootDir: string, query: SetupQuery): InitQuery {
   const defaults = createDefaultConfig(rootDir);
   return {
-    yes: true,
-    agent: true,
+    nonInteractive: true,
     dryRun: query.dryRun,
     force: false,
     missingOnly: true,
@@ -366,6 +364,7 @@ function missingScaffoldFiles(rootDir: string): string[] {
     paths.decisionsPath,
     paths.validatorsPath,
     path.join(rootDir, ".agents/skills/opencanon/SKILL.md"),
+    path.join(rootDir, ".agents/skills/opencanon/.gitignore"),
     path.join(rootDir, ".agents/skills/opencanon/index.ts"),
     path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts"),
     path.join(rootDir, ".agents/skills/opencanon/runtime/cli.js"),
@@ -468,9 +467,21 @@ function ensureSetupStateIgnored(rootDir: string, dryRun: boolean): SetupStep {
     entries: [SetupStateFile, ...generatedStateIgnoreEntries],
     dryRun,
     id: SetupStepId.SetupStateIgnore,
-    presentMessage: "Generated OpenCanon state and runtime files are ignored by Git.",
-    dryRunMessage: "Generated OpenCanon state and runtime ignore entries would be added to .gitignore.",
-    writtenMessage: "Generated OpenCanon state and runtime ignore entries added to .gitignore.",
+    presentMessage: "Generated OpenCanon state files are ignored by Git.",
+    dryRunMessage: "Generated OpenCanon state ignore entries would be added to .gitignore.",
+    writtenMessage: "Generated OpenCanon state ignore entries added to .gitignore.",
+  });
+}
+
+function ensureSkillRuntimeIgnored(rootDir: string, dryRun: boolean): SetupStep {
+  return ensureGitignoreEntriesStep({
+    rootDir: path.join(rootDir, ".agents/skills/opencanon"),
+    entries: ["runtime/"],
+    dryRun,
+    id: SetupStepId.SkillRuntimeIgnore,
+    presentMessage: "Generated skill runtime files are ignored by Git.",
+    dryRunMessage: "runtime/ would be added to .agents/skills/opencanon/.gitignore.",
+    writtenMessage: "runtime/ added to .agents/skills/opencanon/.gitignore.",
   });
 }
 
@@ -661,10 +672,6 @@ function renderSetupMarkdown(result: SetupResult): string {
   for (const step of result.steps) {
     lines.push(`- [${step.status}] ${step.id}: ${step.message}`);
     for (const detail of step.details ?? []) lines.push(`  - ${detail}`);
-  }
-  if (result.init?.agentBriefPath) {
-    lines.push("");
-    lines.push(`Agent brief: ${result.init.agentBriefPath}`);
   }
   lines.push("");
   lines.push("Next:");
