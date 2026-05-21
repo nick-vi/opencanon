@@ -169,6 +169,7 @@ const TextEncoding = {
 const defaultIgnore = [
   "node_modules/**",
   ".git/**",
+  ".agents/**",
   ".opencanon/**",
   "dist/**",
   "build/**",

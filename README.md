@@ -147,7 +147,7 @@ Add `opencanon.config.json` only when a repository needs to override those defau
   "maxFiles": 20000,
   "maxFileSizeKb": 512,
   "projectFilePatterns": ["src/**/*.{ts,tsx,js,jsx,py,svelte,css,scss,sass,less,json,md}", "tests/**/*.{ts,tsx,js,jsx,py,svelte,css,scss,sass,less,json,md}"],
-  "ignore": ["node_modules/**", ".git/**", ".opencanon/**"],
+  "ignore": ["node_modules/**", ".git/**", ".agents/**", ".opencanon/**"],
   "entrypoints": ["src/main.ts"],
   "publicSurfaces": ["src/api/**"],
   "generated": ["src/generated/**"],
