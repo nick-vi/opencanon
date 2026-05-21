@@ -153,7 +153,8 @@ test("bundle install wires installed validator modules into validators index", (
 
     const index = readFileSync(path.join(rootDir, ".agents/skills/opencanon/validators/index.ts"), "utf8");
     assert(index.includes('import wiredValidatorValidator from "./wired-validator.ts";'));
-    assert(index.includes("export default [wiredValidatorValidator];"));
+    assert(index.includes("const opencanonBundleValidators = (value) => Array.isArray(value) ? value : [value];"));
+    assert(index.includes("export default [...opencanonBundleValidators(wiredValidatorValidator)];"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

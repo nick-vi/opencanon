@@ -452,17 +452,19 @@ function writeValidatorIndex(rootDir: string, validatorsPath: string, bundleFile
   if (missing.length === 0) return { path: target.path, action: BundleWriteAction.Unchanged };
 
   const imports = missing.map((module) => `import ${module.identifier} from "${module.importPath}";`).join("\n");
+  const helper = `const opencanonBundleValidators = (value) => Array.isArray(value) ? value : [value];`;
   let next = `${imports}\n${current}`;
+  if (!next.includes("opencanonBundleValidators")) next = `${helper}\n${next}`;
   const exportMatch = next.match(/export\s+default\s+\[([\s\S]*?)\];/m);
   if (exportMatch) {
     const existingEntries = exportMatch[1]
       .split(",")
       .map((entry) => entry.trim())
       .filter(Boolean);
-    const entries = [...existingEntries, ...missing.map((module) => module.identifier)];
+    const entries = [...existingEntries, ...missing.map((module) => `...opencanonBundleValidators(${module.identifier})`)];
     next = next.replace(exportMatch[0], `export default [${entries.join(", ")}];`);
   } else {
-    next += `\nexport default [${missing.map((module) => module.identifier).join(", ")}];\n`;
+    next += `\nexport default [${missing.map((module) => `...opencanonBundleValidators(${module.identifier})`).join(", ")}];\n`;
   }
 
   const action = existsSync(absolute) ? BundleWriteAction.Update : BundleWriteAction.Create;

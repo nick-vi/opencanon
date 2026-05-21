@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.3 - 2026-05-21
+
+- Fixed bundle validator index wiring for modules that export arrays of validators.
+
 ## v0.3.2 - 2026-05-21
 
 - Fixed setup manifest propagation when `OPENCANON_UPDATE_MANIFEST` is used.
