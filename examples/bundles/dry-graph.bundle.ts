@@ -1,6 +1,4 @@
-import { defineCanonBundle } from "../../packages/core/src/bundles.ts";
-
-export default defineCanonBundle({
+export default {
   id: "dry-graph",
   description: "Adds graph-backed DRY validators for repeated literals and similar function surfaces.",
   topics: ["dry", "code-quality"],
@@ -98,4 +96,4 @@ export default [repeatedDomainLiterals, similarFunctions];
   ],
   impactSurfaces: [],
   externalTools: {},
-});
+};

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -111,6 +111,49 @@ test("bundle commands resolve typed options into plans and dry-run installs", ()
     assert.equal(installed.options.sourceRoot, "app");
     assert(installed.files.some((file) => file.path === "docs/opencanon/decisions.json"));
     assert(installed.files.some((file) => file.path === "docs/opencanon/canon/project.md"));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("bundle install wires installed validator modules into validators index", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-bundle-wire-"));
+  const bundlePath = path.join(rootDir, "opencanon.bundle.json");
+  try {
+    mkdirSync(path.join(rootDir, ".agents/skills/opencanon/validators"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(path.join(rootDir, ".agents/skills/opencanon/validators/index.ts"), "export default [];\n");
+    writeFileSync(
+      bundlePath,
+      JSON.stringify({
+        id: "wired-rules",
+        topics: ["project"],
+        validators: ["wired-validator"],
+        docs: [],
+        decisions: [],
+        impactSurfaces: [],
+        externalTools: {},
+        files: [
+          {
+            path: ".agents/skills/opencanon/validators/wired-validator.ts",
+            content: "export default { id: 'wired-validator', topics: ['project'], severity: 'warning', scope: 'project', validate() { return []; } };\n",
+          },
+        ],
+      }),
+    );
+
+    const install = spawnSync("bun", [cli, "bundle", "install", bundlePath, "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+    const installed = JSON.parse(install.stdout) as { files: Array<{ path: string; action: string }>; diagnostics: string[] };
+    assert.equal(installed.diagnostics.length, 0);
+    assert(installed.files.some((file) => file.path === ".agents/skills/opencanon/validators/index.ts" && file.action === "update"));
+
+    const index = readFileSync(path.join(rootDir, ".agents/skills/opencanon/validators/index.ts"), "utf8");
+    assert(index.includes('import wiredValidatorValidator from "./wired-validator.ts";'));
+    assert(index.includes("export default [wiredValidatorValidator];"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

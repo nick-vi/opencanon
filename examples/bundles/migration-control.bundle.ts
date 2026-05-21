@@ -1,6 +1,4 @@
-import { defineCanonBundle } from "../../packages/core/src/bundles.ts";
-
-export default defineCanonBundle({
+export default {
   id: "migration-control",
   description: "Adds a migration validator that blocks new usage of a replaced API while allowing baselined existing usage to warn.",
   topics: ["migration", "deprecation"],
@@ -92,4 +90,4 @@ export default migrationReferences({
   ],
   impactSurfaces: [],
   externalTools: {},
-});
+};

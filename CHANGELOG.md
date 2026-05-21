@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1 - 2026-05-21
+
+- Fixed bundle installs so generated validator modules are wired into the validators index and run immediately.
+- Made example bundles portable outside the source checkout.
+- Added JSON output support for `symbols` and `graph` commands to match documented CLI usage.
+
 ## v0.3.0 - 2026-05-21
 
 - Added bundle-driven migration and graph-backed DRY examples with before/after project fixtures.

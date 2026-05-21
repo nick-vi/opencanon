@@ -1,4 +1,4 @@
-pub(crate) const ENGINE_VERSION: &str = "0.3.0";
+pub(crate) const ENGINE_VERSION: &str = "0.3.1";
 pub(crate) const NAPI_VERSION: &str = "3.9.0";
 pub(crate) const PARSER_VERSION: &str = "oxc-0.128.0";
 pub(crate) const EXTRACTOR_VERSION: &str = "oxc-graph-1";

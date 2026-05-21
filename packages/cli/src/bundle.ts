@@ -267,6 +267,8 @@ async function installBundle(
   files.push(...bundle.docs.map((doc) => writeMarkdownDoc(rootDir, doc.path, doc.heading, doc.body, options.dryRun)));
   files.push(writeJsonArray(rootDir, relative(rootDir, paths.impactSurfacesPath), bundle.impactSurfaces, mergeImpactSurfaces, options.dryRun));
   files.push(...bundle.files.map((file) => writeBundleFile(rootDir, file.path, file.content, options.dryRun)));
+  const validatorIndexResult = writeValidatorIndex(rootDir, relative(rootDir, paths.validatorsPath), bundle.files, options.dryRun);
+  if (validatorIndexResult) files.push(validatorIndexResult);
 
   if (Object.keys(bundle.externalTools).length > 0) {
     files.push(writeConfigExternalTools(rootDir, bundle.externalTools, options.dryRun));
@@ -429,6 +431,61 @@ function writeBundleFile(rootDir: string, filePath: string, content: string, dry
     writeFileSync(absolute, content);
   }
   return { path: target.path, action };
+}
+
+function writeValidatorIndex(rootDir: string, validatorsPath: string, bundleFiles: CanonBundle["files"], dryRun: boolean): InstallFileResult | null {
+  const validatorDir = path.dirname(validatorsPath);
+  const modules = bundleFiles
+    .map((file) => normalizeRepoPath(file.path))
+    .filter((file) => file.startsWith(`${validatorDir}/`) && file.endsWith(".ts") && file !== validatorsPath)
+    .map((file) => ({
+      path: file,
+      importPath: toImportPath(path.relative(path.dirname(validatorsPath), file)),
+      identifier: validatorIdentifier(file),
+    }));
+  if (modules.length === 0) return null;
+
+  const target = resolveBundleWritePath(rootDir, validatorsPath);
+  const absolute = target.absolutePath;
+  const current = existsSync(absolute) ? readFileSync(absolute, "utf8") : "export default [];\n";
+  const missing = modules.filter((module) => !current.includes(`"${module.importPath}"`) && !current.includes(`'${module.importPath}'`));
+  if (missing.length === 0) return { path: target.path, action: BundleWriteAction.Unchanged };
+
+  const imports = missing.map((module) => `import ${module.identifier} from "${module.importPath}";`).join("\n");
+  let next = `${imports}\n${current}`;
+  const exportMatch = next.match(/export\s+default\s+\[([\s\S]*?)\];/m);
+  if (exportMatch) {
+    const existingEntries = exportMatch[1]
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const entries = [...existingEntries, ...missing.map((module) => module.identifier)];
+    next = next.replace(exportMatch[0], `export default [${entries.join(", ")}];`);
+  } else {
+    next += `\nexport default [${missing.map((module) => module.identifier).join(", ")}];\n`;
+  }
+
+  const action = existsSync(absolute) ? BundleWriteAction.Update : BundleWriteAction.Create;
+  if (!dryRun) {
+    mkdirSync(path.dirname(absolute), { recursive: true });
+    writeAtomicTextFileSync(absolute, next);
+  }
+  return { path: target.path, action };
+}
+
+function validatorIdentifier(filePath: string): string {
+  const base = path.basename(filePath, ".ts");
+  const identifier = base.replace(/[^a-zA-Z0-9]+(.)/g, (_, char: string) => char.toUpperCase()).replace(/^[^a-zA-Z_$]+/, "");
+  return identifier ? `${identifier}Validator` : "bundleValidator";
+}
+
+function toImportPath(relativePath: string): string {
+  const normalized = normalizeRepoPath(relativePath);
+  return normalized.startsWith(".") ? normalized : `./${normalized}`;
+}
+
+function normalizeRepoPath(filePath: string): string {
+  return filePath.split(path.sep).join("/");
 }
 
 function writeConfigExternalTools(rootDir: string, externalTools: Record<string, ExternalTool>, dryRun: boolean): InstallFileResult {

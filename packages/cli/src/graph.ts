@@ -1,4 +1,4 @@
-import { fail, resolveRootDir, type CodeGraphEdge } from "@opencanon/core";
+import { fail, resolveRootDir, type CodeGraphEdge, type Format } from "@opencanon/core";
 import { openCodeGraph } from "./code-graph.ts";
 
 type GraphCommand = "callers" | "callees" | "impact";
@@ -7,6 +7,7 @@ type GraphQuery = {
   command: GraphCommand;
   query: string;
   limit: number;
+  format: Format;
   help: boolean;
 };
 
@@ -26,7 +27,8 @@ export async function runGraphCommand(args = Bun.argv.slice(2), cwd = process.cw
       direction: directionForCommand(query.command),
       limit: query.limit,
     });
-    printEdges(query.command, result.edges, graph.sourceFiles.length, query.query);
+    if (query.format === "json") console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, command: query.command, query: query.query, edges: result.edges }, null, 2));
+    else printEdges(query.command, result.edges, graph.sourceFiles.length, query.query);
   } finally {
     graph.close();
   }
@@ -35,6 +37,7 @@ export async function runGraphCommand(args = Bun.argv.slice(2), cwd = process.cw
 function parseArgs(args: string[]): GraphQuery {
   let help = false;
   let limit = 50;
+  let format: Format = "markdown";
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -49,6 +52,13 @@ function parseArgs(args: string[]): GraphQuery {
       index += 1;
       continue;
     }
+    if (arg === "--format") {
+      const value = args[index + 1];
+      if (value !== "markdown" && value !== "json") fail(`Invalid --format: ${value}`);
+      format = value;
+      index += 1;
+      continue;
+    }
     if (arg.startsWith("--")) fail(`Unknown graph option: ${arg}`);
     positional.push(arg);
   }
@@ -57,7 +67,7 @@ function parseArgs(args: string[]): GraphQuery {
   const query = positional[1];
   if (!query) fail(`Expected symbol name for graph ${command}.`);
   if (positional.length > 2) fail(`Unexpected graph arguments: ${positional.slice(2).join(", ")}`);
-  return { command, query, limit, help };
+  return { command, query, limit, format, help };
 }
 
 function directionForCommand(command: GraphCommand): "incoming" | "outgoing" | "both" {
@@ -90,5 +100,6 @@ function printHelp(): void {
 
 Options:
   --limit <n>      Maximum results to return (default 50, max 1000).
+  --format <fmt>   markdown or json. Default: markdown.
 `);
 }

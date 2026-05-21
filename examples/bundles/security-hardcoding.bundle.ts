@@ -1,6 +1,4 @@
-import { defineCanonBundle } from "../../packages/core/src/bundles.ts";
-
-export default defineCanonBundle({
+export default {
   id: "security-hardcoding",
   description: "Adds validators and docs for committed secrets and environment-specific config literals.",
   topics: ["security", "configuration"],
@@ -93,4 +91,4 @@ export default [noSecretLikeLiteralsValidator, noHardcodedConfigValuesValidator]
   ],
   impactSurfaces: [],
   externalTools: {},
-});
+};
