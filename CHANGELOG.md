@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.7 - 2026-05-21
+
+- Fixed default project scope so skill implementation files are ignored while validator fixtures remain checkable.
+
 ## v0.3.6 - 2026-05-21
 
 - Fixed DRY bundle fixture coverage so installed bundles pass fixture validation.
