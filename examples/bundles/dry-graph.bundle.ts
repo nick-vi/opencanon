@@ -95,6 +95,14 @@ export default [repeatedDomainLiterals, similarFunctions];
       path: ".agents/skills/opencanon/fixtures/similar-functions/invalid/src/company.ts",
       content: "function normalizeCompany() { return true; }\nexport function loadCompany() { return normalizeCompany(); }\nexport function fetchCompany() { return normalizeCompany(); }\n",
     },
+    {
+      path: ".agents/skills/opencanon/fixtures/repeated-domain-literals/valid/src/orders.ts",
+      content: "const ORDER_TYPE = \"ORDER\";\nconst STATUS_PENDING = \"pending\";\nexport function loadOrder() { return { type: ORDER_TYPE, status: STATUS_PENDING }; }\nexport function fetchOrder() { return { type: ORDER_TYPE, status: STATUS_PENDING }; }\n",
+    },
+    {
+      path: ".agents/skills/opencanon/fixtures/repeated-domain-literals/invalid/src/orders.ts",
+      content: "export function loadOrder() { return { type: \"ORDER\", status: \"pending\" }; }\nexport function fetchOrder() { return { type: \"ORDER\", status: \"pending\" }; }\n",
+    },
   ],
   impactSurfaces: [],
   externalTools: {},

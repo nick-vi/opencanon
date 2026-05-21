@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.6 - 2026-05-21
+
+- Fixed DRY bundle fixture coverage so installed bundles pass fixture validation.
+
 ## v0.3.5 - 2026-05-21
 
 - Fixed example bundle source globs so generated validators install with valid glob patterns.
