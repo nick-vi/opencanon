@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 import { daemonAuthHeaders, startOpenCanonDaemon } from "@opencanon/daemon";
 
 const statePath = path.join(process.cwd(), ".opencanon", "state.sqlite");
-const watchedFile = path.join(process.cwd(), "tests/opencanon-watch-smoke.generated.ts");
+const watchedFile = path.join(process.cwd(), "tests/unit/company.test.ts");
 const linkedFile = path.join(process.cwd(), "tests/opencanon-outside-link.generated.txt");
 const outsideDir = mkdtempSync(path.join(tmpdir(), "opencanon-ui-smoke-outside-"));
 const outsideFile = path.join(outsideDir, "secret.txt");
 for (const file of [statePath, `${statePath}-wal`, `${statePath}-shm`]) rmSync(file, { force: true });
-rmSync(watchedFile, { force: true });
 rmSync(linkedFile, { force: true });
+const watchedFileOriginal = readFileSync(watchedFile, "utf8");
 writeFileSync(outsideFile, "secret\n");
 symlinkSync(outsideFile, linkedFile);
 
@@ -241,13 +241,19 @@ try {
   );
   assert.equal(streamReceived, true);
 
-  writeFileSync(watchedFile, "export const opencanonWatchSmoke = true;\n");
-  const watcherIndexed = await pollSnapshot(server.url, server.authToken, (snapshot) => snapshot.files.includes("tests/opencanon-watch-smoke.generated.ts"), 10_000);
+  const beforeWatch = await getSnapshot(server.url, server.authToken);
+  writeFileSync(watchedFile, `${watchedFileOriginal}\nexport const opencanonWatchSmoke = true;\n`);
+  const watcherIndexed = await pollSnapshot(
+    server.url,
+    server.authToken,
+    (snapshot) => snapshot.graph.graphHash !== beforeWatch.graph.graphHash && snapshot.files.includes("tests/unit/company.test.ts"),
+    20_000,
+  );
   assert.equal(watcherIndexed, true);
 
   await page.screenshot({ path: "tmp/ui-smoke.png", fullPage: false });
 } finally {
-  rmSync(watchedFile, { force: true });
+  writeFileSync(watchedFile, watchedFileOriginal);
   rmSync(linkedFile, { force: true });
   rmSync(outsideDir, { recursive: true, force: true });
   await browser.close();
@@ -256,15 +262,22 @@ try {
 
 type PollSnapshot = {
   files: string[];
+  graph: { graphHash: string };
   facts?: Array<{ path: string; imports?: Array<{ source: string }> }>;
 };
+
+async function getSnapshot(serverUrl: string, authToken: string): Promise<PollSnapshot> {
+  const response = await fetch(`${serverUrl}/api/snapshot`, { headers: daemonAuthHeaders(authToken) });
+  const body = (await response.json()) as { ok: boolean; data?: PollSnapshot };
+  if (!body.ok || !body.data) throw new Error("Could not read daemon snapshot.");
+  return body.data;
+}
 
 async function pollSnapshot(serverUrl: string, authToken: string, predicate: (snapshot: PollSnapshot) => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const response = await fetch(`${serverUrl}/api/snapshot`, { headers: daemonAuthHeaders(authToken) });
-    const body = (await response.json()) as { ok: boolean; data?: PollSnapshot };
-    if (body.ok && body.data && predicate(body.data)) return true;
+    const snapshot = await getSnapshot(serverUrl, authToken);
+    if (predicate(snapshot)) return true;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   return false;

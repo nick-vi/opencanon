@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.9 - 2026-05-21
+
+- Fixed the UI smoke watcher check to mutate a tracked project file instead of relying on untracked file discovery.
+
 ## v0.3.8 - 2026-05-21
 
 - Fixed daemon validator graph reloads for imported validator modules.
