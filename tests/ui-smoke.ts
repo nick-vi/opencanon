@@ -243,13 +243,14 @@ try {
 
   const beforeWatch = await getSnapshot(server.url, server.authToken);
   writeFileSync(watchedFile, `${watchedFileOriginal}\nexport const opencanonWatchSmoke = true;\n`);
-  const watcherIndexed = await pollSnapshot(
+  await postJson<PollSnapshot>(server.url, server.authToken, "/api/index", {});
+  const reindexed = await pollSnapshot(
     server.url,
     server.authToken,
     (snapshot) => snapshot.graph.graphHash !== beforeWatch.graph.graphHash && snapshot.files.includes("tests/unit/company.test.ts"),
     20_000,
   );
-  assert.equal(watcherIndexed, true);
+  assert.equal(reindexed, true);
 
   await page.screenshot({ path: "tmp/ui-smoke.png", fullPage: false });
 } finally {
