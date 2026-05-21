@@ -54,6 +54,8 @@ bun run opencanon bundle inspect https://example.com/opencanon.bundle.json --sha
 
 Bundles may declare typed `options`; pass values with repeated `--option key=value`. Local bundles may be TypeScript modules or JSON data files. Remote bundles must be JSON data files, must use HTTPS, and must be pinned with `--sha256 <hash>`; OpenCanon does not execute remote TypeScript.
 
+Local example bundles include `migration-control`, `dry-graph`, `security-hardcoding`, and `tauri-desktop`.
+
 Project-level before/after examples live under `examples/projects/`. They show the expected repository shape after an agent applies a bundle or convention: source edits, docs, decisions, validators, and fixtures.
 
 ## Runtime
@@ -99,7 +101,7 @@ Minimal manifest shape:
 {
   "version": 1,
   "channel": "stable",
-  "skillVersion": "0.3.7",
+  "skillVersion": "0.3.8",
   "requiredBun": "1.3.13",
   "daemonSchema": 1,
   "runtime": {
@@ -183,6 +185,7 @@ export default defineValidator({
   scope: "file",
   facts: ["imports"],
   applies: ["src/services/**/*.ts"],
+  analysis: ["src/**/*.ts"],
   summary: ({ applies, scope, facts }) =>
     `Files matching ${applies.join(", ")} must follow ${scope} conventions using ${facts.join(", ")} facts.`,
   validate({ ctx, runtime }) {
@@ -193,6 +196,7 @@ export default defineValidator({
 
 - `scope` is required on every real validator or inherited from a parent. Valid scopes are `file`, `folder`, `import-edge`, `package`, and `project`.
 - `facts` declares the parsed facts a validator consumes. Valid fact kinds are `imports`, `exports`, `symbols`, `calls`, `literals`, `comments`, `references`, `annotations`, `diagnostics`, and `duplicates`.
+- `analysis` is optional. It widens the parsed fact scope beyond current target files for cross-scope rules, for example validating TypeScript files while also reading `src-tauri/src/**/*.rs`. It is a fact-scope hint, not an access boundary.
 - `summary` is optional rule metadata for `opencanon rules`. It can be a string or a synchronous definition-time callback that receives resolved `id`, `topics`, `applies`, `severity`, `scope`, `facts`, and `decisionIds`.
 - `ctx.files` exposes discovered project files.
 - `ctx.targetFiles` is the current validation scope matched by `applies` or CLI input.
@@ -201,6 +205,7 @@ export default defineValidator({
 - Import analysis resolves relative, TS path-alias, and workspace-package imports against discovered project files, even when only target files are parsed.
 - `ctx.impact.*` exposes configured impact surfaces, downstream domain edges, required checks, and proposed impact notes for touched files.
 - `ctx.baseline.*` exposes known findings from the configured baseline file.
+- `ctx.projectFiles(patterns?)` returns discovered project files independent of current target and analysis scope. `ctx.byGlob(patterns)` is kept as a concise alias.
 - `ctx.text(path)`, `ctx.json(path)`, and `ctx.jsonFiles(patterns)` load structured project/config files on demand.
 - `ctx.workspace()` exposes package/app ownership, dependencies, and import edges for monorepo validators.
 - `ctx.folders()` exposes discovered project folders.
@@ -208,6 +213,17 @@ export default defineValidator({
 - Individual files expose lazy text helpers. Parser-specific helpers still exist for framework internals and exceptional validators. Prefer `ctx.facts.*` so language adapters can expand without changing rule code.
 
 Validator results can be synchronous or asynchronous. The CLI awaits all validators and sorts findings deterministically. This is async-safe execution, not worker-thread CPU parallelism.
+
+Large repos should split validators by domain and keep the configured entrypoint as a small barrel:
+
+```ts
+import api from "./api.ts";
+import tauri from "./tauri.ts";
+
+export default [api, tauri];
+```
+
+Domain modules can export a parent validator with nested `validators: []` so topics, decisions, facts, and applies scopes are inherited consistently.
 
 Finding resolution policy: any validation finding must be addressed before an agent completes the task. Agents fix code to match current decisions, fix bugged validators with fixtures when the validator is wrong, or ask the user before changing a decision. `error` findings are blocking and make the CLI exit nonzero. `warning` findings are non-blocking by default; the CLI exits zero unless `--strict-warnings` is used. Markdown validation output includes a decision-update request template and points to `context --list-exceptions` for auditing documented exceptions.
 
@@ -249,6 +265,25 @@ export default defineValidator({
       message: "Route handlers must call services, not DAL modules.",
     }),
   ],
+});
+```
+
+For Tauri apps, `tauriCommandParity` checks common frontend/Rust drift:
+
+```ts
+import { tauriCommandParity } from "../../../.agents/skills/opencanon/index.ts";
+
+export default tauriCommandParity({
+  id: "tauri-command-parity",
+  topics: ["tauri"],
+  severity: "error",
+  frontend: ["src/**/*.{ts,tsx}"],
+  rust: ["src-tauri/src/**/*.rs"],
+  invokeFunctions: ["invoke", "tauriInvoke"],
+  listenFunctions: ["listen", "tauriListen"],
+  checkEvents: true,
+  checkHandlerRegistration: true,
+  message: "Tauri frontend calls must resolve to Rust commands and events.",
 });
 ```
 

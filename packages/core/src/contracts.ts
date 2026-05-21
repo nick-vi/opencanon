@@ -173,6 +173,7 @@ export const ValidatorContractSchema = z.object({
   severity: z.enum(validatorSeverityValues),
   scope: ValidatorScopeSchema,
   applies: z.array(z.string().min(1)).default([]),
+  analysis: z.array(z.string().min(1)).default([]),
   facts: z.array(FactKindSchema).default([]),
   decisionIds: z.array(z.string().min(1)).default([]),
   docs: z.array(z.string().min(1)).default([]),
@@ -695,6 +696,15 @@ export const DaemonHealthSchema = z.object({
   engine: EngineVersionSchema,
   watcher: WatcherStatusSchema.default({ running: false, bufferedEvents: 0, stale: false }),
   startedAt: z.string().datetime(),
+  validatorGraph: z
+    .object({
+      entrypoint: z.string().min(1),
+      hash: z.string().min(1),
+      loadedAt: z.string().datetime(),
+      validatorCount: z.number().int().min(0),
+      dependencyFiles: z.array(z.string().min(1)).default([]),
+    })
+    .optional(),
 });
 export type DaemonHealth = z.infer<typeof DaemonHealthSchema>;
 

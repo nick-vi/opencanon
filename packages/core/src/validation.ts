@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { getAnalysisCache } from "./cache.ts";
 import type { ContextPaths, Decision } from "./core.ts";
-import { discoverProjectFiles, intersects, relative, unique } from "./core.ts";
+import { discoverProjectFiles, intersects, matchesAny, relative, unique } from "./core.ts";
 import { applyFindingFixes } from "./fixes.ts";
 import type { FixApplicationResult, FixMode } from "./fixes.ts";
 import { createProfiler } from "./profiler.ts";
@@ -181,7 +181,7 @@ async function runValidators(params: {
           paths: params.paths,
           files: projectFiles,
           targetFiles,
-          analysisFiles: targetFiles,
+          analysisFiles: analysisFilesForValidator(validator, { projectFiles, targetFiles }),
           project: params.project,
           validator,
           cache,
@@ -214,6 +214,12 @@ async function runValidators(params: {
     findings: sortFindings(findings),
     diagnostics: projectDiscovery.diagnostics,
   };
+}
+
+function analysisFilesForValidator(validator: Validator, query: { projectFiles: string[]; targetFiles: string[] }): string[] {
+  if (validator.analysisGlobs.length === 0) return query.targetFiles;
+  const analysisFiles = query.projectFiles.filter((file) => matchesAny(file, validator.analysisGlobs));
+  return unique([...query.targetFiles, ...analysisFiles]);
 }
 
 function attachFindingReferences(finding: Finding, validator: Validator): Finding {

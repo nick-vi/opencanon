@@ -219,7 +219,7 @@ async function checkFixtures(validators: Validator[], runtime = createRuntime(pa
   for (const validator of validators) {
     for (const fixtureCase of ["valid", "invalid"] as const) {
       const fixtureRoot = path.join(paths.fixturesDir, validator.id, fixtureCase);
-      const files = listFiles(fixtureRoot, (file) => /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
+      const files = listFiles(fixtureRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
 
       const ctx = createValidationContextFromFixture({ rootDir: fixtureRoot, validator });
       const findings = await profiler.measureAsync(`fixture.${validator.id}.${fixtureCase}`, () => Promise.resolve(validator.validate({ ctx, runtime })));
@@ -235,7 +235,7 @@ async function checkFixtures(validators: Validator[], runtime = createRuntime(pa
     }
 
     const fixedRoot = path.join(paths.fixturesDir, validator.id, "fixed");
-    const fixedFiles = listFiles(fixedRoot, (file) => /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
+    const fixedFiles = listFiles(fixedRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
     if (fixedFiles.length === 0) continue;
 
     const invalidRoot = path.join(paths.fixturesDir, validator.id, "invalid");
@@ -386,8 +386,8 @@ function renderFixtureResult(result: FixtureResult): string {
 
 function compareFixtureTrees(actualRoot: string, expectedRoot: string): string[] {
   const diagnostics: string[] = [];
-  const expectedFiles = listFiles(expectedRoot, (file) => /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).map((file) => relative(expectedRoot, file));
-  const actualFiles = listFiles(actualRoot, (file) => /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).map((file) => relative(actualRoot, file));
+  const expectedFiles = listFiles(expectedRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).map((file) => relative(expectedRoot, file));
+  const actualFiles = listFiles(actualRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).map((file) => relative(actualRoot, file));
   const allFiles = unique([...expectedFiles, ...actualFiles]);
 
   for (const file of allFiles) {

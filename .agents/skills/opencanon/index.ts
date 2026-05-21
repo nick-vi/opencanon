@@ -30,4 +30,5 @@ export {
   requiredFunctionParam,
   restrictedSymbols,
   sensitiveChangePolicy,
+  tauriCommandParity,
 } from "../../../packages/validators/src/index.ts";

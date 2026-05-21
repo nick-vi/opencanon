@@ -25,6 +25,7 @@ import { assertSafeDaemonHost, createDaemonAuthToken, usableDaemonAuthToken } fr
 import { listProjects } from "./project-summary.ts";
 import { ApiPathPrefix, ApiRoute, UrlSearchParam, diagnostic, diagnosticCodes, json, validateDaemonAuth, validateMethod } from "./routes.ts";
 import { serveUiAsset } from "./ui-assets.ts";
+import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 
 const FeedbackHostValue = {
   Manual: "manual",
@@ -82,9 +83,18 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
     store,
   });
   const events = createEventBroadcaster();
+  const validatorGraphRuntime = createValidatorGraphRuntime({
+    rootDir,
+    paths,
+    events,
+    initialDependencyFiles: snapshot.health.validatorGraph?.dependencyFiles,
+    rebuildAndPublish,
+    isStopped: () => stopped,
+  });
   let projectInventory = listProjectInventory(rootDir);
   let watchRebuildInFlight: Promise<void> | undefined;
   let queuedWatchSummary: string | undefined;
+  let stopped = false;
 
   let server: ReturnType<typeof Bun.serve>;
   try {
@@ -100,10 +110,20 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
         if (!methodValidation.ok) return json(methodValidation.error, 405);
         const authValidation = validateDaemonAuth(request, url, authToken);
         if (!authValidation.ok) return json(authValidation.error, 401);
-        if (url.pathname === ApiRoute.Health) return json({ ok: true, data: snapshot.health });
-        if (url.pathname === ApiRoute.State) return json({ ok: true, data: snapshot.state });
-        if (url.pathname === ApiRoute.Snapshot) return json({ ok: true, data: snapshot });
+        if (url.pathname === ApiRoute.Health) {
+          snapshot = await validatorGraphRuntime.refreshIfChanged(snapshot);
+          return json({ ok: true, data: snapshot.health });
+        }
+        if (url.pathname === ApiRoute.State) {
+          snapshot = await validatorGraphRuntime.refreshIfChanged(snapshot);
+          return json({ ok: true, data: snapshot.state });
+        }
+        if (url.pathname === ApiRoute.Snapshot) {
+          snapshot = await validatorGraphRuntime.refreshIfChanged(snapshot);
+          return json({ ok: true, data: snapshot });
+        }
         if (url.pathname === ApiRoute.CanonRelated) {
+          snapshot = await validatorGraphRuntime.refreshIfChanged(snapshot);
           const safeFiles = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.File));
           if (!safeFiles.ok) return json(safeFiles.error, 400);
           const currentSnapshot = snapshot;
@@ -248,6 +268,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
   }
 
   function scheduleWatchRebuild(summary: string): void {
+    if (stopped) return;
     queuedWatchSummary = summary;
     if (watchRebuildInFlight) return;
     watchRebuildInFlight = runQueuedWatchRebuilds().finally(() => {
@@ -274,6 +295,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
 
   function startStoreWatcher(): void {
     store.project.startWatcher({ debounceMs: 250, bufferCapacity: 128 }, (batch) => {
+      if (stopped) return;
       const summary = watcherBatchSummary(batch);
       if (summary) scheduleWatchRebuild(summary);
     });
@@ -294,6 +316,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
       summary: "Indexing repository.",
     });
     const next = await rebuildSnapshot({ cwd: rootDir, store });
+    validatorGraphRuntime.recordCurrentSourceSignature();
     projectInventory = listProjectInventory(rootDir);
     store.writeEvent(indexedEvent(next, summary));
     events.broadcast(snapshotEvent(next, summary));
@@ -316,6 +339,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
     url: `http://${host}:${server.port}`,
     authToken,
     async stop() {
+      stopped = true;
       store.project.stopWatcher();
       if (watchRebuildInFlight) await watchRebuildInFlight.catch(() => undefined);
       events.close();

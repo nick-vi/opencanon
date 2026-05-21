@@ -25,6 +25,7 @@ type RuleSummary = {
   severity: Validator["severity"];
   scope: Validator["scope"];
   facts: Validator["facts"];
+  analysis: string[];
   summary?: string;
   topics: string[];
   applies: string[];
@@ -39,7 +40,7 @@ type RuleSummary = {
   command: string;
 };
 
-type RuleValidator = Pick<Validator, "id" | "severity" | "scope" | "facts" | "summary" | "topics" | "appliesScopes" | "decisionIds" | "docs"> & {
+type RuleValidator = Pick<Validator, "id" | "severity" | "scope" | "facts" | "analysisGlobs" | "summary" | "topics" | "appliesScopes" | "decisionIds" | "docs"> & {
   visuals: unknown[];
 };
 
@@ -109,6 +110,7 @@ function summarizeRule(fixturesDir: string, validator: RuleValidator): RuleSumma
     severity: validator.severity,
     scope: validator.scope,
     facts: validator.facts,
+    analysis: validator.analysisGlobs,
     summary: validator.summary,
     topics: validator.topics,
     applies: formatValidatorApplies(validator as Validator),
@@ -147,7 +149,7 @@ function intersectsAny(left: string[], right: string[]): boolean {
 
 function hasFixtureFiles(fixturesDir: string, validatorId: string, fixtureCase: string): boolean {
   const fixtureRoot = path.join(fixturesDir, validatorId, fixtureCase);
-  return listFiles(fixtureRoot, (file) => /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).length > 0;
+  return listFiles(fixtureRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).length > 0;
 }
 
 function renderRulesMarkdown(rules: RuleSummary[]): string {
@@ -168,6 +170,7 @@ function renderRulesMarkdown(rules: RuleSummary[]): string {
     if (rule.summary) lines.push(`Summary: ${rule.summary}`);
     lines.push(`Scope: ${rule.scope}`);
     lines.push(`Facts: ${rule.facts.join(", ") || "<none>"}`);
+    lines.push(`Analysis: ${rule.analysis.join(", ") || "<target files>"}`);
     lines.push(`Topics: ${rule.topics.join(", ") || "<none>"}`);
     lines.push(`Applies: ${rule.applies.join("; ")}`);
     lines.push(`Decisions: ${rule.decisionIds.join(", ") || "<none>"}`);

@@ -18,3 +18,4 @@ export { externalCommand, externalDiagnostics } from "./factories/external.ts";
 export { noBareExcept } from "./factories/python.ts";
 export { duplicateBoundaryLiterals, sensitiveChangePolicy } from "./factories/impact.ts";
 export { migrationReferences } from "./factories/migration.ts";
+export { tauriCommandParity } from "./factories/tauri.ts";

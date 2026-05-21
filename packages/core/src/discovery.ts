@@ -17,7 +17,7 @@ export type ProjectFileDiscovery = {
   failed: boolean;
 };
 
-const sourceExtensions = "{ts,tsx,js,jsx,py,svelte,css,scss,sass,less,json,md,markdown}";
+const sourceExtensions = "{ts,tsx,js,jsx,py,rs,svelte,css,scss,sass,less,json,md,markdown}";
 const ProjectFileName = {
   PackageJson: "package.json",
 } as const;
@@ -177,7 +177,7 @@ function matchesAny(file: string, globs: string[]): boolean {
 }
 
 function isSupportedSourceFile(file: string): boolean {
-  return /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
+  return /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
 }
 
 function normalizePath(value: string): string {

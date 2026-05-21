@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.8 - 2026-05-21
+
+- Fixed daemon validator graph reloads for imported validator modules.
+- Added explicit cross-scope project file access for validators.
+- Added wrapper-aware Tauri command parity and a Tauri desktop example bundle.
+- Improved doctor output for decision backrefs and fixture coverage.
+
 ## v0.3.7 - 2026-05-21
 
 - Fixed default project scope so skill implementation files are ignored while validator fixtures remain checkable.

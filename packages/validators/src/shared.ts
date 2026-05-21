@@ -218,6 +218,15 @@ export type ExternalDiagnosticsOptions = FindingOptions & {
   reportLine?: number;
 };
 
+export type TauriCommandParityOptions = FindingOptions & {
+  frontend: string[];
+  rust: string[];
+  invokeFunctions?: string[];
+  listenFunctions?: string[];
+  checkEvents?: boolean;
+  checkHandlerRegistration?: boolean;
+};
+
 export type NoShimFilesOptions = FindingOptions & {
   in: string[];
   patterns?: RegExp | RegExp[];

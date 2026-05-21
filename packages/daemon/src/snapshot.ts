@@ -59,6 +59,7 @@ export type DaemonSnapshot = {
     severity: Validator["severity"];
     scope: Validator["scope"];
     facts: Validator["facts"];
+    analysisGlobs: string[];
     topics: string[];
     appliesScopes: string[][];
     decisionIds: string[];
@@ -172,6 +173,13 @@ export async function buildDaemonSnapshot(input: { cwd: string; engine: Engine; 
     engine: input.engine.version(),
     watcher: input.store.project.status().watcher,
     startedAt: new Date().toISOString(),
+    validatorGraph: {
+      entrypoint: project.validatorGraph.entrypoint,
+      hash: project.validatorGraph.hash,
+      loadedAt: project.validatorGraph.loadedAt,
+      validatorCount: project.validatorGraph.validatorCount,
+      dependencyFiles: project.validatorGraph.dependencyFiles,
+    },
   };
   const validatorById = new Map(project.validators.map((validator) => [validator.id, validator]));
   const decisionIdsByValidator = decisionsByValidator(project.decisions);
@@ -239,6 +247,7 @@ export async function buildDaemonSnapshot(input: { cwd: string; engine: Engine; 
       severity: validator.severity,
       scope: validator.scope,
       facts: validator.facts,
+      analysisGlobs: validator.analysisGlobs,
       topics: validator.topics,
       appliesScopes: validator.appliesScopes,
       decisionIds: validator.decisionIds,

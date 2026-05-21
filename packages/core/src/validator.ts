@@ -326,6 +326,9 @@ export function createValidationContext(params: {
     file(filePath) {
       return filesByPath.get(normalizePath(filePath));
     },
+    projectFiles(patterns) {
+      return patterns ? projectFiles.filter((file) => matchesAny(file.path, patterns)) : projectFiles;
+    },
     byGlob(patterns) {
       return projectFiles.filter((file) => matchesAny(file.path, patterns));
     },

@@ -15,6 +15,13 @@ export type DaemonHealthDto = {
     stale: boolean;
     reason?: string;
   };
+  validatorGraph?: {
+    entrypoint: string;
+    hash: string;
+    loadedAt: string;
+    validatorCount: number;
+    dependencyFiles: string[];
+  };
 };
 
 export type DaemonStateDto = {
@@ -52,6 +59,7 @@ export type Snapshot = {
     severity: string;
     scope: string;
     facts: string[];
+    analysisGlobs: string[];
     topics: string[];
     appliesScopes: string[][];
     decisionIds: string[];

@@ -38,6 +38,7 @@ import {
   requiredFunctionParam,
   restrictedSymbols,
   similarFunctionNames,
+  tauriCommandParity,
 } from "@opencanon/validators";
 
 test("validator definitions reject unknown keys generically", () => {
@@ -158,7 +159,7 @@ test("context validation enforces decision and validator back-references", () =>
       {
         id: "decision-a",
         date: "2026-04-28",
-        status: "current",
+        status: "current" as const,
         title: "Decision A",
         topics: ["sample"],
         applies: ["src/**/*.ts"],
@@ -168,7 +169,7 @@ test("context validation enforces decision and validator back-references", () =>
       {
         id: "decision-b",
         date: "2026-04-28",
-        status: "current",
+        status: "current" as const,
         title: "Decision B",
         topics: ["sample"],
         applies: ["src/**/*.ts"],
@@ -442,6 +443,102 @@ test("validation context exposes graph callers and callees", () => {
     assert.equal(callees.length, 1);
     assert.equal(callees[0].target.name, "loadCompany");
     assert.equal(ctx.graph.impact("loadCompany").length, 1);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("validator analysis globs expose cross-scope project files", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-analysis-scope-"));
+  try {
+    mkdirSync(path.join(rootDir, "src-tauri/src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\"}\n");
+    writeFileSync(path.join(rootDir, "src/frontend.ts"), "export const command = 'load_company';\n");
+    writeFileSync(path.join(rootDir, "src-tauri/src/commands.rs"), "#[tauri::command]\nfn load_company() {}\n");
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify({
+        fileDiscovery: "filesystem",
+        projectFilePatterns: ["src/**/*.ts", "src-tauri/src/**/*.rs"],
+      }),
+    );
+
+    const paths = createPaths(rootDir);
+    const validator = defineValidator({
+      id: "tauri-parity",
+      topics: ["tauri"],
+      applies: ["src/**/*.ts"],
+      analysis: ["src-tauri/src/**/*.rs"],
+      severity: "error",
+      scope: "project",
+      validate({ ctx }) {
+        assert.deepEqual(ctx.targetFiles.map((file) => file.path), ["src/frontend.ts"]);
+        assert(ctx.files.some((file) => file.path === "src-tauri/src/commands.rs"));
+        assert(ctx.projectFiles(["src-tauri/src/**/*.rs"]).some((file) => file.path === "src-tauri/src/commands.rs"));
+        return [];
+      },
+    });
+
+    const result = await runValidation({
+      rootDir,
+      paths,
+      decisions: [],
+      validators: resolveValidators(validator).validators,
+      files: ["src/frontend.ts"],
+    });
+
+    assert.equal(result.findingCount, 0);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("tauriCommandParity links frontend invokes to Rust commands", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-tauri-parity-"));
+  try {
+    mkdirSync(path.join(rootDir, "src-tauri/src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\"}\n");
+    writeFileSync(
+      path.join(rootDir, "src/frontend.ts"),
+      "invoke('load_company');\ntauriInvoke<Result>('typed_missing');\ntauriListen<void>('company-updated');\n",
+    );
+    writeFileSync(
+      path.join(rootDir, "src-tauri/src/main.rs"),
+      "#[tauri::command]\nfn load_company() {}\nfn main() { tauri::generate_handler!{load_company}; app.emit(\"company-updated\", ()); }\n",
+    );
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify({
+        fileDiscovery: "filesystem",
+        projectFilePatterns: ["src/**/*.ts", "src-tauri/src/**/*.rs"],
+      }),
+    );
+    const paths = createPaths(rootDir);
+    const validator = tauriCommandParity({
+      id: "tauri-command-parity",
+      topics: ["tauri"],
+      frontend: ["src/**/*.ts"],
+      rust: ["src-tauri/src/**/*.rs"],
+      invokeFunctions: ["invoke", "tauriInvoke"],
+      listenFunctions: ["listen", "tauriListen"],
+      checkEvents: true,
+      checkHandlerRegistration: true,
+      severity: "error",
+      message: "Tauri frontend calls must resolve to Rust.",
+    });
+
+    const result = await runValidation({
+      rootDir,
+      paths,
+      decisions: [],
+      validators: resolveValidators(validator).validators,
+      files: ["src/frontend.ts"],
+    });
+
+    assert.equal(result.findingCount, 1);
+    assert(result.findings[0].message.includes("typed_missing"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -1430,6 +1527,53 @@ test("doctor reports and fixes unignored cache files", () => {
     const fixedReport = buildDoctorReport({ paths, decisions: [], validators: [] });
     assert.equal(fixedReport.checks.find((item) => item.id === "cache-ignore")?.status, "pass");
     assert.equal(fixedReport.checks.find((item) => item.id === "generated-ignore")?.status, "pass");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("doctor fixes missing decision validator backrefs", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-decision-backrefs-"));
+  try {
+    mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\"}\n");
+    const decisions = [
+      {
+        id: "company-current",
+        date: "2026-05-21",
+        status: "current" as const,
+        title: "Company rule",
+        topics: ["company"],
+        applies: ["src/**"],
+        summary: "Company rule.",
+        rationale: [],
+        required: [],
+        replaced: [],
+        agentPolicy: [],
+        exceptions: [],
+        docs: [],
+        validatorIds: [],
+      },
+    ];
+    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), `${JSON.stringify(decisions, null, 2)}\n`);
+    const paths = createPaths(rootDir);
+    const validators = resolveValidators({
+      id: "company-rule",
+      topics: ["company"],
+      decisionIds: ["company-current"],
+      severity: "error",
+      scope: "project",
+      validate() {
+        return [];
+      },
+    }).validators;
+    const report = buildDoctorReport({ paths, decisions, validators });
+    assert.equal(report.checks.find((check) => check.id === "context-files")?.status, "fail");
+
+    const fix = applyDoctorFixes({ paths, report, mode: "safe", dryRun: false, decisions, validators });
+    assert.equal(fix.diagnostics.length, 0);
+    const updated = JSON.parse(readFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "utf8"));
+    assert.deepEqual(updated[0].validatorIds, ["company-rule"]);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

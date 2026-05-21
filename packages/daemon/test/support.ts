@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 export function createStudioProject(rootDir: string): void {
   const skillDir = path.join(rootDir, ".agents/skills/opencanon");
@@ -47,5 +46,5 @@ export function createStudioProject(rootDir: string): void {
 }
 
 function testImportPath(_fromDir: string, toFile: string): string {
-  return pathToFileURL(toFile).href;
+  return toFile;
 }

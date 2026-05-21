@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "vitest";
-import { inspectProjectDaemon } from "@opencanon/daemon";
+import { daemonAuthHeaders, inspectProjectDaemon, startOpenCanonDaemon } from "@opencanon/daemon";
 import { createStudioProject } from "./support.ts";
+
+const bunOnlyTest = typeof Bun === "undefined" ? test.skip : test;
 
 test("daemon client uses an unregistered ephemeral daemon when no supervised daemon is running", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-ephemeral-client-"));
@@ -14,8 +16,8 @@ test("daemon client uses an unregistered ephemeral daemon when no supervised dae
   writeFileSync(
     path.join(rootDir, ".agents/skills/opencanon/index.ts"),
     [
-      `export { defineValidator } from ${JSON.stringify(pathToFileURL(path.join(process.cwd(), "packages/core/src/index.ts")).href)};`,
-      `export { noForbiddenCalls } from ${JSON.stringify(pathToFileURL(path.join(process.cwd(), "packages/validators/src/index.ts")).href)};`,
+      `export { defineValidator } from ${JSON.stringify(path.join(process.cwd(), "packages/core/src/index.ts"))};`,
+      `export { noForbiddenCalls } from ${JSON.stringify(path.join(process.cwd(), "packages/validators/src/index.ts"))};`,
       "",
     ].join("\n"),
   );
@@ -86,6 +88,48 @@ test("daemon client uses an unregistered ephemeral daemon when no supervised dae
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+bunOnlyTest("running daemon reloads validator graph when imported validator modules change", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-daemon-validator-reload-"));
+  createStudioProject(rootDir);
+  mkdirSync(path.join(rootDir, "src"), { recursive: true });
+  mkdirSync(path.join(rootDir, "validator-helpers"), { recursive: true });
+  writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
+  writeFileSync(
+    path.join(rootDir, "validators/index.ts"),
+    ["import validator from \"./rules.ts\";", "", "export default validator;", ""].join("\n"),
+  );
+  writeFileSync(path.join(rootDir, "validators/rules.ts"), ["import { validatorIds } from \"../validator-helpers/rules.ts\";", "", "export default validatorIds.map((id) => ({", "  id,", "  topics: [\"test\"],", "  severity: \"warning\",", "  scope: \"project\",", "  validate() { return []; },", "}));", ""].join("\n"));
+  writeFileSync(path.join(rootDir, "validator-helpers/rules.ts"), validatorHelperSource(["first-rule"]));
+
+  const server = await startOpenCanonDaemon({ cwd: rootDir, port: 0, serveUi: false });
+  try {
+    const first = await getSnapshotValidatorIds(server.url, server.authToken);
+    assert.deepEqual(first, ["first-rule"]);
+
+    writeFileSync(path.join(rootDir, "validator-helpers/rules.ts"), validatorHelperSource(["first-rule", "second-rule"]));
+    const next = await getSnapshotValidatorIds(server.url, server.authToken);
+    assert.deepEqual(next, ["first-rule", "second-rule"]);
+
+    writeFileSync(path.join(rootDir, "validators/rules.ts"), "export default { id: 1 };\n");
+    const lastGood = await getSnapshotValidatorIds(server.url, server.authToken);
+    assert.deepEqual(lastGood, ["first-rule", "second-rule"]);
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+async function getSnapshotValidatorIds(url: string, authToken: string): Promise<string[]> {
+  const response = await fetch(`${url}/api/snapshot`, { headers: daemonAuthHeaders(authToken) });
+  if (response.status !== 200) assert.fail(await response.text());
+  const body = (await response.json()) as { data: { validators: Array<{ id: string }> } };
+  return body.data.validators.map((validator) => validator.id);
+}
+
+function validatorHelperSource(ids: string[]): string {
+  return `export const validatorIds = ${JSON.stringify(ids)};\n`;
+}
 
 function ephemeralDaemonClientCheckSource(): string {
   const daemonClientUrl = pathToFileURL(path.join(process.cwd(), "packages/cli/src/daemon-client.ts")).href;

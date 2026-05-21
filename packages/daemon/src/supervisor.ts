@@ -311,6 +311,14 @@ export function renderDaemonStatusMarkdown(inspection: DaemonInspection | undefi
       `Engine: ${inspection.health.engine.engineVersion} (package ${inspection.health.engine.packageVersion}, NAPI ${inspection.health.engine.napiVersion})`,
       `Watcher: ${formatWatcherStatus(inspection.health.watcher)}`,
     );
+    if (inspection.health.validatorGraph) {
+      lines.push(
+        `Validator graph: ${inspection.health.validatorGraph.validatorCount} validators`,
+        `Validator graph inputs: ${inspection.health.validatorGraph.dependencyFiles.length} files`,
+        `Validator graph hash: ${inspection.health.validatorGraph.hash.slice(0, 12)}`,
+        `Validator graph loaded: ${inspection.health.validatorGraph.loadedAt}`,
+      );
+    }
   }
   if (inspection.state) {
     lines.push(

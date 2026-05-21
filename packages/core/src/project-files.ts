@@ -408,7 +408,7 @@ export function parseComments(text: string, language: ProjectFile["language"]): 
 
 
 export function isSupportedSourceFile(file: string): boolean {
-  return /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
+  return /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
 }
 
 

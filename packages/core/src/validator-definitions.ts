@@ -25,6 +25,7 @@ export function resolveValidators(input: unknown): { validators: Validator[]; di
         scope: undefined,
         facts: [],
         appliesScopes: [],
+        analysisGlobs: [],
         docs: [],
       },
       validators,
@@ -55,6 +56,7 @@ type InheritedValidatorMetadata = {
   scope: ValidatorScope | undefined;
   facts: FactKind[];
   appliesScopes: string[][];
+  analysisGlobs: string[];
   docs: string[];
 };
 
@@ -80,7 +82,7 @@ function traverseValidatorDefinition(params: {
   const id = typeof value.id === "string" ? value.id : "<unknown>";
   const childDefinitions = Array.isArray(value.validators) ? value.validators : [];
   for (const key of Object.keys(value)) {
-    if (!["id", "topics", "applies", "severity", "scope", "facts", "decisionIds", "docs", "summary", "visuals", "validate", "validators"].includes(key)) {
+    if (!["id", "topics", "applies", "analysis", "severity", "scope", "facts", "decisionIds", "docs", "summary", "visuals", "validate", "validators"].includes(key)) {
       diagnostics.push(`Validator ${id} has unknown key: ${key}.`);
     }
   }
@@ -94,6 +96,9 @@ function traverseValidatorDefinition(params: {
   }
   if (value.applies !== undefined && (!Array.isArray(value.applies) || value.applies.some((item) => typeof item !== "string" || item.length === 0))) {
     diagnostics.push(`Validator ${id} applies must be string[] when present.`);
+  }
+  if (value.analysis !== undefined && (!Array.isArray(value.analysis) || value.analysis.some((item) => typeof item !== "string" || item.length === 0))) {
+    diagnostics.push(`Validator ${id} analysis must be string[] when present.`);
   }
   if (value.severity !== undefined && !validSeverities.has(value.severity as Severity)) diagnostics.push(`Validator ${id} severity must be error or warning.`);
   if (value.scope !== undefined && !validScopes.has(value.scope as ValidatorScope)) {
@@ -123,6 +128,7 @@ function traverseValidatorDefinition(params: {
     scope: (value.scope as ValidatorScope | undefined) ?? inherited.scope,
     facts: unique([...inherited.facts, ...((value.facts as FactKind[] | undefined) ?? [])]),
     appliesScopes: value.applies ? appendAppliesScope(inherited.appliesScopes, value.applies) : inherited.appliesScopes,
+    analysisGlobs: value.analysis ? unique([...inherited.analysisGlobs, ...value.analysis]) : inherited.analysisGlobs,
     docs: unique([...inherited.docs, ...(value.docs ?? [])]),
   };
 
@@ -149,6 +155,7 @@ function traverseValidatorDefinition(params: {
       id: value.id,
       topics: next.topics,
       appliesScopes: next.appliesScopes,
+      analysisGlobs: next.analysisGlobs,
       severity: next.severity ?? "error",
       scope: next.scope ?? "project",
       facts: next.facts,
@@ -219,5 +226,4 @@ function appendAppliesScope(scopes: string[][], patterns: string[]): string[][] 
   if (scopes.some((scope) => scope.join(FactKeySeparator) === key)) return scopes;
   return [...scopes, patterns];
 }
-
 

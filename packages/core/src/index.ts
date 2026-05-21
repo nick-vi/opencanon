@@ -1,6 +1,7 @@
 export type {
   ContextConfig,
   ContextPaths,
+  ContextDiagnostic,
   ContextReferenceValidator,
   ContextValidationInput,
   Baseline,
@@ -23,7 +24,9 @@ export {
   resolveRootDir,
   validateConfig,
   validateContext,
+  validateContextDiagnostics,
   validateImpactSurfaces,
+  ContextDiagnosticCode,
 } from "./context.ts";
 export { fail } from "./core.ts";
 export { explainGlobMatches, intersects, matchesAny, matchesAnyFile, pathToImportUrl, relative, splitList, toRepoRelativePath, unique } from "./core-utils.ts";
@@ -312,6 +315,8 @@ export type { ProfileEntry, Profiler } from "./profiler.ts";
 export { createProfiler, renderProfileMarkdown } from "./profiler.ts";
 export type { ProjectContext } from "./project.ts";
 export { loadProjectContext, loadValidators } from "./project.ts";
+export type { ValidatorGraphMetadata, ValidatorGraphSourceSignature } from "./validator-graph.ts";
+export { loadValidatorGraph, readValidatorGraphSourceSignature } from "./validator-graph.ts";
 export type { FeedbackDedupeScope, FeedbackHost, FeedbackInput, FeedbackRenderOptions, FeedbackResult } from "./feedback.ts";
 export { formatFeedbackResult, renderFeedbackMarkdown, runFeedback } from "./feedback.ts";
 export type { HookFileAction, HookInspection, HookInstallFileResult, HookInstallResult } from "./hook-install.ts";

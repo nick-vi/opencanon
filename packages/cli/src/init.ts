@@ -513,6 +513,7 @@ export {
   restrictedSymbols,
   sensitiveChangePolicy,
   similarFunctionNames,
+  tauriCommandParity,
 } from "./runtime/validators.js";
 `;
 }
@@ -568,11 +569,14 @@ Each real validator should have:
 - optional \`facts\` declaring consumed parsed facts: \`imports\`, \`exports\`, \`symbols\`, \`calls\`, \`literals\`, \`comments\`, \`references\`, \`annotations\`, \`diagnostics\`, or \`duplicates\`
 - optional \`summary\` as a string or synchronous definition-time callback for \`opencanon rules\`
 - optional \`applies\` globs
+- optional \`analysis\` globs for parsed facts that must include files outside current targets; this is not an access boundary
 - \`validate({ ctx, runtime })\`
 - valid and invalid fixtures under \`fixtures/<validator-id>/valid\` and \`fixtures/<validator-id>/invalid\`
 - optional fixed fixtures under \`fixtures/<validator-id>/fixed\` when structured fixes are provided
 
-Prefer \`ctx.facts.*\` for imports, exports, symbols, calls, literals, comments, references, annotations, diagnostics, and duplicates. Use \`ctx.graph.*\` for graph-shaped symbols, references, callers, callees, and impact. Use \`ctx.impact.*\` for configured impact surfaces and proposed impact notes, and \`ctx.baseline.*\` for known findings.
+Prefer \`ctx.facts.*\` for imports, exports, symbols, calls, literals, comments, references, annotations, diagnostics, and duplicates. Use \`ctx.projectFiles(patterns?)\` when a project validator needs discovered files independent of target scope. Use \`ctx.graph.*\` for graph-shaped symbols, references, callers, callees, and impact. Use \`ctx.impact.*\` for configured impact surfaces and proposed impact notes, and \`ctx.baseline.*\` for known findings.
+
+Large repos should keep \`validators/index.ts\` as a small barrel that imports domain modules, for example \`api.ts\`, \`tauri.ts\`, or \`security.ts\`, and exports an array.
 
 While editing one validator, run:
 

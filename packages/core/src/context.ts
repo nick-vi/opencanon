@@ -86,6 +86,18 @@ export type ContextValidationInput = {
   paths?: ContextPaths;
 };
 
+export const ContextDiagnosticCode = {
+  DecisionValidatorBackrefMissing: "decision-validator-backref-missing",
+  ValidatorDecisionBackrefMissing: "validator-decision-backref-missing",
+  InvalidContext: "invalid-context",
+} as const;
+export type ContextDiagnosticCode = (typeof ContextDiagnosticCode)[keyof typeof ContextDiagnosticCode];
+
+export type ContextDiagnostic = {
+  code: ContextDiagnosticCode;
+  message: string;
+};
+
 export type ChangePolicy = {
   requiresTests?: string[];
   requiresDocs?: string[];
@@ -320,7 +332,12 @@ export function loadBaseline(paths: ContextPaths): Baseline {
 }
 
 export function validateContext(input: ContextValidationInput): string[] {
-  const diagnostics: string[] = [];
+  return validateContextDiagnostics(input).map((diagnostic) => diagnostic.message);
+}
+
+export function validateContextDiagnostics(input: ContextValidationInput): ContextDiagnostic[] {
+  const diagnostics: ContextDiagnostic[] = [];
+  const push = (message: string, code: ContextDiagnosticCode = ContextDiagnosticCode.InvalidContext) => diagnostics.push({ code, message });
   const { decisions, validators = [], impactSurfaces = [], paths } = input;
   const decisionIds = new Set<string>();
   const validatorIds = new Set(validators.map((validator) => validator.id));
@@ -328,57 +345,63 @@ export function validateContext(input: ContextValidationInput): string[] {
   const decisionById = new Map<string, Decision>();
   const validStatuses = new Set(["current", "proposed", "replaced"]);
 
-  if (!Array.isArray(decisions)) diagnostics.push("decisions.json must contain an array.");
+  if (!Array.isArray(decisions)) push("decisions.json must contain an array.");
   for (const decision of decisions) {
     if (decision.id) decisionIds.add(decision.id);
   }
 
   for (const decision of decisions) {
-    if (!decision.id) diagnostics.push("Decision is missing id.");
-    if (decision.id && decisionById.has(decision.id)) diagnostics.push(`Duplicate decision id: ${decision.id}`);
+    if (!decision.id) push("Decision is missing id.");
+    if (decision.id && decisionById.has(decision.id)) push(`Duplicate decision id: ${decision.id}`);
     decisionById.set(decision.id, decision);
 
-    if (!decision.title) diagnostics.push(`Decision ${decision.id} is missing title.`);
-    if (!decision.date) diagnostics.push(`Decision ${decision.id} is missing date.`);
-    if (!validStatuses.has(decision.status)) diagnostics.push(`Decision ${decision.id} has invalid status: ${decision.status}`);
-    if (!Array.isArray(decision.topics) || decision.topics.length === 0) diagnostics.push(`Decision ${decision.id} needs at least one topic.`);
-    if (!Array.isArray(decision.applies) || decision.applies.length === 0) diagnostics.push(`Decision ${decision.id} needs at least one applies glob.`);
-    if (!decision.summary) diagnostics.push(`Decision ${decision.id} is missing summary.`);
+    if (!decision.title) push(`Decision ${decision.id} is missing title.`);
+    if (!decision.date) push(`Decision ${decision.id} is missing date.`);
+    if (!validStatuses.has(decision.status)) push(`Decision ${decision.id} has invalid status: ${decision.status}`);
+    if (!Array.isArray(decision.topics) || decision.topics.length === 0) push(`Decision ${decision.id} needs at least one topic.`);
+    if (!Array.isArray(decision.applies) || decision.applies.length === 0) push(`Decision ${decision.id} needs at least one applies glob.`);
+    if (!decision.summary) push(`Decision ${decision.id} is missing summary.`);
 
-    for (const issue of validatePatterns(decision.applies ?? [])) diagnostics.push(`Decision ${decision.id}: ${issue}`);
+    for (const issue of validatePatterns(decision.applies ?? [])) push(`Decision ${decision.id}: ${issue}`);
     for (const docsRef of decision.docs ?? []) {
-      diagnostics.push(...validateDocsReference(`Decision ${decision.id}`, docsRef, { decisionIds, paths }));
+      for (const issue of validateDocsReference(`Decision ${decision.id}`, docsRef, { decisionIds, paths })) push(issue);
     }
     for (const validatorId of decision.validatorIds ?? []) {
       if (!validatorIds.has(validatorId)) {
-        diagnostics.push(`Decision ${decision.id} references missing validator: ${validatorId}`);
+        push(`Decision ${decision.id} references missing validator: ${validatorId}`);
         continue;
       }
       const validator = validatorById.get(validatorId);
       if (validator && !(validator.decisionIds ?? []).includes(decision.id)) {
-        diagnostics.push(`Decision ${decision.id} references validator ${validatorId}, but validator ${validatorId} does not reference decision ${decision.id}.`);
+        push(
+          `Decision ${decision.id} references validator ${validatorId}, but validator ${validatorId} does not reference decision ${decision.id}.`,
+          ContextDiagnosticCode.DecisionValidatorBackrefMissing,
+        );
       }
     }
   }
 
   for (const validator of validators) {
-    if (!validator.id) diagnostics.push("Validator reference is missing id.");
+    if (!validator.id) push("Validator reference is missing id.");
     for (const decisionId of validator.decisionIds ?? []) {
       if (!decisionIds.has(decisionId)) {
-        diagnostics.push(`Validator ${validator.id} references missing decision: ${decisionId}`);
+        push(`Validator ${validator.id} references missing decision: ${decisionId}`);
         continue;
       }
       const decision = decisionById.get(decisionId);
       if (decision && !(decision.validatorIds ?? []).includes(validator.id)) {
-        diagnostics.push(`Validator ${validator.id} references decision ${decisionId}, but decision ${decisionId} does not reference validator ${validator.id}.`);
+        push(
+          `Validator ${validator.id} references decision ${decisionId}, but decision ${decisionId} does not reference validator ${validator.id}.`,
+          ContextDiagnosticCode.ValidatorDecisionBackrefMissing,
+        );
       }
     }
     for (const docsRef of validator.docs ?? []) {
-      diagnostics.push(...validateDocsReference(`Validator ${validator.id}`, docsRef, { decisionIds, paths }));
+      for (const issue of validateDocsReference(`Validator ${validator.id}`, docsRef, { decisionIds, paths })) push(issue);
     }
   }
 
-  diagnostics.push(...validateImpactSurfaces(impactSurfaces, paths, decisionIds));
+  for (const issue of validateImpactSurfaces(impactSurfaces, paths, decisionIds)) push(issue);
 
   return diagnostics;
 }

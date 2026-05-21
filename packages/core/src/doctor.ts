@@ -229,7 +229,7 @@ export function renderDoctorMarkdown(report: DoctorReport): string {
   return lines.join("\n");
 }
 
-export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorReport; mode: FixMode; dryRun: boolean }): DoctorFixResult {
+export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorReport; mode: FixMode; dryRun: boolean; decisions?: Decision[]; validators?: Validator[] }): DoctorFixResult {
   const result: DoctorFixResult = {
     mode: params.mode,
     dryRun: params.dryRun,
@@ -241,6 +241,19 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
   const precommit = params.report.checks.find((check) => check.id === "precommit");
   const cacheIgnore = params.report.checks.find((check) => check.id === "cache-ignore");
   const generatedIgnore = params.report.checks.find((check) => check.id === "generated-ignore");
+  const missingDecisionRefs = missingDecisionValidatorRefs(params.decisions ?? [], params.validators ?? []);
+
+  if (missingDecisionRefs.size > 0) {
+    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
+      result.skipped.push("decision-validator-refs: safe fix outside requested mode.");
+    } else {
+      result.selectedFixes += 1;
+      if (!params.dryRun) {
+        addMissingDecisionValidatorRefs(params.paths, missingDecisionRefs);
+        result.appliedFixes += 1;
+      }
+    }
+  }
 
   if (cacheIgnore?.status === DoctorStatus.Fail) {
     if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
@@ -287,6 +300,29 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
   }
 
   return result;
+}
+
+function missingDecisionValidatorRefs(decisions: Decision[], validators: Validator[]): Map<string, string[]> {
+  const byDecision = new Map(decisions.map((decision) => [decision.id, decision]));
+  const missing = new Map<string, string[]>();
+  for (const validator of validators) {
+    for (const decisionId of validator.decisionIds ?? []) {
+      const decision = byDecision.get(decisionId);
+      if (!decision || (decision.validatorIds ?? []).includes(validator.id)) continue;
+      missing.set(decisionId, [...(missing.get(decisionId) ?? []), validator.id]);
+    }
+  }
+  return missing;
+}
+
+function addMissingDecisionValidatorRefs(paths: ContextPaths, missing: Map<string, string[]>): void {
+  const decisions = JSON.parse(readFileSync(paths.decisionsPath, doctorTextEncoding)) as Decision[];
+  for (const decision of decisions) {
+    const validatorIds = missing.get(decision.id);
+    if (!validatorIds) continue;
+    decision.validatorIds = [...new Set([...(decision.validatorIds ?? []), ...validatorIds])].sort();
+  }
+  writeFileSync(paths.decisionsPath, `${JSON.stringify(decisions, null, 2)}\n`);
 }
 
 export function renderDoctorFixMarkdown(result: DoctorFixResult): string {
@@ -422,6 +458,9 @@ function validateValidators(validators: Validator[]): string[] {
     for (const patterns of validator.appliesScopes) {
       for (const issue of validatePatterns(patterns)) diagnostics.push(`Validator ${validator.id}: ${issue}`);
     }
+    if (validator.analysisGlobs.length > 0) {
+      for (const issue of validatePatterns(validator.analysisGlobs)) diagnostics.push(`Validator ${validator.id}: ${issue}`);
+    }
     if (typeof validator.validate !== "function") diagnostics.push(`Validator ${validator.id} needs validate().`);
   }
 
@@ -429,16 +468,27 @@ function validateValidators(validators: Validator[]): string[] {
 }
 
 function validateFixturePresence(paths: ContextPaths, validators: Validator[]): string[] {
-  const diagnostics: string[] = [];
+  const missingValid: string[] = [];
+  const missingInvalid: string[] = [];
 
   for (const validator of validators) {
-    for (const fixtureCase of ["valid", "invalid"]) {
-      const fixtureRoot = path.join(paths.fixturesDir, validator.id, fixtureCase);
-      const fixtureFiles = listFiles(fixtureRoot, (file) => /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
-      if (fixtureFiles.length === 0) diagnostics.push(`Validator ${validator.id} has no ${fixtureCase} fixture files.`);
-    }
+    const validRoot = path.join(paths.fixturesDir, validator.id, "valid");
+    const invalidRoot = path.join(paths.fixturesDir, validator.id, "invalid");
+    const validFiles = listFiles(validRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
+    const invalidFiles = listFiles(invalidRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
+    if (validFiles.length === 0) missingValid.push(validator.id);
+    if (invalidFiles.length === 0) missingInvalid.push(validator.id);
   }
 
+  const diagnostics: string[] = [];
+  if (missingValid.length > 0) diagnostics.push(`Missing valid fixtures: ${missingValid.length} validator(s).`);
+  if (missingInvalid.length > 0) diagnostics.push(`Missing invalid fixtures: ${missingInvalid.length} validator(s).`);
+  for (const validatorId of [...new Set([...missingValid, ...missingInvalid])].slice(0, 20)) {
+    const cases = [missingValid.includes(validatorId) ? "valid" : "", missingInvalid.includes(validatorId) ? "invalid" : ""].filter(Boolean).join(", ");
+    diagnostics.push(`${validatorId}: missing ${cases} fixture files.`);
+  }
+  const omitted = new Set([...missingValid, ...missingInvalid]).size - 20;
+  if (omitted > 0) diagnostics.push(`${omitted} additional validator(s) omitted from fixture summary.`);
   return diagnostics;
 }
 

@@ -76,7 +76,7 @@ export const StudioOption = {
 } as const;
 export type StudioOption = (typeof StudioOption)[keyof typeof StudioOption];
 
-export const SourceExtensionPattern = /\.(ts|tsx|js|jsx|py|svelte|css|scss|sass|less|json|md|markdown)$/;
+export const SourceExtensionPattern = /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/;
 export const TextEncoding = {
   Utf8: "utf8",
 } as const;

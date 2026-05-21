@@ -74,6 +74,7 @@ export function createEventBroadcaster() {
     },
   };
 }
+export type EventBroadcaster = ReturnType<typeof createEventBroadcaster>;
 
 export function snapshotEvent(snapshot: DaemonSnapshot, summary: string): DaemonStreamEvent {
   return {

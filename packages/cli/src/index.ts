@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
 import { runDaemonCommand, runDevCommand } from "@opencanon/daemon";
-import { fail, loadImpactSurfaces, resolveRootDir, validateContext } from "@opencanon/core";
+import { ContextDiagnosticCode, createPaths, fail, loadContextFiles, loadImpactSurfaces, resolveRootDir, validateContextDiagnostics } from "@opencanon/core";
 import { applyDoctorFixes, buildDoctorReport, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
 import { CliOptionDescription, CliOptionFlag, CliOptionName, booleanOption, fixModeOption, formatOption, rejectUnknownOptions } from "./options.ts";
 import { runBenchmarkCommand } from "./benchmark.ts";
@@ -12,7 +12,7 @@ import { runBundleCommand } from "./bundle.ts";
 import { runFeedbackCommand, runHookCommand } from "./feedback.ts";
 import { runGraphCommand } from "./graph.ts";
 import { runInitCommand } from "./init.ts";
-import { loadProjectContext } from "./project.ts";
+import { loadProjectContext, loadValidators } from "./project.ts";
 import { runContextCommand } from "./context.ts";
 import { runRefactorCommand } from "./refactor.ts";
 import { runRulesCommand } from "./rules.ts";
@@ -155,18 +155,23 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
     dryRun: booleanOption(options.dryRun),
     runExternalTools: booleanOption(options.runExternalTools),
   };
-  const { paths, decisions, validators } = await loadProjectContext(cwd);
+  const rootDir = resolveRootDir(cwd);
+  const paths = createPaths(rootDir);
+  const { decisions } = loadContextFiles(paths);
+  const validators = await loadValidators(rootDir, paths);
   const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
-  const diagnostics = [...impactDiagnostics, ...validateContext({ decisions, validators, impactSurfaces, paths })];
-  if (diagnostics.length > 0) {
+  const contextDiagnostics = validateContextDiagnostics({ decisions, validators, impactSurfaces, paths });
+  const diagnostics = [...impactDiagnostics.map((message) => ({ code: ContextDiagnosticCode.InvalidContext, message })), ...contextDiagnostics];
+  if (diagnostics.length > 0 && (!query.fixMode || !diagnostics.every((diagnostic) => diagnostic.code === ContextDiagnosticCode.ValidatorDecisionBackrefMissing))) {
     console.error("OpenCanon files are invalid. Run bun run opencanon context --check for details.");
     process.exit(1);
   }
 
   let report = buildDoctorReport({ paths, decisions, validators, runExternalTools: query.runExternalTools });
-  const fixes = query.fixMode ? applyDoctorFixes({ paths, report, mode: query.fixMode, dryRun: query.dryRun }) : undefined;
+  const fixes = query.fixMode ? applyDoctorFixes({ paths, report, mode: query.fixMode, dryRun: query.dryRun, decisions, validators }) : undefined;
   if (fixes && !fixes.dryRun && fixes.diagnostics.length === 0 && fixes.appliedFixes > 0) {
-    report = buildDoctorReport({ paths, decisions, validators, runExternalTools: query.runExternalTools });
+    const nextDecisions = loadContextFiles(paths).decisions;
+    report = buildDoctorReport({ paths, decisions: nextDecisions, validators, runExternalTools: query.runExternalTools });
   }
 
   if (query.format === "json") {

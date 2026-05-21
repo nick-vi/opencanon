@@ -2,6 +2,7 @@ export type {
   Baseline,
   ChangePolicy,
   ContextConfig,
+  ContextDiagnostic,
   ContextPaths,
   ContextReferenceValidator,
   ContextValidationInput,
@@ -22,7 +23,9 @@ export {
   resolveRootDir,
   validateConfig,
   validateContext,
+  validateContextDiagnostics,
   validateImpactSurfaces,
+  ContextDiagnosticCode,
 } from "./context.ts";
 export { explainGlobMatches, intersects, matchesAny, matchesAnyFile, normalizePath, pathToImportUrl, relative, splitList, toRepoRelativePath, unique } from "./core-utils.ts";
 export type { ProjectFileDiscovery } from "./discovery.ts";

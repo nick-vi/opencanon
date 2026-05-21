@@ -294,6 +294,7 @@ export type ValidationContext = {
   impact: ImpactApi;
   baseline: BaselineApi;
   file(path: string): ProjectFile | undefined;
+  projectFiles(patterns?: string[]): ProjectFile[];
   byGlob(patterns: string[]): ProjectFile[];
   text(path: string): FileRead;
   json<T = unknown>(path: string): JsonRead<T>;
@@ -356,6 +357,7 @@ export type ValidatorDefinition = {
   id: string;
   topics?: string[];
   applies?: string[];
+  analysis?: string[];
   severity?: Severity;
   scope?: ValidatorScope;
   facts?: FactKind[];
@@ -384,6 +386,7 @@ export type Validator = {
   id: string;
   topics: string[];
   appliesScopes: string[][];
+  analysisGlobs: string[];
   severity: Severity;
   scope: ValidatorScope;
   facts: FactKind[];
