@@ -67,6 +67,7 @@ export default {
 export default migrationReferences({
   id: "{{validatorId}}",
   topics: ["migration", "deprecation"],
+  decisionIds: ["migration-control-current"],
   severity: "error",
   in: "{{sourceGlobs}}".split(",").map((item) => item.trim()).filter(Boolean),
   pattern: "{{oldPattern}}",

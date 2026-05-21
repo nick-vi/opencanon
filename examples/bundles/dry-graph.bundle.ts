@@ -63,6 +63,7 @@ const sourceGlobs = "{{sourceGlobs}}".split(",").map((item) => item.trim()).filt
 export const repeatedDomainLiterals = repeatedLiterals({
   id: "repeated-domain-literals",
   topics: ["dry", "domain-model"],
+  decisionIds: ["graph-backed-dry-current"],
   in: sourceGlobs,
   severity: "warning",
   minOccurrences: Number("{{minLiteralOccurrences}}"),
@@ -74,6 +75,7 @@ export const repeatedDomainLiterals = repeatedLiterals({
 export const similarFunctions = similarFunctionNames({
   id: "similar-functions",
   topics: ["dry", "code-quality"],
+  decisionIds: ["graph-backed-dry-current"],
   in: sourceGlobs,
   severity: "warning",
   minSimilarity: Number("{{minFunctionSimilarity}}"),

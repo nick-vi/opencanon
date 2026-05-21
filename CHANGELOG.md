@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.4 - 2026-05-21
+
+- Fixed example bundles so installed validators reference their bundled decisions.
+
 ## v0.3.3 - 2026-05-21
 
 - Fixed bundle validator index wiring for modules that export arrays of validators.
