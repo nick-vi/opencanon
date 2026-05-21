@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.5 - 2026-05-21
+
+- Fixed example bundle source globs so generated validators install with valid glob patterns.
+
 ## v0.3.4 - 2026-05-21
 
 - Fixed example bundles so installed validators reference their bundled decisions.

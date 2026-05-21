@@ -6,7 +6,7 @@ export default {
   options: {
     sourceGlobs: {
       type: "string[]",
-      default: ["src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
+      default: ["src/**/*.ts", "src/**/*.tsx", "packages/*/src/**/*.ts", "packages/*/src/**/*.tsx"],
       description: "Source globs checked by the validators.",
     },
     allowedLiterals: {
