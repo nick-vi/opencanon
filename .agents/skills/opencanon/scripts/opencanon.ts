@@ -11,7 +11,7 @@ const runtimeCli = "runtime/cli.js";
 const runtimeCliPath = path.join(skillRoot, runtimeCli);
 const sourceCliPath = path.resolve(skillRoot, "../../..", "packages/cli/src/index.ts");
 const sourceCheckout = existsSync(sourceCliPath);
-const defaultManifestUrl = "https://github.com/nick-vi/opencanon/releases/download/v0.3.1/opencanon-runtime-manifest.json";
+const defaultManifestUrl = "https://github.com/nick-vi/opencanon/releases/download/v0.3.2/opencanon-runtime-manifest.json";
 const cliArgs = Bun.argv.slice(2);
 const manifestArg = resolveManifestArg(cliArgs) ?? process.env.OPENCANON_UPDATE_MANIFEST ?? null;
 const bootstrapManifest = manifestArg ?? defaultManifestUrl;
@@ -29,7 +29,7 @@ if (typeof cli.runOpenCanonCli !== "function") {
 }
 
 if (!manifestArg && !sourceCheckout && cliPath === runtimeCliPath && shouldUseDefaultManifest(cliArgs)) {
-  cliArgs.push("--manifest", defaultManifestUrl);
+  cliArgs.push("--manifest", bootstrapManifest);
 }
 
 await cli.runOpenCanonCli(cliArgs);

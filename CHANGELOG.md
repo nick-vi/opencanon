@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.2 - 2026-05-21
+
+- Fixed setup manifest propagation when `OPENCANON_UPDATE_MANIFEST` is used.
+- Updated generated skill barrels to export the full curated validator factory surface.
+
 ## v0.3.1 - 2026-05-21
 
 - Fixed bundle installs so generated validator modules are wired into the validators index and run immediately.

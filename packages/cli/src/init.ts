@@ -483,9 +483,14 @@ await cli.runOpenCanonCli(Bun.argv.slice(2));
 function skillBarrelTemplate(): string {
   return `export * from "./runtime/core.js";
 export {
+  annotationRequiresTags,
+  duplicateBoundaryLiterals,
   externalCommand,
+  externalDiagnostics,
   fileNames,
   folderStructure,
+  migrationReferences,
+  noBareExcept,
   noBarrelCrossBoundary,
   noBypassComments,
   noCommentMatches,
@@ -499,11 +504,15 @@ export {
   noLayerCall,
   noNativeEnums,
   noSecretLikeLiterals,
+  noShimFiles,
+  noUnusedExports,
   repeatedLiterals,
   requireExportPattern,
   requiredFileSibling,
   requiredFunctionParam,
   restrictedSymbols,
+  sensitiveChangePolicy,
+  similarFunctionNames,
 } from "./runtime/validators.js";
 `;
 }
