@@ -153,7 +153,7 @@
     ],
     "required": [
       "Use PascalCase names for enum-like const objects.",
-      "Use PascalCase keys.",
+      "Use SCREAMING_SNAKE_CASE keys.",
       "Use string literal values.",
       "Export a matching derived union type with the same name."
     ],
@@ -168,7 +168,7 @@
       "External generated TypeScript definitions outside source ownership."
     ],
     "examples": [
-      "export const CompanyStatus = { Active: \"active\" } as const;",
+      "export const CompanyStatus = { ACTIVE: \"active\" } as const;",
       "export type CompanyStatus = (typeof CompanyStatus)[keyof typeof CompanyStatus];"
     ]
   },

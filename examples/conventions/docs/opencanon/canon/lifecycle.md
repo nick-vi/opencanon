@@ -19,7 +19,7 @@ Rules:
 
 - Do not use native `enum` or `const enum`.
 - Use PascalCase object names.
-- Use PascalCase keys.
+- Use SCREAMING_SNAKE_CASE keys.
 - Use string literal values.
 - Export a matching derived union type.
 

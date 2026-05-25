@@ -5,6 +5,7 @@ tmp/
 .opencanon/daemon.json
 .opencanon/daemon.log
 .opencanon/setup.json
+.opencanon/commit-approvals.json
 .opencanon/*.sqlite
 .opencanon/*.sqlite-shm
 .opencanon/*.sqlite-wal

@@ -1,4 +1,4 @@
-import { noFolderNames } from "../../../.agents/skills/opencanon/index.ts";
+import { noFolderNames } from "@opencanon/validators";
 
 const validator = noFolderNames({
   id: "no-dumpster-folders",

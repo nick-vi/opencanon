@@ -120,7 +120,8 @@ export default {
   files: [
     {
       path: ".agents/skills/opencanon/validators/tauri-desktop.ts",
-      content: `import { defineValidator, tauriCommandParity } from "../index.ts";
+      content: `import { defineValidator } from "@opencanon/core";
+import { tauriCommandParity } from "@opencanon/validators";
 
 const frontendGlobs = "{{frontendGlobs}}".split(",").map((item) => item.trim()).filter(Boolean);
 const rustGlobs = "{{rustGlobs}}".split(",").map((item) => item.trim()).filter(Boolean);

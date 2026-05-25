@@ -56,7 +56,7 @@ export default {
   files: [
     {
       path: ".agents/skills/opencanon/validators/dry-graph.ts",
-      content: `import { repeatedLiterals, similarFunctionNames } from "../index.ts";
+      content: `import { repeatedLiterals, similarFunctionNames } from "@opencanon/validators";
 
 const sourceGlobs = "{{sourceGlobs}}".split(",").map((item) => item.trim()).filter(Boolean);
 
@@ -88,20 +88,20 @@ export default [repeatedDomainLiterals, similarFunctions];
 `,
     },
     {
-      path: ".agents/skills/opencanon/fixtures/similar-functions/valid/src/company.ts",
-      content: "function normalizeCompany() { return true; }\nexport function loadCompany() { return normalizeCompany(); }\nexport function renderAccount() { return true; }\n",
+      path: ".agents/skills/opencanon/fixtures/similar-functions/valid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/company.ts', \"function normalizeCompany() { return true; }\\nexport function loadCompany() { return normalizeCompany(); }\\nexport function renderAccount() { return true; }\\n\")] });\n",
     },
     {
-      path: ".agents/skills/opencanon/fixtures/similar-functions/invalid/src/company.ts",
-      content: "function normalizeCompany() { return true; }\nexport function loadCompany() { return normalizeCompany(); }\nexport function fetchCompany() { return normalizeCompany(); }\n",
+      path: ".agents/skills/opencanon/fixtures/similar-functions/invalid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/company.ts', \"function normalizeCompany() { return true; }\\nexport function loadCompany() { return normalizeCompany(); }\\nexport function fetchCompany() { return normalizeCompany(); }\\n\")] });\n",
     },
     {
-      path: ".agents/skills/opencanon/fixtures/repeated-domain-literals/valid/src/orders.ts",
-      content: "const ORDER_TYPE = \"ORDER\";\nconst STATUS_PENDING = \"pending\";\nexport function loadOrder() { return { type: ORDER_TYPE, status: STATUS_PENDING }; }\nexport function fetchOrder() { return { type: ORDER_TYPE, status: STATUS_PENDING }; }\n",
+      path: ".agents/skills/opencanon/fixtures/repeated-domain-literals/valid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/orders.ts', \"const ORDER_TYPE = \\\"ORDER\\\";\\nconst STATUS_PENDING = \\\"pending\\\";\\nexport function loadOrder() { return { type: ORDER_TYPE, status: STATUS_PENDING }; }\\nexport function fetchOrder() { return { type: ORDER_TYPE, status: STATUS_PENDING }; }\\n\")] });\n",
     },
     {
-      path: ".agents/skills/opencanon/fixtures/repeated-domain-literals/invalid/src/orders.ts",
-      content: "export function loadOrder() { return { type: \"ORDER\", status: \"pending\" }; }\nexport function fetchOrder() { return { type: \"ORDER\", status: \"pending\" }; }\n",
+      path: ".agents/skills/opencanon/fixtures/repeated-domain-literals/invalid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/orders.ts', \"export function loadOrder() { return { type: \\\"ORDER\\\", status: \\\"pending\\\" }; }\\nexport function fetchOrder() { return { type: \\\"ORDER\\\", status: \\\"pending\\\" }; }\\n\")] });\n",
     },
   ],
   impactSurfaces: [],

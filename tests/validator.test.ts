@@ -9,6 +9,8 @@ import {
   applyFindingFixes,
   buildDoctorReport,
   createPaths,
+  createCommitApprovalContext,
+  createCommitApprovalRecord,
   createRuntime,
   defineValidator,
   createValidatorFactory,
@@ -17,8 +19,13 @@ import {
   flushValidationContextCache,
   FixModeValue,
   getChangedFiles,
+  loadCommitApprovalsWithDiagnostics,
+  toPendingCommitGates,
+  resolveCommitGates,
   resolveValidators,
   runValidation,
+  savePendingCommitGates,
+  upsertCommitApproval,
   validateConfig,
   validateContext,
   validateValidatorDefinitions,
@@ -275,6 +282,255 @@ test("structured fixes reject paths outside the project root", () => {
     assert.equal(result.appliedEdits, 0);
     assert(result.diagnostics.some((diagnostic) => diagnostic.includes("Unsafe edit path")));
     assert.equal(readFileSync(path.join(rootDir, targetFile), "utf8"), "export const value = 1;\n");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("validators can emit diff-bound commit gates", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-commit-gate-"));
+  const targetFile = "src/auth/session.ts";
+
+  try {
+    mkdirSync(path.join(rootDir, "src/auth"), { recursive: true });
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 60;\n");
+    initGitRepo(rootDir);
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 120;\n");
+    git(rootDir, ["add", targetFile]);
+
+    const paths = createPaths(rootDir);
+    const validators = resolveValidators(
+      defineValidator({
+        id: "auth-session-intent",
+        topics: ["auth"],
+        severity: "warning",
+        scope: "file",
+        applies: ["src/auth/**"],
+        validate({ ctx }) {
+          for (const file of ctx.targetFiles) {
+            ctx.commitGate({
+              id: "auth-session-change",
+              title: "Auth session behavior changed",
+              reason: "Session lifecycle code changed and needs user intent before commit.",
+              question: "Did the user approve the auth session TTL change?",
+              file: file.path,
+              line: 1,
+              evidence: [{ file: file.path, line: 1, message: "sessionTtl changed" }],
+            });
+          }
+          return [];
+        },
+      }),
+    ).validators;
+
+    const result = await runValidation({ rootDir, paths, decisions: [], validators, files: [targetFile] });
+    assert.equal(result.findings.length, 0);
+    assert.equal(result.commitGates.length, 1);
+    assert.equal(result.commitGates[0]?.id, "auth-session-change");
+
+    const context = createCommitApprovalContext(paths, result.validatorGraphHash);
+    const unresolved = resolveCommitGates(result.commitGates, { version: 1, approvals: [] }, context);
+    assert.equal(unresolved[0]?.status, "unresolved");
+    const pending = toPendingCommitGates(unresolved);
+    assert.equal(pending[0]?.question, "Did the user approve the auth session TTL change?");
+    assert.equal(pending[0]?.agentAction, "request_user_input");
+    assert.deepEqual(pending[0]?.preferredToolNames, ["request_user_input", "ask_user"]);
+    assert.equal(pending[0]?.plainChatFallbackAllowed, true);
+    assert.match(pending[0]?.fallbackProtocol ?? "", /pause and ask in chat/);
+    assert.equal(pending[0]?.choices[0]?.label, "Approve");
+    assert(pending[0]?.agentProtocol.includes("Do not infer approval from the original commit request."));
+    assert(pending[0]?.agentProtocol.some((instruction) => instruction.includes("structured ask-user tool")));
+    assert.match(pending[0]?.approveCommand ?? "", /gate approve auth-session-change/);
+
+    const approval = createCommitApprovalRecord({
+      gate: result.commitGates[0]!,
+      summary: "User confirmed the session TTL change is intentional.",
+      context,
+    });
+    const approved = resolveCommitGates(result.commitGates, { version: 1, approvals: [approval] }, context);
+    assert.equal(approved[0]?.status, "approved");
+    const saved = savePendingCommitGates(paths, { context, gates: unresolved });
+    assert.equal(saved.pending.length, 1);
+    assert(existsSync(path.join(paths.cacheDir, "commit-gates.json")));
+    const upserted = upsertCommitApproval({ version: 1, approvals: [approval] }, approval);
+    assert.equal(upserted.approvals.length, 1);
+
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 180;\n");
+    git(rootDir, ["add", targetFile]);
+    const changedContext = createCommitApprovalContext(paths, result.validatorGraphHash);
+    const invalidated = resolveCommitGates(result.commitGates, { version: 1, approvals: [approval] }, changedContext);
+    assert.equal(invalidated[0]?.status, "unresolved");
+    writeFileSync(paths.commitApprovalsPath, "{");
+    const malformed = loadCommitApprovalsWithDiagnostics(paths);
+    assert.equal(malformed.approvals.approvals.length, 0);
+    assert.match(malformed.diagnostics[0] ?? "", /not valid JSON/);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("validator graph hash is based on metadata instead of function source", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validator-hash-"));
+  const targetFile = "src/auth/session.ts";
+
+  try {
+    mkdirSync(path.join(rootDir, "src/auth"), { recursive: true });
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 60;\n");
+    const paths = createPaths(rootDir);
+    const validatorBase = {
+      id: "auth-session-hash",
+      topics: ["auth"],
+      severity: "warning" as const,
+      scope: "file" as const,
+      applies: ["src/auth/**"],
+    };
+    const first = resolveValidators(
+      defineValidator({
+        ...validatorBase,
+        validate() {
+          return [];
+        },
+      }),
+    ).validators;
+    const second = resolveValidators(
+      defineValidator({
+        ...validatorBase,
+        validate({ ctx }) {
+          return ctx.targetFiles.length > 100 ? [] : [];
+        },
+      }),
+    ).validators;
+
+    const firstResult = await runValidation({ rootDir, paths, decisions: [], validators: first, files: [targetFile] });
+    const secondResult = await runValidation({ rootDir, paths, decisions: [], validators: second, files: [targetFile] });
+    assert.equal(firstResult.validatorGraphHash, secondResult.validatorGraphHash);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("invalid commit gate definitions are validator-runtime findings", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-invalid-commit-gate-"));
+  const targetFile = "src/auth/session.ts";
+
+  try {
+    mkdirSync(path.join(rootDir, "src/auth"), { recursive: true });
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 60;\n");
+    const paths = createPaths(rootDir);
+    const validators = resolveValidators(
+      defineValidator({
+        id: "auth-session-invalid-gate",
+        topics: ["auth"],
+        severity: "warning",
+        scope: "file",
+        applies: ["src/auth/**"],
+        validate({ ctx }) {
+          ctx.commitGate({
+            id: "auth-session-change",
+            title: "Auth session behavior changed",
+            reason: "Session lifecycle code changed and needs user intent before commit.",
+            question: "",
+          });
+          return [];
+        },
+      }),
+    ).validators;
+
+    const result = await runValidation({ rootDir, paths, decisions: [], validators, files: [targetFile] });
+    assert.equal(result.commitGates.length, 0);
+    assert.equal(result.findings[0]?.validatorId, "validator-runtime");
+    assert.match(result.findings[0]?.message ?? "", /needs a non-empty question/);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("file-less commit gate approvals bind to gate identity", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-commit-gate-identity-"));
+  const targetFile = "src/auth/session.ts";
+
+  try {
+    mkdirSync(path.join(rootDir, "src/auth"), { recursive: true });
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 60;\n");
+    initGitRepo(rootDir);
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 120;\n");
+    git(rootDir, ["add", targetFile]);
+
+    const paths = createPaths(rootDir);
+    const baseGate = {
+      id: "auth-session-change",
+      validatorId: "auth-session-intent",
+      title: "Auth session behavior changed",
+      reason: "Session lifecycle code changed and needs user intent before commit.",
+      question: "Did the user approve the auth session TTL change?",
+    };
+    const context = createCommitApprovalContext(paths, "validator-graph");
+    const approval = createCommitApprovalRecord({
+      gate: baseGate,
+      summary: "User confirmed the session TTL change is intentional.",
+      context,
+    });
+
+    assert.equal(resolveCommitGates([baseGate], { version: 1, approvals: [approval] }, context)[0]?.status, "approved");
+    assert.equal(
+      resolveCommitGates([{ ...baseGate, reason: "Different user intent question for the same staged diff." }], { version: 1, approvals: [approval] }, context)[0]
+        ?.status,
+      "unresolved",
+    );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("file-scoped commit gate approvals bind to current file content", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-file-commit-gate-"));
+  const targetFile = "src/auth/session.ts";
+
+  try {
+    mkdirSync(path.join(rootDir, "src/auth"), { recursive: true });
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 60;\n");
+    initGitRepo(rootDir);
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 120;\n");
+    git(rootDir, ["add", targetFile]);
+
+    const paths = createPaths(rootDir);
+    const validators = resolveValidators(
+      defineValidator({
+        id: "auth-session-file-intent",
+        topics: ["auth"],
+        severity: "warning",
+        scope: "file",
+        applies: ["src/auth/**"],
+        validate({ ctx }) {
+          for (const file of ctx.targetFiles) {
+            ctx.commitGate({
+              id: "auth-session-file-change",
+              title: "Auth session file changed",
+              reason: "The full auth session file content needs user intent before commit.",
+              question: "Did the user approve the current auth session file content?",
+              approvalScope: "file",
+              file: file.path,
+              line: 1,
+            });
+          }
+          return [];
+        },
+      }),
+    ).validators;
+
+    const result = await runValidation({ rootDir, paths, decisions: [], validators, files: [targetFile] });
+    const context = createCommitApprovalContext(paths, result.validatorGraphHash);
+    const approval = createCommitApprovalRecord({
+      gate: result.commitGates[0]!,
+      summary: "User confirmed the current auth session file content.",
+      context,
+    });
+
+    assert.equal(resolveCommitGates(result.commitGates, { version: 1, approvals: [approval] }, context)[0]?.status, "approved");
+
+    writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 180;\n");
+    const changedContext = createCommitApprovalContext(paths, result.validatorGraphHash);
+    assert.equal(resolveCommitGates(result.commitGates, { version: 1, approvals: [approval] }, changedContext)[0]?.status, "unresolved");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -963,7 +1219,7 @@ test("project discovery applies max file size guardrail", () => {
       JSON.stringify({
         fileDiscovery: "filesystem",
         maxFileSizeKb: 1,
-        projectFilePatterns: ["src/**/*.ts"],
+        projectFilePatterns: ["src/**/*.ts", "package.json"],
         ignore: ["node_modules/**", ".git/**"],
       }),
     );
@@ -1081,7 +1337,7 @@ test("typescript literal parser powers repeated literal validators", async () =>
       [
         "import { value } from './value';",
         "export const CompanyStatus = {",
-        "  Active: \"active\",",
+        "  ACTIVE: \"active\",",
         "} as const;",
         "export function isActive(status: string) {",
         "  return status === \"active\";",
@@ -1522,7 +1778,7 @@ test("doctor reports and fixes unignored cache files", () => {
     const gitignore = readFileSync(path.join(rootDir, ".gitignore"), "utf8");
     assert(gitignore.includes(".opencanon/cache/"));
     assert(gitignore.includes(".opencanon/*.sqlite"));
-    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\n");
+    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\ngenerated/\n");
 
     const fixedReport = buildDoctorReport({ paths, decisions: [], validators: [] });
     assert.equal(fixedReport.checks.find((item) => item.id === "cache-ignore")?.status, "pass");
@@ -1600,6 +1856,58 @@ test("fixture checks can be scoped to one validator", () => {
   assert(result.stdout.includes("no-native-enums/valid"));
   assert(result.stdout.includes("no-native-enums/invalid"));
   assert(!result.stdout.includes("dal-transaction-param/valid"));
+});
+
+test("fixture checks fail when required flat fixture files are missing", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-missing-fixtures-"));
+  try {
+    mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
+    mkdirSync(path.join(rootDir, "validators"), { recursive: true });
+    mkdirSync(path.join(rootDir, "fixtures/missing-invalid"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify({
+        fileDiscovery: "filesystem",
+        decisionsPath: "docs/opencanon/decisions.json",
+        validatorsPath: "validators/index.ts",
+        fixturesDir: "fixtures",
+        projectFilePatterns: ["src/**/*.ts"],
+        ignore: ["node_modules/**", ".git/**"],
+        requiredPackageScripts: [],
+      }),
+    );
+    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "[]\n");
+    writeFileSync(
+      path.join(rootDir, "validators/index.ts"),
+      `export default {
+  id: "missing-invalid",
+  topics: ["test"],
+  severity: "error",
+  scope: "file",
+  validate() {
+    return [];
+  },
+};
+`,
+    );
+    writeFileSync(
+      path.join(rootDir, "fixtures/missing-invalid/valid.ts"),
+      ['import { defineFixture } from "@opencanon/core/testing";', "", "export default defineFixture({});", ""].join("\n"),
+    );
+
+    const script = path.join(process.cwd(), ".agents/skills/opencanon/scripts/opencanon.ts");
+    const result = spawnSync("bun", [script, "validate", "--check-fixtures"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert(result.stdout.includes("FAIL missing-invalid/invalid/fixtures/missing-invalid/invalid.ts"));
+    assert(result.stdout.includes("Missing required fixture file: fixtures/missing-invalid/invalid.ts"));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
 });
 
 test("rules command renders validator summaries and fixture coverage", () => {
@@ -1717,6 +2025,72 @@ test("validate strict-warnings controls warning exit status", () => {
   }
 });
 
+test("validator graph resolves OpenCanon package-prefixed authoring imports", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-authoring-imports-"));
+  try {
+    mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
+    mkdirSync(path.join(rootDir, "validators"), { recursive: true });
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify({
+        fileDiscovery: "filesystem",
+        decisionsPath: "docs/opencanon/decisions.json",
+        validatorsPath: "validators/index.ts",
+        fixturesDir: "fixtures",
+        projectFilePatterns: ["src/**/*.ts"],
+        ignore: ["node_modules/**", ".git/**"],
+        requiredPackageScripts: [],
+      }),
+    );
+    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "[]\n");
+    writeFileSync(path.join(rootDir, "src/a.ts"), "const value = 'warn';\n");
+    writeFileSync(
+      path.join(rootDir, "validators/index.ts"),
+      `import { defineValidator } from "@opencanon/core";
+import { Packages } from "@opencanon/project";
+
+export default defineValidator({
+  id: "package-import-rule",
+  topics: ["test"],
+  severity: "warning",
+  scope: "file",
+  applies: ["src/**/*.ts"],
+  validate({ ctx }) {
+    return ctx.targetFiles.flatMap((file) =>
+      file.find("warn").map((match) =>
+        file.report({
+          line: match.line,
+          column: match.column,
+          message: \`Package import finding from \${Packages.ROOT}.\`,
+        }),
+      ),
+    );
+  },
+});
+`,
+    );
+
+    const script = path.join(process.cwd(), ".agents/skills/opencanon/scripts/opencanon.ts");
+    const generated = spawnSync("bun", [script, "project-types", "generate"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.equal(generated.status, 0, generated.stderr || generated.stdout);
+
+    const result = spawnSync("bun", [script, "validate", "--files", "src/a.ts"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert(result.stdout.includes("Package import finding from <root>."));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("project context skips broken symlinks in ignored directories", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-project-"));
   try {
@@ -1740,3 +2114,21 @@ test("project context skips broken symlinks in ignored directories", () => {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+function initGitRepo(rootDir: string): void {
+  for (const args of [
+    ["init"],
+    ["config", "user.email", "opencanon@example.com"],
+    ["config", "user.name", "OpenCanon Test"],
+    ["add", "."],
+    ["commit", "-m", "initial"],
+  ]) {
+    const result = spawnSync("git", args, { cwd: rootDir, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
+}
+
+function git(rootDir: string, args: string[]): void {
+  const result = spawnSync("git", args, { cwd: rootDir, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+}

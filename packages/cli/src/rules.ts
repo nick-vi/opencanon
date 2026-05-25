@@ -1,4 +1,4 @@
-import { listFiles, splitList, unique } from "@opencanon/core";
+import { splitList, unique } from "@opencanon/core";
 import type { Format } from "@opencanon/core";
 import { createPaths, formatValidatorApplies, resolveRootDir } from "@opencanon/core";
 import type { Validator, ValidatorVisual } from "@opencanon/core";
@@ -6,6 +6,7 @@ import type { TreeBoundaryRule, TreeDefinition, TreeNode, TreePathDefinition } f
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { DaemonApiRoute, withDaemonClient } from "./daemon-client.ts";
 import type { DaemonSnapshot } from "@opencanon/daemon";
+import { existsSync } from "node:fs";
 import { cac } from "cac";
 import path from "node:path";
 
@@ -148,8 +149,7 @@ function intersectsAny(left: string[], right: string[]): boolean {
 }
 
 function hasFixtureFiles(fixturesDir: string, validatorId: string, fixtureCase: string): boolean {
-  const fixtureRoot = path.join(fixturesDir, validatorId, fixtureCase);
-  return listFiles(fixtureRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).length > 0;
+  return existsSync(path.join(fixturesDir, validatorId, `${fixtureCase}.ts`));
 }
 
 function renderRulesMarkdown(rules: RuleSummary[]): string {

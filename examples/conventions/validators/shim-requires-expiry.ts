@@ -1,4 +1,4 @@
-import { annotationRequiresTags } from "../../../.agents/skills/opencanon/index.ts";
+import { annotationRequiresTags } from "@opencanon/validators";
 
 const validator = annotationRequiresTags({
   id: "shim-requires-expiry",

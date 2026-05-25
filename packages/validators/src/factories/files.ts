@@ -218,7 +218,7 @@ export const noNativeEnums = createValidatorFactory<NoNativeEnumsOptions>((optio
     for (const file of ctx.targetFiles) {
       for (const declaration of file.ts.declarations()) {
         if (declaration.kind !== "enum") continue;
-        const replacement = options.safeFix === false ? null : safeEnumReplacement(declaration, runtime.naming.isPascalCase);
+        const replacement = options.safeFix === false ? null : safeEnumReplacement(declaration, runtime.naming);
         findings.push(
           file.report({
             line: declaration.line,

@@ -39,6 +39,8 @@ export type ContextPaths = {
   impactSurfacesPath: string;
   proposedImpactNotesPath: string;
   baselinePath: string;
+  commitApprovalsPath: string;
+  commitApprovalsPersistent: boolean;
   cacheDir: string;
   projectFilePatterns: string[];
   ignore: string[];
@@ -60,6 +62,8 @@ export type ContextConfig = {
   impactSurfacesPath?: string;
   proposedImpactNotesPath?: string;
   baselinePath?: string;
+  commitApprovalsPath?: string;
+  commitApprovalsPersistent?: boolean;
   cacheDir?: string;
   projectFilePatterns?: string[];
   ignore?: string[];
@@ -152,6 +156,8 @@ const contextConfigKeys = new Set<keyof ContextConfig>([
   "impactSurfacesPath",
   "proposedImpactNotesPath",
   "baselinePath",
+  "commitApprovalsPath",
+  "commitApprovalsPersistent",
   "cacheDir",
   "projectFilePatterns",
   "ignore",
@@ -170,6 +176,7 @@ const defaultFixturesDir = ".agents/skills/opencanon/fixtures";
 const defaultImpactSurfacesPath = path.join(defaultDocsDir, "impact-surfaces.json");
 const defaultProposedImpactNotesPath = path.join(defaultDocsDir, "proposed-impact-notes.json");
 const defaultBaselinePath = ".opencanon/baseline.json";
+const defaultCommitApprovalsPath = ".opencanon/commit-approvals.json";
 const defaultCacheDir = ".opencanon/cache";
 export const ProjectFileName = {
   OpenCanonConfig: "opencanon.config.json",
@@ -200,6 +207,8 @@ export function createDefaultConfig(rootDir: string): Required<ContextConfig> {
     impactSurfacesPath: defaultImpactSurfacesPath,
     proposedImpactNotesPath: defaultProposedImpactNotesPath,
     baselinePath: defaultBaselinePath,
+    commitApprovalsPath: defaultCommitApprovalsPath,
+    commitApprovalsPersistent: false,
     cacheDir: defaultCacheDir,
     projectFilePatterns: defaultProjectFilePatterns(rootDir),
     ignore: defaultIgnore,
@@ -265,6 +274,8 @@ export function createPaths(rootDir: string, configInput = loadConfig(rootDir)):
     impactSurfacesPath: path.join(rootDir, config.impactSurfacesPath),
     proposedImpactNotesPath: path.join(rootDir, config.proposedImpactNotesPath),
     baselinePath: path.join(rootDir, config.baselinePath),
+    commitApprovalsPath: path.join(rootDir, config.commitApprovalsPath),
+    commitApprovalsPersistent: config.commitApprovalsPersistent,
     cacheDir: path.join(rootDir, config.cacheDir),
     projectFilePatterns: config.projectFilePatterns,
     ignore: config.ignore,
@@ -440,6 +451,7 @@ export function validateConfig(paths: ContextPaths): string[] {
   const generated = paths.generated as unknown;
   const cachePath = relative(paths.rootDir, paths.cacheDir);
   const baselinePath = relative(paths.rootDir, paths.baselinePath);
+  const commitApprovalsPath = relative(paths.rootDir, paths.commitApprovalsPath);
 
   diagnostics.push(...validateConfigFile(paths));
 
@@ -465,6 +477,12 @@ export function validateConfig(paths: ContextPaths): string[] {
   }
   if (baselinePath === "" || baselinePath.startsWith("..") || path.isAbsolute(baselinePath)) {
     diagnostics.push(`baselinePath must stay inside the project root, found ${paths.baselinePath}.`);
+  }
+  if (commitApprovalsPath === "" || commitApprovalsPath.startsWith("..") || path.isAbsolute(commitApprovalsPath)) {
+    diagnostics.push(`commitApprovalsPath must stay inside the project root, found ${paths.commitApprovalsPath}.`);
+  }
+  if (typeof paths.commitApprovalsPersistent !== "boolean") {
+    diagnostics.push(`commitApprovalsPersistent must be a boolean, found ${String(paths.commitApprovalsPersistent)}.`);
   }
 
   if (!isStringArray(projectFilePatterns)) {

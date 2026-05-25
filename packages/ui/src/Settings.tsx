@@ -34,6 +34,8 @@ type SettingsForm = {
   impactSurfacesPath: string;
   proposedImpactNotesPath: string;
   baselinePath: string;
+  commitApprovalsPath: string;
+  commitApprovalsPersistent: boolean;
   cacheDir: string;
   projectFilePatterns: string;
   ignore: string;
@@ -176,7 +178,12 @@ function SettingsEditor({
           <TextField label="Impact surfaces path" value={form.impactSurfacesPath} onChange={(value) => setField("impactSurfacesPath", value)} />
           <TextField label="Proposed impact notes path" value={form.proposedImpactNotesPath} onChange={(value) => setField("proposedImpactNotesPath", value)} />
           <TextField label="Baseline path" value={form.baselinePath} onChange={(value) => setField("baselinePath", value)} />
+          <TextField label="Commit approvals path" value={form.commitApprovalsPath} onChange={(value) => setField("commitApprovalsPath", value)} />
           <TextField label="Cache directory" value={form.cacheDir} onChange={(value) => setField("cacheDir", value)} />
+          <label className={SettingsClassName.Field}>
+            <span>Persistent commit approvals</span>
+            <input type="checkbox" checked={form.commitApprovalsPersistent} onChange={(event) => setField("commitApprovalsPersistent", event.target.checked)} />
+          </label>
         </div>
         <div className="settingsGrid">
           <label className={SettingsClassName.Field}>
@@ -223,6 +230,8 @@ function settingsToForm(config: ProjectConfig): SettingsForm {
     impactSurfacesPath: config.impactSurfacesPath,
     proposedImpactNotesPath: config.proposedImpactNotesPath,
     baselinePath: config.baselinePath,
+    commitApprovalsPath: config.commitApprovalsPath,
+    commitApprovalsPersistent: config.commitApprovalsPersistent,
     cacheDir: config.cacheDir,
     projectFilePatterns: config.projectFilePatterns.join("\n"),
     ignore: config.ignore.join("\n"),
@@ -246,6 +255,8 @@ function formToConfig(form: SettingsForm): ProjectConfig {
     impactSurfacesPath: form.impactSurfacesPath,
     proposedImpactNotesPath: form.proposedImpactNotesPath,
     baselinePath: form.baselinePath,
+    commitApprovalsPath: form.commitApprovalsPath,
+    commitApprovalsPersistent: form.commitApprovalsPersistent,
     cacheDir: form.cacheDir,
     projectFilePatterns: splitLines(form.projectFilePatterns),
     ignore: splitLines(form.ignore),

@@ -1,4 +1,4 @@
-import { repeatedLiterals } from "../../../.agents/skills/opencanon/index.ts";
+import { repeatedLiterals } from "@opencanon/validators";
 
 const frameworkVocabulary = [
   "GET",

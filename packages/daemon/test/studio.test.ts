@@ -45,7 +45,7 @@ test("validator studio previews, runs fixtures, and applies generated validators
     const apply = await applyStudioValidator(rootDir, request);
     assert.equal(apply.ok, true);
     assert(existsSync(path.join(rootDir, "validators/no-eval-calls.ts")));
-    assert(existsSync(path.join(rootDir, "fixtures/no-eval-calls/invalid/src/example.ts")));
+    assert(existsSync(path.join(rootDir, "fixtures/no-eval-calls/invalid.ts")));
     assert(readFileSync(path.join(rootDir, "validators/index.ts"), "utf8").includes("noEvalCalls"));
 
     const validators = await listStudioValidators(rootDir);

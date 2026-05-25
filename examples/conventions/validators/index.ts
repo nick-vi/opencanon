@@ -1,4 +1,4 @@
-import { defineValidator } from "../../../.agents/skills/opencanon/index.ts";
+import { defineValidator } from "@opencanon/core";
 import dalTransactionParam from "./dal-transaction-param.ts";
 import deprecatedRequiresReplacement from "./deprecated-requires-replacement.ts";
 import duplicateBoundaryLiterals from "./duplicate-boundary-literals.ts";

@@ -40,7 +40,7 @@ export default {
   files: [
     {
       path: ".agents/skills/opencanon/validators/security-hardcoding.ts",
-      content: `import { noHardcodedConfigValues, noSecretLikeLiterals } from "../index.ts";
+      content: `import { noHardcodedConfigValues, noSecretLikeLiterals } from "@opencanon/validators";
 
 const sourceGlobs = "{{sourceGlobs}}".split(",").map((item) => item.trim()).filter(Boolean);
 const allowedLiterals = "{{allowedLiterals}}".split(",").map((item) => item.trim()).filter(Boolean);
@@ -73,20 +73,20 @@ export default [noSecretLikeLiteralsValidator, noHardcodedConfigValuesValidator]
 `,
     },
     {
-      path: ".agents/skills/opencanon/fixtures/no-secret-like-literals/valid/src/config.ts",
-      content: "export const tokenPlaceholder = \"<generated-token>\";\n",
+      path: ".agents/skills/opencanon/fixtures/no-secret-like-literals/valid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/config.ts', 'export const tokenPlaceholder = \"<generated-token>\";\\n')] });\n",
     },
     {
-      path: ".agents/skills/opencanon/fixtures/no-secret-like-literals/invalid/src/config.ts",
-      content: "export const apiKey = \"not-a-real-secret-value\";\n",
+      path: ".agents/skills/opencanon/fixtures/no-secret-like-literals/invalid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/config.ts', 'export const apiKey = \"not-a-real-secret-value\";\\n')] });\n",
     },
     {
-      path: ".agents/skills/opencanon/fixtures/no-hardcoded-config-values/valid/src/config.ts",
-      content: "export const host = \"127.0.0.1\";\n",
+      path: ".agents/skills/opencanon/fixtures/no-hardcoded-config-values/valid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/config.ts', 'export const host = \"127.0.0.1\";\\n')] });\n",
     },
     {
-      path: ".agents/skills/opencanon/fixtures/no-hardcoded-config-values/invalid/src/config.ts",
-      content: "export const callbackUrl = \"https://api.example.com/callback\";\n",
+      path: ".agents/skills/opencanon/fixtures/no-hardcoded-config-values/invalid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/config.ts', 'export const callbackUrl = \"https://api.example.com/callback\";\\n')] });\n",
     },
   ],
   impactSurfaces: [],

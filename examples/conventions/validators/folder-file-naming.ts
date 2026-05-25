@@ -1,4 +1,4 @@
-import { fileNames } from "../../../.agents/skills/opencanon/index.ts";
+import { fileNames } from "@opencanon/validators";
 
 const validator = fileNames({
   id: "folder-file-naming",

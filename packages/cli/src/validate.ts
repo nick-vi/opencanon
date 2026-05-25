@@ -1,20 +1,29 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
 import type { DaemonSnapshot } from "@opencanon/daemon";
 import { booleanOption, fixModeOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { loadValidators } from "./project.ts";
 import {
+  createCommitApprovalContext,
+  getCommitGateFiles,
+  commitGateApprovalChoices,
+  commitGateAgentProtocol,
+  commitGateFallbackProtocol,
+  materializeFixture,
   createPaths,
   fail,
   getChangedFiles,
   listFiles,
+  loadCommitApprovalsWithDiagnostics,
   loadContextFiles,
   loadImpactSurfaces,
   matchesProjectFileScope,
+  toPendingCommitGates,
   relative,
+  resolveCommitGates,
   resolveRootDir,
+  savePendingCommitGates,
   splitList,
   toRepoRelativePath,
   unique,
@@ -27,8 +36,9 @@ import type { FixMode } from "@opencanon/core";
 import { createProfiler, renderProfileMarkdown } from "@opencanon/core";
 import type { Profiler } from "@opencanon/core";
 import type { Finding, Validator } from "@opencanon/core";
-import { createRuntime, createValidationContextFromFixture, validateFindings } from "@opencanon/core";
+import { createRuntime, createValidationContextFromFixture, createValidationContextFromFixtureFile, flushValidationContextCache, validateFindings } from "@opencanon/core";
 import type { ValidationResult } from "@opencanon/core";
+import type { ResolvedCommitGate } from "@opencanon/core";
 import { selectValidators } from "@opencanon/core";
 import { DaemonApiRoute, withDaemonClient } from "./daemon-client.ts";
 
@@ -115,7 +125,7 @@ export async function runValidateCommand(args = Bun.argv.slice(2), cwd = process
     process.exit(1);
   }
 
-  const result = await withDaemonClient(cwd, (client) =>
+  let result = await withDaemonClient(cwd, (client) =>
     client.post<ValidationResult>(DaemonApiRoute.Validate, {
       files: query.files,
       topics: query.topics,
@@ -126,16 +136,18 @@ export async function runValidateCommand(args = Bun.argv.slice(2), cwd = process
       profile: query.profile,
     }),
   );
+  result = query.changed ? resolveValidationCommitGates(result, true) : { ...result, commitGates: [] };
 
   if (query.format === "json") writeJson(result);
   else console.log(renderFindings(result));
-  process.exit(validationExitCode(result, query.strictWarnings));
+  process.exit(validationExitCode(result, query));
 }
 
-function validationExitCode(result: ValidationResult, strictWarnings: boolean): number {
+function validationExitCode(result: ValidationResult, query: Pick<Query, "changed" | "strictWarnings">): number {
   if (result.diagnostics.length > 0 || result.fixes?.diagnostics.length) return 1;
   if (result.findings.some((finding) => finding.severity === "error")) return 1;
-  if (strictWarnings && result.findings.some((finding) => finding.severity === "warning")) return 1;
+  if (query.changed && (result.commitGates ?? []).some((gate) => gate.status !== "approved")) return 1;
+  if (query.strictWarnings && result.findings.some((finding) => finding.severity === "warning")) return 1;
   return 0;
 }
 
@@ -218,56 +230,93 @@ async function checkFixtures(validators: Validator[], runtime = createRuntime(pa
 
   for (const validator of validators) {
     for (const fixtureCase of ["valid", "invalid"] as const) {
-      const fixtureRoot = path.join(paths.fixturesDir, validator.id, fixtureCase);
-      const files = listFiles(fixtureRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
-
-      const ctx = createValidationContextFromFixture({ rootDir: fixtureRoot, validator });
-      const findings = await profiler.measureAsync(`fixture.${validator.id}.${fixtureCase}`, () => Promise.resolve(validator.validate({ ctx, runtime })));
-      const details = validateFindings(validator, findings, findingValidationContext);
+      const fixturePath = path.join(paths.fixturesDir, validator.id, `${fixtureCase}.ts`);
+      if (!existsSync(fixturePath)) {
+        checks.push({
+          validatorId: validator.id,
+          case: fixtureCase,
+          file: relative(rootDir, fixturePath),
+          passed: false,
+          findings: [],
+          details: [`Missing required fixture file: ${relative(rootDir, fixturePath)}`],
+        });
+        continue;
+      }
+      const ctx = await createValidationContextFromFixtureFile({ fixtureFile: fixturePath, validator });
+      let findings: Finding[] = [];
+      let details: string[] = [];
+      let files: string[] = [];
+      try {
+        findings = await profiler.measureAsync(`fixture.${validator.id}.${fixtureCase}`, () => Promise.resolve(validator.validate({ ctx, runtime })));
+        details = validateFindings(validator, findings, findingValidationContext);
+        files = ctx.files.map((file) => file.path);
+      } finally {
+        flushValidationContextCache(ctx);
+      }
       checks.push({
         validatorId: validator.id,
         case: fixtureCase,
-        file: files.map((file) => relative(fixtureRoot, file)).join(", ") || "<none>",
+        file: files.join(", ") || "<none>",
         passed: (fixtureCase === "valid" ? findings.length === 0 : findings.length > 0) && details.length === 0,
         findings,
         details,
       });
     }
 
-    const fixedRoot = path.join(paths.fixturesDir, validator.id, "fixed");
-    const fixedFiles = listFiles(fixedRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
-    if (fixedFiles.length === 0) continue;
+    const fixedPath = path.join(paths.fixturesDir, validator.id, "fixed.ts");
+    if (!existsSync(fixedPath)) continue;
 
-    const invalidRoot = path.join(paths.fixturesDir, validator.id, "invalid");
-    const tempRoot = mkdtempSync(path.join(tmpdir(), `opencanon-${validator.id}-`));
+    const invalidPath = path.join(paths.fixturesDir, validator.id, "invalid.ts");
+    if (!existsSync(invalidPath)) continue;
     const details: string[] = [];
     let afterFindings: Finding[] = [];
+    let invalidFixture: Awaited<ReturnType<typeof materializeFixture>> | undefined;
+    let fixedFixture: Awaited<ReturnType<typeof materializeFixture>> | undefined;
+    let fixedOutputFiles: string[] = [];
     try {
-      cpSync(invalidRoot, tempRoot, { recursive: true });
-      const beforeCtx = createValidationContextFromFixture({ rootDir: tempRoot, validator });
+      invalidFixture = await materializeFixture(invalidPath);
+      fixedFixture = await materializeFixture(fixedPath);
+      const expectedFixture = fixedFixture;
+      fixedOutputFiles = listFiles(expectedFixture.rootDir, isFixtureComparableFile).map((file) => relative(expectedFixture.rootDir, file));
+      const beforeCtx = createValidationContextFromFixture({
+        rootDir: invalidFixture.rootDir,
+        validator,
+        directories: invalidFixture.directories,
+        targetFiles: invalidFixture.targetFiles,
+        analysisFiles: invalidFixture.analysisFiles,
+      });
       const beforeFindings = await Promise.resolve(validator.validate({ ctx: beforeCtx, runtime }));
       details.push(...validateFindings(validator, beforeFindings, findingValidationContext));
+      flushValidationContextCache(beforeCtx);
       const fixResult = applyFindingFixes({
-        rootDir: tempRoot,
+        rootDir: invalidFixture.rootDir,
         findings: beforeFindings,
         mode: "all",
         dryRun: false,
       });
-      const afterCtx = createValidationContextFromFixture({ rootDir: tempRoot, validator });
+      const afterCtx = createValidationContextFromFixture({
+        rootDir: invalidFixture.rootDir,
+        validator,
+        directories: invalidFixture.directories,
+        targetFiles: invalidFixture.targetFiles,
+        analysisFiles: invalidFixture.analysisFiles,
+      });
       afterFindings = await Promise.resolve(validator.validate({ ctx: afterCtx, runtime }));
+      flushValidationContextCache(afterCtx);
       details.push(...fixResult.diagnostics);
-      details.push(...compareFixtureTrees(tempRoot, fixedRoot));
+      details.push(...compareFixtureTrees(invalidFixture.rootDir, fixedFixture.rootDir));
       if (beforeFindings.length === 0) details.push("Invalid fixture had no findings before fix.");
       if (fixResult.appliedEdits === 0) details.push("No fix edits were applied.");
       if (afterFindings.length > 0) details.push("Fixed fixture still has findings.");
     } finally {
-      rmSync(tempRoot, { recursive: true, force: true });
+      invalidFixture?.cleanup();
+      fixedFixture?.cleanup();
     }
 
     checks.push({
       validatorId: validator.id,
       case: "fixed",
-      file: fixedFiles.map((file) => relative(fixedRoot, file)).join(", "),
+      file: fixedOutputFiles.join(", ") || "fixed.ts",
       passed: details.length === 0,
       findings: afterFindings,
       details,
@@ -283,11 +332,15 @@ async function checkFixtures(validators: Validator[], runtime = createRuntime(pa
 
 function renderFindings(result: ValidationResult): string {
   const lines: string[] = [];
+  const commitGates = (result.commitGates ?? []) as ResolvedCommitGate[];
   lines.push("# OpenCanon Validation");
   lines.push("");
   lines.push(`Files: ${result.files.length > 0 ? result.files.join(", ") : "<project>"}`);
   lines.push(`Validators: ${result.validators.join(", ")}`);
   lines.push(`Findings: ${result.findingCount}`);
+  if (commitGates.length > 0) {
+    lines.push(`Commit gates: ${commitGates.filter((gate) => gate.status !== "approved").length} unresolved, ${commitGates.filter((gate) => gate.status === "approved").length} approved`);
+  }
   if (result.fixes) {
     lines.push(`Fix mode: ${result.fixes.mode}${result.fixes.dryRun ? " (dry-run)" : ""}`);
     lines.push(`Fix edits: ${result.fixes.dryRun ? result.fixes.selectedEdits : result.fixes.appliedEdits}/${result.fixes.selectedEdits}`);
@@ -307,6 +360,56 @@ function renderFindings(result: ValidationResult): string {
       lines.push(`- skipped ${skipped.validatorId} at ${skipped.file}:${skipped.line} (${skipped.safety}): ${skipped.reason}`);
     }
     for (const diagnostic of result.fixes.diagnostics) lines.push(`- error: ${diagnostic}`);
+    lines.push("");
+  }
+
+  if (commitGates.some((gate) => gate.status !== "approved")) {
+    lines.push("Commit Gates:");
+    for (const gate of commitGates.filter((item) => item.status !== "approved")) {
+      lines.push(`- ${gate.id} (${gate.validatorId})`);
+      lines.push(`  ${gate.title}`);
+      lines.push(`  Reason: ${gate.reason}`);
+      if (gate.file) lines.push(`  File: ${gate.file}${gate.line ? `:${gate.line}` : ""}`);
+      if (gate.decisionIds && gate.decisionIds.length > 0) lines.push(`  Decisions: ${gate.decisionIds.join(", ")}`);
+      if (gate.impactSurfaceIds && gate.impactSurfaceIds.length > 0) lines.push(`  Impact surfaces: ${gate.impactSurfaceIds.join(", ")}`);
+      for (const evidence of gate.evidence ?? []) {
+        const location = evidence.file ? `${evidence.file}${evidence.line ? `:${evidence.line}` : ""}` : "";
+        lines.push(`  Evidence: ${[location, evidence.message].filter(Boolean).join(" ")}`);
+      }
+      lines.push(`  Record after explicit user approval: bun run opencanon gate approve ${gate.id} --summary "<user explicit answer to the gate question>" --via agent`);
+    }
+    lines.push("");
+    lines.push("AGENT ACTION REQUIRED:");
+    lines.push("- You are blocked by an OpenCanon commit gate.");
+    for (const instruction of commitGateAgentProtocol()) lines.push(`- ${instruction}`);
+    lines.push("- Present these choices:");
+    for (const choice of commitGateApprovalChoices()) lines.push(`  - ${choice.label}: ${choice.description}`);
+    lines.push("");
+    lines.push("Commit Gate Policy:");
+    lines.push("- These are not normal findings. They block commit flows until user intent is clarified.");
+    lines.push("- Approvals are bound to the current Git diff, config hash, and validator graph.");
+    lines.push("- If the diff changes, the gate must be approved again.");
+    lines.push("");
+    lines.push("Agent Metadata:");
+    lines.push("");
+    lines.push("```json");
+    lines.push(
+      JSON.stringify(
+        {
+          kind: "opencanon.commitGateApprovalRequired",
+          agentAction: "request_user_input",
+          preferredToolNames: ["request_user_input", "ask_user"],
+          plainChatFallbackAllowed: true,
+          fallbackProtocol: commitGateFallbackProtocol(),
+          agentProtocol: commitGateAgentProtocol(),
+          choices: commitGateApprovalChoices(),
+          pending: toPendingCommitGates(commitGates),
+        },
+        null,
+        2,
+      ),
+    );
+    lines.push("```");
     lines.push("");
   }
 
@@ -366,6 +469,35 @@ function renderFindings(result: ValidationResult): string {
   return lines.join("\n");
 }
 
+function resolveValidationCommitGates(result: ValidationResult, updatePendingCache: boolean): ValidationResult {
+  if ((result.commitGates ?? []).length === 0 && !updatePendingCache) return result;
+  const approvalContext = createCommitApprovalContext(paths, result.validatorGraphHash);
+  const approvals = loadCommitApprovalsWithDiagnostics(paths);
+  const scopedGates = commitGatesForStagedFiles(result.commitGates ?? [], approvalContext.stagedFiles);
+  const resolved = resolveCommitGates(scopedGates, approvals.approvals, approvalContext);
+  if (updatePendingCache) {
+    savePendingCommitGates(paths, {
+      context: approvalContext,
+      gates: resolved,
+      diagnostics: [...approvalContext.diagnostics, ...approvals.diagnostics],
+    });
+  }
+  return {
+    ...result,
+    diagnostics: [...result.diagnostics, ...approvalContext.diagnostics, ...approvals.diagnostics],
+    commitGates: resolved,
+  };
+}
+
+function commitGatesForStagedFiles(gates: NonNullable<ValidationResult["commitGates"]>, stagedFiles: string[]): NonNullable<ValidationResult["commitGates"]> {
+  if (stagedFiles.length === 0) return gates;
+  const staged = new Set(stagedFiles);
+  return gates.filter((gate) => {
+    const files = getCommitGateFiles(gate);
+    return files.length === 0 || files.some((file) => staged.has(file));
+  });
+}
+
 type FixtureResult = Awaited<ReturnType<typeof checkFixtures>>;
 
 function renderFixtureResult(result: FixtureResult): string {
@@ -386,8 +518,8 @@ function renderFixtureResult(result: FixtureResult): string {
 
 function compareFixtureTrees(actualRoot: string, expectedRoot: string): string[] {
   const diagnostics: string[] = [];
-  const expectedFiles = listFiles(expectedRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).map((file) => relative(expectedRoot, file));
-  const actualFiles = listFiles(actualRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file)).map((file) => relative(actualRoot, file));
+  const expectedFiles = listFiles(expectedRoot, isFixtureComparableFile).map((file) => relative(expectedRoot, file));
+  const actualFiles = listFiles(actualRoot, isFixtureComparableFile).map((file) => relative(actualRoot, file));
   const allFiles = unique([...expectedFiles, ...actualFiles]);
 
   for (const file of allFiles) {
@@ -407,6 +539,11 @@ function compareFixtureTrees(actualRoot: string, expectedRoot: string): string[]
   }
 
   return diagnostics;
+}
+
+function isFixtureComparableFile(file: string): boolean {
+  const relativeFile = file.split(path.sep).join("/");
+  return !relativeFile.includes("/.opencanon/") && /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
 }
 
 function writeJson(value: unknown): void {

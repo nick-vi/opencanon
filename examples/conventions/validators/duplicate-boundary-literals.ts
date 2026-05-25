@@ -1,4 +1,4 @@
-import { duplicateBoundaryLiterals } from "../../../.agents/skills/opencanon/index.ts";
+import { duplicateBoundaryLiterals } from "@opencanon/validators";
 
 const validator = duplicateBoundaryLiterals({
   id: "duplicate-boundary-literals",

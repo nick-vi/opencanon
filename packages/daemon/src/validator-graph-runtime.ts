@@ -15,7 +15,7 @@ export type ValidatorGraphRuntime = {
 
 export function createValidatorGraphRuntime(input: {
   rootDir: string;
-  paths: ContextPaths;
+  paths: () => ContextPaths;
   events: EventBroadcaster;
   initialDependencyFiles?: string[];
   rebuildAndPublish(summary: string): Promise<DaemonSnapshot>;
@@ -27,7 +27,7 @@ export function createValidatorGraphRuntime(input: {
 
   async function refreshIfChanged(current: DaemonSnapshot): Promise<DaemonSnapshot> {
     if (input.isStopped()) return current;
-    const nextSignature = readValidatorGraphSourceSignature(input.rootDir, input.paths, dependencyFiles);
+    const nextSignature = readValidatorGraphSourceSignature(input.rootDir, input.paths(), dependencyFiles);
     if (nextSignature.diagnostics.length > 0) {
       broadcastValidatorGraphDiagnostics(input.events, nextSignature.diagnostics);
       return current;
@@ -63,8 +63,8 @@ export function createValidatorGraphRuntime(input: {
   return { refreshIfChanged, recordCurrentSourceSignature };
 }
 
-function readCurrentSourceSignature(input: { rootDir: string; paths: ContextPaths; events: EventBroadcaster }, dependencyFiles: string[] | undefined): string {
-  const result = readValidatorGraphSourceSignature(input.rootDir, input.paths, dependencyFiles);
+function readCurrentSourceSignature(input: { rootDir: string; paths: () => ContextPaths; events: EventBroadcaster }, dependencyFiles: string[] | undefined): string {
+  const result = readValidatorGraphSourceSignature(input.rootDir, input.paths(), dependencyFiles);
   if (result.diagnostics.length > 0) broadcastValidatorGraphDiagnostics(input.events, result.diagnostics);
   return result.signature;
 }

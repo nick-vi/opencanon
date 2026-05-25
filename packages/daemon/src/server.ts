@@ -26,6 +26,7 @@ import { listProjects } from "./project-summary.ts";
 import { ApiPathPrefix, ApiRoute, UrlSearchParam, diagnostic, diagnosticCodes, json, validateDaemonAuth, validateMethod } from "./routes.ts";
 import { serveUiAsset } from "./ui-assets.ts";
 import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
+import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 
 const FeedbackHostValue = {
   Manual: "manual",
@@ -63,7 +64,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
   assertSafeDaemonHost(host, options.allowRemote);
   const authToken = usableDaemonAuthToken(options.authToken) ?? usableDaemonAuthToken(process.env.OPENCANON_DAEMON_TOKEN) ?? createDaemonAuthToken();
   const port = options.port ?? 4767;
-  const paths = createPaths(rootDir);
+  let paths = createPaths(rootDir);
   const configDiagnostics = validateConfig(paths);
   if (configDiagnostics.length > 0) {
     throw new Error(`Invalid OpenCanon config:\n${configDiagnostics.map((diagnostic) => `- ${diagnostic}`).join("\n")}`);
@@ -76,16 +77,21 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
     dispose: (store) => store.close(),
   });
   let store = await storeResource.get();
-
+  const events = createEventBroadcaster();
+  const projectTypesRuntime = createProjectTypesRuntime({
+    rootDir,
+    paths: () => paths,
+    events,
+  });
+  projectTypesRuntime.generateNow("Project authoring types generated on daemon startup.");
   let snapshot = await buildDaemonSnapshot({
     cwd: rootDir,
     engine: prerequisites.engine,
     store,
   });
-  const events = createEventBroadcaster();
   const validatorGraphRuntime = createValidatorGraphRuntime({
     rootDir,
-    paths,
+    paths: () => paths,
     events,
     initialDependencyFiles: snapshot.health.validatorGraph?.dependencyFiles,
     rebuildAndPublish,
@@ -189,7 +195,9 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
           if (request.method === "GET") return json({ ok: true, data: readProjectSettings(rootDir) });
           const result = writeProjectSettings(rootDir, await readJsonBody(request));
           if (!result.ok) return json({ ok: false, diagnostics: result.diagnostics }, 400);
+          paths = createPaths(rootDir);
           await restartStore();
+          projectTypesRuntime.generateNow("Project authoring types regenerated after settings changed.");
           snapshot = await rebuildAndPublish("Project settings saved.");
           return json({ ok: true, data: result.settings });
         }
@@ -262,6 +270,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
     });
   } catch (error) {
     store.project.stopWatcher();
+    projectTypesRuntime.stop();
     events.close();
     await storeResource.dispose();
     throw error;
@@ -297,6 +306,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
     store.project.startWatcher({ debounceMs: 250, bufferCapacity: 128 }, (batch) => {
       if (stopped) return;
       const summary = watcherBatchSummary(batch);
+      projectTypesRuntime.scheduleForFiles(batch.paths, "Project authoring types updated after indexed files changed.");
       if (summary) scheduleWatchRebuild(summary);
     });
   }
@@ -341,6 +351,7 @@ export async function startOpenCanonDaemon(options: DaemonServerOptions = {}): P
     async stop() {
       stopped = true;
       store.project.stopWatcher();
+      projectTypesRuntime.stop();
       if (watchRebuildInFlight) await watchRebuildInFlight.catch(() => undefined);
       events.close();
       server.stop(true);

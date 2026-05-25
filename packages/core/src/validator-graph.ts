@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ContextPaths } from "./context.ts";
 import { listFiles } from "./discovery.ts";
@@ -90,6 +90,17 @@ async function bundleValidatorGraph(rootDir: string, paths: ContextPaths): Promi
     minify: false,
     sourcemap: "none",
     metafile: true,
+    plugins: [
+      {
+        name: "opencanon-authoring-imports",
+        setup(builder) {
+          const aliases = validatorAuthoringImportAliases(rootDir);
+          builder.onResolve({ filter: /^@opencanon\/core(?:\/testing)?$/ }, () => ({ path: aliases.core }));
+          builder.onResolve({ filter: /^@opencanon\/validators$/ }, () => ({ path: aliases.validators }));
+          builder.onResolve({ filter: /^@opencanon\/project$/ }, () => ({ path: aliases.project }));
+        },
+      },
+    ],
   });
   if (!build.success) {
     const diagnostics = build.logs.map((log) => log.message).filter(Boolean);
@@ -109,6 +120,24 @@ async function bundleValidatorGraph(rootDir: string, paths: ContextPaths): Promi
     bundlePath,
     hash,
     dependencyFiles: validatorGraphDependencyFiles(rootDir, build.metafile),
+  };
+}
+
+function validatorAuthoringImportAliases(rootDir: string): { core: string; validators: string; project: string } {
+  const generatedProject = path.join(rootDir, ".agents/skills/opencanon/generated/project.ts");
+  const sourceCore = path.join(rootDir, "packages/core/src/index.ts");
+  const sourceValidators = path.join(rootDir, "packages/validators/src/index.ts");
+  if (existsSync(sourceCore) && existsSync(sourceValidators)) {
+    return { core: sourceCore, validators: sourceValidators, project: generatedProject };
+  }
+
+  const skillRoot = process.env.OPENCANON_SKILL_ROOT && existsSync(path.join(process.env.OPENCANON_SKILL_ROOT, "index.ts"))
+    ? process.env.OPENCANON_SKILL_ROOT
+    : path.join(rootDir, ".agents/skills/opencanon");
+  return {
+    core: path.join(skillRoot, "index.ts"),
+    validators: path.join(skillRoot, "index.ts"),
+    project: existsSync(generatedProject) ? generatedProject : path.join(skillRoot, "generated/project.ts"),
   };
 }
 

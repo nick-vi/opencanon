@@ -1,4 +1,4 @@
-import { noNativeEnums } from "../../../.agents/skills/opencanon/index.ts";
+import { noNativeEnums } from "@opencanon/validators";
 
 const validator = noNativeEnums({
   id: "no-native-enums",

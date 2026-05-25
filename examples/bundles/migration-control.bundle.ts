@@ -62,7 +62,7 @@ export default {
   files: [
     {
       path: ".agents/skills/opencanon/validators/migration-control.ts",
-      content: `import { migrationReferences } from "../index.ts";
+      content: `import { migrationReferences } from "@opencanon/validators";
 
 export default migrationReferences({
   id: "{{validatorId}}",
@@ -81,12 +81,12 @@ export default migrationReferences({
 `,
     },
     {
-      path: ".agents/skills/opencanon/fixtures/old-api-migration/valid/src/current.ts",
-      content: "currentApi();\n",
+      path: ".agents/skills/opencanon/fixtures/old-api-migration/valid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/current.ts', 'currentApi();\\n')] });\n",
     },
     {
-      path: ".agents/skills/opencanon/fixtures/old-api-migration/invalid/src/old.ts",
-      content: "oldApi();\n",
+      path: ".agents/skills/opencanon/fixtures/old-api-migration/invalid.ts",
+      content: "import { defineFixture } from '@opencanon/core/testing';\n\nexport default defineFixture({ files: ({ file }) => [file('src/old.ts', 'oldApi();\\n')] });\n",
     },
   ],
   impactSurfaces: [],

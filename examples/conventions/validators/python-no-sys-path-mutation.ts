@@ -1,4 +1,4 @@
-import { noForbiddenCalls } from "../../../.agents/skills/opencanon/index.ts";
+import { noForbiddenCalls } from "@opencanon/validators";
 
 const validator = noForbiddenCalls({
   id: "python-no-sys-path-mutation",

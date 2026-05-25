@@ -258,6 +258,8 @@ test("project scope filtering applies project patterns and ignores", () => {
     impactSurfacesPath: "docs/opencanon/impact-surfaces.json",
     proposedImpactNotesPath: "docs/opencanon/proposed-impact-notes.json",
     baselinePath: ".opencanon/baseline.json",
+    commitApprovalsPath: ".opencanon/commit-approvals.json",
+    commitApprovalsPersistent: false,
     cacheDir: ".opencanon/cache",
     projectFilePatterns: ["src/**/*.ts", "tests/**/*.ts"],
     ignore: ["packages/**", ".agents/**"],

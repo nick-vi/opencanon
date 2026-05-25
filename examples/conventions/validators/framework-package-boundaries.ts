@@ -1,4 +1,4 @@
-import { defineValidator } from "../../../.agents/skills/opencanon/index.ts";
+import { defineValidator } from "@opencanon/core";
 
 const packageNodes = {
   cli: "packages/cli/src/**/*.{ts,tsx}",
