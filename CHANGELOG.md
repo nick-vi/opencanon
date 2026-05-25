@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.11 - 2026-05-25
+
+- Added virtual fixture files for validator tests, including typed helpers for TypeScript, Python, JSON, and raw file content.
+- Added generated project authoring constants for package roots, imports, npm dependencies, Rust crates, Cargo packages, and Python packages.
+- Added explicit commit approval gates with diff/file scopes and deterministic approval fingerprints.
+
 ## v0.3.10 - 2026-05-21
 
 - Fixed the UI smoke indexing check to use explicit daemon reindexing instead of CI-sensitive file watcher timing.
