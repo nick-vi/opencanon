@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.12 - 2026-05-25
+
+- Fixed CI file descriptor pressure by avoiding ephemeral daemon startup for rule metadata and non-graph context queries.
+- Keeps the v0.3.11 validator authoring APIs while making `check:ci` pass in GitHub Actions.
+
 ## v0.3.11 - 2026-05-25
 
 - Added virtual fixture files for validator tests, including typed helpers for TypeScript, Python, JSON, and raw file content.

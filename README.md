@@ -103,7 +103,7 @@ Minimal manifest shape:
 {
   "version": 1,
   "channel": "stable",
-  "skillVersion": "0.3.11",
+  "skillVersion": "0.3.12",
   "requiredBun": "1.3.13",
   "daemonSchema": 1,
   "runtime": {
