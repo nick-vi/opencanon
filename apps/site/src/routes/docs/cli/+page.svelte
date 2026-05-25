@@ -15,6 +15,10 @@ opencanon refactor rename-symbol loadCompany fetchCompany --file src/services/co
 opencanon validate --project --profile
 opencanon validate --check-fixtures
 opencanon validate --changed --strict-warnings`;
+  const gateCommands = `opencanon gate pending --format json
+opencanon gate approve <gate-id> \\
+  --summary "User explicitly approved the blocked change." \\
+  --via agent`;
   const feedbackCommands = `opencanon feedback --changed
 opencanon feedback --changed --strict-warnings`;
   const daemonCommands = `opencanon daemon start
@@ -68,6 +72,15 @@ opencanon db reset --confirm`;
 
 <h2>Validate</h2>
 <CodeBlock title="validate" language="shell" code={validateCommands} />
+
+<h2>Commit Gates</h2>
+<CodeBlock title="gate" language="shell" code={gateCommands} />
+<p>
+  Validators can emit commit gates for intent-sensitive changes. Pending gates
+  are written during changed-file validation. Agents should inspect the staged
+  diff and gate evidence, ask the user for explicit Approve or Reject, and only
+  then record the scoped approval before retrying the commit.
+</p>
 
 <h2>Feedback</h2>
 <CodeBlock title="feedback" language="shell" code={feedbackCommands} />

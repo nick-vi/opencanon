@@ -3,6 +3,9 @@
 
 const layoutTree = `.agents/skills/opencanon/
 ├─ .gitignore
+├─ generated/ # gitignored
+│  ├─ project.ts
+│  └─ aliases.d.ts
 ├─ scripts/
 │  └─ opencanon.ts
 ├─ runtime/ # gitignored
@@ -69,10 +72,29 @@ docs/opencanon/
 
 <h2>Graph Index</h2>
 <p>
-  The engine extracts TS/JS symbols, references, calls, imports, literals, and
-  duplicates into local SQLite state. CLI graph commands and validators read
-  the same index, so scoped searches, caller/callee inspection, and
-  graph-backed validators share one source of repository facts.
+  The engine extracts TS/JS symbols, references, calls, imports, literals,
+  diagnostics, duplicates, and Python facts into local SQLite state. CLI graph
+  commands and validators read the same index, so scoped searches,
+  caller/callee inspection, and graph-backed validators share one source of
+  repository facts. Rust crates, Cargo dependencies, and Python dependency
+  metadata are also discovered for generated authoring constants.
+</p>
+
+<h2>Generated authoring types</h2>
+<p>
+  The daemon keeps gitignored authoring files fresh under
+  <code>.agents/skills/opencanon/generated/</code>. <code>project.ts</code>
+  exposes typed constants for workspace packages, import specifiers, npm
+  dependencies, Rust crates, Cargo dependencies, and Python dependencies.
+  <code>aliases.d.ts</code> declares ambient modules for fixture source imports
+  so invalid and valid virtual projects can still type-check in an editor.
+</p>
+<p>
+  These generated types are deliberately small. OpenCanon does not generate
+  per-file symbol, literal, caller, or callee maps by default because those
+  make TypeScript language servers slow in large repositories. Validators still
+  read precise facts at runtime from <code>ctx.facts</code> and
+  <code>ctx.graph</code>.
 </p>
 
 <h2>Strict prerequisites</h2>
