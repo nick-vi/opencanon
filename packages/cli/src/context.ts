@@ -1,5 +1,5 @@
 import { cac } from "cac";
-import type { DaemonSnapshot, RelatedCanon } from "@opencanon/daemon";
+import type { RelatedCanon } from "@opencanon/daemon";
 import { booleanOption, formatOption, positiveIntegerOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { loadValidators } from "./project.ts";
 import {
@@ -72,9 +72,7 @@ export async function runContextCommand(args = Bun.argv.slice(2), cwd = process.
     return;
   }
 
-  const snapshot = await withDaemonClient(cwd, (client) => client.get<DaemonSnapshot>(DaemonApiRoute.Snapshot));
-  const decisions = snapshot.decisions;
-  const validators = snapshot.validators;
+  const { decisions } = loadContextFiles(paths);
 
   if (query.listExceptions && query.changed && query.files.length === 0) {
     console.log("No changed files.");
@@ -102,6 +100,7 @@ export async function runContextCommand(args = Bun.argv.slice(2), cwd = process.
   }
 
   if (query.explain) {
+    const validators = await loadValidators(rootDir, paths);
     const files = query.explainFiles.length > 0 ? query.explainFiles : query.files;
     if (files.length === 0) fail("--explain requires files, --files, or --changed.");
     const result = explainContext(decisions, validators, files);
