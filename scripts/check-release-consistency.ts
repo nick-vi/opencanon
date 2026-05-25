@@ -47,14 +47,6 @@ checks.push(
     value: matchFile("README.md", new RegExp(`"skillVersion": "(${versionPattern})"`)),
   },
   {
-    label: ".agents/skills/opencanon/scripts/opencanon.ts manifest version",
-    value: manifestVersion(".agents/skills/opencanon/scripts/opencanon.ts"),
-  },
-  {
-    label: "apps/site/src/lib/site.config.js manifest version",
-    value: manifestVersion("apps/site/src/lib/site.config.js"),
-  },
-  {
     label: "CHANGELOG.md latest heading",
     value: matchFile("CHANGELOG.md", new RegExp(`^## v?(${versionPattern})\\b`, "m")),
   },
@@ -67,6 +59,8 @@ const failures = checks.flatMap((check) => {
 });
 
 if (failures.length > 0) fail(failures);
+assertLatestManifestUrl(".agents/skills/opencanon/scripts/opencanon.ts");
+assertLatestManifestUrl("apps/site/src/lib/site.config.js");
 console.log(`Release consistency check passed for ${expectedVersion}.`);
 
 function readJson(relativePath: string): Record<string, any> {
@@ -83,8 +77,13 @@ function matchFile(relativePath: string, pattern: RegExp): string | null {
   return pattern.exec(read(relativePath))?.[1] ?? null;
 }
 
-function manifestVersion(relativePath: string): string | null {
-  return matchFile(relativePath, new RegExp(`/releases/download/v(${versionPattern})/opencanon-runtime-manifest\\.json`));
+function assertLatestManifestUrl(relativePath: string): void {
+  const text = read(relativePath);
+  const latestPath = "/releases/latest/download/opencanon-runtime-manifest.json";
+  if (!text.includes(latestPath)) fail([`${relativePath} must use ${latestPath}.`]);
+  if (new RegExp(`/releases/download/v${versionPattern}/opencanon-runtime-manifest\\.json`).test(text)) {
+    fail([`${relativePath} must not pin the default update manifest to a release tag.`]);
+  }
 }
 
 function fail(messages: string[]): never {
