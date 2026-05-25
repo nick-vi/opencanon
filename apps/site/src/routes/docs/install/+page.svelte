@@ -8,6 +8,8 @@
     SITE,
     SKILLS_INSTALL_COMMAND
   } from '$lib/site.config.js';
+
+  const releaseProducerCommand = `bun run release:publish -- 0.3.14`;
 </script>
 
 <svelte:head><title>Install | OpenCanon</title></svelte:head>
@@ -77,6 +79,15 @@
   <code>~/.opencanon/daemons.json</code>.
 </p>
 <CodeBlock title="daemon" language="shell" code={DAEMON_COMMAND} />
+
+<h2>Release producer flow</h2>
+<p>
+  Maintainers publish through one script so versions, release checks, tags,
+  GitHub workflow watching, and asset verification stay coherent. The release
+  workflow builds engine assets for every supported target and uploads the
+  manifest, runtime archive, channel files, and checksums.
+</p>
+<CodeBlock title="publish release" language="shell" code={releaseProducerCommand} />
 
 <h2>Next</h2>
 <p>

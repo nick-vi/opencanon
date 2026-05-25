@@ -13,6 +13,8 @@ opencanon daemon stop
 opencanon update apply --manifest ./opencanon-runtime-manifest.json
 opencanon daemon check
 opencanon daemon start`;
+  const projectTypesCommands = `opencanon project-types generate
+opencanon daemon status`;
 </script>
 
 <svelte:head><title>Daemon | OpenCanon</title></svelte:head>
@@ -47,8 +49,18 @@ opencanon daemon start`;
   The daemon uses the engine binary under
   <code>.agents/skills/opencanon/runtime/engine/</code> for watching, hashing,
   fact extraction, and affected-file calculation. JavaScript and TypeScript use
-  Oxc.
+  Oxc. Python source facts are available to validators, and Rust, Cargo, npm,
+  and Python dependency metadata feed generated project constants.
 </p>
+
+<h2>Project Types</h2>
+<p>
+  While the daemon is running, it refreshes gitignored project authoring types
+  when package manifests, Cargo files, Python dependency files, fixtures, or
+  TypeScript config inputs change. Run generation manually during setup, CI, or
+  recovery if the watcher reports stale generated types.
+</p>
+<CodeBlock title="project types" language="shell" code={projectTypesCommands} />
 
 <h2>Updates</h2>
 <p>
