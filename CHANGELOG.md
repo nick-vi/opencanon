@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.13 - 2026-05-25
+
+- Fixed GitHub Actions file descriptor exhaustion by running UI smoke before the parallel Vitest pool.
+- Keeps the v0.3.11 validator authoring APIs while making the full CI sequence pass on the Linux runner.
+
 ## v0.3.12 - 2026-05-25
 
 - Fixed CI file descriptor pressure by avoiding ephemeral daemon startup for rule metadata and non-graph context queries.
