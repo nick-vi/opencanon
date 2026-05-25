@@ -4,8 +4,7 @@ import { createPaths, formatValidatorApplies, resolveRootDir } from "@opencanon/
 import type { Validator, ValidatorVisual } from "@opencanon/core";
 import type { TreeBoundaryRule, TreeDefinition, TreeNode, TreePathDefinition } from "@opencanon/core";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
-import { DaemonApiRoute, withDaemonClient } from "./daemon-client.ts";
-import type { DaemonSnapshot } from "@opencanon/daemon";
+import { loadValidators } from "./project.ts";
 import { existsSync } from "node:fs";
 import { cac } from "cac";
 import path from "node:path";
@@ -64,8 +63,8 @@ export async function runRulesCommand(args = Bun.argv.slice(2), cwd = process.cw
 
   const rootDir = resolveRootDir(cwd);
   const paths = createPaths(rootDir);
-  const snapshot = await withDaemonClient(cwd, (client) => client.get<DaemonSnapshot>(DaemonApiRoute.Snapshot));
-  const selectedValidators = selectRuleValidators(snapshot.validators, {
+  const validators = await loadValidators(rootDir, paths);
+  const selectedValidators = selectRuleValidators(validators, {
     topics: query.topics,
     validatorIds: query.validatorIds,
     decisionIds: query.decisionIds,
