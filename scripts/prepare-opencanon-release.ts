@@ -9,8 +9,8 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
   throw new Error("Usage: bun run release:prepare -- <semver>");
 }
 
-const tag = `v${version}`;
 const releaseDate = new Date().toISOString().slice(0, 10);
+const tag = `v${version}`;
 const packagePaths = [
   "package.json",
   "apps/site/package.json",
@@ -35,17 +35,8 @@ replaceInFile(rustPackagePath, /^version = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"$/
 replaceInFile(engineConstantsPath, /ENGINE_VERSION: &str = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"/, `ENGINE_VERSION: &str = "${version}"`);
 replaceRustLockPackageVersion(rustLockPath, "opencanon-engine", version);
 
-replaceInFile(
-  ".agents/skills/opencanon/scripts/opencanon.ts",
-  /releases\/download\/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\/opencanon-runtime-manifest\.json/g,
-  `releases/download/${tag}/opencanon-runtime-manifest.json`,
-);
-
-replaceInFile(
-  "apps/site/src/lib/site.config.js",
-  /releases\/download\/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\/opencanon-runtime-manifest\.json/g,
-  `releases/download/${tag}/opencanon-runtime-manifest.json`,
-);
+ensureLatestManifestUrl(".agents/skills/opencanon/scripts/opencanon.ts");
+ensureLatestManifestUrl("apps/site/src/lib/site.config.js");
 
 replaceInFile(
   "README.md",
@@ -53,7 +44,7 @@ replaceInFile(
   `"skillVersion": "${version}"`,
 );
 
-updateChangelog(tag, releaseDate);
+updateChangelog(`v${version}`, releaseDate);
 console.log(`Prepared OpenCanon ${tag}.`);
 
 function updateJson(relativePath: string, update: (json: Record<string, unknown>) => void): void {
@@ -68,6 +59,20 @@ function replaceInFile(relativePath: string, pattern: RegExp, replacement: strin
   const before = readFileSync(filePath, "utf8");
   const after = before.replace(pattern, replacement);
   if (after === before) throw new Error(`No release version reference updated in ${relativePath}.`);
+  writeFileSync(filePath, after);
+}
+
+function ensureLatestManifestUrl(relativePath: string): void {
+  const filePath = path.join(rootDir, relativePath);
+  const before = readFileSync(filePath, "utf8");
+  const latestPath = "releases/latest/download/opencanon-runtime-manifest.json";
+  const after = before.replace(
+    /releases\/(?:download\/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|latest\/download)\/opencanon-runtime-manifest\.json/g,
+    latestPath,
+  );
+  if (after === before && !before.includes(latestPath)) {
+    throw new Error(`No latest release manifest reference found in ${relativePath}.`);
+  }
   writeFileSync(filePath, after);
 }
 
