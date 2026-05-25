@@ -13,7 +13,7 @@ bun .agents/skills/opencanon/scripts/opencanon.ts setup --yes --hooks codex
 
 `setup` is safe to rerun. It scaffolds missing OpenCanon files, installs requested feedback hooks, validates the context, runs doctor checks, runs project validation, verifies daemon prerequisites, and starts the project daemon unless `--no-daemon` is used.
 
-Commit the scaffolded docs, decisions, validators, fixtures, hook config, skill wrapper files, `.agents/skills/opencanon/.gitignore`, `skills-lock.json`, and package script. Do not commit `.agents/skills/opencanon/runtime/` or `.opencanon/` generated state; setup installs runtime assets locally from the release manifest, adds repo state paths to the root `.gitignore`, and keeps runtime ignored from the skill folder.
+Commit the scaffolded docs, decisions, validators, fixtures, hook config, skill wrapper files, `.agents/skills/opencanon/.gitignore`, `skills-lock.json`, and package script. Do not commit `.agents/skills/opencanon/runtime/` or `.opencanon/` generated state; setup installs runtime assets locally from the release manifest, adds repo state paths including `.opencanon/commit-approvals.json` to the root `.gitignore`, and keeps runtime ignored from the skill folder.
 
 ## Daily Use
 
@@ -25,6 +25,8 @@ bun run opencanon search loadCompany --kind symbol --symbol-kind function --scop
 bun run opencanon symbols loadCompany --kind function --scope "src/services/**"
 bun run opencanon graph callers loadCompany
 bun run opencanon validate --changed
+bun run opencanon gate pending --format json
+bun run opencanon gate approve <gate-id> --summary "User confirmed the change is intended."
 bun run opencanon feedback --changed
 bun run opencanon doctor
 ```
@@ -70,7 +72,7 @@ bun run opencanon daemon stop
 bun run opencanon dev
 ```
 
-`daemon start` runs the current project's daemon in the background and registers it in `~/.opencanon/daemons.json`; project-local generated state remains under `.opencanon/` and is ignored by Git. Normal `context`, `rules`, `validate`, `feedback`, and hook commands reuse that daemon when it is running, or start an isolated in-process ephemeral daemon for the single request. `dev` starts the daemon and serves the UI.
+`daemon start` runs the current project's daemon in the background and registers it in `~/.opencanon/daemons.json`; project-local generated state remains under `.opencanon/` and is ignored by Git. Normal `context`, `rules`, `validate`, `feedback`, and hook commands reuse that daemon when it is running, or start an isolated in-process ephemeral daemon for the single request. The daemon generates gitignored project authoring types under `.agents/skills/opencanon/generated/` on startup and refreshes them when package, dependency, fixture, Cargo, Python, or TypeScript config inputs change; run `bun run opencanon project-types generate` manually for setup, CI, or recovery if the daemon reports its project-type watcher failed. `dev` starts the daemon and serves the UI.
 
 ## Runtime Updates
 
@@ -144,6 +146,8 @@ Add `opencanon.config.json` only when a repository needs to override those defau
   "impactSurfacesPath": "docs/opencanon/impact-surfaces.json",
   "proposedImpactNotesPath": "docs/opencanon/proposed-impact-notes.json",
   "baselinePath": ".opencanon/baseline.json",
+  "commitApprovalsPath": ".opencanon/commit-approvals.json",
+  "commitApprovalsPersistent": false,
   "cacheDir": ".opencanon/cache",
   "fileDiscovery": "git",
   "maxFiles": 20000,
@@ -165,7 +169,7 @@ Add `opencanon.config.json` only when a repository needs to override those defau
 }
 ```
 
-When the effective discovery mode is `git`, OpenCanon requires a Git repository and never silently falls back to filesystem traversal. Git discovery respects `.gitignore`, then OpenCanon applies `projectFilePatterns`, `ignore`, `maxFiles`, and `maxFileSizeKb`. `validate --changed` and `feedback --changed` use the same project scope before running validators. Use `fileDiscovery: "filesystem"` as an explicit override for tests, benchmarks, or non-Git experiments. Parser results are cached under `cacheDir`; `init` and `setup` add root ignore rules for cache, daemon state, setup state, and SQLite state, plus a skill-local `.gitignore` for installed runtime artifacts. `doctor` verifies them.
+When the effective discovery mode is `git`, OpenCanon requires a Git repository and never silently falls back to filesystem traversal. Git discovery respects `.gitignore`, then OpenCanon applies `projectFilePatterns`, `ignore`, `maxFiles`, and `maxFileSizeKb`. `validate --changed` and `feedback --changed` use the same project scope before running validators. Validators may emit commit gates with `ctx.commitGate(...)` for ambiguous changes that need user intent before commit; unresolved gates block validation until `opencanon gate approve <gate-id> --summary "<user explicit answer to the gate question>" --via agent` records a scoped approval. Gate approvals default to the exact staged diff for the gate file/evidence files; use `approvalScope: "file"` only when the full current file content is the intended approval boundary. Changed-file validation writes pending gates to `.opencanon/cache/commit-gates.json`; agents can read them with `opencanon gate pending --format json`, inspect the staged diff and gate evidence, explain why the change is blocked and intent-sensitive, use a structured ask-user tool when available, or pause and ask in chat with explicit Approve/Reject choices if no structured tool is available. Agents must approve only after explicit user approval, then retry the commit. Use `fileDiscovery: "filesystem"` as an explicit override for tests, benchmarks, or non-Git experiments. Parser results are cached under `cacheDir`; `init` and `setup` add root ignore rules for cache, daemon state, setup state, ephemeral commit approvals, and SQLite state, plus a skill-local `.gitignore` for installed runtime artifacts. `doctor` verifies them.
 
 Invalid config is a hard failure for normal `context` and `validate` commands. `doctor` reports the same diagnostics and can repair generated artifact ignore entries with `--fix safe`.
 
@@ -345,9 +349,11 @@ bun run opencanon init --non-interactive --dry-run
 
 Validator behavior is tested with fixtures, not ad hoc prose. Each real validator has:
 
-- `.agents/skills/opencanon/fixtures/<validator-id>/valid`
-- `.agents/skills/opencanon/fixtures/<validator-id>/invalid`
-- optional `.agents/skills/opencanon/fixtures/<validator-id>/fixed` when structured fixes are provided
+- `.agents/skills/opencanon/fixtures/<validator-id>/valid.ts`
+- `.agents/skills/opencanon/fixtures/<validator-id>/invalid.ts`
+- optional `.agents/skills/opencanon/fixtures/<validator-id>/fixed.ts` when structured fixes are provided
+
+Fixture files are virtual project definitions. Prefer language helpers such as `file.ts(path, text)`, `file.py(path, text)`, `file.rs(path, text)`, and `file.json(path, value)`; text helpers dedent multiline strings and add a trailing newline. Use raw `file(path, text)` only when exact text preservation matters.
 
 Run one validator while iterating, then the full suite before finishing:
 

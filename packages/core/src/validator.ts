@@ -13,6 +13,7 @@ import { buildAnnotationFacts, buildCallFacts, buildDuplicateFacts, buildExportF
 import { validateFindings, findingKey, type FindingValidationContext } from "./findings.ts";
 import { formatValidatorApplies, resolveValidators, validateValidatorDefinitions, validatorMatchesAnyFile, validatorMatchesFile } from "./validator-definitions.ts";
 import { validateTree } from "./tree.ts";
+import { materializeFixture, type FixtureDefinition } from "./testing.ts";
 
 export { validateFindings } from "./findings.ts";
 export type { FindingValidationContext } from "./findings.ts";
@@ -26,6 +27,9 @@ export type {
   Finding,
   FindingFix,
   FixSafety,
+  CommitGate,
+  CommitGateEvidence,
+  CommitGateInput,
   FolderInfo,
   GraphApi,
   ImpactApi,
@@ -40,13 +44,34 @@ export type {
   ProjectExportFact,
   ProjectFile,
   ProjectGraphEdge,
+  OpenCanonProjectIndex,
+  OpenCanonProjectIndexFile,
   ProjectLiteralFact,
+  ProjectCallNameIn,
+  ProjectCalleeOf,
+  ProjectCallerOf,
+  ProjectExportNameIn,
+  ProjectFunctionNameIn,
+  ProjectImportSourceIn,
+  ProjectIndexFilePath,
+  ProjectStringLiteralIn,
+  ProjectSymbolId,
+  ProjectSymbolNameIn,
   ProjectReferenceFact,
   ProjectSymbolFact,
   ReportInput,
   Severity,
   TextEdit,
   TextMatch,
+  TypedCallEdge,
+  TypedCallFact,
+  TypedCallerEdge,
+  TypedExportFact,
+  TypedFactsApi,
+  TypedFunctionFact,
+  TypedImportFact,
+  TypedStringLiteralFact,
+  TypedSymbolFact,
   ValidationContext,
   Validator,
   ValidatorArgs,
@@ -70,6 +95,9 @@ import type {
   Finding,
   FindingFix,
   FixSafety,
+  CommitGate,
+  CommitGateEvidence,
+  CommitGateInput,
   FolderInfo,
   GraphApi,
   ImpactApi,
@@ -106,16 +134,24 @@ import type {
   WorkspacePackage,
 } from "./validator-types.ts";
 const flushCacheSymbol = Symbol("opencanon.flushCache");
+const commitGatesSymbol = Symbol("opencanon.commitGates");
+const commitGateDiagnosticsSymbol = Symbol("opencanon.commitGateDiagnostics");
+const fixtureCleanupSymbol = Symbol("opencanon.fixtureCleanup");
 const FactKeySeparator = "\u0000";
 
 type CacheableValidationContext = ValidationContext & {
   [flushCacheSymbol]?: () => void;
+  [commitGatesSymbol]?: CommitGate[];
+  [commitGateDiagnosticsSymbol]?: string[];
+  [fixtureCleanupSymbol]?: () => void;
 };
 
+/** Define a validator with typed `validate({ ctx, runtime })` arguments and finding return values. */
 export function defineValidator(definition: ValidatorDefinition): ValidatorDefinition {
   return definition;
 }
 
+/** Create an option-driven validator factory while preserving the standard validator contract. */
 export function createValidatorFactory<TOptions extends Record<string, unknown> = Record<string, never>>(
   create: (options: ValidatorFactoryBaseOptions & TOptions) => ValidatorDefinition,
 ): ValidatorFactory<TOptions> {
@@ -174,14 +210,15 @@ export function createValidationContext(params: {
   rootDir: string;
   paths?: ContextPaths;
   files?: string[];
+  directories?: string[];
   targetFiles?: string[];
   analysisFiles?: string[];
   project?: boolean;
   validator: Pick<Validator, "id" | "severity">;
-  cache?: AnalysisCache;
+  cache?: AnalysisCache | null;
   profiler?: Profiler;
 }): ValidationContext {
-  const cache = params.cache ?? (params.paths ? getAnalysisCache(params.paths) : undefined);
+  const cache = params.cache === null ? undefined : (params.cache ?? (params.paths ? getAnalysisCache(params.paths) : undefined));
   const projectFiles = loadProjectFiles(params.rootDir, params.files, params.validator, params.paths, cache, params.profiler);
   const knownFiles = new Set(projectFiles.map((file) => file.path));
   for (const targetFile of params.targetFiles ?? []) {
@@ -257,6 +294,38 @@ export function createValidationContext(params: {
       duplicates() {
         duplicateFactCache ??= buildDuplicateFacts(ctx.facts.literals());
         return duplicateFactCache;
+      },
+    },
+    typed: {
+      imports(file) {
+        return ctx.imports().filter((edge) => edge.from.path === file).map((edge) => ({ ...edge, file })) as never;
+      },
+      exports(file) {
+        return ctx.facts.exports().filter((fact) => fact.file.path === file) as never;
+      },
+      functions(file) {
+        return ctx.facts.symbols().filter((fact) => fact.file.path === file && fact.kind === "function") as never;
+      },
+      stringLiterals(file) {
+        return ctx.facts.literals().filter((fact) => fact.file.path === file) as never;
+      },
+      symbols(file) {
+        return ctx.facts.symbols()
+          .filter((fact) => fact.file.path === file)
+          .map((fact) => ({ ...fact, id: symbolId(fact) })) as never;
+      },
+      calls(file) {
+        return ctx.facts.calls().filter((fact) => fact.file.path === file) as never;
+      },
+      callees(symbol) {
+        return ctx.graph.callees(symbol)
+          .filter((edge) => edge.source)
+          .map((edge) => ({ ...edge, from: symbolId(edge.source!), to: symbolId(edge.target) })) as never;
+      },
+      callers(symbol) {
+        return ctx.graph.callers(symbol)
+          .filter((edge) => edge.source)
+          .map((edge) => ({ ...edge, from: symbolId(edge.source!), to: symbolId(edge.target) })) as never;
       },
     },
     graph: {
@@ -375,7 +444,7 @@ export function createValidationContext(params: {
       return importCache;
     },
     folders() {
-      folderCache ??= buildFolders(projectFiles);
+      folderCache ??= buildFolders(projectFiles, params.directories);
       return folderCache;
     },
     comments() {
@@ -395,22 +464,48 @@ export function createValidationContext(params: {
         ...input,
       };
     },
+    commitGate(input) {
+      const gate = {
+        validatorId: params.validator.id,
+        ...input,
+      };
+      if (!input.question.trim()) {
+        ctx[commitGateDiagnosticsSymbol]?.push(`Commit gate ${input.id} from validator ${params.validator.id} needs a non-empty question.`);
+        return gate;
+      }
+      ctx[commitGatesSymbol]?.push(gate);
+      return gate;
+    },
   };
   function graphEdges(): ProjectGraphEdge[] {
     graphEdgeCache ??= buildGraphEdges(ctx.facts.symbols(), ctx.facts.references());
     return graphEdgeCache;
   }
   ctx[flushCacheSymbol] = () => cache?.flush();
+  ctx[commitGatesSymbol] = [];
+  ctx[commitGateDiagnosticsSymbol] = [];
   return ctx;
 }
 
 export function flushValidationContextCache(ctx: ValidationContext): void {
   (ctx as CacheableValidationContext)[flushCacheSymbol]?.();
+  (ctx as CacheableValidationContext)[fixtureCleanupSymbol]?.();
+}
+
+export function commitGatesFromValidationContext(ctx: ValidationContext): CommitGate[] {
+  return (ctx as CacheableValidationContext)[commitGatesSymbol] ?? [];
+}
+
+export function commitGateDiagnosticsFromValidationContext(ctx: ValidationContext): string[] {
+  return (ctx as CacheableValidationContext)[commitGateDiagnosticsSymbol] ?? [];
 }
 
 export function createValidationContextFromFixture(params: {
   rootDir: string;
   validator: Pick<Validator, "id" | "severity">;
+  directories?: string[];
+  targetFiles?: string[];
+  analysisFiles?: string[];
 }): ValidationContext {
   const files = listFiles(params.rootDir, isSupportedSourceFile).map((file) => relative(params.rootDir, file));
   const paths = createPaths(params.rootDir);
@@ -418,10 +513,31 @@ export function createValidationContextFromFixture(params: {
     rootDir: params.rootDir,
     paths,
     files,
-    targetFiles: files,
+    directories: params.directories,
+    targetFiles: params.targetFiles ?? files,
+    analysisFiles: params.analysisFiles,
+    cache: null,
     validator: params.validator,
   });
 }
+
+export async function createValidationContextFromFixtureFile(params: {
+  fixtureFile: string;
+  validator: Pick<Validator, "id" | "severity">;
+}): Promise<ValidationContext> {
+  const fixture = await materializeFixture(params.fixtureFile);
+  const ctx = createValidationContextFromFixture({
+    rootDir: fixture.rootDir,
+    validator: params.validator,
+    directories: fixture.directories,
+    targetFiles: fixture.targetFiles,
+    analysisFiles: fixture.analysisFiles,
+  });
+  (ctx as CacheableValidationContext)[fixtureCleanupSymbol] = fixture.cleanup;
+  return ctx;
+}
+
+export type { FixtureDefinition };
 
 function surfacesForFiles(surfaces: ImpactSurface[], files: string[]): ImpactSurface[] {
   return surfaces.filter((surface) => files.some((file) => matchesAny(file, surface.applies)));
@@ -452,7 +568,11 @@ function buildGraphEdges(symbols: ProjectSymbolFact[], references: ProjectRefere
 
 function graphSymbolMatches(symbols: ProjectSymbolFact[], symbol: string | ProjectSymbolFact): ProjectSymbolFact[] {
   if (typeof symbol !== "string") return [symbol];
-  return symbols.filter((item) => item.name === symbol);
+  return symbols.filter((item) => item.name === symbol || symbolId(item) === symbol || `${item.file.path}#${item.name}` === symbol);
+}
+
+function symbolId(symbol: ProjectSymbolFact): string {
+  return `${symbol.file.path}#${symbol.name}:${symbol.line}`;
 }
 
 function nearestPriorSymbol(symbols: ProjectSymbolFact[], file: string, line: number): ProjectSymbolFact | undefined {
@@ -469,8 +589,17 @@ function buildDomainEdges(surfaces: ImpactSurface[]): DomainEdge[] {
   ]);
 }
 
-function buildFolders(files: ProjectFile[]): FolderInfo[] {
+function buildFolders(files: ProjectFile[], directories: string[] = []): FolderInfo[] {
   const folders = new Map<string, Set<string>>();
+  for (const directory of directories) {
+    const normalized = normalizePath(directory).replace(/\/+$/, "");
+    if (normalized.length === 0 || normalized === ".") continue;
+    const parts = normalized.split("/");
+    for (let index = 1; index <= parts.length; index += 1) {
+      const folder = parts.slice(0, index).join("/");
+      folders.set(folder, folders.get(folder) ?? new Set<string>());
+    }
+  }
   for (const file of files) {
     const parts = file.path.split("/");
     for (let index = 1; index < parts.length; index += 1) {

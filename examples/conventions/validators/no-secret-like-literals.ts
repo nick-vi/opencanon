@@ -1,4 +1,4 @@
-import { noSecretLikeLiterals } from "../../../.agents/skills/opencanon/index.ts";
+import { noSecretLikeLiterals } from "@opencanon/validators";
 
 const validator = noSecretLikeLiterals({
   id: "no-secret-like-literals",

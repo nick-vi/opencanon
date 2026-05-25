@@ -29,6 +29,22 @@ export {
   ContextDiagnosticCode,
 } from "./context.ts";
 export { fail } from "./core.ts";
+export type { CommitApprovalContext, CommitApprovalRecord, CommitApprovalsFile, CommitGateApprovalChoice, ResolvedCommitGate, PendingCommitGate, PendingCommitGatesFile } from "./commit-approvals.ts";
+export {
+  createCommitApprovalContext,
+  createCommitApprovalRecord,
+  getCommitGateFiles,
+  commitGateApprovalChoices,
+  commitGateAgentProtocol,
+  commitGateFallbackProtocol,
+  loadCommitApprovalsWithDiagnostics,
+  loadPendingCommitGates,
+  toPendingCommitGates,
+  resolveCommitGates,
+  saveCommitApprovals,
+  savePendingCommitGates,
+  upsertCommitApproval,
+} from "./commit-approvals.ts";
 export { explainGlobMatches, intersects, matchesAny, matchesAnyFile, pathToImportUrl, relative, splitList, toRepoRelativePath, unique } from "./core-utils.ts";
 export {
   discoverProjectFiles,
@@ -230,6 +246,10 @@ export type {
   Finding,
   FindingFix,
   FixSafety,
+  CommitGate,
+  CommitGateApprovalScope,
+  CommitGateEvidence,
+  CommitGateInput,
   FolderInfo,
   GraphApi,
   ImpactApi,
@@ -244,6 +264,8 @@ export type {
   ProjectExportFact,
   ProjectFile,
   ProjectGraphEdge,
+  OpenCanonProjectIndex,
+  OpenCanonProjectIndexFile,
   ProjectLiteralFact,
   ProjectReferenceFact,
   ProjectSymbolFact,
@@ -274,6 +296,7 @@ export {
   createRuntime,
   createValidationContext,
   createValidationContextFromFixture,
+  createValidationContextFromFixtureFile,
   defineValidator,
   flushValidationContextCache,
   formatValidatorApplies,
@@ -283,6 +306,8 @@ export {
   validatorMatchesAnyFile,
   validatorMatchesFile,
 } from "./validator.ts";
+export type { FixtureFileApi, FixtureFileEntry, FixtureFileOptions, FixtureFileBuilder, FixtureTextFileInput, MaterializedFixture, FixtureDefinition, FixtureTextInput } from "./testing.ts";
+export { materializeFixture, defineFixture } from "./testing.ts";
 export type { FixApplicationResult, FixMode } from "./fixes.ts";
 export { applyFindingFixes, FixModeValue, isFixAllowed } from "./fixes.ts";
 export type { RefactorApplyResult, RefactorFileMove, RefactorPlan, RefactorPlanKind } from "./refactors.ts";
@@ -315,6 +340,8 @@ export type { ProfileEntry, Profiler } from "./profiler.ts";
 export { createProfiler, renderProfileMarkdown } from "./profiler.ts";
 export type { ProjectContext } from "./project.ts";
 export { loadProjectContext, loadValidators } from "./project.ts";
+export type { ProjectTypesGenerationResult } from "./project-types.ts";
+export { generateProjectTypes, ProjectAliasesFilePath, ProjectTypesFilePath } from "./project-types.ts";
 export type { ValidatorGraphMetadata, ValidatorGraphSourceSignature } from "./validator-graph.ts";
 export { loadValidatorGraph, readValidatorGraphSourceSignature } from "./validator-graph.ts";
 export type { FeedbackDedupeScope, FeedbackHost, FeedbackInput, FeedbackRenderOptions, FeedbackResult } from "./feedback.ts";

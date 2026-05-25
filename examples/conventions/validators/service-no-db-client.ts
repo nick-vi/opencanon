@@ -1,4 +1,4 @@
-import { noImports } from "../../../.agents/skills/opencanon/index.ts";
+import { noImports } from "@opencanon/validators";
 
 const validator = noImports({
   id: "service-no-db-client",

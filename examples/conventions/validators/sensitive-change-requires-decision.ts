@@ -1,4 +1,4 @@
-import { sensitiveChangePolicy } from "../../../.agents/skills/opencanon/index.ts";
+import { sensitiveChangePolicy } from "@opencanon/validators";
 
 const validator = sensitiveChangePolicy({
   id: "sensitive-change-requires-decision",

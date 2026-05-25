@@ -24,7 +24,7 @@ export function createStudioProject(rootDir: string): void {
   writeFileSync(
     path.join(rootDir, ".agents/skills/opencanon/index.ts"),
     [
-      `export { defineValidator } from "${testImportPath(skillDir, path.join(process.cwd(), "packages/core/src/index.ts"))}";`,
+      `export * from "${testImportPath(skillDir, path.join(process.cwd(), "packages/core/src/index.ts"))}";`,
       `export { noForbiddenCalls } from "${testImportPath(skillDir, path.join(process.cwd(), "packages/validators/src/index.ts"))}";`,
       "",
     ].join("\n"),

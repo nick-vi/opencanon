@@ -6,15 +6,17 @@ const TextEncoding = {
   Utf8: "utf8",
 } as const;
 
+type BinaryFileContent = Uint8Array | DataView;
+
 export function writeAtomicTextFileSync(filePath: string, content: string): void {
   writeAtomicFileSync(filePath, content, TextEncoding.Utf8);
 }
 
-export function writeAtomicBinaryFileSync(filePath: string, content: NodeJS.ArrayBufferView): void {
+export function writeAtomicBinaryFileSync(filePath: string, content: BinaryFileContent): void {
   writeAtomicFileSync(filePath, content);
 }
 
-function writeAtomicFileSync(filePath: string, content: string | NodeJS.ArrayBufferView, encoding?: BufferEncoding): void {
+function writeAtomicFileSync(filePath: string, content: string | BinaryFileContent, encoding?: BufferEncoding): void {
   const dir = path.dirname(filePath);
   mkdirSync(dir, { recursive: true });
   const tmpPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);

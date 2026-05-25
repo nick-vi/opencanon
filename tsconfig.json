@@ -14,7 +14,10 @@
     "packages/**/*.d.ts",
     "packages/**/*.ts",
     "scripts/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    ".agents/skills/opencanon/*.ts",
+    ".agents/skills/opencanon/fixtures/**/*.ts",
+    "examples/conventions/fixtures/**/*.ts"
   ],
   "exclude": [
     "node_modules",

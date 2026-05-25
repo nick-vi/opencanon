@@ -430,6 +430,8 @@ export const ResolvedProjectSettingsSchema = z.object({
   impactSurfacesPath: z.string().min(1).default("docs/opencanon/impact-surfaces.json"),
   proposedImpactNotesPath: z.string().min(1).default("docs/opencanon/proposed-impact-notes.json"),
   baselinePath: z.string().min(1).default(".opencanon/baseline.json"),
+  commitApprovalsPath: z.string().min(1).default(".opencanon/commit-approvals.json"),
+  commitApprovalsPersistent: z.boolean().default(false),
   projectFilePatterns: z.array(z.string().min(1)),
   ignore: z.array(z.string().min(1)),
   entrypoints: z.array(z.string().min(1)).default([]),

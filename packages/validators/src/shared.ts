@@ -489,11 +489,14 @@ export function firstCodeLineNumber(lines: string[], language: "typescript" | "s
   return Number.POSITIVE_INFINITY;
 }
 
-export function safeEnumReplacement(declaration: TypeScriptEnumDeclaration, isPascalCase: (value: string) => boolean): string | null {
+export function safeEnumReplacement(
+  declaration: TypeScriptEnumDeclaration,
+  naming: { isPascalCase(value: string): boolean; isScreamingSnakeCase(value: string): boolean },
+): string | null {
   if (!declaration.exported) return null;
-  if (!isPascalCase(declaration.name)) return null;
+  if (!naming.isPascalCase(declaration.name)) return null;
   if (declaration.members.length === 0) return null;
-  if (declaration.members.some((member) => !isPascalCase(member.name) || member.valueKind !== "string" || member.value === undefined)) return null;
+  if (declaration.members.some((member) => !naming.isScreamingSnakeCase(member.name) || member.valueKind !== "string" || member.value === undefined)) return null;
 
   const properties = declaration.members.map((member) => `  ${member.name}: ${JSON.stringify(member.value)},`).join("\n");
   return `export const ${declaration.name} = {\n${properties}\n} as const;\n\nexport type ${declaration.name} = (typeof ${declaration.name})[keyof typeof ${declaration.name}];`;

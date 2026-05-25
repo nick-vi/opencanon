@@ -1,4 +1,4 @@
-import { noBareExcept } from "../../../.agents/skills/opencanon/index.ts";
+import { noBareExcept } from "@opencanon/validators";
 
 const validator = noBareExcept({
   id: "python-no-bare-except",

@@ -185,6 +185,8 @@ export type ProjectConfig = {
   impactSurfacesPath: string;
   proposedImpactNotesPath: string;
   baselinePath: string;
+  commitApprovalsPath: string;
+  commitApprovalsPersistent: boolean;
   cacheDir: string;
   projectFilePatterns: string[];
   ignore: string[];

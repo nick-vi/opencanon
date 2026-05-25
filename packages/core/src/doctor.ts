@@ -37,11 +37,12 @@ const generatedIgnoreEntries = [
   ".opencanon/daemon.json",
   ".opencanon/daemon.log",
   ".opencanon/setup.json",
+  ".opencanon/commit-approvals.json",
   ".opencanon/*.sqlite",
   ".opencanon/*.sqlite-shm",
   ".opencanon/*.sqlite-wal",
 ];
-const skillGeneratedIgnoreEntries = ["runtime/"];
+const skillGeneratedIgnoreEntries = ["runtime/", "generated/"];
 
 export type DoctorCheck = {
   id: string;
@@ -109,6 +110,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   });
 
   const generatedIgnore = validateGeneratedIgnore(paths);
+  const commitApprovalsIgnore = validateCommitApprovalsIgnore(paths);
   checks.push({
     id: "generated-ignore",
     status: generatedIgnore.status,
@@ -119,6 +121,20 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
           ? "Generated daemon state or runtime artifacts are not ignored by Git."
           : "Generated artifact ignore rules could not be fully verified.",
     details: generatedIgnore.diagnostics,
+  });
+
+  checks.push({
+    id: "commit-approvals-ignore",
+    status: commitApprovalsIgnore.status,
+    message:
+      commitApprovalsIgnore.status === DoctorStatus.Pass
+        ? paths.commitApprovalsPersistent
+          ? "Commit approval records are configured as persistent."
+          : "Ephemeral commit approval records are ignored by Git."
+        : commitApprovalsIgnore.status === DoctorStatus.Fail
+          ? "Commit approval ignore rules do not match config."
+          : "Commit approval ignore rules could not be fully verified.",
+    details: commitApprovalsIgnore.diagnostics,
   });
 
   const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
@@ -241,6 +257,7 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
   const precommit = params.report.checks.find((check) => check.id === "precommit");
   const cacheIgnore = params.report.checks.find((check) => check.id === "cache-ignore");
   const generatedIgnore = params.report.checks.find((check) => check.id === "generated-ignore");
+  const commitApprovalsIgnore = params.report.checks.find((check) => check.id === "commit-approvals-ignore");
   const missingDecisionRefs = missingDecisionValidatorRefs(params.decisions ?? [], params.validators ?? []);
 
   if (missingDecisionRefs.size > 0) {
@@ -275,6 +292,18 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
       if (!params.dryRun) {
         ensureGitignoreEntries(params.paths.rootDir, generatedIgnoreEntries);
         ensureGitignoreEntries(path.join(params.paths.rootDir, ".agents/skills/opencanon"), skillGeneratedIgnoreEntries);
+        result.appliedFixes += 1;
+      }
+    }
+  }
+
+  if (commitApprovalsIgnore?.status === DoctorStatus.Fail && !params.paths.commitApprovalsPersistent) {
+    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
+      result.skipped.push("commit-approvals-ignore: safe fix outside requested mode.");
+    } else {
+      result.selectedFixes += 1;
+      if (!params.dryRun) {
+        ensureGitignoreEntries(params.paths.rootDir, [relative(params.paths.rootDir, params.paths.commitApprovalsPath)]);
         result.appliedFixes += 1;
       }
     }
@@ -406,10 +435,12 @@ function validateGeneratedIgnore(paths: ContextPaths): {
     ".opencanon/daemon.json",
     ".opencanon/daemon.log",
     ".opencanon/setup.json",
+    ".opencanon/commit-approvals.json",
     ".opencanon/state.sqlite",
     ".opencanon/state.sqlite-shm",
     ".opencanon/state.sqlite-wal",
     ".agents/skills/opencanon/runtime/cli.js",
+    ".agents/skills/opencanon/generated/project.ts",
   ];
   const missing = probes.filter((probe) => spawnSync("git", [GitArg.Directory, paths.rootDir, "check-ignore", "--quiet", "--", probe]).status !== 0);
   if (missing.length === 0) return { status: DoctorStatus.Pass, diagnostics: [] };
@@ -417,6 +448,32 @@ function validateGeneratedIgnore(paths: ContextPaths): {
     status: DoctorStatus.Fail,
     diagnostics: [
       `Add generated OpenCanon entries to .gitignore: ${generatedIgnoreEntries.join(", ")}; add ${skillGeneratedIgnoreEntries.join(", ")} to .agents/skills/opencanon/.gitignore. Unignored probes: ${missing.join(", ")}.`,
+    ],
+  };
+}
+
+function validateCommitApprovalsIgnore(paths: ContextPaths): {
+  status: DoctorStatus;
+  diagnostics: string[];
+} {
+  if (!getGitRoot(paths.rootDir)) {
+    return {
+      status: DoctorStatus.Warn,
+      diagnostics: ["No Git repository detected; cannot verify commit approval ignore rules."],
+    };
+  }
+
+  const approvalPath = relative(paths.rootDir, paths.commitApprovalsPath);
+  const result = spawnSync("git", [GitArg.Directory, paths.rootDir, "check-ignore", "--quiet", "--", approvalPath]);
+  const ignored = result.status === 0;
+  if (!paths.commitApprovalsPersistent && ignored) return { status: DoctorStatus.Pass, diagnostics: [] };
+  if (paths.commitApprovalsPersistent && !ignored) return { status: DoctorStatus.Pass, diagnostics: [] };
+  return {
+    status: DoctorStatus.Fail,
+    diagnostics: [
+      paths.commitApprovalsPersistent
+        ? `${approvalPath} is ignored, but commitApprovalsPersistent is true. Remove the ignore rule or set commitApprovalsPersistent to false.`
+        : `Add ${approvalPath} to .gitignore so local commit approval records are never staged.`,
     ],
   };
 }
@@ -472,12 +529,8 @@ function validateFixturePresence(paths: ContextPaths, validators: Validator[]): 
   const missingInvalid: string[] = [];
 
   for (const validator of validators) {
-    const validRoot = path.join(paths.fixturesDir, validator.id, "valid");
-    const invalidRoot = path.join(paths.fixturesDir, validator.id, "invalid");
-    const validFiles = listFiles(validRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
-    const invalidFiles = listFiles(invalidRoot, (file) => /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file));
-    if (validFiles.length === 0) missingValid.push(validator.id);
-    if (invalidFiles.length === 0) missingInvalid.push(validator.id);
+    if (!existsSync(path.join(paths.fixturesDir, validator.id, "valid.ts"))) missingValid.push(validator.id);
+    if (!existsSync(path.join(paths.fixturesDir, validator.id, "invalid.ts"))) missingInvalid.push(validator.id);
   }
 
   const diagnostics: string[] = [];

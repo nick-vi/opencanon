@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { createValidationContext, tree, validateTreeDefinition } from "@opencanon/core";
+import { createPaths, createRuntime, createValidationContext, createValidationContextFromFixtureFile, flushValidationContextCache, tree, validateTreeDefinition } from "@opencanon/core";
 import type { Finding, TreeDefinition, ValidationContext } from "@opencanon/core";
 
 type SourceFiles = Record<string, string>;
@@ -69,6 +69,77 @@ test("folder deny rules report matching target folders only", () => {
   );
 
   assert.deepEqual(paths(findings), ["packages/billing/src/common", "src/misc"]);
+});
+
+test("fixture definitions can expose virtual empty folders", async () => {
+  const rootDir = mkdtempSync(path.join(testTmpRoot(), "opencanon-tree-fixture-"));
+  try {
+    writeFileSync(
+      path.join(rootDir, "invalid.ts"),
+      [
+        'import { defineFixture } from "@opencanon/core/testing";',
+        "",
+        "export default defineFixture({",
+        '  directories: ["src/misc"],',
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    const ctx = await createValidationContextFromFixtureFile({
+      fixtureFile: path.join(rootDir, "invalid.ts"),
+      validator,
+    });
+    const findings = ctx.tree({
+      src: structureFolders,
+    });
+
+    assert.deepEqual(paths(findings), ["src/misc"]);
+    flushValidationContextCache(ctx);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("fixture definitions can create virtual files with helper text", async () => {
+  const rootDir = mkdtempSync(path.join(testTmpRoot(), "opencanon-tree-file-fixture-"));
+  try {
+    writeFileSync(
+      path.join(rootDir, "invalid.ts"),
+      [
+        'import { defineFixture } from "@opencanon/core/testing";',
+        "",
+        "export default defineFixture({",
+        "  files: ({ file }) => [",
+        '    file.json("package.json", { type: "module" }),',
+        '    file.ts("src/services/company.ts", `',
+        "      export const company = { id: \"company\" };",
+        "    `),",
+        "  ],",
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    const ctx = await createValidationContextFromFixtureFile({
+      fixtureFile: path.join(rootDir, "invalid.ts"),
+      validator,
+    });
+    const findings = ctx.tree({
+      src: {
+        children: {
+          services: serviceFileRules,
+        },
+      },
+    });
+
+    assert.deepEqual(paths(findings), ["src/services/company.ts"]);
+    assert.equal(ctx.text("src/services/company.ts").text, 'export const company = { id: "company" };\n');
+    assert.equal((ctx.json("package.json").data as { type?: string } | undefined)?.type, "module");
+    flushValidationContextCache(ctx);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
 });
 
 test("import maxRelativeDepth reports deep relative imports", () => {
@@ -291,14 +362,14 @@ test("tree helper can be used as a validator function", () => {
       "src/services/company.ts": "export function getCompany() {}",
     },
     ["src/services/company.ts"],
-    (ctx) =>
+    (ctx, rootDir) =>
       tree({
         src: {
           children: {
             services: serviceFileRules,
           },
         },
-      })({ ctx, runtime: {} as any }),
+      })({ ctx, runtime: createRuntime(createPaths(rootDir), []) }),
   );
 
   assert.deepEqual(paths(findings), ["src/services/company.ts"]);
@@ -421,7 +492,7 @@ function validate(files: SourceFiles, targetFiles: string[], definition: TreeDef
   return withContext(files, targetFiles, (ctx) => ctx.tree(definition));
 }
 
-function withContext<T>(files: SourceFiles, targetFiles: string[], callback: (ctx: ValidationContext) => T): T {
+function withContext<T>(files: SourceFiles, targetFiles: string[], callback: (ctx: ValidationContext, rootDir: string) => T): T {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-tree-"));
   try {
     for (const [file, text] of Object.entries(files)) {
@@ -437,7 +508,7 @@ function withContext<T>(files: SourceFiles, targetFiles: string[], callback: (ct
       validator,
     });
 
-    return callback(ctx);
+    return callback(ctx, rootDir);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -445,4 +516,10 @@ function withContext<T>(files: SourceFiles, targetFiles: string[], callback: (ct
 
 function paths(findings: Finding[]): string[] {
   return findings.map((finding) => finding.file).sort();
+}
+
+function testTmpRoot(): string {
+  const root = path.join(process.cwd(), "tmp", "tests");
+  mkdirSync(root, { recursive: true });
+  return root;
 }

@@ -65,6 +65,7 @@ const generatedStateIgnoreEntries = [
   ".opencanon/*.sqlite-shm",
   ".opencanon/*.sqlite-wal",
 ];
+const skillGeneratedIgnoreEntries = ["runtime/", "generated/"];
 
 type SetupQuery = {
   dryRun: boolean;
@@ -476,12 +477,12 @@ function ensureSetupStateIgnored(rootDir: string, dryRun: boolean): SetupStep {
 function ensureSkillRuntimeIgnored(rootDir: string, dryRun: boolean): SetupStep {
   return ensureGitignoreEntriesStep({
     rootDir: path.join(rootDir, ".agents/skills/opencanon"),
-    entries: ["runtime/"],
+    entries: skillGeneratedIgnoreEntries,
     dryRun,
     id: SetupStepId.SkillRuntimeIgnore,
-    presentMessage: "Generated skill runtime files are ignored by Git.",
-    dryRunMessage: "runtime/ would be added to .agents/skills/opencanon/.gitignore.",
-    writtenMessage: "runtime/ added to .agents/skills/opencanon/.gitignore.",
+    presentMessage: "Generated skill runtime and project type files are ignored by Git.",
+    dryRunMessage: "Generated skill ignore entries would be added to .agents/skills/opencanon/.gitignore.",
+    writtenMessage: "Generated skill ignore entries added to .agents/skills/opencanon/.gitignore.",
   });
 }
 

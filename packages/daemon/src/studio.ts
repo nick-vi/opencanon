@@ -362,8 +362,8 @@ const studioFactories: StudioFactory[] = [
       [StudioOption.Message]: "Native TypeScript enums are not allowed.",
     },
     fixtures: {
-      valid: [{ path: "src/status.ts", content: "export const Status = { Active: \"active\" } as const;\nexport type Status = (typeof Status)[keyof typeof Status];\n" }],
-      invalid: [{ path: "src/status.ts", content: "export enum Status {\n  Active = \"active\",\n}\n" }],
+      valid: [{ path: "src/status.ts", content: "export const Status = { ACTIVE: \"active\" } as const;\nexport type Status = (typeof Status)[keyof typeof Status];\n" }],
+      invalid: [{ path: "src/status.ts", content: "export enum Status {\n  ACTIVE = \"active\",\n}\n" }],
     },
     sourceFields: [
       StudioOption.Id,
@@ -718,11 +718,25 @@ function validateFixtureSet(fixtures: StudioFixtureSet): string[] {
 
 function writeFixtureSet(fixturesDir: string, validatorId: string, fixtures: StudioFixtureSet): void {
   for (const fixtureCase of [StudioFixtureCase.Valid, StudioFixtureCase.Invalid]) {
-    for (const file of fixtures[fixtureCase]) {
-      const target = path.join(fixturesDir, validatorId, fixtureCase, file.path);
-      writeAtomicTextFileSync(target, file.content);
-    }
+    const target = path.join(fixturesDir, validatorId, `${fixtureCase}.ts`);
+    writeAtomicTextFileSync(target, renderFixtureSource(fixtures[fixtureCase]));
   }
+}
+
+function renderFixtureSource(files: StudioFixtureFile[]): string {
+  const lines = [
+    'import { defineFixture } from "@opencanon/core/testing";',
+    "",
+    "export default defineFixture({",
+    "  files: ({ file }) => [",
+  ];
+  for (const item of files) {
+    lines.push(`    file(${JSON.stringify(item.path)}, ${JSON.stringify(item.content)}),`);
+  }
+  lines.push("  ],");
+  lines.push("});");
+  lines.push("");
+  return lines.join("\n");
 }
 
 function updateValidatorIndex(
@@ -855,7 +869,7 @@ function discoverValidatorSourceFiles(rootDir: string, indexPath: string): Map<s
 }
 
 function fixtureCases(fixturesDir: string, validatorId: string): StudioFixtureCase[] {
-  return [StudioFixtureCase.Valid, StudioFixtureCase.Invalid].filter((fixtureCase) => existsSync(path.join(fixturesDir, validatorId, fixtureCase)));
+  return [StudioFixtureCase.Valid, StudioFixtureCase.Invalid].filter((fixtureCase) => existsSync(path.join(fixturesDir, validatorId, `${fixtureCase}.ts`)));
 }
 
 function factoryById(id: StudioFactoryId): StudioFactory | undefined {

@@ -37,6 +37,7 @@ const generatedGitignoreEntries = [
   ".opencanon/daemon.json",
   ".opencanon/daemon.log",
   ".opencanon/setup.json",
+  ".opencanon/commit-approvals.json",
   ".opencanon/*.sqlite",
   ".opencanon/*.sqlite-shm",
   ".opencanon/*.sqlite-wal",
@@ -181,8 +182,13 @@ export function runInit(rootDir: string, query: InitQuery): InitResult {
   files.push(writeManagedFile(rootDir, query.validatorsPath, validatorsTemplate(), query, diagnostics));
   files.push(writeManagedFile(rootDir, path.join(query.fixturesDir, ".gitkeep"), EmptyFileContent, query, diagnostics));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/SKILL.md", skillTemplate(), query, diagnostics));
-  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/.gitignore", "runtime/\n", query, diagnostics));
+  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/.gitignore", "runtime/\ngenerated/\n", query, diagnostics));
+  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/package.json", skillPackageTemplate(), query, diagnostics));
+  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/tsconfig.json", skillTsconfigTemplate(), query, diagnostics));
+  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/tsconfig.fixtures.json", skillFixtureTsconfigTemplate(), query, diagnostics));
+  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/fixtures/tsconfig.json", skillFixtureDiscoveryTsconfigTemplate(), query, diagnostics));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/index.ts", skillBarrelTemplate(), query, diagnostics));
+  files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/testing.ts", skillTestingTemplate(), query, diagnostics));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts", cliScriptTemplate(), query, diagnostics, 0o755));
   files.push(writeManagedFile(rootDir, ".agents/skills/opencanon/scripts/opencode-plugin.ts", opencodePluginTemplate(), query, diagnostics));
   files.push(...copyBundledRuntimeFiles(rootDir, query, diagnostics));
@@ -392,8 +398,9 @@ function packageScript(): string {
 function nextSteps(query: InitQuery): string[] {
   const steps = [
     "Fill docs/opencanon/decisions.json and referenced Markdown docs from the repository's existing conventions.",
+    "The daemon keeps generated project authoring types fresh when it is running; run bun run opencanon project-types generate manually for setup, CI, or recovery.",
     "Add mechanically checkable validators in the configured validators path.",
-    "Add valid and invalid fixtures under fixtures/<validator-id>/ for each validator.",
+    "Add fixtures/<validator-id>/valid.ts and fixtures/<validator-id>/invalid.ts for each validator.",
     "Run bun run opencanon context --check.",
     "Run bun run opencanon validate --check-fixtures.",
     "Run bun run opencanon doctor.",
@@ -518,6 +525,95 @@ export {
 `;
 }
 
+function skillTestingTemplate(): string {
+  return `export {
+  materializeFixture,
+  defineFixture,
+} from "./runtime/core.js";
+export type {
+  FixtureFileApi,
+  FixtureFileEntry,
+  FixtureFileOptions,
+  FixtureFileBuilder,
+  FixtureTextFileInput,
+  MaterializedFixture,
+  FixtureDefinition,
+  FixtureTextInput,
+} from "./runtime/core.js";
+`;
+}
+
+function skillPackageTemplate(): string {
+  return `${JSON.stringify(
+    {
+      name: "@opencanon/skill",
+      type: "module",
+      private: true,
+      exports: {
+        ".": "./index.ts",
+        "./testing": "./testing.ts",
+        "./project": "./generated/project.ts",
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function skillTsconfigTemplate(): string {
+  return `${JSON.stringify(
+    {
+      compilerOptions: {
+        allowImportingTsExtensions: true,
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        noEmit: true,
+        skipLibCheck: true,
+        strict: true,
+        target: "ES2022",
+        lib: ["ES2023", "DOM", "DOM.Iterable"],
+        types: ["bun", "node"],
+        paths: {
+          "@opencanon/core": ["./runtime/types/core/index.d.ts", "./index.ts"],
+          "@opencanon/core/testing": ["./testing.ts"],
+          "@opencanon/project": ["./generated/project.ts"],
+          "@opencanon/validators": ["./runtime/types/validators/index.d.ts", "./index.ts"],
+        },
+      },
+      include: ["*.ts", "validators/**/*.ts", "generated/**/*.ts", "generated/**/*.d.ts"],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function skillFixtureTsconfigTemplate(): string {
+  return `${JSON.stringify(
+    {
+      extends: "./tsconfig.json",
+      compilerOptions: {
+        strict: false,
+        noImplicitAny: false,
+        skipLibCheck: true,
+      },
+      include: ["fixtures/**/*.ts", "generated/**/*.d.ts"],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function skillFixtureDiscoveryTsconfigTemplate(): string {
+  return `${JSON.stringify(
+    {
+      extends: "../tsconfig.fixtures.json",
+      include: ["**/*.ts", "../generated/**/*.d.ts"],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 function opencodePluginTemplate(): string {
   return `export { OpenCanonPlugin } from "../runtime/cli.js";
 `;
@@ -558,7 +654,7 @@ Use \`--hooks codex\`, \`--hooks claude\`, or \`--hooks opencode\` when the curr
 
 ## Validator Authoring
 
-Validators live at the configured validators path. Export a validator definition or an array. Import authoring APIs from the skill barrel, usually \`../index.ts\` from the default \`.agents/skills/opencanon/validators/index.ts\` path. The barrel exposes \`defineValidator\`, \`createValidatorFactory\`, runtime types, and curated factories such as \`fileNames\` and \`noImports\`.
+Validators live at the configured validators path. Export a validator definition or an array. Import authoring APIs from \`@opencanon/core\`, curated factories from \`@opencanon/validators\`, and generated package/import constants from \`@opencanon/project\`. Fixture definitions can import \`defineFixture\` from \`@opencanon/core/testing\`.
 
 Each real validator should have:
 
@@ -571,10 +667,12 @@ Each real validator should have:
 - optional \`applies\` globs
 - optional \`analysis\` globs for parsed facts that must include files outside current targets; this is not an access boundary
 - \`validate({ ctx, runtime })\`
-- valid and invalid fixtures under \`fixtures/<validator-id>/valid\` and \`fixtures/<validator-id>/invalid\`
-- optional fixed fixtures under \`fixtures/<validator-id>/fixed\` when structured fixes are provided
+- valid and invalid fixtures at \`fixtures/<validator-id>/valid.ts\` and \`fixtures/<validator-id>/invalid.ts\`
+- optional \`fixtures/<validator-id>/fixed.ts\` when structured fixes are provided
 
-Prefer \`ctx.facts.*\` for imports, exports, symbols, calls, literals, comments, references, annotations, diagnostics, and duplicates. Use \`ctx.projectFiles(patterns?)\` when a project validator needs discovered files independent of target scope. Use \`ctx.graph.*\` for graph-shaped symbols, references, callers, callees, and impact. Use \`ctx.impact.*\` for configured impact surfaces and proposed impact notes, and \`ctx.baseline.*\` for known findings.
+Prefer \`ctx.facts.*\` for imports, exports, symbols, calls, literals, comments, references, annotations, diagnostics, and duplicates. Use generated constants from \`@opencanon/project\` for package, dependency, crate, Cargo, Python, and import-specifier names. Use \`ctx.projectFiles(patterns?)\` when a project validator needs discovered files independent of target scope. Use \`ctx.graph.*\` for graph-shaped symbols, references, callers, callees, and impact. Use \`ctx.impact.*\` for configured impact surfaces and proposed impact notes, and \`ctx.baseline.*\` for known findings.
+
+The daemon keeps generated project authoring types fresh when it is running. Run \`bun run opencanon project-types generate\` manually during setup, CI, or recovery, or when the daemon reports that its project-type watcher failed. Generation writes a lightweight gitignored \`generated/project.ts\` with const objects such as \`Packages.EXAMPLE_UI\`, \`PackageRoots.EXAMPLE_UI\`, \`ImportSpecifiers.REACT\`, \`Npm.ZOD.name\`, \`Npm.ZOD.version\`, \`Crates.EXAMPLE_CORE\`, \`CrateRoots.EXAMPLE_CORE\`, \`Cargo.SERDE.name\`, \`Cargo.SERDE.version\`, \`Cargo.SERDE.section\`, \`Python.REQUESTS.name\`, \`Python.REQUESTS.version\`, \`Python.REQUESTS.source\`, and \`Python.REQUESTS.group\`; each object, type, and key carries JSDoc derived from package, Cargo, or Python dependency metadata. It intentionally does not emit file, literal, symbol, caller, or callee fact maps by default because those make TypeScript language servers sluggish in large repos. Generation also writes \`generated/aliases.d.ts\` with ambient module declarations for workspace packages, dependencies, and imports used inside fixture source files so fixtures can keep realistic imports without local \`as any\` stubs.
 
 Large repos should keep \`validators/index.ts\` as a small barrel that imports domain modules, for example \`api.ts\`, \`tauri.ts\`, or \`security.ts\`, and exports an array.
 
@@ -583,6 +681,8 @@ While editing one validator, run:
 \`\`\`bash
 bun run opencanon validate --check-fixtures --validator <validator-id>
 \`\`\`
+
+Fixture definitions are flat TypeScript modules named \`valid.ts\`, \`invalid.ts\`, and optional \`fixed.ts\`. Use \`defineFixture({ directories, files: ({ file }) => [...] })\` for virtual files and folders so invalid test projects do not create invalid source files on disk. Prefer \`file.ts(path, text)\`, \`file.tsx(path, text)\`, \`file.py(path, text)\`, \`file.rs(path, text)\`, \`file.toml(path, text)\`, \`file.md(path, text)\`, and \`file.json(path, value)\` for readable fixtures; language text helpers dedent multiline strings and add a trailing newline, while \`file(path, text)\` remains the raw primitive. The skill has two TypeScript programs: \`tsconfig.json\` keeps validators strict, while \`fixtures/tsconfig.json\` extends the looser fixture program with generated ambient aliases for realistic imports.
 
 Before finishing, run:
 

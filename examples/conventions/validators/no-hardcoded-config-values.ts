@@ -1,4 +1,4 @@
-import { noHardcodedConfigValues } from "../../../.agents/skills/opencanon/index.ts";
+import { noHardcodedConfigValues } from "@opencanon/validators";
 
 const validator = noHardcodedConfigValues({
   id: "no-hardcoded-config-values",

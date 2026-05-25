@@ -10,9 +10,11 @@ import { runBenchmarkCommand } from "./benchmark.ts";
 import { runBaselineCommand } from "./baseline.ts";
 import { runBundleCommand } from "./bundle.ts";
 import { runFeedbackCommand, runHookCommand } from "./feedback.ts";
+import { runGateCommand } from "./gate.ts";
 import { runGraphCommand } from "./graph.ts";
 import { runInitCommand } from "./init.ts";
 import { loadProjectContext, loadValidators } from "./project.ts";
+import { runProjectTypesCommand } from "./project-types.ts";
 import { runContextCommand } from "./context.ts";
 import { runRefactorCommand } from "./refactor.ts";
 import { runRulesCommand } from "./rules.ts";
@@ -72,6 +74,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
+  if (command === "gate") {
+    await runGateCommand(rest, cwd);
+    return;
+  }
+
   if (command === "hook") {
     await runHookCommand(rest, cwd);
     return;
@@ -124,6 +131,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
 
   if (command === "refactor") {
     await runRefactorCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "project-types") {
+    await runProjectTypesCommand(rest, cwd);
     return;
   }
 
@@ -193,6 +205,8 @@ function printHelp(): void {
   opencanon validate --files <paths...>
   opencanon update check --manifest <path-or-url>
   opencanon feedback --files <paths...>
+  opencanon gate approve <gate-id> --summary <summary>
+  opencanon gate pending --format json
   opencanon hook <codex|claude|opencode>
   opencanon hook install --all
   opencanon doctor
@@ -202,6 +216,7 @@ function printHelp(): void {
   opencanon bundle install <bundle.ts|bundle.json> --option key=value
   opencanon symbols <query>
   opencanon refactor rename-symbol <from> <to>
+  opencanon project-types generate
 
 Commands:
   context    Load scoped docs, decisions, validators, and git evidence.
@@ -212,6 +227,7 @@ Commands:
   validate   Run validators against files, changed files, fixtures, or the project.
   update     Check or install verified engine runtime assets from a release manifest.
   feedback   Run validators and render concise agent feedback.
+  gate       Record user clarification for commit gates.
   hook       Adapt host hook payloads to OpenCanon feedback.
   doctor     Check core setup, validator coverage, dependencies, and hooks.
   daemon     Start or inspect the daemon runtime.
@@ -221,6 +237,7 @@ Commands:
   symbols    Search the deterministic TS/JS code symbol graph by query, kind, or scope.
   graph      Inspect deterministic callers, callees, and impact edges.
   refactor   Plan or apply deterministic symbol/import/file refactors.
+  project-types Generate typed package/import constants for validator authoring.
 
 Maintenance:
   db         Inspect or reset generated daemon state.

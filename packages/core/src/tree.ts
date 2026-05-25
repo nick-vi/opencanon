@@ -3,21 +3,30 @@ import { matchesAny, normalizePath, unique } from "./core.ts";
 import { validatePatterns } from "./globs.ts";
 import type { Finding, FindingFix, ImportEdge, ProjectFile, ValidationContext, ValidatorArgs } from "./validator.ts";
 
+/** Declarative file/folder/import boundary rules consumed by `ctx.tree(...)`. */
 export type TreeDefinition = TreePathDefinition | TreeGraphDefinition;
 
+/** Path-keyed tree definition. Keys are folder names or glob patterns. */
 export type TreePathDefinition = Record<string, TreeNode>;
 
+/** Tree definition with optional named nodes and cross-node boundary rules. */
 export type TreeGraphDefinition = {
   paths?: TreePathDefinition;
+  /** Named path groups used by boundary rules. */
   nodes?: Record<string, string | string[]>;
+  /** Import boundary rules between named nodes or glob groups. */
   boundaries?: TreeBoundaryRule[];
 };
 
 export type TreeNode = {
   docs?: string[];
+  /** File naming rules for files under this tree node. */
   files?: TreeFileRules;
+  /** Folder naming rules for folders under this tree node. */
   folders?: TreeFolderRules;
+  /** Import rules for files under this tree node. */
   imports?: TreeImportRules;
+  /** Nested tree nodes. */
   children?: TreePathDefinition;
 };
 
@@ -82,7 +91,9 @@ export function validateTree(ctx: ValidationContext, definition: TreeDefinition)
   const findings: Finding[] = [];
   const nodes = flattenTree(compiled.paths);
   const targetPaths = new Set(ctx.targetFiles.map((file) => file.path));
-  const targetFolders = foldersForFiles(ctx.targetFiles);
+  const targetFolders = ctx.project
+    ? new Set(ctx.folders().map((folder) => folder.path))
+    : new Set([...foldersForFiles(ctx.targetFiles), ...ctx.folders().filter((folder) => folder.empty).map((folder) => folder.path)]);
 
   for (const ruleNode of nodes) {
     if (ruleNode.node.files) findings.push(...validateFileRules(ctx, ruleNode, ruleNode.node.files));

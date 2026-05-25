@@ -34,7 +34,7 @@ test("setup scaffolds missing files, installs requested hooks, validates, and wr
     assert.equal(payload.steps.find((step) => step.id === "daemon")?.status, "skip");
 
     assert(existsSync(path.join(rootDir, ".agents/skills/opencanon/runtime/cli.js")));
-    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\n");
+    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\ngenerated/\n");
     assert(existsSync(path.join(rootDir, ".opencode/plugins/opencanon.ts")));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/setup.json"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
@@ -57,7 +57,7 @@ test("setup scaffolds missing files, installs requested hooks, validates, and wr
     assert.equal(rerunPayload.steps.find((step) => step.id === "cache-ignore")?.status, "pass");
     assert.equal(rerunPayload.steps.find((step) => step.id === "skill-runtime-ignore")?.status, "pass");
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
-    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\n");
+    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\ngenerated/\n");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

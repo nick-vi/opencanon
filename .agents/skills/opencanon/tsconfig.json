@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["bun", "node"],
+    "paths": {
+      "@opencanon/core": ["./runtime/types/core/index.d.ts", "./index.ts"],
+      "@opencanon/core/testing": ["./testing.ts"],
+      "@opencanon/project": ["./generated/project.ts"],
+      "@opencanon/validators": ["./runtime/types/validators/index.d.ts", "./index.ts"]
+    }
+  },
+  "include": ["*.ts", "validators/**/*.ts", "generated/**/*.ts", "generated/**/*.d.ts", "../../../packages/core/src/**/*.d.ts"]
+}

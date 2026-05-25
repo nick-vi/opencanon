@@ -1,4 +1,4 @@
-import { noDeepRelativeImports } from "../../../.agents/skills/opencanon/index.ts";
+import { noDeepRelativeImports } from "@opencanon/validators";
 
 const validator = noDeepRelativeImports({
   id: "no-deep-relative-imports",

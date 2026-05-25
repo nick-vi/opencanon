@@ -1,4 +1,4 @@
-import { noCommentMatches } from "../../../.agents/skills/opencanon/index.ts";
+import { noCommentMatches } from "@opencanon/validators";
 
 const validator = noCommentMatches({
   id: "no-stale-intent-comments",

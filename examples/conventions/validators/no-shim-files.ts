@@ -1,4 +1,4 @@
-import { noShimFiles } from "../../../.agents/skills/opencanon/index.ts";
+import { noShimFiles } from "@opencanon/validators";
 
 const validator = noShimFiles({
   id: "no-shim-files",

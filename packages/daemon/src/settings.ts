@@ -27,6 +27,8 @@ const ConfigField = {
   ImpactSurfacesPath: "impactSurfacesPath",
   Ignore: "ignore",
   BaselinePath: "baselinePath",
+  CommitApprovalsPath: "commitApprovalsPath",
+  CommitApprovalsPersistent: "commitApprovalsPersistent",
   Entrypoints: "entrypoints",
   ExternalTools: "externalTools",
   Generated: "generated",
@@ -48,8 +50,10 @@ const stringConfigFields = [
   ConfigField.ImpactSurfacesPath,
   ConfigField.ProposedImpactNotesPath,
   ConfigField.BaselinePath,
+  ConfigField.CommitApprovalsPath,
   ConfigField.ValidatorsPath,
 ] as const;
+const booleanConfigFields = [ConfigField.CommitApprovalsPersistent] as const;
 const stringArrayConfigFields = [
   ConfigField.Entrypoints,
   ConfigField.Generated,
@@ -63,6 +67,7 @@ const allowedConfigFields = new Set<ConfigField>([
   ...stringConfigFields,
   ...stringArrayConfigFields,
   ...numberConfigFields,
+  ...booleanConfigFields,
   ConfigField.FileDiscovery,
   ConfigField.ExternalTools,
 ]);
@@ -170,6 +175,16 @@ function parseConfigOverrides(input: unknown): { ok: true; overrides: ContextCon
     overrides[field] = value;
   }
 
+  for (const field of booleanConfigFields) {
+    const value = input[field];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") {
+      diagnostics.push(settingsDiagnostic(`${field} must be a boolean.`));
+      continue;
+    }
+    overrides[field] = value;
+  }
+
   const fileDiscovery = input[ConfigField.FileDiscovery];
   if (fileDiscovery !== undefined) {
     if (fileDiscovery !== FileDiscoveryMode.Git && fileDiscovery !== FileDiscoveryMode.Filesystem) {
@@ -212,6 +227,7 @@ function mergeConfig(defaults: Required<ContextConfig>, overrides: ContextConfig
     generated: overrides.generated ?? defaults.generated,
     externalTools: overrides.externalTools ?? defaults.externalTools,
     requiredPackageScripts: overrides.requiredPackageScripts ?? defaults.requiredPackageScripts,
+    commitApprovalsPersistent: overrides.commitApprovalsPersistent ?? defaults.commitApprovalsPersistent,
     fileDiscovery: overrides.fileDiscovery ?? defaults.fileDiscovery,
     maxFiles: overrides.maxFiles ?? defaults.maxFiles,
     maxFileSizeKb: overrides.maxFileSizeKb ?? defaults.maxFileSizeKb,
