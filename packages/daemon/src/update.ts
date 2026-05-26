@@ -1,22 +1,19 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  OpenCanonError,
-  createOpenCanonDiagnostic,
-  resolveRootDir,
-  writeAtomicBinaryFileSync,
-  type OpenCanonDiagnostic,
-} from "@opencanon/core";
+import { OpenCanonError, createOpenCanonDiagnostic, resolveRootDir, type OpenCanonDiagnostic } from "@opencanon/core";
 import { engineBindingName } from "@opencanon/engine";
-import { daemonSchemaVersion, requiredBunVersion } from "./runtime.ts";
+import { requiredBunVersion } from "./runtime.ts";
 import { inspectProjectDaemon } from "./supervisor.ts";
 
 const RuntimeManifestVersion = 1;
 const Sha256Pattern = /^[a-f0-9]{64}$/i;
 const RuntimeChannelPattern = /^[a-z][a-z0-9._-]*$/u;
 const MaxRuntimeFetchRedirects = 5;
+const BundleMarkerFile = ".bundle.json";
 
 const EngineArch = {
   Arm64: "arm64",
@@ -57,11 +54,6 @@ const RuntimeUpdateDiagnosticCode = {
   InvalidManifest: "runtime-manifest-invalid",
 } as const;
 
-const RuntimeArchiveFormat = {
-  TarGz: "tar.gz",
-} as const;
-type RuntimeArchiveFormat = (typeof RuntimeArchiveFormat)[keyof typeof RuntimeArchiveFormat];
-
 const RuntimeUpdateStatus = {
   Current: "current",
   Missing: "missing",
@@ -71,16 +63,9 @@ const RuntimeUpdateStatus = {
 } as const;
 export type RuntimeUpdateStatus = (typeof RuntimeUpdateStatus)[keyof typeof RuntimeUpdateStatus];
 
-export type RuntimeManifestAsset = {
+export type RuntimeBundleAsset = {
   url: string;
   sha256: string;
-  schemaVersion: number;
-};
-
-export type RuntimeArchiveAsset = {
-  url: string;
-  sha256: string;
-  format: RuntimeArchiveFormat;
 };
 
 export type RuntimeManifest = {
@@ -88,9 +73,7 @@ export type RuntimeManifest = {
   channel: string;
   skillVersion: string;
   requiredBun: string;
-  daemonSchema: number;
-  runtime?: RuntimeArchiveAsset;
-  engine: Partial<Record<EngineTarget, RuntimeManifestAsset>>;
+  bundles: Partial<Record<EngineTarget, RuntimeBundleAsset>>;
 };
 
 export type RuntimeUpdateCheck = {
@@ -99,22 +82,24 @@ export type RuntimeUpdateCheck = {
   channel: string;
   skillVersion: string;
   requiredBun: string;
-  daemonSchema: number;
   target: EngineTarget;
-  assetUrl: string;
-  resolvedAssetSource: string;
+  bundleUrl: string;
+  resolvedBundleSource: string;
+  runtimeRoot: string;
   runtimePath: string;
   expectedSha256: string;
   currentSha256?: string;
-  engineSchema: number;
-  runtimeArchiveUrl?: string;
-  resolvedRuntimeArchiveSource?: string;
-  runtimeArchiveSha256?: string;
 };
 
 export type RuntimeUpdateApplyResult = {
   status: Extract<RuntimeUpdateStatus, "current" | "dry-run" | "installed">;
   check: RuntimeUpdateCheck;
+};
+
+type BundleMarker = {
+  skillVersion: string;
+  sha256: string;
+  target: EngineTarget;
 };
 
 type RuntimeManifestSource = {
@@ -151,21 +136,25 @@ export async function checkRuntimeUpdate(input: { manifestSource: string; cwd?: 
   const runtimeRoot = input.runtimeRoot ?? defaultRuntimeRoot;
   const loaded = await loadRuntimeManifest(input.manifestSource, input.cwd ?? process.cwd());
   const target = currentEngineTarget();
-  const asset = loaded.manifest.engine[target];
-  if (!asset) {
+  const bundle = loaded.manifest.bundles[target];
+  if (!bundle) {
     throw new OpenCanonError([
       createOpenCanonDiagnostic({
         code: "engine-binary-missing",
-        message: `Runtime manifest has no engine asset for ${target}.`,
-        details: [`Manifest source: ${input.manifestSource}`, `Available targets: ${Object.keys(loaded.manifest.engine).join(", ") || "<none>"}.`],
+        message: `Runtime manifest has no bundle for ${target}.`,
+        details: [`Manifest source: ${input.manifestSource}`, `Available targets: ${Object.keys(loaded.manifest.bundles).join(", ") || "<none>"}.`],
       }),
     ]);
   }
-  validateRuntimeCompatibility(loaded.manifest, asset);
+  validateRuntimeCompatibility(loaded.manifest);
 
-  const runtimePath = engineRuntimePathForTarget(runtimeRoot, target);
-  const currentSha256 = existsSync(runtimePath) ? sha256File(runtimePath) : undefined;
-  const status = currentSha256 === undefined ? RuntimeUpdateStatus.Missing : currentSha256 === asset.sha256 ? RuntimeUpdateStatus.Current : RuntimeUpdateStatus.UpdateAvailable;
+  const marker = readBundleMarker(runtimeRoot);
+  const status =
+    !marker
+      ? RuntimeUpdateStatus.Missing
+      : marker.sha256 === bundle.sha256 && marker.target === target
+        ? RuntimeUpdateStatus.Current
+        : RuntimeUpdateStatus.UpdateAvailable;
 
   return {
     status,
@@ -173,17 +162,13 @@ export async function checkRuntimeUpdate(input: { manifestSource: string; cwd?: 
     channel: loaded.manifest.channel,
     skillVersion: loaded.manifest.skillVersion,
     requiredBun: loaded.manifest.requiredBun,
-    daemonSchema: loaded.manifest.daemonSchema,
     target,
-    assetUrl: asset.url,
-    resolvedAssetSource: resolveAssetSource(asset.url, loaded),
-    runtimePath,
-    expectedSha256: asset.sha256,
-    currentSha256,
-    engineSchema: asset.schemaVersion,
-    runtimeArchiveUrl: loaded.manifest.runtime?.url,
-    resolvedRuntimeArchiveSource: loaded.manifest.runtime ? resolveAssetSource(loaded.manifest.runtime.url, loaded) : undefined,
-    runtimeArchiveSha256: loaded.manifest.runtime?.sha256,
+    bundleUrl: bundle.url,
+    resolvedBundleSource: resolveAssetSource(bundle.url, loaded),
+    runtimeRoot,
+    runtimePath: engineRuntimePathForTarget(runtimeRoot, target),
+    expectedSha256: bundle.sha256,
+    currentSha256: marker?.sha256,
   };
 }
 
@@ -201,32 +186,81 @@ export async function applyRuntimeUpdate(input: {
   if (check.status === RuntimeUpdateStatus.Current) return { status: RuntimeUpdateStatus.Current, check };
   if (input.dryRun) return { status: RuntimeUpdateStatus.DryRun, check };
 
-  const bytes = await readBytes(check.resolvedAssetSource, input.cwd ?? process.cwd());
+  const bytes = await readBytes(check.resolvedBundleSource, input.cwd ?? process.cwd());
   const downloadedSha256 = sha256Bytes(bytes);
   if (downloadedSha256 !== check.expectedSha256) {
     throw new OpenCanonError([
       createOpenCanonDiagnostic({
         code: RuntimeUpdateDiagnosticCode.Failed,
-        message: "Downloaded OpenCanon engine runtime did not match the manifest checksum.",
-        details: [`Expected ${check.expectedSha256}; downloaded ${downloadedSha256}.`, `Asset: ${check.resolvedAssetSource}`],
-        action: "Do not run this binary. Retry with a trusted manifest source.",
+        message: "Downloaded OpenCanon runtime bundle did not match the manifest checksum.",
+        details: [`Expected ${check.expectedSha256}; downloaded ${downloadedSha256}.`, `Bundle: ${check.resolvedBundleSource}`],
+        action: "Do not run this bundle. Retry with a trusted manifest source.",
       }),
     ]);
   }
 
-  writeAtomicBinaryFileSync(check.runtimePath, bytes);
-  const installedSha256 = sha256File(check.runtimePath);
-  if (installedSha256 !== check.expectedSha256) {
-    throw new OpenCanonError([
-      createOpenCanonDiagnostic({
-        code: RuntimeUpdateDiagnosticCode.Failed,
-        message: "Installed OpenCanon engine runtime checksum did not match the manifest.",
-        details: [`Expected ${check.expectedSha256}; installed ${installedSha256}.`, `Path: ${check.runtimePath}`],
-      }),
-    ]);
-  }
+  installBundle({
+    runtimeRoot: check.runtimeRoot,
+    bytes,
+    marker: { skillVersion: check.skillVersion, sha256: check.expectedSha256, target: check.target },
+  });
 
-  return { status: RuntimeUpdateStatus.Installed, check: { ...check, currentSha256: installedSha256, status: RuntimeUpdateStatus.Current } };
+  return { status: RuntimeUpdateStatus.Installed, check: { ...check, currentSha256: check.expectedSha256, status: RuntimeUpdateStatus.Current } };
+}
+
+// Atomic rename of runtimeRoot can fail on Windows if cli.js inside is mapped by the calling process; invoke from outside the runtime dir on Windows.
+function installBundle(input: { runtimeRoot: string; bytes: Buffer; marker: BundleMarker }): void {
+  const runtimeRoot = path.resolve(input.runtimeRoot);
+  const stagingParent = path.dirname(runtimeRoot);
+  const stagingDir = mkdtempSync(path.join(stagingParent, ".opencanon-runtime-staging-"));
+  const archivePath = path.join(stagingDir, "bundle.tar.gz");
+  const extractDir = path.join(stagingDir, "extract");
+  const oldDir = `${runtimeRoot}.old-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(archivePath, input.bytes);
+    mkdirSync(extractDir, { recursive: true });
+    extractTarball(archivePath, extractDir);
+    writeFileSync(path.join(extractDir, BundleMarkerFile), `${JSON.stringify(input.marker, null, 2)}\n`);
+
+    if (existsSync(runtimeRoot)) renameSync(runtimeRoot, oldDir);
+    try {
+      renameSync(extractDir, runtimeRoot);
+    } catch (error) {
+      if (existsSync(oldDir)) renameSync(oldDir, runtimeRoot);
+      throw error;
+    }
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+    rmSync(oldDir, { recursive: true, force: true });
+  }
+}
+
+function extractTarball(archivePath: string, destDir: string): void {
+  const result = spawnSync("tar", ["-xzf", archivePath, "-C", destDir], { encoding: "utf8", stdio: "pipe" });
+  if (result.status === 0) return;
+  const stderr = (result.stderr ?? "").trim();
+  throw new OpenCanonError([
+    createOpenCanonDiagnostic({
+      code: RuntimeUpdateDiagnosticCode.Failed,
+      message: "Could not extract OpenCanon runtime bundle.",
+      details: [stderr || `tar exited with status ${result.status}`, `Archive: ${archivePath}`],
+    }),
+  ]);
+}
+
+function readBundleMarker(runtimeRoot: string): BundleMarker | undefined {
+  const markerPath = path.join(runtimeRoot, BundleMarkerFile);
+  if (!existsSync(markerPath)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(markerPath, "utf8")) as unknown;
+    if (!isRecord(parsed)) return undefined;
+    const { skillVersion, sha256, target } = parsed as { skillVersion?: unknown; sha256?: unknown; target?: unknown };
+    if (typeof skillVersion !== "string" || typeof sha256 !== "string" || typeof target !== "string") return undefined;
+    if (!Sha256Pattern.test(sha256) || !isEngineTarget(target)) return undefined;
+    return { skillVersion, sha256: sha256.toLowerCase(), target };
+  } catch {
+    return undefined;
+  }
 }
 
 async function loadRuntimeManifest(source: string, cwd: string): Promise<RuntimeManifestLoad> {
@@ -250,33 +284,25 @@ function parseRuntimeManifest(text: string, source: string): RuntimeManifest {
   if (!RuntimeChannelPattern.test(channel) || channel === "latest") diagnostics.push("channel must match [a-z][a-z0-9._-]* and cannot be latest.");
   if (typeof parsed.skillVersion !== "string" || parsed.skillVersion.length === 0) diagnostics.push("skillVersion must be a non-empty string.");
   if (typeof parsed.requiredBun !== "string" || parsed.requiredBun.length === 0) diagnostics.push("requiredBun must be a non-empty string.");
-  if (!Number.isInteger(parsed.daemonSchema) || Number(parsed.daemonSchema) < 1) diagnostics.push("daemonSchema must be a positive integer.");
-  if (!isRecord(parsed.engine)) diagnostics.push("engine must be an object keyed by target.");
+  if (!isRecord(parsed.bundles)) diagnostics.push("bundles must be an object keyed by target.");
 
-  const runtime = parseRuntimeArchiveAsset(parsed.runtime, diagnostics);
-  const engine: Partial<Record<EngineTarget, RuntimeManifestAsset>> = {};
-  if (isRecord(parsed.engine)) {
-    for (const [target, asset] of Object.entries(parsed.engine)) {
+  const bundles: Partial<Record<EngineTarget, RuntimeBundleAsset>> = {};
+  if (isRecord(parsed.bundles)) {
+    for (const [target, asset] of Object.entries(parsed.bundles)) {
       if (!isEngineTarget(target)) {
-        diagnostics.push(`engine.${target} is not a supported target.`);
+        diagnostics.push(`bundles.${target} is not a supported target.`);
         continue;
       }
       if (!isRecord(asset)) {
-        diagnostics.push(`engine.${target} must be an object.`);
+        diagnostics.push(`bundles.${target} must be an object.`);
         continue;
       }
       const url = asset.url;
       const sha256 = asset.sha256;
-      const schemaVersion = asset.schemaVersion;
-      if (typeof url !== "string" || url.length === 0) diagnostics.push(`engine.${target}.url must be a non-empty string.`);
-      if (typeof sha256 !== "string" || !Sha256Pattern.test(sha256)) diagnostics.push(`engine.${target}.sha256 must be a 64-character SHA-256 hex string.`);
-      if (!Number.isInteger(schemaVersion) || Number(schemaVersion) < 1) diagnostics.push(`engine.${target}.schemaVersion must be a positive integer.`);
-      if (typeof url === "string" && typeof sha256 === "string" && Sha256Pattern.test(sha256) && Number.isInteger(schemaVersion) && Number(schemaVersion) >= 1) {
-        engine[target] = {
-          url,
-          sha256: sha256.toLowerCase(),
-          schemaVersion: Number(schemaVersion),
-        };
+      if (typeof url !== "string" || url.length === 0) diagnostics.push(`bundles.${target}.url must be a non-empty string.`);
+      if (typeof sha256 !== "string" || !Sha256Pattern.test(sha256)) diagnostics.push(`bundles.${target}.sha256 must be a 64-character SHA-256 hex string.`);
+      if (typeof url === "string" && typeof sha256 === "string" && Sha256Pattern.test(sha256)) {
+        bundles[target] = { url, sha256: sha256.toLowerCase() };
       }
     }
   }
@@ -287,31 +313,11 @@ function parseRuntimeManifest(text: string, source: string): RuntimeManifest {
     channel,
     skillVersion: parsed.skillVersion as string,
     requiredBun: parsed.requiredBun as string,
-    daemonSchema: parsed.daemonSchema as number,
-    ...(runtime ? { runtime } : {}),
-    engine,
+    bundles,
   };
 }
 
-function parseRuntimeArchiveAsset(value: unknown, diagnostics: string[]): RuntimeArchiveAsset | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) {
-    diagnostics.push("runtime must be an object when provided.");
-    return undefined;
-  }
-  const url = value.url;
-  const sha256 = value.sha256;
-  const format = value.format;
-  if (typeof url !== "string" || url.length === 0) diagnostics.push("runtime.url must be a non-empty string.");
-  if (typeof sha256 !== "string" || !Sha256Pattern.test(sha256)) diagnostics.push("runtime.sha256 must be a 64-character SHA-256 hex string.");
-  if (format !== RuntimeArchiveFormat.TarGz) diagnostics.push(`runtime.format must be ${RuntimeArchiveFormat.TarGz}.`);
-  if (typeof url === "string" && typeof sha256 === "string" && Sha256Pattern.test(sha256) && format === RuntimeArchiveFormat.TarGz) {
-    return { url, sha256: sha256.toLowerCase(), format };
-  }
-  return undefined;
-}
-
-function validateRuntimeCompatibility(manifest: RuntimeManifest, asset: RuntimeManifestAsset): void {
+function validateRuntimeCompatibility(manifest: RuntimeManifest): void {
   const diagnostics: OpenCanonDiagnostic[] = [];
   if (manifest.requiredBun !== requiredBunVersion) {
     diagnostics.push(
@@ -319,24 +325,6 @@ function validateRuntimeCompatibility(manifest: RuntimeManifest, asset: RuntimeM
         code: RuntimeUpdateDiagnosticCode.Failed,
         message: "Runtime manifest targets a different Bun version.",
         details: [`Manifest requires ${manifest.requiredBun}; current runtime requires ${requiredBunVersion}.`],
-      }),
-    );
-  }
-  if (manifest.daemonSchema !== daemonSchemaVersion) {
-    diagnostics.push(
-      createOpenCanonDiagnostic({
-        code: RuntimeUpdateDiagnosticCode.Failed,
-        message: "Runtime manifest targets a different daemon schema.",
-        details: [`Manifest schema ${manifest.daemonSchema}; current schema ${daemonSchemaVersion}.`],
-      }),
-    );
-  }
-  if (asset.schemaVersion !== daemonSchemaVersion) {
-    diagnostics.push(
-      createOpenCanonDiagnostic({
-        code: RuntimeUpdateDiagnosticCode.Failed,
-        message: "Engine runtime asset targets a different schema.",
-        details: [`Asset schema ${asset.schemaVersion}; current daemon schema ${daemonSchemaVersion}.`],
       }),
     );
   }
@@ -370,8 +358,8 @@ async function readTextSource(source: string, cwd: string): Promise<RuntimeManif
 async function readBytes(source: string, cwd: string): Promise<Buffer> {
   const parsed = parseAbsoluteUrl(source);
   if (parsed?.protocol === UrlProtocol.Http || parsed?.protocol === UrlProtocol.Https) {
-    const response = await fetchTrusted(parsed, "runtime asset");
-    if (!response.ok) throw updateFailed(`Could not download runtime asset: ${response.status} ${response.statusText}.`, source);
+    const response = await fetchTrusted(parsed, "runtime bundle");
+    if (!response.ok) throw updateFailed(`Could not download runtime bundle: ${response.status} ${response.statusText}.`, source);
     return Buffer.from(await response.arrayBuffer());
   }
   const filePath = parsed?.protocol === UrlProtocol.File ? fileURLToPath(parsed) : path.resolve(cwd, source);
@@ -420,10 +408,6 @@ function parseAbsoluteUrl(source: string): URL | undefined {
   } catch {
     return undefined;
   }
-}
-
-function sha256File(filePath: string): string {
-  return sha256Bytes(readFileSync(filePath));
 }
 
 function sha256Bytes(bytes: Buffer): string {

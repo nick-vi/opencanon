@@ -17,7 +17,7 @@ import {
 import { buildDaemonSnapshot, buildRelatedCanon, daemonSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type DaemonSnapshot } from "./snapshot.ts";
 import { TreeScope, buildTreeResponse, filterTreeFiles, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { StreamEventType, createEventBroadcaster, eventStream, indexedEvent, snapshotEvent } from "./server-events.ts";
-import { assertDaemonPrerequisites, daemonSchemaVersion, renderPrerequisiteFailure, requiredBunVersion } from "./runtime.ts";
+import { assertDaemonPrerequisites, renderPrerequisiteFailure, requiredBunVersion } from "./runtime.ts";
 import { createDaemonStore, type DaemonStore } from "./state.ts";
 import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyStudioValidator, listStudioFactories, listStudioValidators, previewStudioValidator, runStudioValidatorFixtures } from "./studio.ts";
@@ -456,8 +456,6 @@ export async function checkDaemonPrerequisites(): Promise<string> {
       "",
       `Bun: ${prerequisites.bunVersion} (required ${requiredBunVersion})`,
       `Engine: ${engine.engineVersion} (package ${engine.packageVersion}, NAPI ${engine.napiVersion})`,
-      `Daemon schema: ${daemonSchemaVersion}`,
-      `Engine schema: ${engine.schemaVersion}`,
       "State: SQLite engine",
       "Watcher: engine notify",
     ].join("\n");

@@ -13,3 +13,4 @@ tmp/
 packages/ui/dist/
 packages/engine/binaries/
 crates/*/target/
+.claude/

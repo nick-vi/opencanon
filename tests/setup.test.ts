@@ -89,29 +89,37 @@ test("setup dry-run reports planned scaffold without writing files", () => {
 test("setup can install engine runtime from a release manifest", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-setup-manifest-"));
   const target = currentEngineTarget();
-  const bytes = Buffer.from("manifest-engine-runtime");
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const assetPath = path.join(rootDir, "asset.node");
   const manifestPath = path.join(rootDir, "manifest.json");
+  const engineBindingSuffixes: Record<string, string> = {
+    "darwin-arm64": "darwin-arm64",
+    "darwin-x64": "darwin-x64",
+    "linux-arm64": "linux-arm64-gnu",
+    "linux-x64": "linux-x64-gnu",
+    "win32-x64": "win32-x64-msvc",
+  };
 
   try {
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(path.join(rootDir, "sample.ts"), "export const sample = true;\n");
-    writeFileSync(assetPath, bytes);
+
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    const stage = path.join(rootDir, "stage");
+    mkdirSync(path.join(stage, "engine", target), { recursive: true });
+    writeFileSync(path.join(stage, "cli.js"), "export const runtime = true;\n");
+    writeFileSync(path.join(stage, "validators.js"), "export const validators = true;\n");
+    writeFileSync(path.join(stage, "engine", target, `opencanon.${engineBindingSuffixes[target]}.node`), "manifest-engine-runtime");
+    const bundlePath = path.join(rootDir, "bundle.tar.gz");
+    const tarResult = spawnSync("tar", ["-czf", bundlePath, "-C", stage, "."], { encoding: "utf8" });
+    assert.equal(tarResult.status, 0, tarResult.stderr);
+    const sha256 = createHash("sha256").update(readFileSync(bundlePath)).digest("hex");
+
     writeFileSync(
       manifestPath,
       JSON.stringify({
         version: 1,
         skillVersion: "0.1.0",
         requiredBun: "1.3.13",
-        daemonSchema: 1,
-        engine: {
-          [target]: {
-            url: "./asset.node",
-            sha256,
-            schemaVersion: 1,
-          },
-        },
+        bundles: { [target]: { url: "./bundle.tar.gz", sha256 } },
       }),
     );
 

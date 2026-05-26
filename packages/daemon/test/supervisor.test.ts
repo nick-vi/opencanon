@@ -88,7 +88,6 @@ test("daemon status renders runtime health and state details", () => {
         message: "ready",
         health: {
           status: "ready",
-          schemaVersion: 1,
           engine: {
             packageVersion: "0.1.0",
             engineVersion: "0.1.0",
@@ -101,7 +100,6 @@ test("daemon status renders runtime health and state details", () => {
         state: {
           health: {
             status: "ready",
-            schemaVersion: 1,
             engine: {
               packageVersion: "0.1.0",
               engineVersion: "0.1.0",

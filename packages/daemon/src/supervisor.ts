@@ -307,7 +307,6 @@ export function renderDaemonStatusMarkdown(inspection: DaemonInspection | undefi
   if (inspection.health) {
     lines.push(
       `Health: ${inspection.health.status}`,
-      `Schema: ${inspection.health.schemaVersion}`,
       `Engine: ${inspection.health.engine.engineVersion} (package ${inspection.health.engine.packageVersion}, NAPI ${inspection.health.engine.napiVersion})`,
       `Watcher: ${formatWatcherStatus(inspection.health.watcher)}`,
     );

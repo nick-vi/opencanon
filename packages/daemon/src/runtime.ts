@@ -8,7 +8,6 @@ import {
 import { loadEngine, type Engine } from "@opencanon/engine";
 
 export const requiredBunVersion = "1.3.13";
-export const daemonSchemaVersion = 1;
 const getEngine = lazy(() => loadEngine());
 
 export type DaemonPrerequisites = {
@@ -64,5 +63,5 @@ export function renderPrerequisiteFailure(error: unknown): string {
 }
 
 export function daemonVersionSummary(): string {
-  return `Bun ${requiredBunVersion}, engine schema ${daemonSchemaVersion}`;
+  return `Bun ${requiredBunVersion}`;
 }

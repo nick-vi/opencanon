@@ -550,8 +550,8 @@ async function installSetupRuntime(rootDir: string, query: SetupQuery): Promise<
             : "Engine runtime installed from the release manifest.",
       details: [
         `target: ${result.check.target}`,
-        `asset: ${result.check.resolvedAssetSource}`,
-        `runtime: ${path.relative(rootDir, result.check.runtimePath)}`,
+        `bundle: ${result.check.resolvedBundleSource}`,
+        `runtime: ${path.relative(rootDir, result.check.runtimeRoot)}`,
         `sha256: ${result.check.expectedSha256}`,
       ],
     };

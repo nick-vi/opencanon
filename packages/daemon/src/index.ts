@@ -4,11 +4,11 @@ export { checkDaemonPrerequisites, startOpenCanonDaemon } from "./server.ts";
 export type { DaemonStore, StoreSnapshotInput, StoreState } from "./state.ts";
 export { createDaemonStore, openProjectStore } from "./state.ts";
 export type { DaemonPrerequisites } from "./runtime.ts";
-export { assertDaemonPrerequisites, daemonSchemaVersion, daemonVersionSummary, renderPrerequisiteFailure, requiredBunVersion } from "./runtime.ts";
+export { assertDaemonPrerequisites, daemonVersionSummary, renderPrerequisiteFailure, requiredBunVersion } from "./runtime.ts";
 export type { DaemonSnapshot, RelatedCanon, RelatedCanonQuery } from "./snapshot.ts";
 export { buildDaemonSnapshot, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot } from "./snapshot.ts";
 export { normalizeDaemonPort, runDaemonCommand, runDevCommand } from "./cli.ts";
-export type { EngineTarget, RuntimeArchiveAsset, RuntimeManifest, RuntimeManifestAsset, RuntimeUpdateApplyResult, RuntimeUpdateCheck, RuntimeUpdateStatus } from "./update.ts";
+export type { EngineTarget, RuntimeBundleAsset, RuntimeManifest, RuntimeUpdateApplyResult, RuntimeUpdateCheck, RuntimeUpdateStatus } from "./update.ts";
 export { applyRuntimeUpdate, checkRuntimeUpdate, currentEngineTarget, engineRuntimePathForTarget } from "./update.ts";
 export type { DaemonInspection, DaemonRegistryEntry, DaemonStatus, StartSupervisedDaemonResult, StopDaemonResult } from "./supervisor.ts";
 export {

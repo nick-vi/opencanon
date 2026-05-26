@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
-import { mkdtempSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -53,32 +53,39 @@ function shouldUseDefaultManifest(args: string[]): boolean {
 async function installRuntimeFromManifest(manifestRef: string) {
   const manifestUrl = toUrl(manifestRef);
   const manifest = await readJson(manifestUrl);
-  const runtime = manifest.runtime;
-  if (!runtime || runtime.format !== "tar.gz" || typeof runtime.url !== "string" || typeof runtime.sha256 !== "string") {
-    throw new Error("OpenCanon manifest does not contain a tar.gz runtime asset.");
+  const target = `${process.platform}-${process.arch}`;
+  const bundle = manifest?.bundles?.[target];
+  if (!bundle || typeof bundle.url !== "string" || typeof bundle.sha256 !== "string") {
+    throw new Error(`OpenCanon manifest does not contain a bundle for ${target}.`);
   }
 
-  const runtimeUrl = new URL(runtime.url, manifestUrl);
-  if (!["https:", "file:"].includes(runtimeUrl.protocol)) {
-    throw new Error(`OpenCanon runtime URL must use https: or file:, got ${runtimeUrl.protocol}`);
+  const bundleUrl = new URL(bundle.url, manifestUrl);
+  if (!["https:", "file:"].includes(bundleUrl.protocol)) {
+    throw new Error(`OpenCanon bundle URL must use https: or file:, got ${bundleUrl.protocol}`);
   }
 
-  const archiveBytes = await readBytes(runtimeUrl);
+  const archiveBytes = await readBytes(bundleUrl);
   const actual = createHash("sha256").update(archiveBytes).digest("hex");
-  if (actual !== runtime.sha256) throw new Error(`OpenCanon runtime checksum mismatch: expected ${runtime.sha256}, got ${actual}`);
+  if (actual !== bundle.sha256) throw new Error(`OpenCanon bundle checksum mismatch: expected ${bundle.sha256}, got ${actual}`);
 
   const tempDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-"));
-  const archivePath = path.join(tempDir, "runtime.tar.gz");
+  const archivePath = path.join(tempDir, "bundle.tar.gz");
+  const runtimeRoot = path.join(skillRoot, "runtime");
   try {
     writeFileSync(archivePath, archiveBytes);
     assertSafeArchive(archivePath);
-    const result = Bun.spawnSync(["tar", "-xzf", archivePath, "-C", skillRoot], { stdout: "pipe", stderr: "pipe" });
+    mkdirSync(runtimeRoot, { recursive: true });
+    const result = Bun.spawnSync(["tar", "-xzf", archivePath, "-C", runtimeRoot], { stdout: "pipe", stderr: "pipe" });
     if (!result.success) throw new Error(`OpenCanon runtime extraction failed: ${new TextDecoder().decode(result.stderr).trim()}`);
+    writeFileSync(
+      path.join(runtimeRoot, ".bundle.json"),
+      `${JSON.stringify({ skillVersion: manifest.skillVersion, sha256: bundle.sha256, target }, null, 2)}\n`,
+    );
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 
-  if (!existsSync(runtimeCliPath)) throw new Error(`OpenCanon runtime archive did not install ${runtimeCli}.`);
+  if (!existsSync(runtimeCliPath)) throw new Error(`OpenCanon runtime bundle did not install ${runtimeCli}.`);
 }
 
 async function readJson(url: URL): Promise<any> {
@@ -104,7 +111,7 @@ function assertSafeArchive(archivePath: string) {
 
   const entries = new TextDecoder().decode(result.stdout).split(/\r?\n/u).filter(Boolean);
   for (const entry of entries) {
-    if (path.isAbsolute(entry) || entry.includes("..") || !entry.startsWith("runtime/")) {
+    if (path.isAbsolute(entry) || entry.includes("..")) {
       throw new Error(`OpenCanon runtime archive contains unsafe entry: ${entry}`);
     }
   }

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.14 - 2026-05-26
+
+- Added scoped graph search and symbol-kind filtering for repository queries.
+- Added graph-backed migration and unused-export validation improvements.
+- Added refactor planning APIs and refreshed release/runtime documentation.
+
 ## v0.3.13 - 2026-05-25
 
 - Fixed GitHub Actions file descriptor exhaustion by running UI smoke before the parallel Vitest pool.

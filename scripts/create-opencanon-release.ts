@@ -4,16 +4,15 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  daemonSchemaVersion,
-  requiredBunVersion,
-} from "../packages/daemon/src/runtime.ts";
+import { requiredBunVersion } from "../packages/daemon/src/runtime.ts";
 import {
   engineBindingName,
   type EngineArch,
@@ -23,7 +22,6 @@ import {
 const rootDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const ManifestFileName = "opencanon-runtime-manifest.json";
 const LatestFileName = "latest.json";
-const RuntimeArchiveFileName = "opencanon-skill-runtime.tar.gz";
 const ChecksumFileName = "SHA256SUMS";
 const ChannelNamePattern = /^[a-z][a-z0-9._-]*$/u;
 
@@ -62,27 +60,20 @@ export type CreateOpenCanonReleaseInput = {
 
 export type CreateOpenCanonReleaseResult = {
   assetDir: string;
+  bundlePaths: Partial<Record<EngineTarget, string>>;
   channel: string;
   checksumPath: string;
   latestPath: string;
   manifestPath: string;
   missingTargets: EngineTarget[];
   outDir: string;
-  runtimeArchivePath?: string;
   skillVersion: string;
   targets: EngineTarget[];
 };
 
-type RuntimeManifestAsset = {
+type RuntimeBundleAsset = {
   url: string;
   sha256: string;
-  schemaVersion: number;
-};
-
-type RuntimeArchiveAsset = {
-  url: string;
-  sha256: string;
-  format: "tar.gz";
 };
 
 type RuntimeManifest = {
@@ -90,9 +81,7 @@ type RuntimeManifest = {
   channel: string;
   skillVersion: string;
   requiredBun: string;
-  daemonSchema: number;
-  runtime?: RuntimeArchiveAsset;
-  engine: Partial<Record<EngineTarget, RuntimeManifestAsset>>;
+  bundles: Partial<Record<EngineTarget, RuntimeBundleAsset>>;
 };
 
 type CliOptions = Required<
@@ -103,67 +92,49 @@ type CliOptions = Required<
 export function createOpenCanonRelease(
   input: CreateOpenCanonReleaseInput = {},
 ): CreateOpenCanonReleaseResult {
-  const assetDir = path.resolve(
-    rootDir,
-    input.assetDir ?? "packages/engine/binaries",
-  );
-  const outDir = path.resolve(
-    rootDir,
-    input.outDir ?? "dist/opencanon-release",
-  );
+  const assetDir = path.resolve(rootDir, input.assetDir ?? "packages/engine/binaries");
+  const outDir = path.resolve(rootDir, input.outDir ?? "dist/opencanon-release");
   const channel = input.channel ?? "stable";
   if (!ChannelNamePattern.test(channel) || channel === "latest") {
     throw new Error("Release channel must match [a-z][a-z0-9._-]* and cannot be latest.");
   }
   const skillVersion = input.skillVersion ?? defaultSkillVersion();
+  const runtimeDir = path.resolve(rootDir, input.runtimeDir ?? ".agents/skills/opencanon/runtime");
 
   if (input.clean) rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
-  const engine: RuntimeManifest["engine"] = {};
+  if (!existsSync(runtimeDir)) {
+    if (input.requireRuntime) throw new Error(`Missing generated skill runtime ${runtimeDir}. Run bun run build:skill-runtime first.`);
+    throw new Error(`Generated skill runtime ${runtimeDir} is required to assemble bundles. Run bun run build:skill-runtime first.`);
+  }
+
+  const bundles: RuntimeManifest["bundles"] = {};
+  const bundlePaths: Partial<Record<EngineTarget, string>> = {};
   const checksums: Array<{ fileName: string; sha256: string }> = [];
   const missingTargets: EngineTarget[] = [];
-  const runtimeArchive = packageRuntimeArchive({
-    assetBaseUrl: input.assetBaseUrl,
-    checksums,
-    outDir,
-    requireRuntime: Boolean(input.requireRuntime),
-    runtimeDir: path.resolve(rootDir, input.runtimeDir ?? ".agents/skills/opencanon/runtime"),
-  });
 
   for (const target of targetDefinitions) {
-    const fileName = engineBindingName(
-      "opencanon",
-      target.platform,
-      target.arch,
-    );
+    const fileName = engineBindingName("opencanon", target.platform, target.arch);
     const source = engineAssetPath(assetDir, target.target, fileName);
     if (!source) {
       missingTargets.push(target.target);
       continue;
     }
-
-    const outputPath = path.join(outDir, fileName);
-    if (path.resolve(source) !== path.resolve(outputPath))
-      copyFileSync(source, outputPath);
-    const sha256 = sha256File(outputPath);
-    checksums.push({ fileName, sha256 });
-    engine[target.target] = {
-      url: assetUrl(input.assetBaseUrl, fileName),
-      sha256,
-      schemaVersion: daemonSchemaVersion,
-    };
+    const bundleFileName = `opencanon-runtime-${target.target}.tar.gz`;
+    const bundlePath = path.join(outDir, bundleFileName);
+    packageBundle({ outputPath: bundlePath, runtimeDir, target: target.target, engineFileName: fileName, engineSource: source });
+    const sha256 = sha256File(bundlePath);
+    checksums.push({ fileName: bundleFileName, sha256 });
+    bundles[target.target] = { url: assetUrl(input.assetBaseUrl, bundleFileName), sha256 };
+    bundlePaths[target.target] = bundlePath;
   }
 
   if (input.requireAll && missingTargets.length > 0) {
-    throw new Error(
-      `Missing engine release assets for: ${missingTargets.join(", ")}.`,
-    );
+    throw new Error(`Missing engine release assets for: ${missingTargets.join(", ")}.`);
   }
-  if (Object.keys(engine).length === 0) {
-    throw new Error(
-      `No engine release assets found in ${assetDir}. Run bun run build:engine first.`,
-    );
+  if (Object.keys(bundles).length === 0) {
+    throw new Error(`No engine release assets found in ${assetDir}. Run bun run build:engine first.`);
   }
 
   const manifest: RuntimeManifest = {
@@ -171,9 +142,7 @@ export function createOpenCanonRelease(
     channel,
     skillVersion,
     requiredBun: requiredBunVersion,
-    daemonSchema: daemonSchemaVersion,
-    ...(runtimeArchive.asset ? { runtime: runtimeArchive.asset } : {}),
-    engine,
+    bundles,
   };
   const manifestPath = path.join(outDir, ManifestFileName);
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
@@ -182,79 +151,76 @@ export function createOpenCanonRelease(
   writeFileSync(latestPath, manifestText);
   const channelPath = path.join(outDir, `${channel}.json`);
   writeFileSync(channelPath, manifestText);
-  checksums.push({
-    fileName: ManifestFileName,
-    sha256: sha256File(manifestPath),
-  });
-  checksums.push({
-    fileName: LatestFileName,
-    sha256: sha256File(latestPath),
-  });
-  checksums.push({
-    fileName: `${channel}.json`,
-    sha256: sha256File(channelPath),
-  });
+  checksums.push({ fileName: ManifestFileName, sha256: sha256File(manifestPath) });
+  checksums.push({ fileName: LatestFileName, sha256: sha256File(latestPath) });
+  checksums.push({ fileName: `${channel}.json`, sha256: sha256File(channelPath) });
 
   const checksumPath = path.join(outDir, ChecksumFileName);
   writeFileSync(
     checksumPath,
-    checksums.map((entry) => `${entry.sha256}  ${entry.fileName}`).join("\n") +
-      "\n",
+    checksums.map((entry) => `${entry.sha256}  ${entry.fileName}`).join("\n") + "\n",
   );
 
   return {
     assetDir,
+    bundlePaths,
     channel,
     checksumPath,
     latestPath,
     manifestPath,
     missingTargets,
     outDir,
-    runtimeArchivePath: runtimeArchive.path,
     skillVersion,
-    targets: Object.keys(engine) as EngineTarget[],
+    targets: Object.keys(bundles) as EngineTarget[],
   };
 }
 
-function packageRuntimeArchive(input: {
-  assetBaseUrl?: string;
-  checksums: Array<{ fileName: string; sha256: string }>;
-  outDir: string;
-  requireRuntime: boolean;
+function packageBundle(input: {
+  outputPath: string;
   runtimeDir: string;
-}): { asset?: RuntimeArchiveAsset; path?: string } {
-  if (!existsSync(input.runtimeDir)) {
-    if (input.requireRuntime) throw new Error(`Missing generated skill runtime ${input.runtimeDir}. Run bun run build:skill-runtime first.`);
-    return {};
+  target: EngineTarget;
+  engineFileName: string;
+  engineSource: string;
+}): void {
+  const stagingDir = mkdtempSync(path.join(tmpdir(), "opencanon-bundle-"));
+  try {
+    // Bundle layout matches the live runtime/ tree: cli.js + validators.js + engine/<target>/<binding>.node, plus everything else under runtime/ except foreign engine binaries.
+    copyTree(input.runtimeDir, stagingDir, (relPath) => {
+      if (relPath === "engine" || relPath.startsWith(`engine${path.sep}`) || relPath.startsWith("engine/")) return false;
+      return true;
+    });
+    const engineTargetDir = path.join(stagingDir, "engine", input.target);
+    mkdirSync(engineTargetDir, { recursive: true });
+    copyFileSync(input.engineSource, path.join(engineTargetDir, input.engineFileName));
+    const result = spawnSync("tar", ["-czf", input.outputPath, "-C", stagingDir, "."], { encoding: "utf8" });
+    if (result.status !== 0) {
+      throw new Error(`tar failed for ${input.target}: ${(result.stderr ?? "").trim() || `status ${result.status}`}`);
+    }
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
   }
-
-  const outputPath = path.join(input.outDir, RuntimeArchiveFileName);
-  run("tar", [
-    "--exclude",
-    "runtime/engine",
-    "-czf",
-    outputPath,
-    "-C",
-    path.dirname(input.runtimeDir),
-    path.basename(input.runtimeDir),
-  ]);
-  const sha256 = sha256File(outputPath);
-  input.checksums.push({ fileName: RuntimeArchiveFileName, sha256 });
-  return {
-    path: outputPath,
-    asset: {
-      url: assetUrl(input.assetBaseUrl, RuntimeArchiveFileName),
-      sha256,
-      format: "tar.gz",
-    },
-  };
 }
 
-function engineAssetPath(
-  assetDir: string,
-  target: EngineTarget,
-  fileName: string,
-): string | undefined {
+function copyTree(source: string, destination: string, filter: (relPath: string) => boolean, currentRel = ""): void {
+  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const childSource = path.join(source, entry.name);
+    const childRel = currentRel ? path.join(currentRel, entry.name) : entry.name;
+    if (!filter(childRel)) continue;
+    const childDest = path.join(destination, entry.name);
+    if (entry.isDirectory()) {
+      mkdirSync(childDest, { recursive: true });
+      copyTree(childSource, childDest, filter, childRel);
+    } else if (entry.isFile()) {
+      copyFileSync(childSource, childDest);
+    } else if (entry.isSymbolicLink()) {
+      copyFileSync(childSource, childDest);
+    }
+    void statSync;
+  }
+}
+
+function engineAssetPath(assetDir: string, target: EngineTarget, fileName: string): string | undefined {
   const candidates = [
     path.join(assetDir, fileName),
     path.join(assetDir, target, fileName),
@@ -280,15 +246,7 @@ function sha256File(filePath: string): string {
 function defaultSkillVersion(): string {
   const githubRef = process.env.GITHUB_REF_NAME?.trim();
   if (githubRef) return githubRef;
-
-  const result = spawnSync(
-    "git",
-    ["describe", "--tags", "--always", "--dirty"],
-    {
-      cwd: rootDir,
-      encoding: "utf8",
-    },
-  );
+  const result = spawnSync("git", ["describe", "--tags", "--always", "--dirty"], { cwd: rootDir, encoding: "utf8" });
   if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
   return "0.1.0-dev";
 }
@@ -297,21 +255,15 @@ function parseCliOptions(args: string[]): CliOptions {
   const options: CliOptions = { clean: false, requireAll: false, requireRuntime: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--asset-base-url")
-      options.assetBaseUrl = requiredValue(args, ++index, arg);
-    else if (arg === "--asset-dir")
-      options.assetDir = requiredValue(args, ++index, arg);
-    else if (arg === "--channel")
-      options.channel = requiredValue(args, ++index, arg);
+    if (arg === "--asset-base-url") options.assetBaseUrl = requiredValue(args, ++index, arg);
+    else if (arg === "--asset-dir") options.assetDir = requiredValue(args, ++index, arg);
+    else if (arg === "--channel") options.channel = requiredValue(args, ++index, arg);
     else if (arg === "--clean") options.clean = true;
-    else if (arg === "--out-dir")
-      options.outDir = requiredValue(args, ++index, arg);
+    else if (arg === "--out-dir") options.outDir = requiredValue(args, ++index, arg);
     else if (arg === "--require-all") options.requireAll = true;
     else if (arg === "--require-runtime") options.requireRuntime = true;
-    else if (arg === "--runtime-dir")
-      options.runtimeDir = requiredValue(args, ++index, arg);
-    else if (arg === "--skill-version")
-      options.skillVersion = requiredValue(args, ++index, arg);
+    else if (arg === "--runtime-dir") options.runtimeDir = requiredValue(args, ++index, arg);
+    else if (arg === "--skill-version") options.skillVersion = requiredValue(args, ++index, arg);
     else if (arg === "-h" || arg === "--help") {
       printHelp();
       process.exit(0);
@@ -324,8 +276,7 @@ function parseCliOptions(args: string[]): CliOptions {
 
 function requiredValue(args: string[], index: number, flag: string): string {
   const value = args[index];
-  if (!value || value.startsWith("--"))
-    throw new Error(`${flag} requires a value.`);
+  if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value.`);
   return value;
 }
 
@@ -336,12 +287,12 @@ function printHelp(): void {
 Options:
   --asset-dir <dir>        Directory containing engine .node files. Default: packages/engine/binaries.
   --out-dir <dir>          Release output directory. Default: dist/opencanon-release.
-  --asset-base-url <url>   Base URL or path for manifest asset URLs. Default: colocated relative files.
+  --asset-base-url <url>   Base URL or path for manifest bundle URLs. Default: colocated relative files.
   --channel <name>         Release channel. Default: stable.
   --skill-version <value>  Version written to the manifest. Default: current tag/commit.
   --runtime-dir <dir>      Generated skill runtime directory. Default: .agents/skills/opencanon/runtime.
   --require-all            Fail unless every supported target is present.
-  --require-runtime        Fail unless the generated skill runtime can be archived.
+  --require-runtime        Fail unless the generated skill runtime is present.
   --clean                  Remove out-dir before writing.
 `);
 }
@@ -354,11 +305,4 @@ if (import.meta.main) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
-}
-
-function run(command: string, args: string[]): void {
-  const result = spawnSync(command, args, { cwd: rootDir, encoding: "utf8", stdio: "pipe" });
-  if (result.status === 0) return;
-  const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
-  throw new Error(output || `Command failed: ${command} ${args.join(" ")}`);
 }

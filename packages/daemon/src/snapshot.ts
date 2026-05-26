@@ -25,7 +25,6 @@ import {
   type Validator,
 } from "@opencanon/core";
 import type { Engine } from "@opencanon/engine";
-import { daemonSchemaVersion } from "./runtime.ts";
 import type { DaemonStore } from "./state.ts";
 
 const allFactKinds: FactKind[] = ["imports", "exports", "symbols", "calls", "literals", "comments"];
@@ -169,7 +168,6 @@ export async function buildDaemonSnapshot(input: { cwd: string; engine: Engine; 
 
   const health: DaemonHealth = {
     status: validation.diagnostics.length > 0 ? "failed" : "ready",
-    schemaVersion: daemonSchemaVersion,
     engine: input.engine.version(),
     watcher: input.store.project.status().watcher,
     startedAt: new Date().toISOString(),

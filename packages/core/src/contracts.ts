@@ -694,7 +694,6 @@ export type DaemonResponse = z.infer<typeof DaemonResponseSchema>;
 
 export const DaemonHealthSchema = z.object({
   status: z.enum(["ready", "indexing", "stale", "failed"]),
-  schemaVersion: z.number().int().min(1),
   engine: EngineVersionSchema,
   watcher: WatcherStatusSchema.default({ running: false, bufferedEvents: 0, stale: false }),
   startedAt: z.string().datetime(),

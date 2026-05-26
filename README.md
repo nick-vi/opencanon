@@ -103,19 +103,12 @@ Minimal manifest shape:
 {
   "version": 1,
   "channel": "stable",
-  "skillVersion": "0.3.13",
+  "skillVersion": "0.3.14",
   "requiredBun": "1.3.13",
-  "daemonSchema": 1,
-  "runtime": {
-    "url": "./opencanon-skill-runtime.tar.gz",
-    "sha256": "<64 hex chars>",
-    "format": "tar.gz"
-  },
-  "engine": {
+  "bundles": {
     "darwin-arm64": {
-      "url": "./opencanon.darwin-arm64.node",
-      "sha256": "<64 hex chars>",
-      "schemaVersion": 1
+      "url": "./opencanon-runtime-darwin-arm64.tar.gz",
+      "sha256": "<64 hex chars>"
     }
   }
 }

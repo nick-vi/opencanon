@@ -63,18 +63,18 @@ Updating a pin requires updating package manifests, lockfiles, and the doctor ve
 
 ### Runtime Release Manifest
 
-Engine runtime distribution is manifest-driven. The CLI detects the current target from `process.platform` and `process.arch`; agents do not choose binary URLs manually.
+Engine runtime distribution is manifest-driven. The CLI detects the current target from `process.platform` and `process.arch`; agents do not choose bundle URLs manually.
 
 Manifest contract:
 
 - `version: 1`
-- skill/runtime version
+- skill version
 - required Bun version
-- daemon schema version
-- engine assets keyed by target, such as `darwin-arm64`, `linux-x64`, and `win32-x64`
-- asset URL, SHA-256, and engine schema version
+- one atomic bundle per supported target (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, `win32-x64`), each with a `url` and SHA-256
 
-`opencanon update check --manifest <path-or-url>` reads the manifest, selects the current target, validates Bun and schema compatibility, and reports whether the local engine binary is missing, current, or different. `opencanon update apply --manifest <path-or-url>` refuses to write while the project daemon is running, downloads the target asset over HTTPS, `file:`, or a local path, verifies SHA-256 before install, writes the engine binary atomically, and leaves daemon/engine version validation to the next `daemon check` or daemon start.
+Every bundle is a single `tar.gz` whose contents drop directly into `.agents/skills/opencanon/runtime/`: `cli.js`, `validators.js`, and `engine/<target>/opencanon.<target>.node`. Engine binary and JS runtime ship together to make schema drift impossible.
+
+`opencanon update check --manifest <path-or-url>` reads the manifest, selects the current target, validates the pinned Bun version, and reports `current`, `missing`, or `update-available` against the `.bundle.json` marker. `opencanon update apply --manifest <path-or-url>` refuses to write while the project daemon is running, downloads the target bundle over HTTPS, `file:`, or a local path, verifies SHA-256, extracts to a staging directory, and swaps it into place atomically (renaming the previous `runtime/` aside before removing it).
 
 ### Toolchain
 

@@ -193,18 +193,18 @@ function createLocalManifest(releaseDir: string): string {
 
 function writeBadChecksumManifest(root: string, manifest: string): string {
   const parsed = JSON.parse(readFileSync(manifest, "utf8")) as {
-    engine: Record<string, { sha256: string; url: string }>;
+    bundles: Record<string, { sha256: string; url: string }>;
   };
   const target = currentEngineTarget();
-  const asset = parsed.engine[target];
-  if (!asset)
-    throw new Error(`Manifest has no asset for current target ${target}.`);
-  const assetSource = path.resolve(path.dirname(manifest), asset.url);
+  const bundle = parsed.bundles[target];
+  if (!bundle)
+    throw new Error(`Manifest has no bundle for current target ${target}.`);
+  const bundleSource = path.resolve(path.dirname(manifest), bundle.url);
   const realHash = createHash("sha256")
-    .update(readFileSync(assetSource))
+    .update(readFileSync(bundleSource))
     .digest("hex");
-  asset.url = assetSource;
-  asset.sha256 = realHash === "0".repeat(64) ? "1".repeat(64) : "0".repeat(64);
+  bundle.url = bundleSource;
+  bundle.sha256 = realHash === "0".repeat(64) ? "1".repeat(64) : "0".repeat(64);
   const badManifest = path.join(root, "bad-manifest.json");
   writeFileSync(badManifest, `${JSON.stringify(parsed, null, 2)}\n`);
   return badManifest;
