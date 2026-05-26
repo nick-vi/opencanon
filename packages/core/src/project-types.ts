@@ -473,6 +473,9 @@ function shouldSkipPythonDirectory(rootDir: string, dir: string): boolean {
   return (
     repoPath === ".git" ||
     repoPath.startsWith(".git/") ||
+    repoPath === "node_modules" ||
+    repoPath.includes("/node_modules/") ||
+    repoPath.endsWith("/node_modules") ||
     repoPath === ".venv" ||
     repoPath.endsWith("/.venv") ||
     repoPath.includes("/.venv/") ||
@@ -602,7 +605,16 @@ function pythonDependencyVersion(value: unknown): string {
 
 function shouldSkipCargoDirectory(rootDir: string, dir: string): boolean {
   const repoPath = normalizePath(relative(rootDir, dir));
-  return repoPath === ".git" || repoPath.startsWith(".git/") || repoPath === "target" || repoPath.endsWith("/target") || repoPath.includes("/target/");
+  return (
+    repoPath === ".git" ||
+    repoPath.startsWith(".git/") ||
+    repoPath === "node_modules" ||
+    repoPath.includes("/node_modules/") ||
+    repoPath.endsWith("/node_modules") ||
+    repoPath === "target" ||
+    repoPath.endsWith("/target") ||
+    repoPath.includes("/target/")
+  );
 }
 
 function parseCargoManifest(rootDir: string, manifestFile: string): CargoManifest | null {
