@@ -1,5 +1,5 @@
 import { cac } from "cac";
-import { formatFeedbackResult } from "@opencanon/core";
+import { DiagnosticSeverity, formatFeedbackResult } from "@opencanon/core";
 import type { FeedbackDedupeScope, FeedbackHost, FeedbackResult } from "@opencanon/core";
 import {
   claudeHookConfig,
@@ -20,10 +20,10 @@ import {
   toRepoRelativePath,
   unique,
 } from "@opencanon/core";
-import { DaemonApiRoute, withDaemonClient } from "./daemon-client.ts";
+import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
-export async function runFeedbackCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runFeedbackCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const rootDir = resolveRootDir(cwd);
   const paths = createPaths(rootDir);
   const cli = cac("opencanon feedback");
@@ -55,8 +55,8 @@ export async function runFeedbackCommand(args = Bun.argv.slice(2), cwd = process
     process.exit(1);
   }
 
-  const result = await withDaemonClient(cwd, (client) =>
-    client.post<FeedbackResult>(DaemonApiRoute.Feedback, {
+  const result = await withRuntimeClient(cwd, (client) =>
+    client.post<FeedbackResult>(RuntimeApiRoute.Feedback, {
       files,
       host: "manual",
       dedupeScope: dedupeScopeOption(options.dedupeScope),
@@ -72,12 +72,12 @@ function feedbackExitCode(
   strictWarnings: boolean,
 ): number {
   if (result.diagnostics.length > 0) return 1;
-  if (result.findings.some((finding) => finding.severity === "error")) return 1;
-  if (strictWarnings && result.findings.some((finding) => finding.severity === "warning")) return 1;
+  if (result.findings.some((finding) => finding.severity === DiagnosticSeverity.Error)) return 1;
+  if (strictWarnings && result.findings.some((finding) => finding.severity === DiagnosticSeverity.Warning)) return 1;
   return 0;
 }
 
-export async function runHookCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runHookCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const [command, ...rest] = args;
 
   if (!command || command === "-h" || command === "--help") {
@@ -97,7 +97,7 @@ export async function runHookCommand(args = Bun.argv.slice(2), cwd = process.cwd
 
   const host = hookHostOption(command);
   const payload = parseHookPayload(await readStdin());
-  const { response } = await withDaemonClient(cwd, (client) => client.post<{ response: string }>(DaemonApiRoute.HookFeedback, { host, payload }));
+  const { response } = await withRuntimeClient(cwd, (client) => client.post<{ response: string }>(RuntimeApiRoute.HookFeedback, { host, payload }));
   if (response) console.log(response);
 }
 
@@ -105,9 +105,9 @@ function printHookConfig(args: string[]): void {
   const [host] = args;
   if (!host || host === "-h" || host === "--help") {
     console.log(`Usage:
-  bun run opencanon hook config codex
-  bun run opencanon hook config claude
-  bun run opencanon hook config opencode
+  opencanon hook config codex
+  opencanon hook config claude
+  opencanon hook config opencode
 `);
     return;
   }
@@ -255,8 +255,8 @@ function parseHookPayload(value: string): unknown {
 
 function printFeedbackHelp(): void {
   console.log(`Usage:
-  bun run opencanon feedback --files <paths...>
-  bun run opencanon feedback --changed
+  opencanon feedback --files <paths...>
+  opencanon feedback --changed
 
 Options:
   --format markdown|json       Output format. Default: markdown.
@@ -270,11 +270,11 @@ Options:
 
 function printHookHelp(): void {
   console.log(`Usage:
-  bun run opencanon hook codex < hook-payload.json
-  bun run opencanon hook claude < hook-payload.json
-  bun run opencanon hook opencode < hook-payload.json
-  bun run opencanon hook config codex
-  bun run opencanon hook install codex
+  opencanon hook codex < hook-payload.json
+  opencanon hook claude < hook-payload.json
+  opencanon hook opencode < hook-payload.json
+  opencanon hook config codex
+  opencanon hook install codex
 
 Hosts:
   codex     PostToolUse JSON stdin/stdout for Codex hooks.
@@ -285,10 +285,10 @@ Hosts:
 
 function printHookInstallHelp(): void {
   console.log(`Usage:
-  bun run opencanon hook install codex
-  bun run opencanon hook install claude
-  bun run opencanon hook install opencode
-  bun run opencanon hook install --all
+  opencanon hook install codex
+  opencanon hook install claude
+  opencanon hook install opencode
+  opencanon hook install --all
 
 Options:
   --local      Install project-local config. Default.

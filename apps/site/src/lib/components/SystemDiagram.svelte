@@ -36,9 +36,9 @@
       y: 64
     }),
     node({
-      id: 'daemon',
-      label: 'Daemon',
-      sub: 'facts + validators',
+      id: 'runtime',
+      label: 'Runtime',
+      sub: 'canon + proof',
       icon: Cpu,
       x: 504,
       y: 202,
@@ -67,20 +67,20 @@
   const desktopClients = [
     node({ id: 'cli', label: 'CLI', icon: Terminal, x: 704, y: 92, height: 54, minWidth: 92 }),
     node({ id: 'hooks', label: 'Hooks', icon: GitBranch, x: 704, y: 214, height: 54, minWidth: 92 }),
-    node({ id: 'ui', label: 'UI', icon: Monitor, x: 704, y: 306, height: 54, minWidth: 92 })
+    node({ id: 'diagnostics', label: 'Diagnostics', icon: Monitor, x: 704, y: 306, height: 54, minWidth: 104 })
   ];
 
   const mobileNodes = [
     node({ id: 'repo', label: 'Repository', sub: 'git + working tree', icon: GitBranch, x: 45, y: 26, height: 60, width: 270 }),
     node({ id: 'watcher', label: 'Engine watcher', sub: 'changed paths', icon: Activity, x: 45, y: 138, height: 60, width: 270 }),
-    node({ id: 'daemon', label: 'Daemon', sub: 'facts + validators + SQLite', icon: Cpu, x: 45, y: 250, height: 60, width: 270, tone: 'primary' }),
+    node({ id: 'runtime', label: 'Runtime', sub: 'canon + proof + SQLite', icon: Cpu, x: 45, y: 250, height: 60, width: 270, tone: 'primary' }),
     node({ id: 'findings', label: 'Findings', sub: 'rule + location + fix', icon: ShieldCheck, x: 45, y: 362, height: 60, width: 270 })
   ];
 
   const mobileClients = [
     node({ id: 'cli', label: 'CLI', x: 24, y: 504, height: 34, width: 92 }),
     node({ id: 'hooks', label: 'Hooks', x: 134, y: 504, height: 34, width: 92 }),
-    node({ id: 'ui', label: 'UI', x: 244, y: 504, height: 34, width: 92 })
+    node({ id: 'diagnostics', label: 'Diagnostics', x: 236, y: 504, height: 34, width: 104 })
   ];
 
   function byId(nodes, id) {
@@ -164,34 +164,34 @@
 
   const desktopEdges = [
     { id: 'repo-watcher', d: hPath(desktopNodes, 'repo', 'watcher') },
-    { id: 'watcher-daemon', d: curve(desktopNodes, 'watcher', 'daemon') },
-    { id: 'daemon-state', d: hPath(desktopNodes, 'daemon', 'state') },
+    { id: 'watcher-runtime', d: curve(desktopNodes, 'watcher', 'runtime') },
+    { id: 'runtime-state', d: hPath(desktopNodes, 'runtime', 'state') },
     { id: 'state-findings', d: hPath(desktopNodes, 'state', 'findings') },
-    { id: 'daemon-cli', d: curve([...desktopNodes, ...desktopClients], 'daemon', 'cli'), muted: true },
-    { id: 'daemon-hooks', d: hPath([...desktopNodes, ...desktopClients], 'daemon', 'hooks'), muted: true },
-    { id: 'daemon-ui', d: curve([...desktopNodes, ...desktopClients], 'daemon', 'ui'), muted: true }
+    { id: 'runtime-cli', d: curve([...desktopNodes, ...desktopClients], 'runtime', 'cli'), muted: true },
+    { id: 'runtime-hooks', d: hPath([...desktopNodes, ...desktopClients], 'runtime', 'hooks'), muted: true },
+    { id: 'runtime-diagnostics', d: curve([...desktopNodes, ...desktopClients], 'runtime', 'diagnostics'), muted: true }
   ];
 
   const desktopCycle = [
     hPath(desktopNodes, 'repo', 'watcher'),
-    curve(desktopNodes, 'watcher', 'daemon'),
-    hPath([byId(desktopNodes, 'state'), byId(desktopNodes, 'daemon')], 'daemon', 'state'),
+    curve(desktopNodes, 'watcher', 'runtime'),
+    hPath([byId(desktopNodes, 'state'), byId(desktopNodes, 'runtime')], 'runtime', 'state'),
     hPath([byId(desktopNodes, 'findings'), byId(desktopNodes, 'state')], 'state', 'findings')
   ];
 
   const mobileEdges = [
     { id: 'm-repo-watch', d: vPath(mobileNodes, 'repo', 'watcher') },
-    { id: 'm-watch-daemon', d: vPath(mobileNodes, 'watcher', 'daemon') },
-    { id: 'm-daemon-findings', d: vPath(mobileNodes, 'daemon', 'findings') },
+    { id: 'm-watch-runtime', d: vPath(mobileNodes, 'watcher', 'runtime') },
+    { id: 'm-runtime-findings', d: vPath(mobileNodes, 'runtime', 'findings') },
     { id: 'm-findings-cli', d: fanPath([...mobileNodes, ...mobileClients], 'findings', 'cli'), muted: true },
     { id: 'm-findings-hooks', d: fanPath([...mobileNodes, ...mobileClients], 'findings', 'hooks'), muted: true },
-    { id: 'm-findings-ui', d: fanPath([...mobileNodes, ...mobileClients], 'findings', 'ui'), muted: true }
+    { id: 'm-findings-diagnostics', d: fanPath([...mobileNodes, ...mobileClients], 'findings', 'diagnostics'), muted: true }
   ];
 
   const mobileCycle = [
     vPath(mobileNodes, 'repo', 'watcher'),
-    vPath(mobileNodes, 'watcher', 'daemon'),
-    vPath(mobileNodes, 'daemon', 'findings')
+    vPath(mobileNodes, 'watcher', 'runtime'),
+    vPath(mobileNodes, 'runtime', 'findings')
   ];
 </script>
 
@@ -199,12 +199,12 @@
   <header class="diagram-head">
     <div>
       <p class="smallcaps">Runtime Loop</p>
-      <h3>One daemon. Three clients.</h3>
+      <h3>One service. Local clients.</h3>
     </div>
     <p>
-      Changes become facts. Validators turn facts into findings. The CLI, hooks,
-      and UI read the same local API.
-      <InfoTip term="daemon" id="diagram-daemon-tip" />
+      Changes become facts. Validators turn facts into findings. The CLI, MCP,
+      hooks, and browser diagnostics read the same local API.
+      <InfoTip term="runtime" id="diagram-runtime-tip" />
     </p>
   </header>
 
@@ -288,7 +288,7 @@
     <li><span>1</span> Watch changed files.</li>
     <li><span>2</span> Extract and cache facts.</li>
     <li><span>3</span> Run validators.</li>
-    <li><span>4</span> Send findings to CLI, hooks, and UI.</li>
+    <li><span>4</span> Send findings to CLI, MCP, hooks, and diagnostics.</li>
   </ol>
 </figure>
 

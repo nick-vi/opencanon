@@ -1,8 +1,8 @@
-import { createValidatorFactory } from "@opencanon/core";
+import { createConventionFactory } from "@opencanon/core";
 import { DefaultBypassCommentPatterns, DefaultBypassReasonPatterns, DefaultHeaderCommentAllowPatterns, firstCodeLineNumber, joinPatterns, list, manualFix, optionSummary, regexMatches } from "../shared.ts";
 import type { NoCommentMatchesOptions, NoHeaderCommentsOptions, NoBypassCommentsOptions, NoForbiddenCallsOptions, NoShimFilesOptions, AnnotationPolicyOptions } from "../shared.ts";
 
-export const noCommentMatches = createValidatorFactory<NoCommentMatchesOptions>((options) => {
+export const noCommentMatches = createConventionFactory<NoCommentMatchesOptions>((options) => {
   const patterns = list(options.patterns);
 
   return {
@@ -12,7 +12,7 @@ export const noCommentMatches = createValidatorFactory<NoCommentMatchesOptions>(
     severity: options.severity,
     scope: "file",
     facts: ["comments"],
-    decisionIds: options.decisionIds,
+    conventionIds: options.related,
     summary: optionSummary(options, `Comments in ${joinPatterns(options.in)} must not match the configured forbidden patterns.`),
     validate({ ctx }) {
       const targetFiles = new Set(ctx.targetFiles.map((file) => file.path));
@@ -34,7 +34,7 @@ export const noCommentMatches = createValidatorFactory<NoCommentMatchesOptions>(
   };
 });
 
-export const noHeaderComments = createValidatorFactory<NoHeaderCommentsOptions>((options) => {
+export const noHeaderComments = createConventionFactory<NoHeaderCommentsOptions>((options) => {
   const patterns = list(options.patterns);
   const allowed = [...DefaultHeaderCommentAllowPatterns, ...list(options.allow)];
   const maxHeaderLines = options.maxHeaderLines ?? 12;
@@ -46,7 +46,7 @@ export const noHeaderComments = createValidatorFactory<NoHeaderCommentsOptions>(
     severity: options.severity,
     scope: "file",
     facts: ["comments"],
-    decisionIds: options.decisionIds,
+    conventionIds: options.related,
     summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} must not start with unapproved header comments.`),
     validate({ ctx }) {
       return ctx.targetFiles.flatMap((file) => {
@@ -71,7 +71,7 @@ export const noHeaderComments = createValidatorFactory<NoHeaderCommentsOptions>(
   };
 });
 
-export const noBypassComments = createValidatorFactory<NoBypassCommentsOptions>((options) => {
+export const noBypassComments = createConventionFactory<NoBypassCommentsOptions>((options) => {
   const patterns = list(options.patterns);
   const activePatterns = patterns.length > 0 ? patterns : DefaultBypassCommentPatterns;
   const allowed = list(options.allow);
@@ -85,7 +85,7 @@ export const noBypassComments = createValidatorFactory<NoBypassCommentsOptions>(
     severity: options.severity,
     scope: "file",
     facts: ["comments"],
-    decisionIds: options.decisionIds,
+    conventionIds: options.related,
     summary: optionSummary(options, `Comments in ${joinPatterns(options.in)} must not bypass validators or linters without an approved policy.`),
     validate({ ctx }) {
       const targetFiles = new Set(ctx.targetFiles.map((file) => file.path));
@@ -108,7 +108,7 @@ export const noBypassComments = createValidatorFactory<NoBypassCommentsOptions>(
   };
 });
 
-export const noForbiddenCalls = createValidatorFactory<NoForbiddenCallsOptions>((options) => {
+export const noForbiddenCalls = createConventionFactory<NoForbiddenCallsOptions>((options) => {
   const calls = list(options.calls);
 
   return {
@@ -117,8 +117,10 @@ export const noForbiddenCalls = createValidatorFactory<NoForbiddenCallsOptions>(
     applies: options.in,
     severity: options.severity,
     scope: "file",
-    facts: ["calls"],
-    decisionIds: options.decisionIds,
+    // Matches `options.calls` (arbitrary RegExps, e.g. `sys.path.append\s*\(`) against
+    // file text via `file.find()`, so it depends on NO extracted AST fact kinds.
+    facts: [],
+    conventionIds: options.related,
     summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} must not call the configured forbidden APIs.`),
     validate({ ctx }) {
       return ctx.targetFiles.flatMap((file) =>
@@ -138,7 +140,7 @@ export const noForbiddenCalls = createValidatorFactory<NoForbiddenCallsOptions>(
   };
 });
 
-export const noShimFiles = createValidatorFactory<NoShimFilesOptions>((options) => {
+export const noShimFiles = createConventionFactory<NoShimFilesOptions>((options) => {
   const patterns = list(options.patterns);
   const activePatterns = patterns.length > 0 ? patterns : [/\b(?:shim|compat|legacy|deprecated|old)\b/i];
   return {
@@ -147,7 +149,7 @@ export const noShimFiles = createValidatorFactory<NoShimFilesOptions>((options) 
     applies: options.in,
     severity: options.severity,
     scope: "file",
-    decisionIds: options.decisionIds,
+    conventionIds: options.related,
     summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} must not introduce shim or compatibility naming.`),
     validate({ ctx }) {
       return ctx.targetFiles
@@ -164,7 +166,7 @@ export const noShimFiles = createValidatorFactory<NoShimFilesOptions>((options) 
   };
 });
 
-export const annotationRequiresTags = createValidatorFactory<AnnotationPolicyOptions>((options) => {
+export const annotationRequiresTags = createConventionFactory<AnnotationPolicyOptions>((options) => {
   const tags = new Set(options.tags ?? ["shim", "compat", "deprecated", "legacy"]);
   const required = new Set(options.requireTags);
   return {
@@ -174,7 +176,7 @@ export const annotationRequiresTags = createValidatorFactory<AnnotationPolicyOpt
     severity: options.severity,
     scope: "file",
     facts: ["annotations"],
-    decisionIds: options.decisionIds,
+    conventionIds: options.related,
     summary: optionSummary(options, `Lifecycle annotations in ${joinPatterns(options.in)} must include required metadata.`),
     validate({ ctx }) {
       const targetFiles = new Set(ctx.targetFiles.map((file) => file.path));

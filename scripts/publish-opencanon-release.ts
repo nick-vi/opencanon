@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
 type Options = {
@@ -11,18 +11,18 @@ type Options = {
   watch: boolean;
 };
 
-const version = Bun.argv[2];
-const args = Bun.argv.slice(3);
+const version = process.argv[2];
+const args = process.argv.slice(3);
 
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-  throw new Error("Usage: bun run release:publish -- <semver> [--no-check] [--no-commit] [--no-tag] [--no-push] [--delete-existing] [--no-watch] [--no-verify]");
+  throw new Error("Usage: npm run release:publish -- <semver> [--no-check] [--no-commit] [--no-tag] [--no-push] [--delete-existing] [--no-watch] [--no-verify]");
 }
 
 const options = parseOptions(args);
 const tagName = `v${version}`;
 
-run("bun", ["run", "release:prepare", "--", version]);
-if (options.check) run("bun", ["run", "check:ci"]);
+run("npm", ["run", "release:prepare", "--", version]);
+if (options.check) run("npm", ["run", "check:ci"]);
 
 if (options.commit) {
   run("git", ["add", "-A"]);
@@ -70,12 +70,12 @@ if (options.verify) {
     "latest.json",
     "stable.json",
     "SHA256SUMS",
-    "opencanon-skill-runtime.tar.gz",
-    "opencanon.darwin-arm64.node",
-    "opencanon.darwin-x64.node",
-    "opencanon.linux-arm64-gnu.node",
-    "opencanon.linux-x64-gnu.node",
-    "opencanon.win32-x64-msvc.node",
+    "opencanon-install.mjs",
+    "opencanon-runtime-darwin-arm64.tar.gz",
+    "opencanon-runtime-darwin-x64.tar.gz",
+    "opencanon-runtime-linux-arm64.tar.gz",
+    "opencanon-runtime-linux-x64.tar.gz",
+    "opencanon-runtime-win32-x64.tar.gz",
   ];
   const assets = output("gh", ["release", "view", tagName, "--json", "assets", "--jq", ".assets[].name"]);
   const assetNames = new Set(assets.split("\n").filter(Boolean));

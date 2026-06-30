@@ -9,7 +9,8 @@ opencanon hook install --all`;
 
 <h1>Hooks</h1>
 <p class="lead">
-  Hooks run OpenCanon after edits and return findings to the agent.
+  Hooks connect agent write events to OpenCanon feedback. They call the runtime,
+  then return scoped findings and next steps to the agent.
 </p>
 
 <h2>Supported hosts</h2>
@@ -27,12 +28,13 @@ opencanon hook install --all`;
 
 <h2>What the agent sees</h2>
 <p>
-  Hooks return findings: rule, severity, location, decision link, and optional
-  fix suggestion. The agent reads them as tool output.
+  Hooks return findings: rule, severity, location, Project Canon references,
+  impacted surfaces, related Changes, and optional fix suggestions. The agent
+  reads them as tool output.
 </p>
 
 <h2>Failure mode</h2>
 <p>
-  Hooks fail fast. If the daemon or engine is missing, the hook reports a
-  diagnostic instead of doing a partial run.
+  Hooks fail fast. If the service, project runtime, or engine is missing, the
+  hook reports a diagnostic instead of doing a partial run.
 </p>

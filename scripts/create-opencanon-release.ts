@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -12,7 +14,10 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { requiredBunVersion } from "../packages/daemon/src/runtime.ts";
+import { create as tarCreate } from "tar";
+import { requiredNodeRequirement } from "../packages/distribution/src/node.ts";
+import { trustedReleaseKeys } from "../packages/core/src/release-keys.ts";
+import { signManifestText } from "./release-signing.ts";
 import {
   engineBindingName,
   type EngineArch,
@@ -21,6 +26,7 @@ import {
 
 const rootDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const ManifestFileName = "opencanon-runtime-manifest.json";
+const InstallerFileName = "opencanon-install.mjs";
 const LatestFileName = "latest.json";
 const ChecksumFileName = "SHA256SUMS";
 const ChannelNamePattern = /^[a-z][a-z0-9._-]*$/u;
@@ -54,8 +60,9 @@ export type CreateOpenCanonReleaseInput = {
   outDir?: string;
   requireAll?: boolean;
   requireRuntime?: boolean;
+  requireSignature?: boolean;
   runtimeDir?: string;
-  skillVersion?: string;
+  runtimeVersion?: string;
 };
 
 export type CreateOpenCanonReleaseResult = {
@@ -63,11 +70,12 @@ export type CreateOpenCanonReleaseResult = {
   bundlePaths: Partial<Record<EngineTarget, string>>;
   channel: string;
   checksumPath: string;
+  installerPath: string;
   latestPath: string;
   manifestPath: string;
   missingTargets: EngineTarget[];
   outDir: string;
-  skillVersion: string;
+  runtimeVersion: string;
   targets: EngineTarget[];
 };
 
@@ -79,8 +87,8 @@ type RuntimeBundleAsset = {
 type RuntimeManifest = {
   version: 1;
   channel: string;
-  skillVersion: string;
-  requiredBun: string;
+  runtimeVersion: string;
+  requiredNode: string;
   bundles: Partial<Record<EngineTarget, RuntimeBundleAsset>>;
 };
 
@@ -98,15 +106,15 @@ export function createOpenCanonRelease(
   if (!ChannelNamePattern.test(channel) || channel === "latest") {
     throw new Error("Release channel must match [a-z][a-z0-9._-]* and cannot be latest.");
   }
-  const skillVersion = input.skillVersion ?? defaultSkillVersion();
-  const runtimeDir = path.resolve(rootDir, input.runtimeDir ?? ".agents/skills/opencanon/runtime");
+  const runtimeVersion = input.runtimeVersion ?? defaultRuntimeVersion();
+  const runtimeDir = resolveRuntimeDir(input.runtimeDir);
 
   if (input.clean) rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
   if (!existsSync(runtimeDir)) {
-    if (input.requireRuntime) throw new Error(`Missing generated skill runtime ${runtimeDir}. Run bun run build:skill-runtime first.`);
-    throw new Error(`Generated skill runtime ${runtimeDir} is required to assemble bundles. Run bun run build:skill-runtime first.`);
+    if (input.requireRuntime) throw new Error(`Missing generated OpenCanon runtime ${runtimeDir}. Run npm run build:runtime first.`);
+    throw new Error(`Generated OpenCanon runtime ${runtimeDir} is required to assemble bundles. Run npm run build:runtime first.`);
   }
 
   const bundles: RuntimeManifest["bundles"] = {};
@@ -134,14 +142,13 @@ export function createOpenCanonRelease(
     throw new Error(`Missing engine release assets for: ${missingTargets.join(", ")}.`);
   }
   if (Object.keys(bundles).length === 0) {
-    throw new Error(`No engine release assets found in ${assetDir}. Run bun run build:engine first.`);
+    throw new Error(`No engine release assets found in ${assetDir}. Run npm run build:engine first.`);
   }
-
   const manifest: RuntimeManifest = {
     version: 1,
     channel,
-    skillVersion,
-    requiredBun: requiredBunVersion,
+    runtimeVersion,
+    requiredNode: requiredNodeRequirement,
     bundles,
   };
   const manifestPath = path.join(outDir, ManifestFileName);
@@ -155,7 +162,32 @@ export function createOpenCanonRelease(
   checksums.push({ fileName: LatestFileName, sha256: sha256File(latestPath) });
   checksums.push({ fileName: `${channel}.json`, sha256: sha256File(channelPath) });
 
+  // Sign the manifest bytes (all three files are byte-identical, so one signature serves
+  // all). The detached sidecars are what remote clients verify against the baked-in
+  // trusted keys. `--require-signature` makes a missing key a hard error for real
+  // releases; local/CI manifest generation stays unsigned (consumed via file: paths,
+  // which are exempt from the signature requirement).
+  const privateKeyPem = process.env.OPENCANON_RELEASE_PRIVATE_KEY;
+  if (input.requireSignature && !privateKeyPem) {
+    throw new Error("OPENCANON_RELEASE_PRIVATE_KEY is required to sign the release manifest (--require-signature).");
+  }
+  if (input.requireSignature && trustedReleaseKeys.length === 0) {
+    throw new Error("packages/core/src/release-keys.ts must include a trusted public release key before signing a remote release.");
+  }
+  if (privateKeyPem) {
+    const sidecarText = `${JSON.stringify(signManifestText(manifestText, privateKeyPem), null, 2)}\n`;
+    for (const fileName of [ManifestFileName, LatestFileName, `${channel}.json`]) {
+      const sigPath = path.join(outDir, `${fileName}.sig`);
+      writeFileSync(sigPath, sidecarText);
+      checksums.push({ fileName: `${fileName}.sig`, sha256: sha256File(sigPath) });
+    }
+  }
+
   const checksumPath = path.join(outDir, ChecksumFileName);
+  const installerPath = path.join(outDir, InstallerFileName);
+  writeFileSync(installerPath, renderInstallerAsset());
+  chmodSync(installerPath, 0o755);
+  checksums.push({ fileName: InstallerFileName, sha256: sha256File(installerPath) });
   writeFileSync(
     checksumPath,
     checksums.map((entry) => `${entry.sha256}  ${entry.fileName}`).join("\n") + "\n",
@@ -166,13 +198,30 @@ export function createOpenCanonRelease(
     bundlePaths,
     channel,
     checksumPath,
+    installerPath,
     latestPath,
     manifestPath,
     missingTargets,
     outDir,
-    skillVersion,
+    runtimeVersion,
     targets: Object.keys(bundles) as EngineTarget[],
   };
+}
+
+function renderInstallerAsset(): string {
+  const template = readFileSync(path.join(rootDir, "scripts", InstallerFileName), "utf8");
+  const marker = "/* OPENCANON_TRUSTED_RELEASE_KEYS */ []";
+  if (!template.includes(marker)) {
+    throw new Error(`${InstallerFileName} is missing the trusted release key injection marker.`);
+  }
+  return template.replace(marker, JSON.stringify(trustedReleaseKeys, null, 2));
+}
+
+function resolveRuntimeDir(runtimeDir?: string): string {
+  if (runtimeDir) return path.resolve(rootDir, runtimeDir);
+  const explicit = process.env.OPENCANON_BUILD_RUNTIME_DIR;
+  if (explicit) return path.resolve(rootDir, explicit);
+  return path.resolve(rootDir, "tmp/opencanon-runtime");
 }
 
 function packageBundle(input: {
@@ -184,7 +233,7 @@ function packageBundle(input: {
 }): void {
   const stagingDir = mkdtempSync(path.join(tmpdir(), "opencanon-bundle-"));
   try {
-    // Bundle layout matches the live runtime/ tree: cli.js + validators.js + engine/<target>/<binding>.node, plus everything else under runtime/ except foreign engine binaries.
+    // Bundle layout matches the installed runtime tree: cli.js + validators.js + engine/<target>/<binding>.node, plus everything else under the runtime except foreign engine binaries.
     copyTree(input.runtimeDir, stagingDir, (relPath) => {
       if (relPath === "engine" || relPath.startsWith(`engine${path.sep}`) || relPath.startsWith("engine/")) return false;
       return true;
@@ -192,17 +241,21 @@ function packageBundle(input: {
     const engineTargetDir = path.join(stagingDir, "engine", input.target);
     mkdirSync(engineTargetDir, { recursive: true });
     copyFileSync(input.engineSource, path.join(engineTargetDir, input.engineFileName));
-    const result = spawnSync("tar", ["-czf", input.outputPath, "-C", stagingDir, "."], { encoding: "utf8" });
-    if (result.status !== 0) {
-      throw new Error(`tar failed for ${input.target}: ${(result.stderr ?? "").trim() || `status ${result.status}`}`);
-    }
+    // Deterministic, reproducible archive: a sorted file list + portable/noMtime headers so
+    // the same tag always yields identical bytes (and thus a stable signed sha256). Built
+    // with node-tar (pure JS) rather than the system `tar`, whose GNU/bsd flags differ and
+    // whose gzip embeds build mtime/OS bytes.
+    const entries = readdirSync(stagingDir, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => path.relative(stagingDir, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"))
+      .sort();
+    tarCreate({ file: input.outputPath, cwd: stagingDir, gzip: true, portable: true, noMtime: true, sync: true }, entries);
   } finally {
     rmSync(stagingDir, { recursive: true, force: true });
   }
 }
 
 function copyTree(source: string, destination: string, filter: (relPath: string) => boolean, currentRel = ""): void {
-  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
   for (const entry of readdirSync(source, { withFileTypes: true })) {
     const childSource = path.join(source, entry.name);
     const childRel = currentRel ? path.join(currentRel, entry.name) : entry.name;
@@ -211,12 +264,11 @@ function copyTree(source: string, destination: string, filter: (relPath: string)
     if (entry.isDirectory()) {
       mkdirSync(childDest, { recursive: true });
       copyTree(childSource, childDest, filter, childRel);
-    } else if (entry.isFile()) {
-      copyFileSync(childSource, childDest);
-    } else if (entry.isSymbolicLink()) {
+    } else if (entry.isFile() || entry.isSymbolicLink()) {
+      // Symlinks are dereferenced (copyFileSync follows them) so the release tree never
+      // ships link entries — consistent with the bundle's no-link policy.
       copyFileSync(childSource, childDest);
     }
-    void statSync;
   }
 }
 
@@ -243,7 +295,7 @@ function sha256File(filePath: string): string {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
-function defaultSkillVersion(): string {
+function defaultRuntimeVersion(): string {
   const githubRef = process.env.GITHUB_REF_NAME?.trim();
   if (githubRef) return githubRef;
   const result = spawnSync("git", ["describe", "--tags", "--always", "--dirty"], { cwd: rootDir, encoding: "utf8" });
@@ -262,8 +314,9 @@ function parseCliOptions(args: string[]): CliOptions {
     else if (arg === "--out-dir") options.outDir = requiredValue(args, ++index, arg);
     else if (arg === "--require-all") options.requireAll = true;
     else if (arg === "--require-runtime") options.requireRuntime = true;
+    else if (arg === "--require-signature") options.requireSignature = true;
     else if (arg === "--runtime-dir") options.runtimeDir = requiredValue(args, ++index, arg);
-    else if (arg === "--skill-version") options.skillVersion = requiredValue(args, ++index, arg);
+    else if (arg === "--runtime-version") options.runtimeVersion = requiredValue(args, ++index, arg);
     else if (arg === "-h" || arg === "--help") {
       printHelp();
       process.exit(0);
@@ -282,24 +335,25 @@ function requiredValue(args: string[], index: number, flag: string): string {
 
 function printHelp(): void {
   console.log(`Usage:
-  bun scripts/create-opencanon-release.ts [options]
+  node scripts/create-opencanon-release.ts [options]
 
 Options:
   --asset-dir <dir>        Directory containing engine .node files. Default: packages/engine/binaries.
   --out-dir <dir>          Release output directory. Default: dist/opencanon-release.
   --asset-base-url <url>   Base URL or path for manifest bundle URLs. Default: colocated relative files.
   --channel <name>         Release channel. Default: stable.
-  --skill-version <value>  Version written to the manifest. Default: current tag/commit.
-  --runtime-dir <dir>      Generated skill runtime directory. Default: .agents/skills/opencanon/runtime.
+  --runtime-version <value> Version written to the manifest. Default: current tag/commit.
+  --runtime-dir <dir>       Generated OpenCanon runtime directory. Default: tmp/opencanon-runtime.
   --require-all            Fail unless every supported target is present.
-  --require-runtime        Fail unless the generated skill runtime is present.
+  --require-runtime        Fail unless the generated OpenCanon runtime is present.
+  --require-signature      Fail unless OPENCANON_RELEASE_PRIVATE_KEY is set to sign the manifest.
   --clean                  Remove out-dir before writing.
 `);
 }
 
 if (import.meta.main) {
   try {
-    const result = createOpenCanonRelease(parseCliOptions(Bun.argv.slice(2)));
+    const result = createOpenCanonRelease(parseCliOptions(process.argv.slice(2)));
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

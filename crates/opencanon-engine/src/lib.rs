@@ -3,8 +3,11 @@ mod constants;
 mod contracts;
 mod facts;
 mod json;
+mod observability;
 mod project;
+mod python_facts;
 mod state;
+mod svelte_facts;
 mod watcher;
 
 use constants::{ENGINE_VERSION, NAPI_VERSION};

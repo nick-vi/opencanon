@@ -34,23 +34,23 @@ jobs:
             os: windows-2025-vs2026
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          bun-version: 1.3.13
+          node-version: "24"
 
       - name: Install dependencies
-        run: bun ci
+        run: npm ci
 
       - name: Install Rust components
         run: rustup toolchain install 1.95.0 --profile minimal --component clippy,rustfmt
 
       - name: Build engine runtime
-        run: bun run build:engine
+        run: npm run build:engine
 
       - name: Collect engine runtime
         id: engine
@@ -91,7 +91,7 @@ jobs:
           echo "file=dist/engine/${expected_file}" >> "$GITHUB_OUTPUT"
 
       - name: Upload engine runtime
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: engine-${{ matrix.target }}
           path: ${{ steps.engine.outputs.file }}
@@ -99,8 +99,14 @@ jobs:
 
   publish-release:
     name: Publish Release Assets
-    needs: build-engine
+    needs:
+      - build-engine
     runs-on: ubuntu-24.04
+    # The signing secret (OPENCANON_RELEASE_PRIVATE_KEY) lives in this Environment. Configure
+    # required reviewers + a tag restriction on it in repo Settings -> Environments so each
+    # signed release needs explicit human approval. Until configured it is unprotected but
+    # harmless.
+    environment: release
     permissions:
       attestations: write
       artifact-metadata: write
@@ -108,25 +114,23 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          bun-version: 1.3.13
+          node-version: "24"
 
       - name: Install dependencies
-        run: bun ci
+        run: npm ci
 
-      - name: Build skill runtime archive inputs
-        run: |
-          bun run ui:build
-          bun run build:skill-runtime -- --skip-engine
+      - name: Build runtime archive inputs
+        run: npm run build:runtime -- --skip-engine
 
       - name: Download engine runtimes
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: engine-*
           path: dist/engine
@@ -134,13 +138,19 @@ jobs:
 
       - name: Create runtime manifest
         shell: bash
+        env:
+          # Ed25519 private key (PKCS#8 PEM) that signs the manifest. Generated with
+          # `npm run release:keygen`; its public half is committed in release-keys.ts.
+          # --require-signature makes a missing key a hard failure so releases are never
+          # published unsigned. The emitted <manifest>.sig files ship via dist/release/*.
+          OPENCANON_RELEASE_PRIVATE_KEY: ${{ secrets.OPENCANON_RELEASE_PRIVATE_KEY }}
         run: |
           tag="${{ github.event.inputs.tag || github.ref_name }}"
-          skill_version="${tag#v}"
-          bun run release:manifest -- --asset-dir dist/engine --out-dir dist/release --asset-base-url . --channel stable --require-all --require-runtime --clean --skill-version "$skill_version"
+          runtime_version="${tag#v}"
+          npm run release:manifest -- --asset-dir dist/engine --out-dir dist/release --asset-base-url . --channel stable --require-all --require-runtime --require-signature --clean --runtime-version "$runtime_version"
 
       - name: Attest release assets
-        uses: actions/attest@v4
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4
         with:
           subject-path: dist/release/*
 

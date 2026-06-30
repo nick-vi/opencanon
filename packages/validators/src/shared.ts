@@ -1,8 +1,7 @@
 import path from "node:path";
-import { resolveExternalTool, resolveInsideRoot } from "@opencanon/core";
+import { LiteralValueKind, ProjectFileLanguage, resolveExternalTool, resolveInsideRoot } from "@opencanon/core";
 import type {
   ExportInfo,
-  Finding,
   FindingFix,
   FixSafety,
   LiteralContext,
@@ -121,6 +120,11 @@ export type RepeatedLiteralsOptions = FindingOptions & {
   valueKinds?: Array<"string" | "number" | "boolean">;
   contexts?: LiteralContext[];
   ignore?: Array<string | RegExp>;
+  /**
+   * When true, drop literals whose preceding token on the same line is `typeof X ===` /
+   * `typeof X !==`. These are language-level type guards and rarely worth extracting. Default false.
+   */
+  excludeTypeofRhs?: boolean;
 };
 
 export type NoSecretLikeLiteralsOptions = FindingOptions & {
@@ -218,15 +222,6 @@ export type ExternalDiagnosticsOptions = FindingOptions & {
   reportLine?: number;
 };
 
-export type TauriCommandParityOptions = FindingOptions & {
-  frontend: string[];
-  rust: string[];
-  invokeFunctions?: string[];
-  listenFunctions?: string[];
-  checkEvents?: boolean;
-  checkHandlerRegistration?: boolean;
-};
-
 export type NoShimFilesOptions = FindingOptions & {
   in: string[];
   patterns?: RegExp | RegExp[];
@@ -249,9 +244,13 @@ export type DuplicateBoundaryLiteralsOptions = FindingOptions & {
   ignore?: Array<string | RegExp>;
 };
 
+// Single source of truth for sensitive-change policy requirements; reference members instead of inlining the strings.
+export const ChangePolicyRequirement = { Tests: "tests", Docs: "docs", Approval: "approval" } as const;
+export type ChangePolicyRequirement = (typeof ChangePolicyRequirement)[keyof typeof ChangePolicyRequirement];
+
 export type SensitiveChangePolicyOptions = FindingOptions & {
   in?: string[];
-  require?: "tests" | "docs" | "decision";
+  require?: ChangePolicyRequirement;
 };
 
 export const DefaultHeaderCommentAllowPatterns = [/^!\/usr\/bin\/env\b/u, /^SPDX-License-Identifier:/u, /^@license\b/u, /^Copyright\b/u, /^<reference\s/u];
@@ -447,12 +446,12 @@ export function firstCodeLineNumber(lines: string[], language: "typescript" | "s
     let text = lines[index].trim();
     if (!text) continue;
 
-    if (language === "python") {
+    if (language === ProjectFileLanguage.Python) {
       if (text.startsWith("#")) continue;
       return index + 1;
     }
 
-    if (language !== "typescript" && language !== "svelte") return index + 1;
+    if (language !== ProjectFileLanguage.TypeScript && language !== ProjectFileLanguage.Svelte) return index + 1;
 
     while (text.length > 0) {
       if (inBlockComment) {
@@ -496,7 +495,7 @@ export function safeEnumReplacement(
   if (!declaration.exported) return null;
   if (!naming.isPascalCase(declaration.name)) return null;
   if (declaration.members.length === 0) return null;
-  if (declaration.members.some((member) => !naming.isScreamingSnakeCase(member.name) || member.valueKind !== "string" || member.value === undefined)) return null;
+  if (declaration.members.some((member) => !naming.isScreamingSnakeCase(member.name) || member.valueKind !== LiteralValueKind.String || member.value === undefined)) return null;
 
   const properties = declaration.members.map((member) => `  ${member.name}: ${JSON.stringify(member.value)},`).join("\n");
   return `export const ${declaration.name} = {\n${properties}\n} as const;\n\nexport type ${declaration.name} = (typeof ${declaration.name})[keyof typeof ${declaration.name}];`;
@@ -557,10 +556,6 @@ export function importedSymbolName(specifier: string): string {
     .replace(/^type\s+/, "")
     .split(/\s+as\s+/)[0]
     .trim();
-}
-
-export function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function truncate(value: string, maxLength: number): string {

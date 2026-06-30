@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@opencanon/core": [
+        "../.opencanon/generated/authoring/core.d.ts"
+      ],
+      "@opencanon/core/testing": [
+        "../.opencanon/generated/authoring/testing.d.ts"
+      ],
+      "@opencanon/validators": [
+        "../.opencanon/generated/authoring/validators.d.ts"
+      ],
+      "@opencanon/project": [
+        "../.opencanon/generated/authoring/project.ts"
+      ]
+    }
+  },
+  "include": [
+    "areas/**/*.ts",
+    "changes/**/*.ts",
+    "conventions/**/*.ts",
+    "specs/**/*.ts",
+    "../.opencanon/generated/authoring/project.ts",
+    "../.opencanon/generated/authoring/aliases.d.ts",
+    "../.opencanon/generated/authoring/core.d.ts",
+    "../.opencanon/generated/authoring/testing.d.ts",
+    "../.opencanon/generated/authoring/validators.d.ts"
+  ]
+}

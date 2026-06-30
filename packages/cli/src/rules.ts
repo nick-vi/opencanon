@@ -1,5 +1,5 @@
 import { splitList, unique } from "@opencanon/core";
-import type { Format } from "@opencanon/core";
+import { DiagnosticSeverity, Format } from "@opencanon/core";
 import { createPaths, formatValidatorApplies, resolveRootDir } from "@opencanon/core";
 import type { Validator, ValidatorVisual } from "@opencanon/core";
 import type { TreeBoundaryRule, TreeDefinition, TreeNode, TreePathDefinition } from "@opencanon/core";
@@ -9,10 +9,14 @@ import { existsSync } from "node:fs";
 import { cac } from "cac";
 import path from "node:path";
 
+// Single source of truth for tree-boundary relation kinds; reference members instead of inlining the strings.
+const BoundaryRelationKind = { Allow: "allow", Deny: "deny" } as const;
+type BoundaryRelationKind = (typeof BoundaryRelationKind)[keyof typeof BoundaryRelationKind];
+
 type RuleQuery = {
   topics: string[];
   validatorIds: string[];
-  decisionIds: string[];
+  conventionIds: string[];
   format: Format;
   tree: boolean;
   ascii: boolean;
@@ -29,7 +33,7 @@ type RuleSummary = {
   summary?: string;
   topics: string[];
   applies: string[];
-  decisionIds: string[];
+  conventionIds: string[];
   docs: string[];
   fixtures: {
     valid: boolean;
@@ -40,7 +44,7 @@ type RuleSummary = {
   command: string;
 };
 
-type RuleValidator = Pick<Validator, "id" | "severity" | "scope" | "facts" | "analysisGlobs" | "summary" | "topics" | "appliesScopes" | "decisionIds" | "docs"> & {
+type RuleValidator = Pick<Validator, "id" | "severity" | "scope" | "facts" | "analysisGlobs" | "summary" | "topics" | "appliesScopes" | "conventionIds" | "docs"> & {
   visuals: unknown[];
 };
 
@@ -54,7 +58,7 @@ type BoundaryGraphItem = {
   children?: BoundaryGraphItem[];
 };
 
-export async function runRulesCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runRulesCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
     printHelp();
@@ -67,11 +71,11 @@ export async function runRulesCommand(args = Bun.argv.slice(2), cwd = process.cw
   const selectedValidators = selectRuleValidators(validators, {
     topics: query.topics,
     validatorIds: query.validatorIds,
-    decisionIds: query.decisionIds,
+    conventionIds: query.conventionIds,
   });
   const rules = selectedValidators.map((validator) => summarizeRule(paths.fixturesDir, validator));
 
-  if (query.format === "json") console.log(JSON.stringify({ validators: rules }, null, 2));
+  if (query.format === Format.Json) console.log(JSON.stringify({ validators: rules }, null, 2));
   else if (query.tree) console.log(renderRuleTreesMarkdown(rules, { ascii: query.ascii, color: query.color }));
   else console.log(renderRulesMarkdown(rules));
 }
@@ -83,19 +87,19 @@ function parseArgs(args: string[]): RuleQuery {
   cli.option("--topic <topic>", "Show validators for a topic.");
   cli.option("--topics <topics>", "Show validators for topics.");
   cli.option("--validator <id>", "Show one validator.");
-  cli.option("--decision <id>", "Show validators linked to a decision.");
+  cli.option("--convention <id>", "Show validators linked to a convention.");
   cli.option("--tree", "Render tree visualizations for matching validators.");
   cli.option("--ascii", "Use ASCII tree lines.");
   cli.option("--no-color", "Disable ANSI colors.");
 
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["help", "h", "format", "topic", "topics", "validator", "decision", "tree", "ascii", "color"]);
+  rejectUnknownOptions(options, ["help", "h", "format", "topic", "topics", "validator", "convention", "tree", "ascii", "color"]);
 
   return {
     topics: unique([...stringValues(options.topic), ...stringValues(options.topics)].flatMap(splitList)),
     validatorIds: unique([...stringValues(options.validator), ...parsed.args.map(String)].flatMap(splitList)),
-    decisionIds: unique(stringValues(options.decision).flatMap(splitList)),
+    conventionIds: unique(stringValues(options.convention).flatMap(splitList)),
     format: formatOption(options.format),
     tree: booleanOption(options.tree),
     ascii: booleanOption(options.ascii),
@@ -114,7 +118,7 @@ function summarizeRule(fixturesDir: string, validator: RuleValidator): RuleSumma
     summary: validator.summary,
     topics: validator.topics,
     applies: formatValidatorApplies(validator as Validator),
-    decisionIds: validator.decisionIds,
+    conventionIds: validator.conventionIds,
     docs: validator.docs,
     fixtures: {
       valid: hasFixtureFiles(fixturesDir, validator.id, "valid"),
@@ -122,7 +126,7 @@ function summarizeRule(fixturesDir: string, validator: RuleValidator): RuleSumma
       fixed: hasFixtureFiles(fixturesDir, validator.id, "fixed"),
     },
     visuals: validator.visuals.filter(isValidatorVisual),
-    command: `bun run opencanon validate --validator ${validator.id} --project`,
+    command: `opencanon validate --validator ${validator.id} --project`,
   };
 }
 
@@ -135,11 +139,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function selectRuleValidators(validators: RuleValidator[], query: { topics: string[]; validatorIds: string[]; decisionIds: string[] }): RuleValidator[] {
-  if (query.validatorIds.length === 0 && query.topics.length === 0 && query.decisionIds.length === 0) return validators;
+function selectRuleValidators(validators: RuleValidator[], query: { topics: string[]; validatorIds: string[]; conventionIds: string[] }): RuleValidator[] {
+  if (query.validatorIds.length === 0 && query.topics.length === 0 && query.conventionIds.length === 0) return validators;
   return validators.filter(
     (validator) =>
-      query.validatorIds.includes(validator.id) || intersectsAny(validator.topics, query.topics) || intersectsAny(validator.decisionIds, query.decisionIds),
+      query.validatorIds.includes(validator.id) || intersectsAny(validator.topics, query.topics) || intersectsAny(validator.conventionIds, query.conventionIds),
   );
 }
 
@@ -172,7 +176,7 @@ function renderRulesMarkdown(rules: RuleSummary[]): string {
     lines.push(`Analysis: ${rule.analysis.join(", ") || "<target files>"}`);
     lines.push(`Topics: ${rule.topics.join(", ") || "<none>"}`);
     lines.push(`Applies: ${rule.applies.join("; ")}`);
-    lines.push(`Decisions: ${rule.decisionIds.join(", ") || "<none>"}`);
+    lines.push(`Conventions: ${rule.conventionIds.join(", ") || "<none>"}`);
     lines.push(`Docs: ${(rule.docs ?? []).join(", ") || "<none>"}`);
     lines.push(`Fixtures: ${fixtureLabels(rule.fixtures).join(", ") || "none"}`);
     if (rule.visuals.length > 0) lines.push(`Visuals: ${rule.visuals.map((visual) => visual.kind).join(", ")}`);
@@ -277,8 +281,8 @@ function nodeDetailLines(node: TreeNode, color: ReturnType<typeof colorFns>): st
 function renderBoundaryGraph(boundary: TreeBoundaryRule, nodes: Record<string, string[]>, options: TreeRenderOptions, color: ReturnType<typeof colorFns>): string[] {
   const fromValues = list(boundary.from);
   const relations = [
-    ...list(boundary.allow).map((target) => ({ kind: "allow" as const, target })),
-    ...list(boundary.deny).map((target) => ({ kind: "deny" as const, target })),
+    ...list(boundary.allow).map((target) => ({ kind: BoundaryRelationKind.Allow, target })),
+    ...list(boundary.deny).map((target) => ({ kind: BoundaryRelationKind.Deny, target })),
   ];
 
   return renderBoundaryItems(
@@ -286,7 +290,7 @@ function renderBoundaryGraph(boundary: TreeBoundaryRule, nodes: Record<string, s
       const children: BoundaryGraphItem[] = [];
       for (const pattern of nodes[from] ?? (looksLikeNodeRef(from) ? [] : [from])) children.push({ label: color.dim(pattern) });
       for (const relation of relations) {
-        const relationColor = relation.kind === "allow" ? color.allow : color.deny;
+        const relationColor = relation.kind === BoundaryRelationKind.Allow ? color.allow : color.deny;
         children.push({
           label: relationColor(`${relation.kind} -> ${relation.target}`),
           children: (nodes[relation.target] ?? [relation.target]).map((pattern) => ({ label: color.dim(pattern) })),
@@ -361,7 +365,7 @@ function looksLikeNodeRef(value: string): boolean {
 }
 
 function severityLabel(severity: Validator["severity"], color: ReturnType<typeof colorFns>): string {
-  return severity === "error" ? color.error(severity) : color.warning(severity);
+  return severity === DiagnosticSeverity.Error ? color.error(severity) : color.warning(severity);
 }
 
 function colorFns(enabled: boolean) {
@@ -387,19 +391,19 @@ function fixtureLabels(fixtures: RuleSummary["fixtures"]): string[] {
 
 function printHelp(): void {
   console.log(`Usage:
-  bun run opencanon rules
-  bun run opencanon rules --validator <id>
-  bun run opencanon rules --topic <topic>
-  bun run opencanon rules --decision <id>
-  bun run opencanon rules --tree
-  bun run opencanon rules --tree --ascii
-  bun run opencanon rules --format json
+  opencanon rules
+  opencanon rules --validator <id>
+  opencanon rules --topic <topic>
+  opencanon rules --convention <id>
+  opencanon rules --tree
+  opencanon rules --tree --ascii
+  opencanon rules --format json
 
 Options:
   --format markdown|json   Output format. Default: markdown.
   --topic <topic>          Show validators for a topic.
   --validator <id>         Show one validator.
-  --decision <id>          Show validators linked to a decision.
+  --convention <id>        Show validators linked to a convention.
   --tree                   Render tree visualizations.
   --ascii                  Use ASCII tree lines.
   --no-color               Disable ANSI colors.

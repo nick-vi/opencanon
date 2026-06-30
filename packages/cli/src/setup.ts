@@ -1,664 +1,184 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import { applyRuntimeUpdate, assertDaemonPrerequisites, startSupervisedDaemon } from "@opencanon/daemon";
-import {
-  buildDoctorReport,
-  createDefaultConfig,
-  createPaths,
-  DoctorStatus,
-  fail,
-  HookInstallHost,
-  HookInstallScope,
-  installHook,
-  loadImpactSurfaces,
-  relative,
-  resolveRootDir,
-  runValidation,
-  splitList,
-  validateConfig,
-  validateContext,
-  writeAtomicJsonFileSync,
-  writeAtomicTextFileSync,
-  type DoctorReport,
-  type Format,
-  type HookInstallResult,
-  type ValidationResult,
-} from "@opencanon/core";
+import { createPaths, discoverProjectFiles, fail, Format, HookInstallHost, relative, resolveRootDir, splitList } from "@opencanon/core";
 import { CliOptionDescription, CliOptionFlag, CliOptionName, booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
-import { runInit, type InitQuery, type InitResult } from "./init.ts";
 import { loadProjectContext } from "./project.ts";
-
-const SetupStatus = {
-  Fail: "fail",
-  Pass: "pass",
-  Skip: "skip",
-  Warn: "warn",
-} as const;
-type SetupStatus = (typeof SetupStatus)[keyof typeof SetupStatus];
-
-const SetupStepId = {
-  CacheIgnore: "cache-ignore",
-  Context: "context",
-  Daemon: "daemon",
-  Doctor: "doctor",
-  FeedbackHooks: "feedback-hooks",
-  ProjectValidation: "project-validation",
-  RuntimeUpdate: "runtime-update",
-  Scaffold: "scaffold",
-  SkillRuntimeIgnore: "skill-runtime-ignore",
-  SetupStateIgnore: "setup-state-ignore",
-  SetupState: "setup-state",
-  Validation: "validation",
-} as const;
-type SetupStepId = (typeof SetupStepId)[keyof typeof SetupStepId];
-
-const SetupOptionName = {
-  Daemon: SetupStepId.Daemon,
-} as const;
-
-const SetupStateFile = ".opencanon/setup.json";
-const generatedStateIgnoreEntries = [
-  ".opencanon/daemon.json",
-  ".opencanon/daemon.log",
-  ".opencanon/*.sqlite",
-  ".opencanon/*.sqlite-shm",
-  ".opencanon/*.sqlite-wal",
-];
-const skillGeneratedIgnoreEntries = ["runtime/", "generated/"];
-
-type SetupQuery = {
-  dryRun: boolean;
-  format: Format;
-  hooks: HookInstallHost[];
-  runtimeManifestSource?: string;
-  startDaemon: boolean;
-};
-
-type SetupStep = {
-  id: SetupStepId;
-  status: SetupStatus;
-  message: string;
-  details?: string[];
-};
-
-type SetupInitSummary = {
-  files: InitResult["files"];
-  diagnostics: string[];
-  nextSteps: string[];
-};
+import { runInitFlow, type InitFlowQuery, type InitFlowResult } from "./init-flow.ts";
 
 type SetupResult = {
   rootDir: string;
-  status: Exclude<SetupStatus, "skip">;
+  status: "fail" | "pass" | "warn";
   dryRun: boolean;
-  startedAt: string;
-  completedAt: string;
-  statePath?: string;
-  scaffoldMissing: string[];
-  steps: SetupStep[];
-  init?: SetupInitSummary;
-  hooks: HookInstallResult[];
-  doctor?: DoctorReport;
-  validation?: ValidationResult;
-  daemonStart?: {
-    status: string;
-    url?: string;
-    pid?: number;
-  };
+  init: InitFlowResult;
+  packet?: SetupPacket;
 };
 
-export async function runSetupCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
-  const query = parseSetupArgs(args);
+type SetupPacket = {
+  schema: "opencanon.setup-packet.v1";
+  rootDir: string;
+  generatedAt: string;
+  purpose: string;
+  discovery: {
+    source: string;
+    fileCount: number;
+    sampleFiles: string[];
+    languageCounts: Record<string, number>;
+    packageManagers: string[];
+    diagnostics: string[];
+  };
+  existingCanon: {
+    areas: number;
+    specs: number;
+    changes: number;
+    conventions: number;
+    validators: number;
+    impactSurfaces: number;
+  };
+  agentWorkflow: string[];
+  proposalRequirements: string[];
+  suggestedCommands: string[];
+};
+
+const SetupStatus = {
+  Fail: "fail",
+} as const;
+
+export async function runSetupCommand(args: string[], cwd: string): Promise<void> {
+  const query = parseSetupArgs(args, cwd);
   if (!query) return;
-  const result = await runSetup(cwd, query);
-  if (query.format === "json") console.log(JSON.stringify(result, null, 2));
+
+  const init = await runInitFlow(cwd, query);
+  const result: SetupResult = {
+    rootDir: init.rootDir,
+    status: init.status,
+    dryRun: init.dryRun,
+    init,
+    packet: init.status === SetupStatus.Fail || init.dryRun ? undefined : await buildSetupPacket(init.rootDir),
+  };
+
+  if (query.format === Format.Json) console.log(JSON.stringify(result, null, 2));
   else console.log(renderSetupMarkdown(result));
   process.exit(result.status === SetupStatus.Fail ? 1 : 0);
 }
 
-async function runSetup(cwd: string, query: SetupQuery): Promise<SetupResult> {
+function parseSetupArgs(args: string[], cwd: string): InitFlowQuery | null {
   const rootDir = resolveRootDir(cwd);
-  const startedAt = new Date().toISOString();
-  const steps: SetupStep[] = [];
-  const hooks: HookInstallResult[] = [];
-  const scaffoldMissing = missingScaffoldFiles(rootDir);
-  let init: SetupInitSummary | undefined;
-  let doctor: DoctorReport | undefined;
-  let validation: ValidationResult | undefined;
-  let daemonStart: SetupResult["daemonStart"];
-
-  if (scaffoldMissing.length > 0) {
-    const initResult = runInit(rootDir, createSetupInitQuery(rootDir, query));
-    init = {
-      files: initResult.files,
-      diagnostics: initResult.diagnostics,
-      nextSteps: initResult.nextSteps,
-    };
-    steps.push({
-      id: SetupStepId.Scaffold,
-      status: initResult.diagnostics.length === 0 ? SetupStatus.Pass : SetupStatus.Fail,
-      message: query.dryRun ? "Scaffold plan generated." : "Scaffold is present.",
-      details: [
-        ...scaffoldMissing.map((file) => `missing before setup: ${file}`),
-        ...initResult.files.map((file) => `${file.action}: ${file.path}`),
-        ...initResult.diagnostics,
-      ],
-    });
-  } else {
-    steps.push({
-      id: SetupStepId.Scaffold,
-      status: SetupStatus.Skip,
-      message: "Scaffold is already present.",
-    });
-  }
-
-  hooks.push(...installRequestedHooks(rootDir, query));
-  if (query.hooks.length > 0) {
-    steps.push({
-      id: SetupStepId.FeedbackHooks,
-      status: hooks.some((hook) => hook.diagnostics.length > 0) ? SetupStatus.Fail : SetupStatus.Pass,
-      message: query.dryRun ? "Feedback hook plan generated." : "Requested feedback hooks are installed.",
-      details: hooks.flatMap((hook) => [
-        `${hook.host}: ${hook.scope}${hook.dryRun ? " dry-run" : ""}`,
-        ...hook.files.map((file) => `${file.action}: ${file.path}`),
-        ...hook.diagnostics,
-      ]),
-    });
-  }
-
-  steps.push(ensureCacheIgnored(rootDir, query.dryRun));
-  steps.push(ensureSetupStateIgnored(rootDir, query.dryRun));
-  steps.push(ensureSkillRuntimeIgnored(rootDir, query.dryRun));
-
-  if (query.runtimeManifestSource) {
-    steps.push(await installSetupRuntime(rootDir, query));
-  }
-
-  if (query.dryRun && scaffoldMissing.length > 0) {
-    steps.push({
-      id: SetupStepId.Validation,
-      status: SetupStatus.Skip,
-      message: "Validation needs the scaffold to be written.",
-    });
-  } else {
-    const loaded = await loadSetupContext(rootDir);
-    steps.push(loaded.step);
-
-    if (loaded.context) {
-      doctor = buildDoctorReport(loaded.context);
-      steps.push({
-        id: SetupStepId.Doctor,
-        status: setupStatusFromDoctor(doctor.status),
-        message: `Doctor status: ${doctor.status}.`,
-        details: doctor.checks.map((check) => `${check.status}: ${check.id}: ${check.message}`),
-      });
-
-      try {
-        validation = await runValidation({
-          rootDir,
-          paths: loaded.context.paths,
-          decisions: loaded.context.decisions,
-          validators: loaded.context.validators,
-          project: true,
-        });
-        steps.push({
-          id: SetupStepId.ProjectValidation,
-          status: setupStatusFromValidation(validation),
-          message: `Project validation found ${validation.findingCount} findings.`,
-          details: [
-            `validators: ${validation.validators.length}`,
-            ...validation.diagnostics,
-            ...validation.findings.slice(0, 20).map((finding) => `${finding.severity}: ${finding.validatorId} ${finding.file}:${finding.line}`),
-          ],
-        });
-      } catch (error) {
-        steps.push({
-          id: SetupStepId.ProjectValidation,
-          status: SetupStatus.Fail,
-          message: "Project validation failed.",
-          details: [errorMessage(error)],
-        });
-      }
-    } else {
-      steps.push({
-        id: SetupStepId.Doctor,
-        status: SetupStatus.Skip,
-        message: "Doctor needs valid context files.",
-      });
-      steps.push({
-        id: SetupStepId.ProjectValidation,
-        status: SetupStatus.Skip,
-        message: "Project validation needs valid context files.",
-      });
-    }
-  }
-
-  if (query.startDaemon) {
-    const daemonStep = await startSetupDaemon(rootDir, query.dryRun);
-    daemonStart = daemonStep.daemonStart;
-    steps.push(daemonStep.step);
-  } else {
-    steps.push({
-      id: SetupStepId.Daemon,
-      status: SetupStatus.Skip,
-      message: "Daemon start skipped.",
-    });
-  }
-
-  let result = createSetupResult({
-    rootDir,
-    dryRun: query.dryRun,
-    startedAt,
-    scaffoldMissing,
-    steps,
-    init,
-    hooks,
-    doctor,
-    validation,
-    daemonStart,
-  });
-
-  if (!query.dryRun) {
-    try {
-      writeSetupState(rootDir, result);
-      steps.push({
-        id: SetupStepId.SetupState,
-        status: SetupStatus.Pass,
-        message: `Setup state written to ${SetupStateFile}.`,
-      });
-    } catch (error) {
-      steps.push({
-        id: SetupStepId.SetupState,
-        status: SetupStatus.Fail,
-        message: "Setup state could not be written.",
-        details: [errorMessage(error)],
-      });
-    }
-  } else {
-    steps.push({
-      id: SetupStepId.SetupState,
-      status: SetupStatus.Skip,
-      message: `Setup state would be written to ${SetupStateFile}.`,
-    });
-  }
-
-  result = createSetupResult({
-    rootDir,
-    dryRun: query.dryRun,
-    startedAt,
-    scaffoldMissing,
-    steps,
-    init,
-    hooks,
-    doctor,
-    validation,
-    daemonStart,
-  });
-  if (!query.dryRun && steps.at(-1)?.id === SetupStepId.SetupState && steps.at(-1)?.status === SetupStatus.Pass) writeSetupState(rootDir, result);
-  return result;
-}
-
-function parseSetupArgs(args: string[]): SetupQuery | null {
+  const paths = createPaths(rootDir);
   const cli = cac("opencanon setup");
   cli.option(CliOptionFlag.Help, "Show help.");
   cli.option("--yes", "Use defaults without prompting.");
+  cli.option("--non-interactive", "Alias for --yes.");
   cli.option(CliOptionFlag.DryRun, "Show setup actions without writing files.");
   cli.option(CliOptionFlag.Format, CliOptionDescription.Format);
   cli.option("--hooks <hosts>", "Install feedback hooks: codex, claude, opencode, all, or none.");
-  cli.option(CliOptionFlag.Manifest, CliOptionDescription.RuntimeManifest);
-  cli.option("--no-daemon", "Do not start the supervised daemon.");
+  cli.option("--no-runtime", "Do not start the project runtime.");
+  cli.option("--docs-dir <path>", "Project Canon docs directory.");
+  cli.option("--conventions-path <path>", "Convention entrypoint path.");
+  cli.option("--areas-path <path>", "Area entrypoint path.");
+  cli.option("--specs-path <path>", "Spec entrypoint path.");
+  cli.option("--changes-path <path>", "Change entrypoint path.");
+  cli.option("--fixtures-dir <path>", "Validator fixtures directory.");
+  cli.option("--cache-dir <path>", "Generated cache directory.");
+  cli.option("--file-discovery <mode>", "Project discovery mode: git or filesystem.");
+
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
   rejectUnknownOptions(options, [
     CliOptionName.Help,
     CliOptionName.H,
     CliOptionName.Yes,
+    "nonInteractive",
     CliOptionName.DryRun,
     CliOptionName.Format,
     CliOptionName.Hooks,
-    CliOptionName.Manifest,
-    SetupOptionName.Daemon,
+    "runtime",
+    "docsDir",
+    "conventionsPath",
+    "areasPath",
+    "specsPath",
+    "changesPath",
+    "fixturesDir",
+    "cacheDir",
+    "fileDiscovery",
   ]);
 
   if (booleanOption(options.help) || booleanOption(options.h)) {
     printSetupHelp();
     return null;
   }
-  if (parsed.args.length > 0) throw new Error(`Unexpected setup arguments: ${parsed.args.join(", ")}`);
+  if (parsed.args.length > 0) fail(`Unexpected setup arguments: ${parsed.args.join(", ")}`);
+  if (!booleanOption(options.dryRun) && !booleanOption(options.yes) && !booleanOption(options.nonInteractive)) {
+    fail("opencanon setup requires explicit consent. Use --yes or --dry-run.");
+  }
 
   return {
     dryRun: booleanOption(options.dryRun),
     format: formatOption(options.format),
     hooks: hooksOption(options.hooks),
-    runtimeManifestSource: manifestOption(options.manifest),
-    startDaemon: options[SetupOptionName.Daemon] !== false,
+    startRuntime: options.runtime !== false,
+    init: {
+      docsDir: stringOption(options.docsDir, relative(rootDir, paths.docsDir)),
+      conventionsPath: stringOption(options.conventionsPath, relative(rootDir, paths.conventionsPath)),
+      areasPath: stringOption(options.areasPath, relative(rootDir, paths.areasPath)),
+      specsPath: stringOption(options.specsPath, relative(rootDir, paths.specsPath)),
+      changesPath: stringOption(options.changesPath, relative(rootDir, paths.changesPath)),
+      fixturesDir: stringOption(options.fixturesDir, relative(rootDir, paths.fixturesDir)),
+      cacheDir: stringOption(options.cacheDir, relative(rootDir, paths.cacheDir)),
+      fileDiscovery: fileDiscoveryOption(options.fileDiscovery, paths.fileDiscovery),
+    },
   };
 }
 
-function createSetupInitQuery(rootDir: string, query: SetupQuery): InitQuery {
-  const defaults = createDefaultConfig(rootDir);
+async function buildSetupPacket(rootDir: string): Promise<SetupPacket> {
+  const paths = createPaths(rootDir);
+  const project = await loadProjectContext(rootDir);
+  const discovery = discoverProjectFiles(paths);
   return {
-    nonInteractive: true,
-    dryRun: query.dryRun,
-    force: false,
-    missingOnly: true,
-    format: query.format,
-    hooks: [],
-    docsDir: defaults.docsDir,
-    validatorsPath: defaults.validatorsPath,
-    fixturesDir: defaults.fixturesDir,
-    cacheDir: defaults.cacheDir,
-    fileDiscovery: defaults.fileDiscovery,
-  };
-}
-
-function missingScaffoldFiles(rootDir: string): string[] {
-  let paths: ReturnType<typeof createPaths>;
-  try {
-    paths = createPaths(rootDir);
-  } catch {
-    return ["opencanon.config.json"];
-  }
-
-  const files = [
-    paths.decisionsPath,
-    paths.validatorsPath,
-    path.join(rootDir, ".agents/skills/opencanon/SKILL.md"),
-    path.join(rootDir, ".agents/skills/opencanon/.gitignore"),
-    path.join(rootDir, ".agents/skills/opencanon/index.ts"),
-    path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts"),
-    path.join(rootDir, ".agents/skills/opencanon/runtime/cli.js"),
-  ];
-  const missing = files.filter((file) => !existsSync(file)).map((file) => relative(rootDir, file));
-  if (!packageHasOpenCanonScript(rootDir)) missing.push("package.json#scripts.opencanon");
-  return missing;
-}
-
-function packageHasOpenCanonScript(rootDir: string): boolean {
-  const packageJsonPath = path.join(rootDir, "package.json");
-  if (!existsSync(packageJsonPath)) return false;
-  try {
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { scripts?: Record<string, unknown> };
-    return packageJson.scripts?.opencanon === "bun .agents/skills/opencanon/scripts/opencanon.ts";
-  } catch {
-    return false;
-  }
-}
-
-function installRequestedHooks(rootDir: string, query: SetupQuery): HookInstallResult[] {
-  return query.hooks.map((host) =>
-    installHook({
-      rootDir,
-      host,
-      scope: HookInstallScope.Project,
-      dryRun: query.dryRun,
-    }),
-  );
-}
-
-async function loadSetupContext(rootDir: string): Promise<{
-  step: SetupStep;
-  context?: {
-    paths: ReturnType<typeof createPaths>;
-    decisions: Awaited<ReturnType<typeof loadProjectContext>>["decisions"];
-    validators: Awaited<ReturnType<typeof loadProjectContext>>["validators"];
-    impactSurfaces: Awaited<ReturnType<typeof loadProjectContext>>["impactSurfaces"];
-  };
-}> {
-  try {
-    const context = await loadProjectContext(rootDir);
-    const diagnostics = [
-      ...validateConfig(context.paths),
-      ...loadImpactSurfaces(context.paths).diagnostics,
-      ...validateContext({
-        paths: context.paths,
-        decisions: context.decisions,
-        validators: context.validators,
-        impactSurfaces: context.impactSurfaces,
-      }),
-    ];
-    return {
-      step: {
-        id: SetupStepId.Context,
-        status: diagnostics.length === 0 ? SetupStatus.Pass : SetupStatus.Fail,
-        message: diagnostics.length === 0 ? "Context files are valid." : "Context files need attention.",
-        details: diagnostics,
-      },
-      context: diagnostics.length === 0 ? context : undefined,
-    };
-  } catch (error) {
-    return {
-      step: {
-        id: SetupStepId.Context,
-        status: SetupStatus.Fail,
-        message: "Context files could not be loaded.",
-        details: [errorMessage(error)],
-      },
-    };
-  }
-}
-
-function ensureCacheIgnored(rootDir: string, dryRun: boolean): SetupStep {
-  try {
-    const paths = createPaths(rootDir);
-    const entry = `${relative(rootDir, paths.cacheDir).replace(/\/$/, "")}/`;
-    return ensureGitignoreEntryStep({
-      rootDir,
-      entry,
-      dryRun,
-      id: SetupStepId.CacheIgnore,
-      presentMessage: `${entry} is ignored by Git.`,
-      dryRunMessage: `${entry} would be added to .gitignore.`,
-      writtenMessage: `${entry} added to .gitignore.`,
-    });
-  } catch (error) {
-    return {
-      id: SetupStepId.CacheIgnore,
-      status: SetupStatus.Fail,
-      message: "Cache ignore entry could not be resolved.",
-      details: [errorMessage(error)],
-    };
-  }
-}
-
-function ensureSetupStateIgnored(rootDir: string, dryRun: boolean): SetupStep {
-  return ensureGitignoreEntriesStep({
+    schema: "opencanon.setup-packet.v1",
     rootDir,
-    entries: [SetupStateFile, ...generatedStateIgnoreEntries],
-    dryRun,
-    id: SetupStepId.SetupStateIgnore,
-    presentMessage: "Generated OpenCanon state files are ignored by Git.",
-    dryRunMessage: "Generated OpenCanon state ignore entries would be added to .gitignore.",
-    writtenMessage: "Generated OpenCanon state ignore entries added to .gitignore.",
-  });
-}
-
-function ensureSkillRuntimeIgnored(rootDir: string, dryRun: boolean): SetupStep {
-  return ensureGitignoreEntriesStep({
-    rootDir: path.join(rootDir, ".agents/skills/opencanon"),
-    entries: skillGeneratedIgnoreEntries,
-    dryRun,
-    id: SetupStepId.SkillRuntimeIgnore,
-    presentMessage: "Generated skill runtime and project type files are ignored by Git.",
-    dryRunMessage: "Generated skill ignore entries would be added to .agents/skills/opencanon/.gitignore.",
-    writtenMessage: "Generated skill ignore entries added to .agents/skills/opencanon/.gitignore.",
-  });
-}
-
-function ensureGitignoreEntryStep(params: {
-  rootDir: string;
-  entry: string;
-  dryRun: boolean;
-  id: SetupStepId;
-  presentMessage: string;
-  dryRunMessage: string;
-  writtenMessage: string;
-}): SetupStep {
-  return ensureGitignoreEntriesStep({ ...params, entries: [params.entry] });
-}
-
-function ensureGitignoreEntriesStep(params: {
-  rootDir: string;
-  entries: string[];
-  dryRun: boolean;
-  id: SetupStepId;
-  presentMessage: string;
-  dryRunMessage: string;
-  writtenMessage: string;
-}): SetupStep {
-  const gitignorePath = path.join(params.rootDir, ".gitignore");
-  const current = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
-  const lines = current.split(/\r?\n/).map((line) => line.trim());
-  const missingEntries = params.entries.filter((entry) => !lines.includes(entry));
-  if (missingEntries.length === 0) {
-    return {
-      id: params.id,
-      status: SetupStatus.Pass,
-      message: params.presentMessage,
-    };
-  }
-
-  if (!params.dryRun) {
-    const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
-    writeAtomicTextFileSync(gitignorePath, `${current}${prefix}${missingEntries.join("\n")}\n`);
-  }
-  return {
-    id: params.id,
-    status: SetupStatus.Pass,
-    message: params.dryRun ? params.dryRunMessage : params.writtenMessage,
+    generatedAt: new Date().toISOString(),
+    purpose: "Guide an agent through establishing this repository's Project Canon with user review.",
+    discovery: {
+      source: discovery.source,
+      fileCount: discovery.files.length,
+      sampleFiles: discovery.files.slice(0, 25),
+      languageCounts: languageCounts(discovery.files),
+      packageManagers: packageManagers(rootDir),
+      diagnostics: discovery.diagnostics,
+    },
+    existingCanon: {
+      areas: project.areas.length,
+      specs: project.specs.length,
+      changes: project.changes.length,
+      conventions: project.conventions.length,
+      validators: project.validators.length,
+      impactSurfaces: project.impactSurfaces.length,
+    },
+    agentWorkflow: [
+      "Inspect the setup packet and existing Project Canon before proposing durable definitions.",
+      "Explore repository structure, tests, docs, package scripts, entrypoints, and risky surfaces using OpenCanon Search and scoped context.",
+      "Draft Areas, Specs, Conventions, Impact Surfaces, Checks, and active Changes as a proposal with evidence and open questions.",
+      "Ask the user to accept or revise the proposal before writing TypeScript definitions under opencanon/.",
+      "After accepted definitions are written, render Project Canon docs, run validate, and run doctor.",
+    ],
+    proposalRequirements: [
+      "Areas identify ownership and implementation boundaries.",
+      "Specs describe durable product or system behavior, not temporary implementation tasks.",
+      "Conventions describe rules that should outlive the current setup session and can later gain runtime Proof.",
+      "Impact Surfaces identify files or resources where downstream effects need explicit attention.",
+      "Checks name the commands, tests, validators, or Doctor coverage that prove the canon stays current.",
+      "Changes describe active work only; progress belongs in runtime Activity, not mutable definition status.",
+    ],
+    suggestedCommands: [
+      "opencanon brief --format json",
+      "opencanon canon map --format json",
+      "opencanon search \"architecture entrypoints\"",
+      "opencanon context --files <paths...>",
+      "opencanon validate --changed",
+      "opencanon doctor",
+    ],
   };
-}
-
-async function installSetupRuntime(rootDir: string, query: SetupQuery): Promise<SetupStep> {
-  try {
-    const result = await applyRuntimeUpdate({
-      rootDir,
-      cwd: rootDir,
-      manifestSource: query.runtimeManifestSource ?? "",
-      runtimeRoot: path.join(rootDir, ".agents/skills/opencanon/runtime"),
-      dryRun: query.dryRun,
-    });
-    return {
-      id: SetupStepId.RuntimeUpdate,
-      status: SetupStatus.Pass,
-      message:
-        result.status === "current"
-          ? "Engine runtime already matches the release manifest."
-          : result.status === "dry-run"
-            ? "Engine runtime release asset selected."
-            : "Engine runtime installed from the release manifest.",
-      details: [
-        `target: ${result.check.target}`,
-        `bundle: ${result.check.resolvedBundleSource}`,
-        `runtime: ${path.relative(rootDir, result.check.runtimeRoot)}`,
-        `sha256: ${result.check.expectedSha256}`,
-      ],
-    };
-  } catch (error) {
-    return {
-      id: SetupStepId.RuntimeUpdate,
-      status: SetupStatus.Fail,
-      message: "Engine runtime could not be installed from the release manifest.",
-      details: [errorMessage(error)],
-    };
-  }
-}
-
-async function startSetupDaemon(rootDir: string, dryRun: boolean): Promise<{ step: SetupStep; daemonStart?: SetupResult["daemonStart"] }> {
-  if (dryRun) {
-    return {
-      step: {
-        id: SetupStepId.Daemon,
-        status: SetupStatus.Skip,
-        message: "Daemon prerequisite checks and start would run.",
-      },
-    };
-  }
-
-  try {
-    const prerequisites = assertDaemonPrerequisites();
-    const started = await startSupervisedDaemon({ cwd: rootDir });
-    return {
-      daemonStart: {
-        status: started.status,
-        url: started.entry.url,
-        pid: started.entry.pid,
-      },
-      step: {
-        id: SetupStepId.Daemon,
-        status: SetupStatus.Pass,
-        message: `Daemon ${started.status} at ${started.entry.url}.`,
-        details: [`Bun: ${prerequisites.bunVersion}`, `Engine: ${prerequisites.engine.version().engineVersion}`],
-      },
-    };
-  } catch (error) {
-    return {
-      step: {
-        id: SetupStepId.Daemon,
-        status: SetupStatus.Fail,
-        message: "Daemon could not be started.",
-        details: [errorMessage(error)],
-      },
-    };
-  }
-}
-
-function setupStatusFromDoctor(status: DoctorStatus): SetupStatus {
-  if (status === DoctorStatus.Fail) return SetupStatus.Fail;
-  if (status === DoctorStatus.Warn) return SetupStatus.Warn;
-  return SetupStatus.Pass;
-}
-
-function setupStatusFromValidation(validation: ValidationResult): SetupStatus {
-  if (validation.diagnostics.length > 0 || validation.findings.some((finding) => finding.severity === "error")) return SetupStatus.Fail;
-  if (validation.findings.length > 0) return SetupStatus.Warn;
-  return SetupStatus.Pass;
-}
-
-function createSetupResult(params: Omit<SetupResult, "status" | "completedAt" | "statePath">): SetupResult {
-  return {
-    ...params,
-    status: aggregateSetupStatus(params.steps),
-    completedAt: new Date().toISOString(),
-    statePath: params.dryRun ? undefined : SetupStateFile,
-  };
-}
-
-function aggregateSetupStatus(steps: SetupStep[]): Exclude<SetupStatus, "skip"> {
-  if (steps.some((step) => step.status === SetupStatus.Fail)) return SetupStatus.Fail;
-  if (steps.some((step) => step.status === SetupStatus.Warn)) return SetupStatus.Warn;
-  return SetupStatus.Pass;
-}
-
-function writeSetupState(rootDir: string, result: SetupResult): void {
-  writeAtomicJsonFileSync(path.join(rootDir, SetupStateFile), {
-    version: 1,
-    rootDir: result.rootDir,
-    status: result.status,
-    startedAt: result.startedAt,
-    completedAt: result.completedAt,
-    steps: result.steps,
-    scaffoldMissing: result.scaffoldMissing,
-    init: result.init,
-    hooks: result.hooks.map((hook) => ({
-      host: hook.host,
-      scope: hook.scope,
-      dryRun: hook.dryRun,
-      files: hook.files,
-      diagnostics: hook.diagnostics,
-    })),
-    doctorStatus: result.doctor?.status,
-    validation: result.validation
-      ? {
-          files: result.validation.files,
-          validators: result.validation.validators,
-          findingCount: result.validation.findingCount,
-          diagnostics: result.validation.diagnostics,
-        }
-      : undefined,
-    daemonStart: result.daemonStart,
-  });
 }
 
 function renderSetupMarkdown(result: SetupResult): string {
@@ -667,22 +187,75 @@ function renderSetupMarkdown(result: SetupResult): string {
   lines.push("");
   lines.push(`Root: ${result.rootDir}${result.dryRun ? " (dry-run)" : ""}`);
   lines.push(`Status: ${result.status}`);
-  if (result.statePath) lines.push(`State: ${result.statePath}`);
   lines.push("");
-  lines.push("Steps:");
-  for (const step of result.steps) {
-    lines.push(`- [${step.status}] ${step.id}: ${step.message}`);
-    for (const detail of step.details ?? []) lines.push(`  - ${detail}`);
+  lines.push("Init:");
+  for (const step of result.init.steps) lines.push(`- [${step.status}] ${step.id}: ${step.message}`);
+  if (!result.packet) {
+    lines.push("");
+    lines.push("Next:");
+    lines.push(result.status === SetupStatus.Fail ? "- Fix failed setup steps, then rerun `opencanon setup --yes`." : "- Rerun without `--dry-run` to produce the agent setup packet.");
+    return lines.join("\n");
   }
+
   lines.push("");
-  lines.push("Next:");
-  if (result.status === SetupStatus.Fail) {
-    lines.push("- Fix failed setup steps, then rerun bun run opencanon setup.");
-  } else {
-    lines.push("- Use bun run opencanon context --files <paths...> before code edits.");
-    lines.push("- Use bun run opencanon validate --files <paths...> after code edits.");
-  }
+  lines.push("Discovery:");
+  lines.push(`- Source: ${result.packet.discovery.source}`);
+  lines.push(`- Files: ${result.packet.discovery.fileCount}`);
+  lines.push(`- Languages: ${formatRecord(result.packet.discovery.languageCounts) || "none"}`);
+  lines.push(`- Package managers: ${result.packet.discovery.packageManagers.join(", ") || "none"}`);
+  for (const diagnostic of result.packet.discovery.diagnostics) lines.push(`- Diagnostic: ${diagnostic}`);
+
+  lines.push("");
+  lines.push("Existing Project Canon:");
+  lines.push(`- Areas: ${result.packet.existingCanon.areas}`);
+  lines.push(`- Specs: ${result.packet.existingCanon.specs}`);
+  lines.push(`- Changes: ${result.packet.existingCanon.changes}`);
+  lines.push(`- Conventions: ${result.packet.existingCanon.conventions}`);
+  lines.push(`- Validators: ${result.packet.existingCanon.validators}`);
+  lines.push(`- Impact Surfaces: ${result.packet.existingCanon.impactSurfaces}`);
+
+  lines.push("");
+  lines.push("Agent Workflow:");
+  for (const item of result.packet.agentWorkflow) lines.push(`- ${item}`);
+
+  lines.push("");
+  lines.push("Suggested Commands:");
+  for (const command of result.packet.suggestedCommands) lines.push(`- \`${command}\``);
+
   return lines.join("\n");
+}
+
+function languageCounts(files: string[]): Record<string, number> {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    const key = languageKey(file);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function languageKey(file: string): string {
+  const basename = path.basename(file);
+  if (basename === "package.json") return "package-json";
+  const extension = path.extname(file).slice(1);
+  return extension || "other";
+}
+
+function packageManagers(rootDir: string): string[] {
+  const managers: string[] = [];
+  if (existsSync(path.join(rootDir, "package-lock.json"))) managers.push("npm");
+  if (existsSync(path.join(rootDir, "pnpm-lock.yaml"))) managers.push("pnpm");
+  if (existsSync(path.join(rootDir, "yarn.lock"))) managers.push("yarn");
+  if (existsSync(path.join(rootDir, "bun.lock")) || existsSync(path.join(rootDir, "bun.lockb"))) managers.push("bun");
+  if (existsSync(path.join(rootDir, "Cargo.toml"))) managers.push("cargo");
+  if (existsSync(path.join(rootDir, "pyproject.toml"))) managers.push("python");
+  return managers;
+}
+
+function formatRecord(record: Record<string, number>): string {
+  return Object.entries(record)
+    .map(([key, value]) => `${key} ${value}`)
+    .join(", ");
 }
 
 function hooksOption(value: unknown): HookInstallHost[] {
@@ -691,35 +264,45 @@ function hooksOption(value: unknown): HookInstallHost[] {
   if (values.includes("all")) return [HookInstallHost.Codex, HookInstallHost.Claude, HookInstallHost.OpenCode];
   return values.map((item) => {
     if (item === HookInstallHost.Codex || item === HookInstallHost.Claude || item === HookInstallHost.OpenCode) return item;
-    throw new Error(`Unsupported --hooks value: ${item}`);
+    fail(`Unsupported --hooks value: ${item}`);
   });
 }
 
-function manifestOption(value: unknown): string | undefined {
-  const values = stringValues(value);
-  if (values.length > 1) fail("--manifest accepts one source.");
-  return values[0];
+function fileDiscoveryOption(value: unknown, fallback: InitFlowQuery["init"]["fileDiscovery"]): InitFlowQuery["init"]["fileDiscovery"] {
+  if (value === undefined) return fallback;
+  if (value === "git" || value === "filesystem") return value;
+  fail(`Unsupported --file-discovery: ${String(value)}`);
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function stringOption(value: unknown, fallback: string): string {
+  if (value === undefined) return fallback;
+  if (typeof value === "string" && value.length > 0) return value;
+  fail("Option requires a string value.");
 }
 
 function printSetupHelp(): void {
   console.log(`Usage:
-  bun run opencanon setup --yes
-  bun run opencanon setup --yes --hooks codex
-  bun run opencanon setup --yes --hooks codex,claude,opencode
-  bun run opencanon setup --yes --manifest <path-or-url>
-  bun run opencanon setup --yes --no-daemon
-  bun run opencanon setup --dry-run
+  opencanon setup --yes
+  opencanon setup --yes --hooks codex
+  opencanon setup --yes --no-runtime
+  opencanon setup --dry-run
 
 Options:
   --yes                    Use defaults without prompting.
+  --non-interactive        Alias for --yes.
   --dry-run                Show setup actions without writing files.
   --format markdown|json   Output format. Default: markdown.
   --hooks <hosts>          codex, claude, opencode, all, or none. Default: none.
-  ${CliOptionFlag.Manifest}      Release manifest path, file URL, or HTTPS URL for engine runtime install.
-  --no-daemon              Do not start the supervised daemon.
+  --no-runtime             Do not start the project runtime.
+  --docs-dir <path>        Default: docs/opencanon.
+  --conventions-path <path>
+  --areas-path <path>
+  --specs-path <path>
+  --changes-path <path>
+  --fixtures-dir <path>    Default: opencanon/fixtures.
+  --cache-dir <path>       Default: .opencanon/cache.
+  --file-discovery <mode>  git or filesystem.
+
+Setup runs deterministic init first, then emits an agent setup packet for establishing Project Canon with user review.
 `);
 }

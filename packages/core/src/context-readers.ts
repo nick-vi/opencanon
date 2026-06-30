@@ -3,7 +3,8 @@ import path from "node:path";
 import type { AnalysisCache } from "./cache.ts";
 import { matchesAny, normalizePath } from "./core.ts";
 import type { Profiler } from "./profiler.ts";
-import { createProjectFile, isSupportedSourceFile, parseJsonRead } from "./project-files.ts";
+import { createProjectFile, parseJsonRead } from "./project-files.ts";
+import { isSupportedSourceFile } from "./discovery.ts";
 import type { FileRead, JsonRead, ProjectFile, Validator } from "./validator-types.ts";
 
 export function readContextText(params: {

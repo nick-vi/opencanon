@@ -10,45 +10,71 @@ import {
   ExtractFactsResultSchema,
   EngineVersionSchema,
   EngineProjectStatusSchema,
+  EmbedSemanticTextsRequestSchema,
+  EmbedSemanticTextsResultSchema,
+  GenerateTextRequestSchema,
+  GenerateTextResultSchema,
   IndexCodeGraphRequestSchema,
   IndexCodeGraphResultSchema,
+  ListSemanticChunksRequestSchema,
+  ListSemanticChunksResultSchema,
   OpenCanonErrorCodeSchema,
   OpenProjectRequestSchema,
   OpenCanonError,
+  ReadProductModelProjectionResultSchema,
+  ReadSemanticIndexStatusRequestSchema,
+  ReadSemanticIndexStatusResultSchema,
   ScanAndDiffRequestSchema,
   ScanAndDiffResultSchema,
   SearchGraphEdgesRequestSchema,
   SearchGraphEdgesResultSchema,
   SearchReferencesRequestSchema,
   SearchReferencesResultSchema,
+  SearchSemanticIndexRequestSchema,
+  SearchSemanticIndexResultSchema,
   SearchSymbolsRequestSchema,
   SearchSymbolsResultSchema,
   WatcherEventBatchSchema,
   WatcherStartRequestSchema,
   WatcherStartResultSchema,
+  WriteProductModelProjectionRequestSchema,
+  WriteSemanticIndexRequestSchema,
   createOpenCanonDiagnostic,
   type BuildRepoGraphRequest,
   type BuildRepoGraphResult,
   type CanonEvent,
+  type EmbedSemanticTextsRequest,
+  type EmbedSemanticTextsResult,
+  type GenerateTextRequest,
+  type GenerateTextResult,
   type ExtractFactsRequest,
   type ExtractFactsResult,
   type EngineVersion,
   type EngineProjectStatus,
   type IndexCodeGraphRequest,
   type IndexCodeGraphResult,
+  type ListSemanticChunksRequest,
+  type ListSemanticChunksResult,
   type OpenProjectRequest,
+  type ProductModelProjection,
+  type ReadSemanticIndexStatusRequest,
+  type ReadSemanticIndexStatusResult,
   type ScanAndDiffRequest,
   type ScanAndDiffResult,
   type SearchGraphEdgesRequest,
   type SearchGraphEdgesResult,
   type SearchReferencesRequest,
   type SearchReferencesResult,
+  type SearchSemanticIndexRequest,
+  type SearchSemanticIndexResult,
   type SearchSymbolsRequest,
   type SearchSymbolsResult,
   type WatcherEventBatch,
   type WatcherStartRequest,
   type WatcherStartResult,
+  type WriteSemanticIndexRequest,
 } from "@opencanon/core";
+import type { SpanRecord, TraceEventRecord, TraceRecord } from "@opencanon/observability";
 
 const require = createRequire(import.meta.url);
 const packageSourceDir = fileURLToPath(new URL(".", import.meta.url));
@@ -73,12 +99,39 @@ export type EngineProject = {
   searchSymbols(request: SearchSymbolsRequest): SearchSymbolsResult;
   searchReferences(request: SearchReferencesRequest): SearchReferencesResult;
   searchGraphEdges(request: SearchGraphEdgesRequest): SearchGraphEdgesResult;
+  writeProductModelProjection(projection: ProductModelProjection): void;
+  readProductModelProjection(): ProductModelProjection | null;
+  writeSemanticIndex(request: WriteSemanticIndexRequest): void;
+  readSemanticIndexStatus(request?: ReadSemanticIndexStatusRequest): ReadSemanticIndexStatusResult;
+  listSemanticChunks(request?: ListSemanticChunksRequest): ListSemanticChunksResult;
+  searchSemanticIndex(request: SearchSemanticIndexRequest): SearchSemanticIndexResult;
+  embedSemanticTexts(request: EmbedSemanticTextsRequest): EmbedSemanticTextsResult;
+  generateText(request: GenerateTextRequest): GenerateTextResult;
   startWatcher(request: WatcherStartRequest, onBatch: (batch: WatcherEventBatch) => void): WatcherStartResult;
   drainWatcherEvents(): WatcherEventBatch[];
   stopWatcher(): void;
   writeEvent(event: CanonEvent): void;
   listEvents(limit?: number): CanonEvent[];
+  writeObservabilityRecords(records: ObservabilityRecordBatch): void;
+  listObservabilityRecords(query?: ObservabilityRecordQuery): ObservabilityRecordResult;
   close(): void;
+};
+
+export type ObservabilityRecordBatch = {
+  traces?: readonly TraceRecord[] | undefined;
+  spans?: readonly SpanRecord[] | undefined;
+  events?: readonly TraceEventRecord[] | undefined;
+};
+
+export type ObservabilityRecordQuery = {
+  limit?: number | undefined;
+  traceId?: string | undefined;
+};
+
+export type ObservabilityRecordResult = {
+  traces: TraceRecord[];
+  spans: SpanRecord[];
+  events: TraceEventRecord[];
 };
 
 type EngineJsonBinding = {
@@ -95,11 +148,21 @@ type EngineProjectJsonBinding = {
   searchSymbolsJson(request: string): string;
   searchReferencesJson(request: string): string;
   searchGraphEdgesJson(request: string): string;
+  writeProductModelProjectionJson(request: string): void;
+  readProductModelProjectionJson(): string;
+  writeSemanticIndexJson(request: string): void;
+  readSemanticIndexStatusJson(request: string): string;
+  listSemanticChunksJson(request: string): string;
+  searchSemanticIndexJson(request: string): string;
+  embedSemanticTextsJson(request: string): string;
+  generateTextJson(request: string): string;
   startWatcherJson(request: string, callback: (error: unknown, batchJson?: string) => void): string;
   drainWatcherEventsJson(): string;
   stopWatcher(): void;
   writeEventJson(request: string): void;
   listEventsJson(request: string): string;
+  writeObservabilityRecordsJson(request: string): void;
+  listObservabilityRecordsJson(request: string): string;
   close(): void;
 };
 
@@ -152,7 +215,7 @@ export function loadEngine(moduleName = "opencanon"): Engine {
         code: "engine-binary-missing",
         message: "OpenCanon engine binary is required.",
         details: candidates.map((candidate) => `Expected ${candidate}.`),
-        action: "Build or install the bundled OpenCanon runtime before starting the daemon.",
+        action: "Build or install the bundled OpenCanon runtime before starting the project runtime.",
       }),
     ]);
   }
@@ -194,6 +257,34 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
       SearchReferencesResultSchema.parse(parseJson(callEngine(() => project.searchReferencesJson(JSON.stringify(SearchReferencesRequestSchema.parse(request)))))),
     searchGraphEdges: (request) =>
       SearchGraphEdgesResultSchema.parse(parseJson(callEngine(() => project.searchGraphEdgesJson(JSON.stringify(SearchGraphEdgesRequestSchema.parse(request)))))),
+    writeProductModelProjection: (projection) =>
+      callEngine(() => project.writeProductModelProjectionJson(JSON.stringify(WriteProductModelProjectionRequestSchema.parse({ projection })))),
+    readProductModelProjection: () => {
+      const parsed = ReadProductModelProjectionResultSchema.safeParse(parseJson(callEngine(() => project.readProductModelProjectionJson())));
+      return parsed.success ? parsed.data.projection : null;
+    },
+    writeSemanticIndex: (request) =>
+      callEngine(() => project.writeSemanticIndexJson(JSON.stringify(WriteSemanticIndexRequestSchema.parse(request)))),
+    readSemanticIndexStatus: (request = {}) =>
+      ReadSemanticIndexStatusResultSchema.parse(
+        parseJson(callEngine(() => project.readSemanticIndexStatusJson(JSON.stringify(ReadSemanticIndexStatusRequestSchema.parse(request))))),
+      ),
+    listSemanticChunks: (request = {}) =>
+      ListSemanticChunksResultSchema.parse(
+        parseJson(callEngine(() => project.listSemanticChunksJson(JSON.stringify(ListSemanticChunksRequestSchema.parse(request))))),
+      ),
+    searchSemanticIndex: (request) =>
+      SearchSemanticIndexResultSchema.parse(
+        parseJson(callEngine(() => project.searchSemanticIndexJson(JSON.stringify(SearchSemanticIndexRequestSchema.parse(request))))),
+      ),
+    embedSemanticTexts: (request) =>
+      EmbedSemanticTextsResultSchema.parse(
+        parseJson(callEngine(() => project.embedSemanticTextsJson(JSON.stringify(EmbedSemanticTextsRequestSchema.parse(request))))),
+      ),
+    generateText: (request) =>
+      GenerateTextResultSchema.parse(
+        parseJson(callEngine(() => project.generateTextJson(JSON.stringify(GenerateTextRequestSchema.parse(request))))),
+      ),
     startWatcher: (request, onBatch) =>
       WatcherStartResultSchema.parse(
         parseJson(
@@ -214,6 +305,8 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     stopWatcher: () => callEngine(() => project.stopWatcher()),
     writeEvent: (event) => callEngine(() => project.writeEventJson(JSON.stringify({ event: CanonEventSchema.parse(event) }))),
     listEvents: (limit = 50) => (parseJson(callEngine(() => project.listEventsJson(JSON.stringify({ limit })))) as unknown[]).map((event) => CanonEventSchema.parse(event)),
+    writeObservabilityRecords: (records) => callEngine(() => project.writeObservabilityRecordsJson(JSON.stringify(records))),
+    listObservabilityRecords: (query = {}) => parseObservabilityRecordResult(parseJson(callEngine(() => project.listObservabilityRecordsJson(JSON.stringify(query))))),
     close: () => callEngine(() => project.close()),
   };
 }
@@ -228,7 +321,7 @@ function assertEngineJsonBinding(binding: Partial<EngineJsonBinding>): asserts b
       code: EngineDiagnosticCode.InvalidPayload,
       message: "OpenCanon engine exports are invalid.",
       details: [`Missing engine JSON exports: ${missing.join(", ")}.`],
-      action: "Rebuild the engine with bun run build:engine.",
+      action: "Rebuild the engine with npm run build:engine.",
     }),
   ]);
 }
@@ -243,11 +336,21 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "searchSymbolsJson",
     "searchReferencesJson",
     "searchGraphEdgesJson",
+    "writeProductModelProjectionJson",
+    "readProductModelProjectionJson",
+    "writeSemanticIndexJson",
+    "readSemanticIndexStatusJson",
+    "listSemanticChunksJson",
+    "searchSemanticIndexJson",
+    "embedSemanticTextsJson",
+    "generateTextJson",
     "startWatcherJson",
     "drainWatcherEventsJson",
     "stopWatcher",
     "writeEventJson",
     "listEventsJson",
+    "writeObservabilityRecordsJson",
+    "listObservabilityRecordsJson",
     "close",
   ].filter((key) => typeof project[key as keyof EngineProjectJsonBinding] !== "function");
   if (missing.length === 0) return;
@@ -256,9 +359,30 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
       code: EngineDiagnosticCode.InvalidPayload,
       message: "OpenCanon engine project handle exports are invalid.",
       details: [`Missing engine project exports: ${missing.join(", ")}.`],
-      action: "Rebuild the engine with bun run build:engine.",
+      action: "Rebuild the engine with npm run build:engine.",
     }),
   ]);
+}
+
+function parseObservabilityRecordResult(value: unknown): ObservabilityRecordResult {
+  if (typeof value !== "object" || value === null) {
+    throw new OpenCanonError([
+      createOpenCanonDiagnostic({
+        code: EngineDiagnosticCode.InvalidPayload,
+        message: "OpenCanon engine returned invalid observability records.",
+      }),
+    ]);
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    traces: arrayOrEmpty(record.traces) as TraceRecord[],
+    spans: arrayOrEmpty(record.spans) as SpanRecord[],
+    events: arrayOrEmpty(record.events) as TraceEventRecord[],
+  };
+}
+
+function arrayOrEmpty(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function parseJson(value: string): unknown {

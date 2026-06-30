@@ -1,7 +1,9 @@
+.opencanon/generated/
 .opencanon/cache/
-.opencanon/daemon.json
-.opencanon/daemon.log
-.opencanon/setup.json
-.opencanon/*.sqlite
-.opencanon/*.sqlite-shm
-.opencanon/*.sqlite-wal
+.opencanon/semantic-index/
+.opencanon/runtime.json
+.opencanon/runtime.log
+.opencanon/worker.lock
+.opencanon/init.json
+.opencanon/commit-approvals.json
+.opencanon/*.sqlite*

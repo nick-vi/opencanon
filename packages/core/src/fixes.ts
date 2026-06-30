@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolveInsideRoot } from "./paths.ts";
-import type { Finding, FixSafety, TextEdit } from "./validator.ts";
+import type { Finding, TextEdit } from "./validator.ts";
+import { FixSafety } from "./validator.ts";
 
 export const FixModeValue = {
   Safe: "safe",
@@ -120,7 +121,7 @@ export function applyFindingFixes(params: {
 
   if (result.diagnostics.length > 0 || params.dryRun) return result;
 
-  for (const [file, edits] of editsByFile) {
+  for (const edits of editsByFile.values()) {
     const absolutePath = edits[0]?.absolutePath;
     if (!absolutePath) continue;
     let text = readFileSync(absolutePath, "utf8");
@@ -135,7 +136,7 @@ export function applyFindingFixes(params: {
 }
 
 export function isFixAllowed(safety: FixSafety, mode: FixMode): boolean {
-  if (safety === "manual") return false;
+  if (safety === FixSafety.Manual) return false;
   if (mode === FixModeValue.All) return safety === FixModeValue.Safe || safety === FixModeValue.Suggested;
   if (mode === FixModeValue.Suggested) return safety === FixModeValue.Safe || safety === FixModeValue.Suggested;
   return safety === FixModeValue.Safe;

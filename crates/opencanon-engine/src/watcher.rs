@@ -22,15 +22,15 @@ pub(crate) type WatcherQueue = Arc<Mutex<VecDeque<WatcherEventBatch>>>;
 pub(crate) struct NativeWatcher {
     pub(crate) watcher: Option<notify::RecommendedWatcher>,
     pub(crate) stop: Arc<AtomicBool>,
-    pub(crate) worker: Option<JoinHandle<()>>,
+    pub(crate) thread: Option<JoinHandle<()>>,
 }
 
 impl NativeWatcher {
     pub(crate) fn stop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
         self.watcher.take();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }
@@ -45,7 +45,7 @@ pub(crate) struct WatcherPathFilter {
     ignore: GlobSet,
 }
 
-pub(crate) struct WatcherWorkerInput {
+pub(crate) struct WatcherThreadInput {
     pub(crate) root_dir: PathBuf,
     pub(crate) state_path: String,
     pub(crate) filter: WatcherPathFilter,
@@ -56,7 +56,7 @@ pub(crate) struct WatcherWorkerInput {
     pub(crate) buffer_capacity: usize,
 }
 
-pub(crate) fn run_watcher_worker(input: WatcherWorkerInput, rx: Receiver<notify::Result<Event>>) {
+pub(crate) fn run_watcher_thread(input: WatcherThreadInput, rx: Receiver<notify::Result<Event>>) {
     let mut pending_paths = BTreeSet::new();
     let mut pending_reason: Option<String> = None;
     let mut deadline: Option<Instant> = None;
@@ -96,7 +96,7 @@ pub(crate) fn run_watcher_worker(input: WatcherWorkerInput, rx: Receiver<notify:
 }
 
 fn emit_watcher_batch(
-    input: &WatcherWorkerInput,
+    input: &WatcherThreadInput,
     pending_paths: &mut BTreeSet<String>,
     pending_reason: &mut Option<String>,
 ) {

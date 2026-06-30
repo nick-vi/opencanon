@@ -3,33 +3,71 @@ import path from "node:path";
 import type { AnalysisCache } from "./cache.ts";
 import type { ContextPaths } from "./core.ts";
 import { listFiles, listProjectFiles, matchesAny, relative } from "./core.ts";
+import { isSupportedSourceFile } from "./discovery.ts";
 import type { Profiler } from "./profiler.ts";
-import { parsePythonClasses, parsePythonFunctions, parsePythonImports } from "./python.ts";
-import {
-  parseSvelteTypeScriptDeclarations,
-  parseSvelteTypeScriptExports,
-  parseSvelteTypeScriptFunctions,
-  parseSvelteTypeScriptImports,
-  parseSvelteTypeScriptLiterals,
-  parseTypeScriptDeclarations,
-  parseTypeScriptExports,
-  parseTypeScriptFunctions,
-  parseTypeScriptImports,
-  parseTypeScriptLiterals,
-} from "./typescript.ts";
 import type { ExportInfo, FunctionInfo, ImportInfo, LiteralInfo, TypeScriptDeclaration } from "./typescript.ts";
 import type { PythonClassInfo, PythonFunctionInfo, PythonImportInfo } from "./python.ts";
-import type { CommentInfo, JsonRead, ProjectFile, TextMatch, Validator } from "./validator-types.ts";
+import type { CallInfo, CommentInfo, JsonRead, ProjectDiagnosticFact, ProjectFile, TextMatch, Validator } from "./validator-types.ts";
+import type { FileFacts } from "./contracts.ts";
+import {
+  mapCalls,
+  mapComments,
+  mapDeclarations,
+  mapExports,
+  mapFunctions,
+  mapImports,
+  mapLiterals,
+  mapPythonCalls,
+  mapPythonClasses,
+  mapPythonFunctions,
+  mapPythonImports,
+} from "./ast-fact-mappers.ts";
 
 export const PackageJsonFileName = "package.json";
-export const ProjectFileLanguage = {
-  TypeScript: "typescript",
-  Svelte: "svelte",
-  Python: "python",
-  Json: "json",
-  Markdown: "markdown",
-  Text: "text",
-} as const;
+import { ProjectFileLanguage, descriptorForExtension } from "./language-registry.ts";
+
+/**
+ * Module-level injection seam for an AST-backed project facts provider,
+ * mirroring the live type-facts provider seam in validator.ts. The project runtime (and
+ * any in-process validation host that owns the engine) registers a factory
+ * here at startup; every AST fact accessor — `file.ts.imports/exports/
+ * functions/declarations/calls/literals()`, `file.py.*`, and `file.comments()`
+ * for TypeScript — reads from it. There is NO regex fallback for those structural
+ * facts; access throws if no provider is installed. (Svelte/Python `comments()`
+ * are the exception: they scan the whole file as text, since markup/`#` comments
+ * live outside the JS AST.) Svelte structural facts come from the engine's
+ * SvelteExtractor (which locates `<script>` blocks and parses them with oxc),
+ * reached through this same seam like any other language. Core stays
+ * free of any `@opencanon/engine` import (layering — enforced by
+ * framework-package-boundaries) — it only calls back through this factory, which
+ * the runtime/CLI supplies.
+ *
+ * The factory is keyed by `rootDir`; it may return `undefined` only when that
+ * root truly has no engine-backed provider. AST fact access then throws
+ * instead of silently falling back to regex. The provider is expected to
+ * batch/cache internally keyed by (path, content).
+ */
+export interface ProjectAstFactsProvider {
+  /**
+   * Engine-extracted language-neutral facts for ONE file — ALL fact kinds in one
+   * parse. Core adapts these to per-language accessor shapes via ast-fact-mappers
+   * (the universal contract → TypeScript surface boundary). The one method any
+   * language flows through. `undefined` when the file yielded no facts (the core
+   * mappers treat it as empty).
+   */
+  factsFor(filePath: string, text: string): FileFacts | undefined;
+}
+export type ProjectAstFactsProviderFactory = (rootDir: string) => ProjectAstFactsProvider | undefined;
+let projectAstFactsProviderFactory: ProjectAstFactsProviderFactory | undefined;
+
+/** Runtime/CLI-only: install (or clear) the AST-backed project facts provider factory. */
+export function setProjectAstFactsProviderFactory(factory: ProjectAstFactsProviderFactory | undefined): void {
+  projectAstFactsProviderFactory = factory;
+}
+
+export function getProjectAstFactsProvider(rootDir: string): ProjectAstFactsProvider | undefined {
+  return projectAstFactsProviderFactory?.(rootDir);
+}
 
 export function loadProjectFiles(
   rootDir: string,
@@ -59,6 +97,7 @@ export function createProjectFile(params: {
   return createProjectFileFromDisk({
     absolutePath,
     path: filePath,
+    rootDir: params.rootDir,
     validator: params.validator,
     cache: params.cache,
     profiler: params.profiler,
@@ -68,6 +107,10 @@ export function createProjectFile(params: {
 export function createProjectFileFromDisk(params: {
   absolutePath: string;
   path: string;
+  /** Project root, when known. Enables the AST facts provider seam (imports,
+   * exports, symbols, declarations, calls, literals, comments — TS/Svelte via oxc,
+   * Python via rustpython). */
+  rootDir?: string;
   validator: Pick<Validator, "id" | "severity">;
   cache?: AnalysisCache;
   profiler?: Profiler;
@@ -79,6 +122,7 @@ export function createProjectFileFromDisk(params: {
     imports: undefined as ImportInfo[] | undefined,
     exports: undefined as ExportInfo[] | undefined,
     functions: undefined as FunctionInfo[] | undefined,
+    calls: undefined as CallInfo[] | undefined,
     declarations: undefined as TypeScriptDeclaration[] | undefined,
     literals: undefined as LiteralInfo[] | undefined,
   };
@@ -86,8 +130,10 @@ export function createProjectFileFromDisk(params: {
     imports: undefined as PythonImportInfo[] | undefined,
     functions: undefined as PythonFunctionInfo[] | undefined,
     classes: undefined as PythonClassInfo[] | undefined,
+    calls: undefined as CallInfo[] | undefined,
   };
   let commentCache: CommentInfo[] | undefined;
+  let diagnosticsCache: ProjectDiagnosticFact[] | undefined;
 
   function readText(): string {
     textCache ??= params.profiler?.measure("file.read", () => readFileSync(params.absolutePath, "utf8")) ?? readFileSync(params.absolutePath, "utf8");
@@ -106,6 +152,17 @@ export function createProjectFileFromDisk(params: {
     params.cache?.set(params.path, key, value);
     return value;
   }
+
+  function requireProvider(): ProjectAstFactsProvider {
+    const provider = params.rootDir ? getProjectAstFactsProvider(params.rootDir) : undefined;
+    if (!provider) {
+      throw new Error(
+        `AST facts require an installed ProjectAstFactsProvider for ${params.path}. Install one via setProjectAstFactsProviderFactory (e.g. createCliAstFactsProvider / withCliAstFactsProvider) before reading facts.`,
+      );
+    }
+    return provider;
+  }
+
 
   return {
     path: params.path,
@@ -135,51 +192,121 @@ export function createProjectFileFromDisk(params: {
       return matchesAny(params.path, [glob]);
     },
     comments() {
-      commentCache ??= cached("comments", () => parseComments(readText(), languageFor(extension)));
+      commentCache ??= cached("comments", () => {
+        const language = languageFor(extension);
+        if (language === ProjectFileLanguage.TypeScript) {
+          return mapComments(requireProvider().factsFor(params.path, readText()));
+        }
+        return parseComments(readText(), language);
+      });
       return commentCache;
     },
+    diagnostics() {
+      diagnosticsCache ??= cached("diagnostics", () => {
+        const language = languageFor(extension);
+        let facts: FileFacts | undefined;
+        if (language === ProjectFileLanguage.TypeScript || language === ProjectFileLanguage.Svelte || language === ProjectFileLanguage.Python) facts = requireProvider().factsFor(params.path, readText());
+        else return [];
+        return (facts?.diagnostics ?? []).map((diagnostic) => ({
+          file: params.path,
+          line: diagnostic.position?.line ?? 1,
+          column: diagnostic.position?.column,
+          source: facts?.parser ?? "parser",
+          code: diagnostic.code,
+          message: diagnostic.message,
+          severity: diagnostic.severity,
+        }));
+      });
+      return diagnosticsCache;
+    },
     report(input) {
+      const column = input.column ?? firstNonWhitespaceColumn(readLines()[input.line - 1] ?? "");
       return {
         validatorId: params.validator.id,
         severity: params.validator.severity,
         file: params.path,
         ...input,
+        column,
       };
     },
     ts: {
       imports() {
-        tsCache.imports ??= cached("ts.imports", () => (languageFor(extension) === ProjectFileLanguage.Svelte ? parseSvelteTypeScriptImports(readText()) : parseTypeScriptImports(readText())));
+        tsCache.imports ??= cached("ts.imports", () => {
+          const language = languageFor(extension);
+          if (language !== ProjectFileLanguage.TypeScript && language !== ProjectFileLanguage.Svelte) return [];
+          return mapImports(requireProvider().factsFor(params.path, readText()));
+        });
         return tsCache.imports;
       },
       exports() {
-        tsCache.exports ??= cached("ts.exports", () => (languageFor(extension) === ProjectFileLanguage.Svelte ? parseSvelteTypeScriptExports(readText()) : parseTypeScriptExports(readText())));
+        tsCache.exports ??= cached("ts.exports", () => {
+          const language = languageFor(extension);
+          if (language !== ProjectFileLanguage.TypeScript && language !== ProjectFileLanguage.Svelte) return [];
+          return mapExports(requireProvider().factsFor(params.path, readText()));
+        });
         return tsCache.exports;
       },
       functions() {
-        tsCache.functions ??= cached("ts.functions", () => (languageFor(extension) === ProjectFileLanguage.Svelte ? parseSvelteTypeScriptFunctions(readText()) : parseTypeScriptFunctions(readText())));
+        tsCache.functions ??= cached("ts.functions", () => {
+          const language = languageFor(extension);
+          if (language !== ProjectFileLanguage.TypeScript && language !== ProjectFileLanguage.Svelte) return [];
+          return mapFunctions(requireProvider().factsFor(params.path, readText()), readText());
+        });
         return tsCache.functions;
       },
+      calls() {
+        tsCache.calls ??= cached("ts.calls", () => {
+          const language = languageFor(extension);
+          if (language !== ProjectFileLanguage.TypeScript && language !== ProjectFileLanguage.Svelte) return [];
+          return mapCalls(requireProvider().factsFor(params.path, readText()));
+        });
+        return tsCache.calls;
+      },
       declarations() {
-        tsCache.declarations ??= cached("ts.declarations", () => (languageFor(extension) === ProjectFileLanguage.Svelte ? parseSvelteTypeScriptDeclarations(readText()) : parseTypeScriptDeclarations(readText())));
+        tsCache.declarations ??= cached("ts.declarations", () => {
+          const language = languageFor(extension);
+          if (language !== ProjectFileLanguage.TypeScript && language !== ProjectFileLanguage.Svelte) return [];
+          return mapDeclarations(requireProvider().factsFor(params.path, readText()));
+        });
         return tsCache.declarations;
       },
       literals() {
-        tsCache.literals ??= cached("ts.literals", () => (languageFor(extension) === ProjectFileLanguage.Svelte ? parseSvelteTypeScriptLiterals(readText()) : parseTypeScriptLiterals(readText())));
+        tsCache.literals ??= cached("ts.literals", () => {
+          const language = languageFor(extension);
+          if (language !== ProjectFileLanguage.TypeScript && language !== ProjectFileLanguage.Svelte) return [];
+          return mapLiterals(requireProvider().factsFor(params.path, readText()));
+        });
         return tsCache.literals;
       },
     },
     py: {
       imports() {
-        pyCache.imports ??= cached("py.imports", () => parsePythonImports(readText()));
+        pyCache.imports ??= cached("py.imports", () => {
+          if (languageFor(extension) !== ProjectFileLanguage.Python) return [];
+          return mapPythonImports(requireProvider().factsFor(params.path, readText()));
+        });
         return pyCache.imports;
       },
       functions() {
-        pyCache.functions ??= cached("py.functions", () => parsePythonFunctions(readText()));
+        pyCache.functions ??= cached("py.functions", () => {
+          if (languageFor(extension) !== ProjectFileLanguage.Python) return [];
+          return mapPythonFunctions(requireProvider().factsFor(params.path, readText()), readText());
+        });
         return pyCache.functions;
       },
       classes() {
-        pyCache.classes ??= cached("py.classes", () => parsePythonClasses(readText()));
+        pyCache.classes ??= cached("py.classes", () => {
+          if (languageFor(extension) !== ProjectFileLanguage.Python) return [];
+          return mapPythonClasses(requireProvider().factsFor(params.path, readText()));
+        });
         return pyCache.classes;
+      },
+      calls() {
+        pyCache.calls ??= cached("py.calls", () => {
+          if (languageFor(extension) !== ProjectFileLanguage.Python) return [];
+          return mapPythonCalls(requireProvider().factsFor(params.path, readText()));
+        });
+        return pyCache.calls;
       },
     },
   };
@@ -203,12 +330,8 @@ export function parseJsonRead<T>(pathLabel: string, text: string, filePath: stri
 
 
 export function languageFor(extension: string): ProjectFile["language"] {
-  if (extension === ".ts" || extension === ".tsx" || extension === ".js" || extension === ".jsx") return ProjectFileLanguage.TypeScript;
-  if (extension === ".svelte") return ProjectFileLanguage.Svelte;
-  if (extension === ".py") return ProjectFileLanguage.Python;
-  if (extension === ".json") return ProjectFileLanguage.Json;
-  if (extension === ".md" || extension === ".markdown") return ProjectFileLanguage.Markdown;
-  return ProjectFileLanguage.Text;
+  // Single source of truth: the language registry's per-descriptor extension map.
+  return descriptorForExtension(extension).id;
 }
 
 
@@ -310,6 +433,11 @@ export function stripTrailingJsonCommas(text: string): string {
 }
 
 
+export function firstNonWhitespaceColumn(line: string): number {
+  const match = line.match(/\S/);
+  return match && typeof match.index === "number" ? match.index + 1 : 1;
+}
+
 export function findMatches(lines: string[], pattern: RegExp | string): TextMatch[] {
   const matches: TextMatch[] = [];
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
@@ -407,9 +535,6 @@ export function parseComments(text: string, language: ProjectFile["language"]): 
 }
 
 
-export function isSupportedSourceFile(file: string): boolean {
-  return /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
-}
 
 
 function isRecord(value: unknown): value is Record<string, unknown> {

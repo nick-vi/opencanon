@@ -13,7 +13,7 @@ export type DocSnippet = {
   endLine: number;
   body: string;
   contentHash: string;
-  decisionIds: string[];
+  conventionIds: string[];
 };
 
 const TextEncoding = {
@@ -22,9 +22,9 @@ const TextEncoding = {
 const MarkdownExtensionPattern = /\.(md|markdown)$/i;
 
 export function resolveDocsReferences(
-  paths: Pick<ContextPaths, "rootDir" | "decisionsPath">,
+  paths: Pick<ContextPaths, "rootDir">,
   references: string[],
-  decisionIdsByReference = new Map<string, string[]>,
+  conventionIdsByReference = new Map<string, string[]>,
 ): DocSnippet[] {
   const snippets: DocSnippet[] = [];
   for (const reference of unique(references)) {
@@ -32,7 +32,7 @@ export function resolveDocsReferences(
     if (!resolved.ok) continue;
     snippets.push({
       ...resolved.snippet,
-      decisionIds: decisionIdsByReference.get(reference) ?? [],
+      conventionIds: conventionIdsByReference.get(reference) ?? [],
     });
   }
   return snippets;
@@ -80,7 +80,7 @@ export function parseMarkdownDoc(markdown: string, filePath: string): DocSnippet
       endLine,
       body,
       contentHash: createHash("sha256").update(body).digest("hex"),
-      decisionIds: [],
+      conventionIds: [],
     };
   });
 }
@@ -102,7 +102,7 @@ export function normalizeMarkdownHeading(value: string): string {
 export function validateDocsReference(
   owner: string,
   reference: string,
-  context: { decisionIds: Set<string>; paths?: ContextPaths },
+  context: { conventionIds: Set<string>; paths?: ContextPaths },
 ): string[] {
   const diagnostics: string[] = [];
   const trimmed = reference.trim();
@@ -110,13 +110,6 @@ export function validateDocsReference(
   const parsed = parseDocsReference(trimmed);
   if (!parsed.ok) return parsed.diagnostics.map((diagnostic) => `${owner} ${diagnostic}: ${reference}`);
   if (!context.paths) return diagnostics;
-
-  const decisionsPath = relative(context.paths.rootDir, context.paths.decisionsPath);
-  if (parsed.normalizedPath === decisionsPath) {
-    if (!parsed.fragment) diagnostics.push(`${owner} docs reference to decisions must include #<decision-id>: ${reference}`);
-    else if (!context.decisionIds.has(parsed.fragment)) diagnostics.push(`${owner} docs reference points at missing decision: ${reference}`);
-    return diagnostics;
-  }
 
   const resolved = resolveMarkdownDocsReference(context.paths, trimmed);
   if (!resolved.ok) {
@@ -128,13 +121,11 @@ export function validateDocsReference(
 }
 
 function resolveMarkdownDocsReference(
-  paths: Pick<ContextPaths, "rootDir" | "decisionsPath">,
+  paths: Pick<ContextPaths, "rootDir">,
   reference: string,
 ): { ok: true; snippet: DocSnippet } | { ok: false; diagnostic: string } {
   const parsed = parseDocsReference(reference);
   if (!parsed.ok) return { ok: false, diagnostic: parsed.diagnostics.join(" ") };
-  const decisionsPath = relative(paths.rootDir, paths.decisionsPath);
-  if (parsed.normalizedPath === decisionsPath) return { ok: false, diagnostic: "docs reference points at a decision record, not a Markdown heading" };
   if (!MarkdownExtensionPattern.test(parsed.normalizedPath)) return { ok: false, diagnostic: "docs reference must point at a Markdown file" };
   if (!parsed.fragment) return { ok: false, diagnostic: "docs reference must include #<heading-slug>" };
 

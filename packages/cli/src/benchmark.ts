@@ -5,7 +5,7 @@ import path from "node:path";
 import { cac } from "cac";
 import { booleanOption, formatOption, rejectUnknownOptions } from "./options.ts";
 import { createPaths, discoverProjectFiles, fail } from "@opencanon/core";
-import type { Format } from "@opencanon/core";
+import { Format } from "@opencanon/core";
 import { createProfiler } from "@opencanon/core";
 import type { ProfileEntry } from "@opencanon/core";
 import { createRuntime, createValidationContext, flushValidationContextCache } from "@opencanon/core";
@@ -26,7 +26,7 @@ type BenchmarkResult = {
   profile: ProfileEntry[];
 };
 
-export async function runBenchmarkCommand(args = Bun.argv.slice(2)): Promise<void> {
+export async function runBenchmarkCommand(args = process.argv.slice(2)): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
     printHelp();
@@ -36,7 +36,7 @@ export async function runBenchmarkCommand(args = Bun.argv.slice(2)): Promise<voi
   const results: BenchmarkResult[] = [];
   for (const size of query.sizes) results.push(await runBenchmark(size, query.keep));
 
-  if (query.format === "json") {
+  if (query.format === Format.Json) {
     console.log(JSON.stringify({ results }, null, 2));
     return;
   }
@@ -162,8 +162,8 @@ function renderBenchmarkMarkdown(results: BenchmarkResult[]): string {
 
 function printHelp(): void {
   console.log(`Usage:
-  bun run opencanon benchmark
-  bun run opencanon benchmark --sizes 1000,10000,50000
+  opencanon benchmark
+  opencanon benchmark --sizes 1000,10000,50000
 
 Options:
   --sizes <sizes>          Comma-separated file counts. Default: 1000.

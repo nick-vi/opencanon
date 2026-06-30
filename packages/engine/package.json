@@ -1,6 +1,6 @@
 {
   "name": "@opencanon/engine",
-  "version": "0.3.14",
+  "version": "0.4.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -22,7 +22,8 @@
     "check": "cargo test --manifest-path ../../crates/opencanon-engine/Cargo.toml"
   },
   "dependencies": {
-    "@opencanon/core": "workspace:*"
+    "@opencanon/core": "*",
+    "@opencanon/observability": "*"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.6.2"

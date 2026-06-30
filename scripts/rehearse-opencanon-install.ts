@@ -11,19 +11,16 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { currentEngineTarget } from "../packages/daemon/src/update.ts";
+import { currentEngineTarget } from "../packages/distribution/src/update.ts";
 import { createOpenCanonRelease } from "./create-opencanon-release.ts";
 
 const rootDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const sourceSkillScript = path.join(
-  rootDir,
-  ".agents/skills/opencanon/scripts/opencanon.ts",
-);
+const sourceCliScript = path.join(rootDir, "packages/cli/src/index.ts");
 
 type RehearsalOptions = {
   keep: boolean;
   manifest?: string;
-  noDaemon: boolean;
+  noRuntime: boolean;
 };
 
 type CommandResult = {
@@ -47,8 +44,10 @@ export function runOpenCanonInstallRehearsal(
   const root = mkdtempSync(path.join(tmpdir(), "opencanon-install-rehearsal-"));
   const repo = path.join(root, "repo");
   const releaseDir = path.join(root, "release");
+  const runtimeRoot = path.join(root, "installed-runtime");
+  const registryPath = path.join(root, "service.json");
   const commands: CommandResult[] = [];
-  let daemonStarted = false;
+  let runtimeStarted = false;
 
   try {
     const manifest = options.manifest
@@ -68,46 +67,45 @@ export function runOpenCanonInstallRehearsal(
     run(commands, "git", ["add", "package.json", "src/company.ts"], repo);
 
     const setupArgs = [
-      "setup",
+      "init",
       "--yes",
       "--hooks",
       "codex",
-      "--manifest",
-      manifest,
       "--format",
       "json",
     ];
-    if (options.noDaemon) setupArgs.push("--no-daemon");
-    const setup = run(commands, "bun", [sourceSkillScript, ...setupArgs], repo);
+    if (options.noRuntime) setupArgs.push("--no-runtime");
+    const setup = run(commands, process.execPath, [sourceCliScript, ...setupArgs], repo, runtimeEnv(runtimeRoot, registryPath));
     const setupOutput = JSON.parse(setup.stdout) as {
       steps: Array<{ id: string; status: string }>;
     };
-    daemonStarted = setupOutput.steps.some(
-      (step) => step.id === "daemon" && step.status === "pass",
+    runtimeStarted = setupOutput.steps.some(
+      (step) => step.id === "runtime" && step.status === "pass",
     );
 
-    const installedSkillScript = path.join(
-      repo,
-      ".agents/skills/opencanon/scripts/opencanon.ts",
-    );
     run(
       commands,
-      "bun",
-      [installedSkillScript, "context", "--files", "src/company.ts"],
+      process.execPath,
+      [sourceCliScript, "context", "--files", "src/company.ts"],
       repo,
+      runtimeEnv(runtimeRoot, registryPath),
     );
-    run(commands, "bun", [installedSkillScript, "validate", "--project"], repo);
+    run(commands, process.execPath, [sourceCliScript, "validate", "--project"], repo, runtimeEnv(runtimeRoot, registryPath));
+    stopRehearsalProcesses(commands, repo, runtimeRoot, registryPath);
+    runtimeStarted = false;
     run(
       commands,
-      "bun",
-      [installedSkillScript, "update", "check", "--manifest", manifest],
+      process.execPath,
+      [sourceCliScript, "update", "check", "--manifest", manifest],
       repo,
+      runtimeEnv(runtimeRoot, registryPath),
     );
+    stopRehearsalProcesses(commands, repo, runtimeRoot, registryPath);
     run(
       commands,
-      "bun",
+      process.execPath,
       [
-        installedSkillScript,
+        sourceCliScript,
         "update",
         "apply",
         "--manifest",
@@ -115,19 +113,18 @@ export function runOpenCanonInstallRehearsal(
         "--dry-run",
       ],
       repo,
+      runtimeEnv(runtimeRoot, registryPath),
     );
-    if (daemonStarted)
-      run(commands, "bun", [installedSkillScript, "daemon", "status"], repo);
-    if (daemonStarted)
-      run(commands, "bun", [installedSkillScript, "daemon", "stop"], repo);
-    daemonStarted = false;
+    stopRehearsalProcesses(commands, repo, runtimeRoot, registryPath);
+    runtimeStarted = false;
 
     const badManifest = writeBadChecksumManifest(root, manifest);
     const rejected = runExpectedFailure(
       commands,
-      "bun",
-      [installedSkillScript, "update", "apply", "--manifest", badManifest],
+      process.execPath,
+      [sourceCliScript, "update", "apply", "--manifest", badManifest],
       repo,
+      runtimeEnv(runtimeRoot, registryPath),
     );
     if (!/checksum|SHA-256/i.test(`${rejected.stdout}\n${rejected.stderr}`)) {
       throw new Error(
@@ -140,22 +137,25 @@ export function runOpenCanonInstallRehearsal(
           .join("\n"),
       );
     }
+    stopRehearsalProcesses(commands, repo, runtimeRoot, registryPath);
 
     run(
       commands,
-      "bun",
-      [installedSkillScript, "update", "apply", "--manifest", manifest],
+      process.execPath,
+      [sourceCliScript, "update", "apply", "--manifest", manifest],
       repo,
+      runtimeEnv(runtimeRoot, registryPath),
     );
-    run(commands, "bun", [installedSkillScript, "daemon", "check"], repo);
-    if (!options.noDaemon) {
-      run(commands, "bun", [installedSkillScript, "daemon", "start"], repo);
-      daemonStarted = true;
-      run(commands, "bun", [installedSkillScript, "daemon", "status"], repo);
-      run(commands, "bun", [installedSkillScript, "daemon", "stop"], repo);
-      daemonStarted = false;
+    run(commands, process.execPath, [sourceCliScript, "project", "check"], repo, runtimeEnv(runtimeRoot, registryPath));
+    if (!options.noRuntime) {
+      run(commands, process.execPath, [sourceCliScript, "project", "start"], repo, runtimeEnv(runtimeRoot, registryPath));
+      runtimeStarted = true;
+      run(commands, process.execPath, [sourceCliScript, "project", "status"], repo, runtimeEnv(runtimeRoot, registryPath));
+      run(commands, process.execPath, [sourceCliScript, "project", "stop"], repo, runtimeEnv(runtimeRoot, registryPath));
+      runtimeStarted = false;
     }
-    run(commands, "bun", [installedSkillScript, "doctor"], repo);
+    run(commands, process.execPath, [sourceCliScript, "doctor"], repo, runtimeEnv(runtimeRoot, registryPath));
+    stopRehearsalProcesses(commands, repo, runtimeRoot, registryPath);
 
     return {
       badManifestRejected: true,
@@ -168,16 +168,8 @@ export function runOpenCanonInstallRehearsal(
       root,
     };
   } finally {
-    if (daemonStarted) {
-      const installedSkillScript = path.join(
-        repo,
-        ".agents/skills/opencanon/scripts/opencanon.ts",
-      );
-      spawnSync("bun", [installedSkillScript, "daemon", "stop"], {
-        cwd: repo,
-        encoding: "utf8",
-      });
-    }
+    if (runtimeStarted || existsSync(repo))
+      stopRehearsalProcesses(undefined, repo, runtimeRoot, registryPath);
     if (!options.keep) rmSync(root, { recursive: true, force: true });
   }
 }
@@ -189,6 +181,27 @@ function createLocalManifest(releaseDir: string): string {
     outDir: releaseDir,
   });
   return release.manifestPath;
+}
+
+function runtimeEnv(runtimeRoot: string, registryPath: string, extra?: Record<string, string>): Record<string, string> {
+  return {
+    OPENCANON_CLI: sourceCliScript,
+    OPENCANON_SERVICE_REGISTRY_PATH: registryPath,
+    OPENCANON_RUNTIME_ROOT: runtimeRoot,
+    ...(extra ?? {}),
+  };
+}
+
+function stopRehearsalProcesses(
+  commands: CommandResult[] | undefined,
+  repo: string,
+  runtimeRoot: string,
+  registryPath: string,
+): void {
+  if (!existsSync(repo)) return;
+  const env = runtimeEnv(runtimeRoot, registryPath);
+  runBestEffort(commands, process.execPath, [sourceCliScript, "project", "stop"], repo, env);
+  runBestEffort(commands, process.execPath, [sourceCliScript, "service", "stop"], repo, env);
 }
 
 function writeBadChecksumManifest(root: string, manifest: string): string {
@@ -215,8 +228,9 @@ function run(
   command: string,
   args: string[],
   cwd: string,
+  env?: Record<string, string>,
 ): CommandResult {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", env: env ? { ...process.env, ...env } : process.env });
   const commandText = `${command} ${args.join(" ")}`;
   const commandResult = {
     command: commandText,
@@ -239,13 +253,32 @@ function run(
   return commandResult;
 }
 
+function runBestEffort(
+  commands: CommandResult[] | undefined,
+  command: string,
+  args: string[],
+  cwd: string,
+  env?: Record<string, string>,
+): CommandResult {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", env: env ? { ...process.env, ...env } : process.env });
+  const commandResult = {
+    command: `${command} ${args.join(" ")}`,
+    status: result.status ?? 1,
+    stderr: result.stderr ?? "",
+    stdout: result.stdout ?? "",
+  };
+  commands?.push(commandResult);
+  return commandResult;
+}
+
 function runExpectedFailure(
   commands: CommandResult[],
   command: string,
   args: string[],
   cwd: string,
+  env?: Record<string, string>,
 ): CommandResult {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", env: env ? { ...process.env, ...env } : process.env });
   const commandResult = {
     command: `${command} ${args.join(" ")}`,
     status: result.status ?? 1,
@@ -259,13 +292,13 @@ function runExpectedFailure(
 }
 
 function parseOptions(args: string[]): RehearsalOptions {
-  const options: RehearsalOptions = { keep: false, noDaemon: false };
+  const options: RehearsalOptions = { keep: false, noRuntime: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--keep") options.keep = true;
     else if (arg === "--manifest")
       options.manifest = requiredValue(args, ++index, arg);
-    else if (arg === "--no-daemon") options.noDaemon = true;
+    else if (arg === "--no-runtime") options.noRuntime = true;
     else if (arg === "-h" || arg === "--help") {
       printHelp();
       process.exit(0);
@@ -285,21 +318,21 @@ function requiredValue(args: string[], index: number, flag: string): string {
 
 function printHelp(): void {
   console.log(`Usage:
-  bun scripts/rehearse-opencanon-install.ts [options]
+  npm run rehearse:install -- [options]
 
 Options:
   --manifest <path>  Use an existing release manifest. Default: generate one from packages/engine/binaries.
-  --no-daemon        Skip daemon startup during setup.
+  --no-runtime       Skip project runtime startup during init.
   --keep             Keep the rehearsal directory.
 `);
 }
 
 if (import.meta.main) {
   try {
-    if (!existsSync(sourceSkillScript))
-      throw new Error(`Missing skill script: ${sourceSkillScript}`);
+    if (!existsSync(sourceCliScript))
+      throw new Error(`Missing OpenCanon CLI source: ${sourceCliScript}`);
     const result = runOpenCanonInstallRehearsal(
-      parseOptions(Bun.argv.slice(2)),
+      parseOptions(process.argv.slice(2)),
     );
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {

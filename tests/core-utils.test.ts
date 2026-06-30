@@ -339,7 +339,6 @@ test("markdown doc refs resolve normalized headings without section ids", () => 
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-docrefs-"));
   try {
     mkdirSync(path.join(rootDir, "docs"), { recursive: true });
-    writeFileSync(path.join(rootDir, "docs/decisions.json"), "[]\n");
     writeFileSync(path.join(rootDir, "docs/canon.md"), ["# Canon", "", "## API Routes!", "", "Routes call services.", "", "## API Routes!", "", "Duplicate heading."].join("\n"));
 
     const snippets = parseMarkdownDoc("## Café Routes!\n\nBody\n\n## Café Routes!\n", "docs/canon.md");
@@ -350,14 +349,14 @@ test("markdown doc refs resolve normalized headings without section ids", () => 
     );
 
     const resolved = resolveDocsReferences(
-      { rootDir, decisionsPath: path.join(rootDir, "docs/decisions.json") },
+      { rootDir },
       ["docs/canon.md#api-routes"],
       new Map([["docs/canon.md#api-routes", ["route-decision"]]]),
     );
 
     assert.equal(resolved.length, 1);
     assert.equal(resolved[0].heading, "API Routes!");
-    assert.equal(resolved[0].decisionIds[0], "route-decision");
+    assert.equal(resolved[0].conventionIds[0], "route-decision");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

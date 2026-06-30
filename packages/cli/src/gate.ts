@@ -17,11 +17,12 @@ import {
   upsertCommitApproval,
   validateConfig,
 } from "@opencanon/core";
-import type { ResolvedCommitGate, Format } from "@opencanon/core";
+import type { ResolvedCommitGate } from "@opencanon/core";
+import { Format } from "@opencanon/core";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
-import { DaemonApiRoute, withDaemonClient } from "./daemon-client.ts";
+import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 
-export async function runGateCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runGateCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const [command = "help", ...rest] = args;
   if (command === "approve") {
     await runGateApproveCommand(rest, cwd);
@@ -63,7 +64,7 @@ async function runGateApproveCommand(args: string[], cwd: string): Promise<void>
   const paths = createPaths(rootDir);
   const configDiagnostics = validateConfig(paths);
   if (configDiagnostics.length > 0) fail(configDiagnostics.join("\n"));
-  const { approvalContext, approvals, gates } = await currentCommitGates(cwd, rootDir, paths);
+  const { approvalContext, approvals, gates, governingConventions } = await currentCommitGates(cwd, rootDir, paths);
   const matchingGates = gates.filter((item) => item.id === gateId);
   if (matchingGates.length > 1) fail(`Commit gate id is ambiguous: ${gateId}. Gate ids must be unique for approval.`);
   const gate = matchingGates[0];
@@ -85,6 +86,7 @@ async function runGateApproveCommand(args: string[], cwd: string): Promise<void>
   savePendingCommitGates(paths, {
     context: approvalContext,
     gates: resolveCommitGates(gates, updatedApprovals, approvalContext),
+    governingConventions,
   });
 
   console.log(`Approved commit gate for current diff: ${gateId}`);
@@ -106,7 +108,7 @@ function runGatePendingCommand(args: string[], cwd: string): void {
   const rootDir = resolveRootDir(cwd);
   const paths = createPaths(rootDir);
   const pending = loadPendingCommitGates(paths);
-  if (format === "json") {
+  if (format === Format.Json) {
     console.log(JSON.stringify(pending, null, 2));
     return;
   }
@@ -117,14 +119,15 @@ async function currentCommitGates(cwd: string, rootDir: string, paths: ReturnTyp
   approvalContext: ReturnType<typeof createCommitApprovalContext>;
   approvals: ReturnType<typeof loadCommitApprovalsWithDiagnostics>["approvals"];
   gates: ResolvedCommitGate[];
+  governingConventions: ValidationResult["governingConventions"];
 }> {
   if (!getGitRoot(rootDir)) fail(`Not a git repository: ${rootDir}`);
   const pendingContext = createCommitApprovalContext(paths, "pending");
   const files = unique(pendingContext.stagedFiles.filter((file) => matchesProjectFileScope(paths, file)));
   if (files.length === 0) fail("No changed project files are available for commit gate approval.");
 
-  const result = await withDaemonClient(cwd, (client) =>
-    client.post<ValidationResult>(DaemonApiRoute.Validate, {
+  const result = await withRuntimeClient(cwd, (client) =>
+    client.post<ValidationResult>(RuntimeApiRoute.Validate, {
       files,
       topics: [],
       validatorIds: [],
@@ -139,8 +142,9 @@ async function currentCommitGates(cwd: string, rootDir: string, paths: ReturnTyp
     context: approvalContext,
     gates,
     diagnostics: [...approvalContext.diagnostics, ...approvals.diagnostics],
+    governingConventions: result.governingConventions,
   });
-  return { approvalContext, approvals: approvals.approvals, gates };
+  return { approvalContext, approvals: approvals.approvals, gates, governingConventions: result.governingConventions };
 }
 
 function renderPendingMarkdown(pending: ReturnType<typeof loadPendingCommitGates>, _format: Format): string {
@@ -151,6 +155,19 @@ function renderPendingMarkdown(pending: ReturnType<typeof loadPendingCommitGates
   }
   if (pending.pending.length > 0) {
     lines.push("");
+    if (pending.governingConventions && pending.governingConventions.conventions.length > 0) {
+      lines.push("Governing Conventions:");
+      for (const convention of pending.governingConventions.conventions) {
+        lines.push(`- ${convention.id}: ${convention.title}`);
+        lines.push(`  Rule: ${convention.rule}`);
+        if (convention.docs.length > 0) lines.push(`  Docs: ${convention.docs.join(", ")}`);
+        if (convention.impactSurfaceIds.length > 0) lines.push(`  Impact surfaces: ${convention.impactSurfaceIds.join(", ")}`);
+      }
+      if (pending.governingConventions.truncated) {
+        lines.push(`- ${pending.governingConventions.omittedConventions} more relevant convention(s) omitted from pending-gate feedback.`);
+      }
+      lines.push("");
+    }
     for (const gate of pending.pending) {
       lines.push(`- ${gate.id} (${gate.validatorId})`);
       lines.push(`  Question: ${gate.question}`);
@@ -182,8 +199,8 @@ function singleOption(value: unknown, flag: string, fallback?: string): string {
 
 function printGateHelp(): void {
   console.log(`Usage:
-  bun run opencanon gate approve <gate-id> --summary <summary>
-  bun run opencanon gate pending [--format json]
+  opencanon gate approve <gate-id> --summary <summary>
+  opencanon gate pending [--format json]
 
 Commands:
   approve  Record user clarification for the current Git diff.

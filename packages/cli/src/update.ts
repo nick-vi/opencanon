@@ -1,9 +1,13 @@
 import { cac } from "cac";
-import { applyRuntimeUpdate, checkRuntimeUpdate, type RuntimeUpdateApplyResult, type RuntimeUpdateCheck } from "@opencanon/daemon";
-import { fail, type Format } from "@opencanon/core";
+import { applyRuntimeUpdate, checkRuntimeUpdate, type RuntimeUpdateApplyResult, type RuntimeUpdateCheck, type UpdateSafetyGuard } from "@opencanon/distribution";
+import { createOpenCanonDiagnostic, fail, Format, OpenCanonError, resolveRootDir } from "@opencanon/core";
+import { inspectProjectRuntime, inspectService, RuntimeStatus } from "@opencanon/runtime";
 import { CliOptionDescription, CliOptionFlag, CliOptionName, booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
 const RuntimeManifestEnv = "OPENCANON_UPDATE_MANIFEST";
+const RuntimeUpdateDiagnosticCode = {
+  Failed: "runtime-update-failed",
+} as const;
 
 type UpdateQuery = {
   format: Format;
@@ -14,7 +18,7 @@ type UpdateApplyQuery = UpdateQuery & {
   dryRun: boolean;
 };
 
-export async function runUpdateCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runUpdateCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const [command = "check", ...rest] = args;
   if (command === "check") {
     await runUpdateCheckCommand(rest, cwd);
@@ -35,16 +39,52 @@ async function runUpdateCheckCommand(args: string[], cwd: string): Promise<void>
   const query = parseUpdateArgs("opencanon update check", args);
   if (!query) return;
   const check = await checkRuntimeUpdate({ manifestSource: query.manifestSource, cwd });
-  if (query.format === "json") console.log(JSON.stringify(check, null, 2));
+  if (query.format === Format.Json) console.log(JSON.stringify(check, null, 2));
   else console.log(renderRuntimeUpdateCheckMarkdown(check));
 }
 
 async function runUpdateApplyCommand(args: string[], cwd: string): Promise<void> {
   const query = parseUpdateApplyArgs(args);
   if (!query) return;
-  const result = await applyRuntimeUpdate({ manifestSource: query.manifestSource, cwd, dryRun: query.dryRun });
-  if (query.format === "json") console.log(JSON.stringify(result, null, 2));
+  const result = await applyRuntimeUpdate({ manifestSource: query.manifestSource, cwd, dryRun: query.dryRun, safety: createRuntimeUpdateSafetyGuard(cwd) });
+  if (query.format === Format.Json) console.log(JSON.stringify(result, null, 2));
   else console.log(renderRuntimeUpdateApplyMarkdown(result));
+}
+
+export function createRuntimeUpdateSafetyGuard(cwd: string): UpdateSafetyGuard {
+  const rootDir = resolveRootDir(cwd);
+  return {
+    async assertSafeToUpdate() {
+      await assertNoRunningRuntime(rootDir);
+    },
+  };
+}
+
+async function assertNoRunningRuntime(rootDir: string): Promise<void> {
+  await assertNoRunningService();
+  const inspection = await inspectProjectRuntime(rootDir);
+  if (!inspection || inspection.status === RuntimeStatus.Stale) return;
+  throw new OpenCanonError([
+    createOpenCanonDiagnostic({
+      code: RuntimeUpdateDiagnosticCode.Failed,
+      message: "OpenCanon runtime update requires the project runtime to be stopped.",
+      details: [`Runtime status: ${inspection.status}.`, `Root: ${rootDir}`],
+      action: "Run opencanon service stop and opencanon project stop, then rerun the update.",
+    }),
+  ]);
+}
+
+async function assertNoRunningService(): Promise<void> {
+  const inspection = await inspectService();
+  if (!inspection || inspection.status === RuntimeStatus.Stale) return;
+  throw new OpenCanonError([
+    createOpenCanonDiagnostic({
+      code: RuntimeUpdateDiagnosticCode.Failed,
+      message: "OpenCanon runtime update requires the service to be stopped.",
+      details: [`Service status: ${inspection.status}.`, `PID: ${inspection.entry.pid}`],
+      action: "Run opencanon service stop and opencanon project stop, then rerun the update.",
+    }),
+  ]);
 }
 
 function parseUpdateArgs(commandName: string, args: string[]): UpdateQuery | null {
@@ -104,8 +144,8 @@ function renderRuntimeUpdateCheckMarkdown(check: RuntimeUpdateCheck): string {
     `Status: ${check.status}`,
     `Target: ${check.target}`,
     `Channel: ${check.channel}`,
-    `Skill version: ${check.skillVersion}`,
-    `Required Bun: ${check.requiredBun}`,
+    `Runtime version: ${check.runtimeVersion}`,
+    `Required Node: ${check.requiredNode}`,
     `Manifest: ${check.manifestSource}`,
     `Bundle: ${check.resolvedBundleSource}`,
     `Runtime root: ${check.runtimeRoot}`,
@@ -123,9 +163,9 @@ function renderRuntimeUpdateApplyMarkdown(result: RuntimeUpdateApplyResult): str
 
 function printUpdateHelp(): void {
   console.log(`Usage:
-  bun run opencanon update check --manifest <path-or-url>
-  bun run opencanon update apply --manifest <path-or-url>
-  bun run opencanon update apply --manifest <path-or-url> --dry-run
+  opencanon update check --manifest <path-or-url>
+  opencanon update apply --manifest <path-or-url>
+  opencanon update apply --manifest <path-or-url> --dry-run
 
 Options:
   ${CliOptionFlag.Manifest}       ${CliOptionDescription.RuntimeManifest}
@@ -134,5 +174,6 @@ Options:
 
 Environment:
   ${RuntimeManifestEnv}      Default manifest source when --manifest is omitted.
+  OPENCANON_RUNTIME_ROOT     Override runtime install root.
 `);
 }

@@ -9,7 +9,7 @@ import {
   resolveRootDir,
   splitModule,
   updateImports,
-  type Format,
+  Format,
   type RefactorPlan,
 } from "@opencanon/core";
 import { openCodeGraph } from "./code-graph.ts";
@@ -26,7 +26,7 @@ type RefactorQuery = {
   help: boolean;
 };
 
-export async function runRefactorCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runRefactorCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
     printHelp();
@@ -38,7 +38,7 @@ export async function runRefactorCommand(args = Bun.argv.slice(2), cwd = process
   const plan = createPlan(query, common);
   const result = applyRefactorPlan({ rootDir, plan, dryRun: !query.apply });
 
-  if (query.format === "json") {
+  if (query.format === Format.Json) {
     console.log(JSON.stringify({ plan, result }, null, 2));
     return;
   }

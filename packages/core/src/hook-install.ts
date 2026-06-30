@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-export type HookFileAction = "create" | "update" | "unchanged";
+// Single source of truth for hook-file write actions; reference members instead of inlining the strings.
+export const HookFileAction = { Create: "create", Update: "update", Unchanged: "unchanged" } as const;
+export type HookFileAction = (typeof HookFileAction)[keyof typeof HookFileAction];
 
 export const HookInstallHost = {
   Codex: "codex",
@@ -85,7 +87,7 @@ export function codexHookConfig() {
     matcher: codexMatcher,
     hook: {
       type: "command",
-      command: `bun "$(git rev-parse --show-toplevel)/.agents/skills/opencanon/scripts/opencanon.ts" hook ${HookInstallHost.Codex}`,
+      command: `opencanon hook ${HookInstallHost.Codex}`,
       statusMessage: "Running OpenCanon feedback",
     },
   };
@@ -97,18 +99,41 @@ export function claudeHookConfig() {
     matcher: claudeMatcher,
     hook: {
       type: "command",
-      command: `bun "$CLAUDE_PROJECT_DIR/.agents/skills/opencanon/scripts/opencanon.ts" hook ${HookInstallHost.Claude}`,
+      command: `opencanon hook ${HookInstallHost.Claude}`,
       statusMessage: "Running OpenCanon feedback",
     },
   };
 }
 
 export function openCodePluginSource(scope: HookInstallScope = "project"): string {
-  const importPath =
-    scope === HookInstallScope.Global
-      ? "../../../.agents/skills/opencanon/scripts/opencode-plugin.ts"
-      : "../../.agents/skills/opencanon/scripts/opencode-plugin.ts";
-  return `export { OpenCanonPlugin } from "${importPath}";\n`;
+  void scope;
+  return `const editTools = new Set(["write", "edit", "apply_patch"]);
+
+export const OpenCanonPlugin = async ({ directory, worktree }) => {
+  const cwd = worktree ?? directory;
+  return {
+    "tool.execute.after": async (input, output) => {
+      if (!editTools.has(String(input.tool))) return;
+      const { spawnSync } = await import("node:child_process");
+      const result = spawnSync("opencanon", ["hook", "opencode"], {
+        cwd,
+        input: JSON.stringify({ input: { ...input, cwd }, output }),
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+      });
+      const text = result.stdout.trim();
+      if (!text || !output || typeof output !== "object") return;
+      try {
+        const parsed = JSON.parse(text);
+        const additionalContext = typeof parsed.additionalContext === "string" ? parsed.additionalContext : "";
+        if (additionalContext) output.output = [typeof output.output === "string" ? output.output : "", additionalContext].filter(Boolean).join("\\n\\n");
+      } catch {
+        output.output = [typeof output.output === "string" ? output.output : "", text].filter(Boolean).join("\\n\\n");
+      }
+    },
+  };
+};
+`;
 }
 
 function installCodexHook(params: { rootDir: string; scope: HookInstallScope; dryRun: boolean }): HookInstallResult {
@@ -194,12 +219,12 @@ function inspectOpenCodeHook(rootDir: string, scope: HookInstallScope): HookInsp
   if (!existsSync(pluginPath)) {
     return { host: HookInstallHost.OpenCode, installed: false, valid: false, details: [`No OpenCode plugin found for ${scope} scope.`] };
   }
-  const valid = readText(pluginPath).includes(".agents/skills/opencanon/scripts/opencode-plugin.ts");
+  const valid = readText(pluginPath).includes(`"opencanon", ["hook", "opencode"]`);
   return {
     host: HookInstallHost.OpenCode,
     installed: true,
     valid,
-    details: valid ? ["OpenCode feedback plugin points to .agents/skills/opencanon."] : [`${pluginPath} does not point to the OpenCanon .agents skill plugin.`],
+    details: valid ? ["OpenCode feedback plugin delegates to the installed opencanon command."] : [`${pluginPath} does not delegate to the installed opencanon command.`],
   };
 }
 
@@ -298,7 +323,11 @@ function openCodePluginPath(rootDir: string, scope: HookInstallScope): string {
 
 function readJson(file: string): unknown {
   if (!existsSync(file)) return {};
-  return JSON.parse(readFileSync(file, hookTextEncoding)) as unknown;
+  try {
+    return JSON.parse(readFileSync(file, hookTextEncoding)) as unknown;
+  } catch {
+    return {};
+  }
 }
 
 function readText(file: string): string {

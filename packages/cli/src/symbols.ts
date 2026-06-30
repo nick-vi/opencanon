@@ -1,4 +1,4 @@
-import { fail, matchesAny, resolveRootDir, type CodeReference, type CodeSymbol, type Format } from "@opencanon/core";
+import { fail, Format, matchesAny, resolveRootDir, type CodeReference, type CodeSymbol } from "@opencanon/core";
 import { openCodeGraph } from "./code-graph.ts";
 
 type SymbolsQuery = {
@@ -12,7 +12,7 @@ type SymbolsQuery = {
   help: boolean;
 };
 
-export async function runSymbolsCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runSymbolsCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
     printHelp();
@@ -31,7 +31,7 @@ export async function runSymbolsCommand(args = Bun.argv.slice(2), cwd = process.
         limit: engineLimit,
       });
       const references = filterReferences(result.references, query);
-      if (query.format === "json") console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, references }, null, 2));
+      if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, references }, null, 2));
       else printReferences(references, graph.sourceFiles.length, query);
       return;
     }
@@ -42,7 +42,7 @@ export async function runSymbolsCommand(args = Bun.argv.slice(2), cwd = process.
       limit: engineLimit,
     });
     const symbols = filterSymbols(result.symbols, query);
-    if (query.format === "json") console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, symbols }, null, 2));
+    if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, symbols }, null, 2));
     else printSymbols(symbols, graph.sourceFiles.length, query);
   } finally {
     graph.close();
@@ -88,7 +88,7 @@ function parseArgs(args: string[]): SymbolsQuery {
     }
     if (arg === "--format") {
       const value = args[index + 1];
-      if (value !== "markdown" && value !== "json") fail(`Invalid --format: ${value}`);
+      if (value !== Format.Markdown && value !== Format.Json) fail(`Invalid --format: ${value}`);
       format = value;
       index += 1;
       continue;

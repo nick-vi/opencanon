@@ -1,16 +1,16 @@
-import { createValidatorFactory } from "@opencanon/core";
+import { createConventionFactory, LiteralValueKind, ProjectSymbolKind, TypeScriptDeclarationKind } from "@opencanon/core";
 import type { Finding, LiteralContext } from "@opencanon/core";
-import { edgeMatches, importedSymbolName, list, literalIgnored, manualFix, optionSummary, regexMatches, escapeRegex, firstCodeLineNumber, joinPatterns, matchesAny, paramsContain, safeEnumReplacement, valueMatches, interpolateSibling } from "../shared.ts";
-import type { FileNameOptions, NoImportsOptions, NoForbiddenImportsOptions, NoDeepRelativeImportsOptions, RequiredFunctionParamOptions, RequiredFileSiblingOptions, NoBarrelCrossBoundaryOptions, NoLayerCallOptions, RequireExportPatternOptions, NoUnusedExportsOptions, SimilarFunctionNamesOptions, NoNativeEnumsOptions, RepeatedLiteralsOptions, RestrictedSymbolsOptions, NoSecretLikeLiteralsOptions, NoHardcodedConfigValuesOptions } from "../shared.ts";
+import { edgeMatches, importedSymbolName, list, literalIgnored, manualFix, optionSummary, joinPatterns, matchesAny, paramsContain, safeEnumReplacement, valueMatches, interpolateSibling } from "../shared.ts";
+import type { FileNameOptions, RequiredFunctionParamOptions, RequiredFileSiblingOptions, RequireExportPatternOptions, NoUnusedExportsOptions, SimilarFunctionNamesOptions, NoNativeEnumsOptions, RepeatedLiteralsOptions, RestrictedSymbolsOptions, NoSecretLikeLiteralsOptions, NoHardcodedConfigValuesOptions } from "../shared.ts";
 import path from "node:path";
 
-export const fileNames = createValidatorFactory<FileNameOptions>((options) => ({
+export const fileNames = createConventionFactory<FileNameOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "file",
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} must use the configured file naming pattern.`),
   validate({ ctx, runtime }) {
     const suffixes = list(options.suffix);
@@ -35,14 +35,14 @@ export const fileNames = createValidatorFactory<FileNameOptions>((options) => ({
   },
 }));
 
-export const requiredFunctionParam = createValidatorFactory<RequiredFunctionParamOptions>((options) => ({
+export const requiredFunctionParam = createConventionFactory<RequiredFunctionParamOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "file",
   facts: ["symbols"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Functions in ${joinPatterns(options.in)} must include the required parameter.`),
   validate({ ctx }) {
     const functionPatterns = list(options.functions);
@@ -50,7 +50,7 @@ export const requiredFunctionParam = createValidatorFactory<RequiredFunctionPara
     return ctx.facts
       .symbols()
       .filter((fn) => targetPaths.has(fn.file.path))
-      .filter((fn) => fn.kind === "function")
+      .filter((fn) => fn.kind === ProjectSymbolKind.Function)
         .filter((fn) => !options.exportedOnly || fn.exported)
         .filter((fn) => functionPatterns.length === 0 || functionPatterns.some((pattern) => valueMatches(fn.name, pattern)))
       .filter((fn) => !paramsContain(fn.params ?? [], options.param, options.position ?? "any"))
@@ -65,13 +65,13 @@ export const requiredFunctionParam = createValidatorFactory<RequiredFunctionPara
   },
 }));
 
-export const requiredFileSibling = createValidatorFactory<RequiredFileSiblingOptions>((options) => ({
+export const requiredFileSibling = createConventionFactory<RequiredFileSiblingOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "file",
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} must have sibling file ${joinPatterns(list(options.sibling))}.`),
   validate({ ctx }) {
     const projectFiles = new Set(ctx.files.map((file) => file.path));
@@ -91,14 +91,14 @@ export const requiredFileSibling = createValidatorFactory<RequiredFileSiblingOpt
   },
 }));
 
-export const requireExportPattern = createValidatorFactory<RequireExportPatternOptions>((options) => ({
+export const requireExportPattern = createConventionFactory<RequireExportPatternOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "file",
   facts: ["exports"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} must export a symbol matching the required pattern.`),
   validate({ ctx }) {
     const names = list(options.names);
@@ -118,14 +118,14 @@ export const requireExportPattern = createValidatorFactory<RequireExportPatternO
   },
 }));
 
-export const noUnusedExports = createValidatorFactory<NoUnusedExportsOptions>((options) => ({
+export const noUnusedExports = createConventionFactory<NoUnusedExportsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "project",
   facts: ["symbols", "references"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Exports in ${joinPatterns(options.in)} must have a known project reference.`),
   validate({ ctx, runtime }) {
     const allowed = list(options.allow);
@@ -155,14 +155,14 @@ export const noUnusedExports = createValidatorFactory<NoUnusedExportsOptions>((o
   },
 }));
 
-export const similarFunctionNames = createValidatorFactory<SimilarFunctionNamesOptions>((options) => ({
+export const similarFunctionNames = createConventionFactory<SimilarFunctionNamesOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "project",
   facts: ["symbols", "calls"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Function names in ${joinPatterns(options.in)} should not describe duplicate or near-duplicate behavior.`),
   validate({ ctx }) {
     const minSimilarity = options.minSimilarity ?? 0.82;
@@ -170,7 +170,7 @@ export const similarFunctionNames = createValidatorFactory<SimilarFunctionNamesO
     const allow = options.allow ?? [];
     const functions = ctx.graph
       .symbols()
-      .filter((symbol) => symbol.kind === "function" || symbol.kind === "method")
+      .filter((symbol) => symbol.kind === ProjectSymbolKind.Function || symbol.kind === ProjectSymbolKind.Method)
       .filter((symbol) => targetPaths.has(symbol.file.path))
       .filter((symbol) => !allow.some((pattern) => valueMatches(symbol.name, pattern)));
     const findings: Finding[] = [];
@@ -203,21 +203,21 @@ export const similarFunctionNames = createValidatorFactory<SimilarFunctionNamesO
   },
 }));
 
-export const noNativeEnums = createValidatorFactory<NoNativeEnumsOptions>((options) => ({
+export const noNativeEnums = createConventionFactory<NoNativeEnumsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "file",
-  facts: ["symbols"],
-  decisionIds: options.decisionIds,
+  facts: ["declarations"],
+  conventionIds: options.related,
   summary: options.summary ?? options.message ?? `Files matching ${joinPatterns(options.in)} must use const-object enum patterns instead of native TypeScript enums.`,
   validate({ ctx, runtime }) {
     const findings: Finding[] = [];
 
     for (const file of ctx.targetFiles) {
       for (const declaration of file.ts.declarations()) {
-        if (declaration.kind !== "enum") continue;
+        if (declaration.kind !== TypeScriptDeclarationKind.Enum) continue;
         const replacement = options.safeFix === false ? null : safeEnumReplacement(declaration, runtime.naming);
         findings.push(
           file.report({
@@ -287,14 +287,14 @@ function sharedCalleeNames(left: Array<{ target: { name: string } }>, right: Arr
   return [...new Set(left.map((edge) => edge.target.name).filter((name) => rightNames.has(name)))].sort();
 }
 
-export const repeatedLiterals = createValidatorFactory<RepeatedLiteralsOptions>((options) => ({
+export const repeatedLiterals = createConventionFactory<RepeatedLiteralsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "project",
   facts: ["literals"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Repeated primitive literals in ${joinPatterns(options.in)} should be extracted into named constants or const-object enum patterns.`),
   validate({ ctx }) {
     const minOccurrences = options.minOccurrences ?? 3;
@@ -311,6 +311,11 @@ export const repeatedLiterals = createValidatorFactory<RepeatedLiteralsOptions>(
         if (/^(?:\\[nrt])+$/u.test(literal.value)) continue;
         if (!/[A-Za-z0-9]/.test(literal.value)) continue;
         if (literalIgnored(literal.value, options.ignore ?? [])) continue;
+        if (options.excludeTypeofRhs) {
+          const lineText = file.lineAt(literal.line);
+          const prefix = lineText.slice(0, literal.column - 1);
+          if (/typeof\s+[A-Za-z_$][\w$]*\s*(?:===|!==|==|!=)\s*$/.test(prefix)) continue;
+        }
         const key = `${literal.valueKind}:${literal.value}`;
         const values = groups.get(key) ?? [];
         values.push({
@@ -359,14 +364,14 @@ const ConfigValueKinds = {
   Url: "url",
 } as const;
 
-export const noSecretLikeLiterals = createValidatorFactory<NoSecretLikeLiteralsOptions>((options) => ({
+export const noSecretLikeLiterals = createConventionFactory<NoSecretLikeLiteralsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "file",
   facts: ["literals"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} must not contain secret-like literals.`),
   validate({ ctx, runtime }) {
     const allow = options.allow ?? [];
@@ -377,7 +382,7 @@ export const noSecretLikeLiterals = createValidatorFactory<NoSecretLikeLiteralsO
     const findings: Finding[] = [];
 
     for (const literal of ctx.facts.literals()) {
-      if (literal.valueKind !== "string") continue;
+      if (literal.valueKind !== LiteralValueKind.String) continue;
       if (!ctx.targetFiles.some((file) => file.path === literal.file.path)) continue;
       if (allowFiles.length > 0 && runtime.globs.matches(literal.file.path, allowFiles)) continue;
       if (literalIgnored(literal.value, allow)) continue;
@@ -386,7 +391,12 @@ export const noSecretLikeLiterals = createValidatorFactory<NoSecretLikeLiteralsO
       const line = literal.file.lineAt(literal.line);
       const secretNamedAssignment = lineHasSecretAssignmentName(line, literal.column) && literal.value.length >= 8 && !isLocalhostLiteral(literal.value);
       const secretPattern = patterns.some((pattern) => pattern.test(literal.value));
-      const highEntropy = literal.value.length >= minLength && shannonEntropy(literal.value) >= minEntropy && /[A-Za-z]/.test(literal.value) && /\d/.test(literal.value);
+      const highEntropy =
+        isSecretTokenCandidate(literal.value) &&
+        literal.value.length >= minLength &&
+        shannonEntropy(literal.value) >= minEntropy &&
+        /[A-Za-z]/.test(literal.value) &&
+        /\d/.test(literal.value);
       if (!secretNamedAssignment && !secretPattern && !highEntropy) continue;
 
       findings.push(
@@ -404,14 +414,14 @@ export const noSecretLikeLiterals = createValidatorFactory<NoSecretLikeLiteralsO
   },
 }));
 
-export const noHardcodedConfigValues = createValidatorFactory<NoHardcodedConfigValuesOptions>((options) => ({
+export const noHardcodedConfigValues = createConventionFactory<NoHardcodedConfigValuesOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "file",
   facts: ["literals"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} should keep environment-specific config values behind named config.`),
   validate({ ctx, runtime }) {
     const allow = options.allow ?? [];
@@ -444,14 +454,14 @@ export const noHardcodedConfigValues = createValidatorFactory<NoHardcodedConfigV
   },
 }));
 
-export const restrictedSymbols = createValidatorFactory<RestrictedSymbolsOptions>((options) => ({
+export const restrictedSymbols = createConventionFactory<RestrictedSymbolsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: options.scanText ? "file" : "import-edge",
   facts: options.scanText ? ["imports", "symbols"] : ["imports"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Symbols ${options.symbols.join(", ")} are restricted outside ${joinPatterns(options.allowIn)}.`),
   validate({ ctx, runtime }) {
     const symbols = new Set(options.symbols);
@@ -487,7 +497,7 @@ export const restrictedSymbols = createValidatorFactory<RestrictedSymbolsOptions
       for (const file of ctx.targetFiles) {
         if (runtime.globs.matches(file.path, options.allowIn)) continue;
         for (const symbol of symbols) {
-          for (const match of file.find(new RegExp(`\\b${escapeRegex(symbol)}\\b`, "g"))) {
+          for (const match of file.find(new RegExp(`\\b${RegExp.escape(symbol)}\\b`, "g"))) {
             pushFinding(
               file.report({
                 line: match.line,
@@ -517,6 +527,10 @@ function shannonEntropy(value: string): number {
 
 function isLocalhostLiteral(value: string): boolean {
   return value === "localhost" || value === "127.0.0.1" || value.startsWith("http://127.0.0.1") || value.startsWith("http://localhost");
+}
+
+function isSecretTokenCandidate(value: string): boolean {
+  return !/\s/u.test(value);
 }
 
 function lineHasSecretAssignmentName(line: string, literalColumn: number): boolean {

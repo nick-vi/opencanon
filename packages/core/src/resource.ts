@@ -1,4 +1,6 @@
-export type ResourceSignal = "SIGINT" | "SIGTERM" | "beforeExit";
+// Single source of truth for resource lifecycle signals; reference members instead of inlining the strings.
+export const ResourceSignal = { SigInt: "SIGINT", SigTerm: "SIGTERM", BeforeExit: "beforeExit" } as const;
+export type ResourceSignal = (typeof ResourceSignal)[keyof typeof ResourceSignal];
 
 export type ResourceOptions<T> = {
   init(): T | Promise<T>;
@@ -96,7 +98,7 @@ function registerSignals(signals: ResourceOptions<unknown>["signals"], handlers:
       void dispose();
     };
     handlers.set(signal, handler);
-    if (signal === "beforeExit") {
+    if (signal === ResourceSignal.BeforeExit) {
       process.once("beforeExit", handler);
     } else {
       process.once(signal, handler);

@@ -1,6 +1,6 @@
 import path from "node:path";
-import { renderFeedbackMarkdown, runFeedback } from "./feedback.ts";
-import type { FeedbackHost, FeedbackResult } from "./feedback.ts";
+import { FeedbackHost, renderFeedbackMarkdown, runFeedback } from "./feedback.ts";
+import type { FeedbackResult } from "./feedback.ts";
 import { unique } from "./core.ts";
 
 export type HookFeedback = {
@@ -33,9 +33,9 @@ export async function createHookFeedback(host: FeedbackHost, payload: unknown, c
 
 export function renderHookResponse(feedback: HookFeedback): string {
   if (!feedback.text) return "";
-  if (feedback.host === "codex") return renderCodexResponse(feedback.text);
-  if (feedback.host === "claude") return renderClaudeResponse(feedback.text);
-  if (feedback.host === "opencode") {
+  if (feedback.host === FeedbackHost.Codex) return renderCodexResponse(feedback.text);
+  if (feedback.host === FeedbackHost.Claude) return renderClaudeResponse(feedback.text);
+  if (feedback.host === FeedbackHost.OpenCode) {
     return JSON.stringify(
       {
         additionalContext: feedback.text,
@@ -59,7 +59,7 @@ export function normalizeHookPayload(
   payload: unknown,
   cwdFallback = process.cwd(),
 ): { cwd: string; files: string[]; sessionId?: string; turnId?: string } {
-  if (host === "opencode" && isRecord(payload) && isRecord(payload.input) && isRecord(payload.output)) {
+  if (host === FeedbackHost.OpenCode && isRecord(payload) && isRecord(payload.input) && isRecord(payload.output)) {
     return normalizeOpenCodePayload({ input: payload.input, output: payload.output }, cwdFallback);
   }
 

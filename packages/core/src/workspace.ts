@@ -2,7 +2,9 @@ import path from "node:path";
 import type { ContextPaths } from "./core.ts";
 import { matchesAny, normalizePath, unique } from "./core.ts";
 import { listKnownContextFiles } from "./context-readers.ts";
-import { PackageJsonFileName, ProjectFileLanguage, readJsonObject, readLooseJsonObject } from "./project-files.ts";
+import { PackageJsonFileName, readJsonObject, readLooseJsonObject } from "./project-files.ts";
+import { ProjectFileLanguage } from "./language-registry.ts";
+import { ImportEdgeKind } from "./validator-types.ts";
 import type { ImportEdge, ProjectFile, WorkspaceGraph, WorkspaceKind, WorkspacePackage } from "./validator-types.ts";
 
 export function buildWorkspaceGraph(rootDir: string, files: ProjectFile[], importEdges: () => ImportEdge[]): WorkspaceGraph {
@@ -110,29 +112,48 @@ export function buildImportGraph(params: {
   const edges: ImportEdge[] = [];
 
   for (const file of sourceFiles) {
-    if (file.language !== ProjectFileLanguage.TypeScript && file.language !== ProjectFileLanguage.Svelte) continue;
     const fromPackage = params.workspace.ownerOf(file)?.name;
-    for (const item of file.ts.imports()) {
-      const resolved = resolveImport({
-        fromPath: file.path,
-        source: item.source,
-        filesByPath,
-        workspace: params.workspace,
-        resolveAlias,
-      });
-      edges.push({
-        from: file,
-        to: resolved.path ? filesByPath.get(resolved.path) : undefined,
-        source: item.source,
-        line: item.line,
-        specifiers: item.specifiers,
-        kind: item.kind,
-        resolution: resolved.resolution,
-        relativeDepth: relativeDepth(item.source),
-        resolvedPath: resolved.path,
-        fromPackage,
-        toPackage: resolved.packageName ?? (resolved.path ? params.workspace.ownerOf(resolved.path)?.name : undefined),
-      });
+    if (file.language === ProjectFileLanguage.TypeScript || file.language === ProjectFileLanguage.Svelte) {
+      for (const item of file.ts.imports()) {
+        const resolved = resolveImport({
+          fromPath: file.path,
+          source: item.source,
+          filesByPath,
+          workspace: params.workspace,
+          resolveAlias,
+        });
+        edges.push({
+          from: file,
+          to: resolved.path ? filesByPath.get(resolved.path) : undefined,
+          source: item.source,
+          line: item.line,
+          specifiers: item.specifiers,
+          kind: item.kind,
+          resolution: resolved.resolution,
+          relativeDepth: relativeDepth(item.source),
+          resolvedPath: resolved.path,
+          fromPackage,
+          toPackage: resolved.packageName ?? (resolved.path ? params.workspace.ownerOf(resolved.path)?.name : undefined),
+        });
+      }
+    } else if (file.language === ProjectFileLanguage.Python) {
+      // Python imports are surfaced as edges so the canonical import API is polyglot,
+      // but always `unresolved`: OpenCanon does not resolve Python module paths yet
+      // (registry: python resolution = none). relativeDepth stays 0 so depth-based
+      // import rules never fire on Python.
+      for (const item of file.py.imports()) {
+        edges.push({
+          from: file,
+          to: undefined,
+          source: item.module,
+          line: item.line,
+          specifiers: item.names,
+          kind: ImportEdgeKind.Import,
+          resolution: "unresolved",
+          relativeDepth: 0,
+          fromPackage,
+        });
+      }
     }
   }
 

@@ -6,11 +6,10 @@ const repo = {
 export const SITE = {
   name: 'OpenCanon',
   description:
-    'Local repo rules for agents: context, validators, findings, and a daemon-backed UI.',
+    'Agent-ready, human-readable Project Canon: enforced specs, conventions, checks, search, and local runtime APIs.',
   repo,
   repoSlug: `${repo.owner}/${repo.name}`,
   repoUrl: `https://github.com/${repo.owner}/${repo.name}`,
-  bunVersion: '1.3.13',
   nav: [
     { href: '/docs/install', label: 'Docs', icon: 'book' },
     { href: '/specimen', label: 'Output', icon: 'fileCode' },
@@ -30,7 +29,7 @@ export const SITE = {
       icon: 'layers',
       items: [
         { href: '/docs/concepts', label: 'Concepts', icon: 'boxes' },
-        { href: '/docs/validators', label: 'Validators', icon: 'shield' },
+        { href: '/docs/validators', label: 'Proof', icon: 'shield' },
         { href: '/docs/examples', label: 'Examples', icon: 'fileCode' }
       ]
     },
@@ -40,7 +39,7 @@ export const SITE = {
       items: [
         { href: '/docs/cli', label: 'CLI', icon: 'terminal' },
         { href: '/docs/hooks', label: 'Hooks', icon: 'gitBranch' },
-        { href: '/docs/daemon', label: 'Daemon', icon: 'cpu' }
+        { href: '/docs/runtime', label: 'Runtime', icon: 'cpu' }
       ]
     },
     {
@@ -53,12 +52,15 @@ export const SITE = {
 
 export const SKILLS_INSTALL_COMMAND = `npx skills add ${SITE.repoSlug} --skill opencanon -a codex -y`;
 
-export const SKILL_COMMAND = `bun .agents/skills/opencanon/scripts/opencanon.ts`;
+export const INSTALL_COMMAND = `curl -fsSL https://github.com/${repo.owner}/${repo.name}/releases/latest/download/opencanon-install.mjs -o opencanon-install.mjs
+node opencanon-install.mjs
+rm opencanon-install.mjs`;
 
-export const INIT_COMMAND = `${SKILL_COMMAND} setup --yes --hooks codex`;
+export const SETUP_COMMAND = `opencanon setup --yes --hooks codex`;
 
-export const DAEMON_COMMAND = `bun run opencanon daemon start
-bun run opencanon daemon status
-bun run opencanon daemon open`;
+export const SERVICE_COMMAND = `opencanon service start
+opencanon service status
+opencanon project status
+opencanon project open`;
 
 export const RELEASE_MANIFEST_URL = `https://github.com/${repo.owner}/${repo.name}/releases/latest/download/opencanon-runtime-manifest.json`;

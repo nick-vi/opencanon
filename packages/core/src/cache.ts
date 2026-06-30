@@ -4,8 +4,13 @@ import path from "node:path";
 import { writeAtomicJsonFileSync } from "./atomic.ts";
 import type { ContextPaths } from "./core.ts";
 
-const cacheVersion = 1;
-const parserVersion = "opencanon-parser";
+const cacheVersion = 2;
+// Gates cached fact validity. MUST be bumped whenever fact extraction changes —
+// keep it in lockstep with the engine EXTRACTOR_VERSION (crates/opencanon-engine/
+// src/constants.rs). Bumping here invalidates every pre-existing analysis.json
+// fact blob, so a cache written by an older extractor (e.g. the deleted regex
+// parsers) is never served after the AST migration.
+const factCacheVersion = "engine-graph-16";
 
 type CacheFile = {
   version: number;
@@ -52,7 +57,7 @@ export function getAnalysisCache(paths: ContextPaths): AnalysisCache {
       record &&
       record.size === stats.size &&
       record.mtimeMs === stats.mtimeMs &&
-      record.parserVersion === parserVersion &&
+      record.parserVersion === factCacheVersion &&
       record.configHash === configHash
     ) {
       return record;
@@ -61,7 +66,7 @@ export function getAnalysisCache(paths: ContextPaths): AnalysisCache {
       path: file,
       size: stats.size,
       mtimeMs: stats.mtimeMs,
-      parserVersion,
+      parserVersion: factCacheVersion,
       configHash,
       values: {},
     };

@@ -1,0 +1,52 @@
+# Local Service and Project Runtimes
+
+Area id: `local-service-and-runtimes`.
+Render style: `reference`.
+
+## Summary
+
+Summary: The OpenCanon local service discovers projects and lazily starts isolated per-project runtimes.
+
+## Ownership
+
+Files: packages/service-contracts/**, packages/runtime/src/service.ts, packages/runtime/src/local-protocol.ts, packages/runtime/src/routes.ts, packages/cli/src/runtime-client.ts, packages/runtime/test/service.test.ts
+Endpoints: /api/projects/ensure (service), /api/projects/request (service), /api/projects/events/stream (service)
+Commands: opencanon service (cli), opencanon project (cli)
+
+## Impact surfaces
+
+- [local-service-control](opencanon://impact-surfaces/local-service-control)
+
+## Checks
+
+- `runtime-client-tests` test `packages/runtime/test/client.test.ts`
+- `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
+- `project-doctor` doctor
+
+## Stories
+
+Story `lazy-project-runtime`: as developer, I want OpenCanon commands to start the project runtime on demand, so projects do not require manually managed background processes.
+- service registry records runtime identity
+- large context requests move through the local protocol
+Checks: `runtime-client-tests`, `project-doctor`
+
+## Behaviors
+
+Behavior `large-related-context-request`: CLI requests related context for a large change set; the request uses the local protocol without exceeding HTTP query/header limits.
+Checks: `runtime-client-tests`
+
+Behavior `project-event-stream-is-explicit`: local service proxies project runtime events to CLI, MCP, and diagnostics clients; transport close or failure is reported as an explicit event-stream error instead of being masked by stale project data.
+Checks: `runtime-client-tests`, `service-lifecycle-tests`
+
+Behavior `project-worker-single-owner`: local service starts or repairs a project runtime; one project worker owns the repo state before SQLite opens, while stale or duplicate workers are retired.
+Checks: `service-lifecycle-tests`
+
+## Dependencies
+
+No area dependencies are recorded.
+
+## Governance
+
+- infer governing conventions from owned scope
+- convention [framework-package-boundaries](opencanon://conventions/framework-package-boundaries)
+- convention [service-events-current](opencanon://conventions/service-events-current)

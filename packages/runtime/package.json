@@ -1,0 +1,19 @@
+{
+  "name": "@opencanon/runtime",
+  "version": "0.4.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@opencanon/service-contracts": "*",
+    "@opencanon/core": "*",
+    "@opencanon/distribution": "*",
+    "@opencanon/engine": "*",
+    "@opencanon/observability": "*",
+    "@opencanon/validators": "*",
+    "cac": "7.0.0"
+  }
+}

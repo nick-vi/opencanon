@@ -1,6 +1,6 @@
 {
   "name": "@opencanon/cli",
-  "version": "0.3.14",
+  "version": "0.4.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -11,8 +11,11 @@
     "opencanon": "./src/index.ts"
   },
   "dependencies": {
-    "@opencanon/daemon": "workspace:*",
-    "@opencanon/core": "workspace:*",
-    "cac": "7.0.0"
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@opencanon/core": "*",
+    "@opencanon/distribution": "*",
+    "@opencanon/runtime": "*",
+    "cac": "7.0.0",
+    "zod": "4.4.3"
   }
 }

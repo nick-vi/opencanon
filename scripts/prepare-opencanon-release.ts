@@ -1,24 +1,23 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const rootDir = process.cwd();
-const version = Bun.argv[2];
+const version = process.argv[2];
 
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-  throw new Error("Usage: bun run release:prepare -- <semver>");
+  throw new Error("Usage: npm run release:prepare -- <semver>");
 }
 
 const releaseDate = new Date().toISOString().slice(0, 10);
 const tag = `v${version}`;
 const packagePaths = [
   "package.json",
-  "apps/site/package.json",
   "packages/cli/package.json",
   "packages/core/package.json",
-  "packages/daemon/package.json",
+  "packages/distribution/package.json",
+  "packages/runtime/package.json",
   "packages/engine/package.json",
-  "packages/ui/package.json",
   "packages/validators/package.json",
 ];
 const rustPackagePath = "crates/opencanon-engine/Cargo.toml";
@@ -35,13 +34,10 @@ replaceInFile(rustPackagePath, /^version = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"$/
 replaceInFile(engineConstantsPath, /ENGINE_VERSION: &str = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"/, `ENGINE_VERSION: &str = "${version}"`);
 replaceRustLockPackageVersion(rustLockPath, "opencanon-engine", version);
 
-ensureLatestManifestUrl(".agents/skills/opencanon/scripts/opencanon.ts");
-ensureLatestManifestUrl("apps/site/src/lib/site.config.js");
-
 replaceInFile(
   "README.md",
-  /"skillVersion": "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"/g,
-  `"skillVersion": "${version}"`,
+  /"runtimeVersion": "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"/g,
+  `"runtimeVersion": "${version}"`,
 );
 
 updateChangelog(`v${version}`, releaseDate);
@@ -62,24 +58,12 @@ function replaceInFile(relativePath: string, pattern: RegExp, replacement: strin
   writeFileSync(filePath, after);
 }
 
-function ensureLatestManifestUrl(relativePath: string): void {
-  const filePath = path.join(rootDir, relativePath);
-  const before = readFileSync(filePath, "utf8");
-  const latestPath = "releases/latest/download/opencanon-runtime-manifest.json";
-  const after = before.replace(
-    /releases\/(?:download\/v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|latest\/download)\/opencanon-runtime-manifest\.json/g,
-    latestPath,
-  );
-  if (after === before && !before.includes(latestPath)) {
-    throw new Error(`No latest release manifest reference found in ${relativePath}.`);
-  }
-  writeFileSync(filePath, after);
-}
-
 function updateChangelog(tagName: string, date: string): void {
   const changelogPath = path.join(rootDir, "CHANGELOG.md");
   const changelog = existsSync(changelogPath) ? readFileSync(changelogPath, "utf8") : "# Changelog\n";
-  if (changelog.includes(`## ${tagName} `) || changelog.includes(`## ${tagName}\n`)) return;
+  // Anchor to a heading line so an unrelated mention of the tag in prose can't suppress
+  // the real changelog entry.
+  if (new RegExp(`^## ${RegExp.escape(tagName)}\\b`, "m").test(changelog)) return;
 
   const heading = `## ${tagName} - ${date}`;
   const entry = [
@@ -103,12 +87,8 @@ function updateChangelog(tagName: string, date: string): void {
 function replaceRustLockPackageVersion(relativePath: string, packageName: string, nextVersion: string): void {
   const filePath = path.join(rootDir, relativePath);
   const before = readFileSync(filePath, "utf8");
-  const pattern = new RegExp(`(\\[\\[package\\]\\]\\nname = "${escapeRegExp(packageName)}"\\nversion = ")\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(")`);
+  const pattern = new RegExp(`(\\[\\[package\\]\\]\\nname = "${RegExp.escape(packageName)}"\\nversion = ")\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(")`);
   const after = before.replace(pattern, `$1${nextVersion}$2`);
   if (after === before) throw new Error(`No Cargo.lock version entry updated for ${packageName}.`);
   writeFileSync(filePath, after);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

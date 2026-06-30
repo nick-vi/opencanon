@@ -1,33 +1,57 @@
-#!/usr/bin/env bun
-import { rmSync } from "node:fs";
+#!/usr/bin/env node
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import { runDaemonCommand, runDevCommand } from "@opencanon/daemon";
-import { ContextDiagnosticCode, createPaths, fail, loadContextFiles, loadImpactSurfaces, resolveRootDir, validateContextDiagnostics } from "@opencanon/core";
-import { applyDoctorFixes, buildDoctorReport, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
+import { inspectProjectRuntime, inspectService, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, RuntimeStatus, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
+import { ContextDiagnosticCode, fail, Format, loadImpactSurfaces, resolveRootDir, validateContextDiagnostics } from "@opencanon/core";
+import { applyDoctorFixes, buildDoctorReport, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
+import type { DoctorRuntimeHealth, ProducerStatus } from "@opencanon/core";
+import { fetchRunningRuntimeProducers } from "./runtime-client.ts";
 import { CliOptionDescription, CliOptionFlag, CliOptionName, booleanOption, fixModeOption, formatOption, rejectUnknownOptions } from "./options.ts";
 import { runBenchmarkCommand } from "./benchmark.ts";
 import { runBaselineCommand } from "./baseline.ts";
-import { runBundleCommand } from "./bundle.ts";
+import { runCanonCommand } from "./canon.ts";
+import { runChangesCommand } from "./changes.ts";
 import { runFeedbackCommand, runHookCommand } from "./feedback.ts";
 import { runGateCommand } from "./gate.ts";
 import { runGraphCommand } from "./graph.ts";
-import { runInitCommand } from "./init.ts";
-import { loadProjectContext, loadValidators } from "./project.ts";
-import { runProjectTypesCommand } from "./project-types.ts";
-import { runContextCommand } from "./context.ts";
+import { runLanguagesCommand } from "./languages.ts";
+import { runMcpCommand } from "./mcp.ts";
+import { loadProjectContext } from "./project.ts";
+import { runBriefCommand } from "./brief.ts";
+import { runAskCommand, runContextCommand } from "./context.ts";
 import { runRefactorCommand } from "./refactor.ts";
+import { runReviewCommand } from "./review.ts";
 import { runRulesCommand } from "./rules.ts";
 import { runSearchCommand } from "./search.ts";
+import { runInitCommand } from "./init-flow.ts";
 import { runSetupCommand } from "./setup.ts";
 import { runSymbolsCommand } from "./symbols.ts";
 import { runUpdateCommand } from "./update.ts";
+import { runAnalyzeCommand } from "./analyze.ts";
 import { runValidateCommand } from "./validate.ts";
+import { runWorktreeCommand } from "./worktree.ts";
+
+const DoctorProjectRuntimeReadyTimeoutMs = 60_000;
 
 export { OpenCanonPlugin } from "./opencode-plugin.ts";
 
-export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runOpenCanonCli(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
+  // Install the engine-backed AST facts provider for the whole CLI process so TS
+  // facts come from the oxc AST on every in-process validation path (lazy per
+  // rootDir; disposed on exit, with a process.exit backstop). Shared helper so
+  // external @opencanon/core consumers satisfy the same provider-required contract.
+  await withCliAstFactsProvider(() => dispatchOpenCanonCli(args, cwd));
+}
+
+async function dispatchOpenCanonCli(args: string[], cwd: string): Promise<void> {
   const [command, ...rest] = args;
+
+  if (command === "--version" || command === "-v" || command === "version") {
+    if (rest.length > 0) fail(`Unexpected version arguments: ${rest.join(", ")}`);
+    console.log(readCliVersion());
+    return;
+  }
 
   if (!command || command === "-h" || command === "--help" || command === "help") {
     printHelp();
@@ -39,6 +63,21 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
+  if (command === "brief") {
+    await runBriefCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "status") {
+    await runOpenCanonStatusCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "ask") {
+    await runAskCommand(rest, cwd);
+    return;
+  }
+
   if (command === "init") {
     await runInitCommand(rest, cwd);
     return;
@@ -46,6 +85,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
 
   if (command === "setup") {
     await runSetupCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "languages") {
+    await runLanguagesCommand(rest);
     return;
   }
 
@@ -61,6 +105,11 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
 
   if (command === "rules") {
     await runRulesCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "review") {
+    await runReviewCommand(rest, cwd);
     return;
   }
 
@@ -84,23 +133,28 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
+  if (command === "mcp") {
+    await runMcpCommand(rest, cwd);
+    return;
+  }
+
   if (command === "doctor") {
     await runDoctorCommand(rest, cwd);
     return;
   }
 
-  if (command === "daemon") {
-    await runDaemonCommand(rest, cwd);
+  if (command === "service") {
+    await runServiceCommand(rest, cwd);
     return;
   }
 
-  if (command === "db") {
-    runDbCommand(rest, cwd);
+  if (command === "project") {
+    await runProjectCommand(rest, cwd);
     return;
   }
 
-  if (command === "dev") {
-    await runDevCommand(rest, cwd);
+  if (command === "state") {
+    runStateCommand(rest, cwd);
     return;
   }
 
@@ -114,8 +168,18 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
-  if (command === "bundle") {
-    await runBundleCommand(rest, cwd);
+  if (command === "canon") {
+    await runCanonCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "changes") {
+    await runChangesCommand(rest, cwd);
+    return;
+  }
+
+  if (command === "worktree") {
+    await runWorktreeCommand(rest, cwd);
     return;
   }
 
@@ -134,8 +198,8 @@ export async function runOpenCanonCli(args = Bun.argv.slice(2), cwd = process.cw
     return;
   }
 
-  if (command === "project-types") {
-    await runProjectTypesCommand(rest, cwd);
+  if (command === "analyze") {
+    await runAnalyzeCommand(rest, cwd);
     return;
   }
 
@@ -146,7 +210,7 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
   const cli = cac("opencanon doctor");
   cli.option(CliOptionFlag.Help, "Show help.");
   cli.option(CliOptionFlag.Format, CliOptionDescription.Format);
-  cli.option("--fix [mode]", "Apply doctor setup fixes.");
+  cli.option("--fix [mode]", "Apply doctor init fixes.");
   cli.option(CliOptionFlag.DryRun, CliOptionDescription.DryRun);
   cli.option("--run-external-tools", "Execute configured external tool checks.");
 
@@ -168,118 +232,221 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
     runExternalTools: booleanOption(options.runExternalTools),
   };
   const rootDir = resolveRootDir(cwd);
-  const paths = createPaths(rootDir);
-  const { decisions } = loadContextFiles(paths);
-  const validators = await loadValidators(rootDir, paths);
-  const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
-  const contextDiagnostics = validateContextDiagnostics({ decisions, validators, impactSurfaces, paths });
+  const project = await loadProjectContext(rootDir);
+  const { paths, areas, specs, changes, conventions, validators, impactSurfaces } = project;
+  const { diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
+  const contextDiagnostics = validateContextDiagnostics({
+    conventions,
+    areas,
+    specs,
+    changes,
+    validators: validators.map((validator) => ({ id: validator.id, conventionIds: validator.conventionIds, docs: validator.docs })),
+    impactSurfaces,
+    paths,
+  });
   const diagnostics = [...impactDiagnostics.map((message) => ({ code: ContextDiagnosticCode.InvalidContext, message })), ...contextDiagnostics];
-  if (diagnostics.length > 0 && (!query.fixMode || !diagnostics.every((diagnostic) => diagnostic.code === ContextDiagnosticCode.ValidatorDecisionBackrefMissing))) {
-    console.error("OpenCanon files are invalid. Run bun run opencanon context --check for details.");
+  if (diagnostics.length > 0) {
+    console.error("OpenCanon files are invalid. Run opencanon context --check for details.");
     process.exit(1);
   }
 
-  let report = buildDoctorReport({ paths, decisions, validators, runExternalTools: query.runExternalTools });
-  const fixes = query.fixMode ? applyDoctorFixes({ paths, report, mode: query.fixMode, dryRun: query.dryRun, decisions, validators }) : undefined;
+  // Authoritative producer status from a running runtime (it owns the live producer);
+  // undefined when no runtime is running, in which case the headless sidecar resolve
+  // is correct (no live producer exists).
+  const runtimeHealth = await buildDoctorRuntimeHealth(rootDir);
+  const producerStatuses = await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir);
+  let report = buildDoctorReport({ paths, areas, specs, changes, conventions, validators, runExternalTools: query.runExternalTools, producerStatuses, runtimeHealth });
+  const fixes = query.fixMode ? applyDoctorFixes({ paths, report, mode: query.fixMode, dryRun: query.dryRun, conventions, validators }) : undefined;
   if (fixes && !fixes.dryRun && fixes.diagnostics.length === 0 && fixes.appliedFixes > 0) {
-    const nextDecisions = loadContextFiles(paths).decisions;
-    report = buildDoctorReport({ paths, decisions: nextDecisions, validators, runExternalTools: query.runExternalTools });
+    const nextProject = await loadProjectContext(rootDir);
+    report = buildDoctorReport({
+      paths: nextProject.paths,
+      areas: nextProject.areas,
+      specs: nextProject.specs,
+      changes: nextProject.changes,
+      conventions: nextProject.conventions,
+      validators: nextProject.validators,
+      runExternalTools: query.runExternalTools,
+      producerStatuses,
+      runtimeHealth,
+    });
   }
 
-  if (query.format === "json") {
+  if (query.format === Format.Json) {
     console.log(JSON.stringify({ ...report, fixes }, null, 2));
   } else {
     console.log([renderDoctorMarkdown(report), fixes ? renderDoctorFixMarkdown(fixes) : ""].filter(Boolean).join("\n\n"));
   }
 
-  process.exit(report.status === "fail" ? 1 : 0);
+  process.exit(report.status === DoctorStatus.Fail ? 1 : 0);
+}
+
+async function buildDoctorRuntimeHealth(rootDir: string): Promise<DoctorRuntimeHealth> {
+  await reconcileProjectRuntimes();
+  await settleStartingRuntimeForDoctor(rootDir);
+  const [service, project] = await Promise.all([inspectService(), inspectProjectRuntime(rootDir)]);
+  return {
+    service: {
+      status: service?.status ?? "not-running",
+      registered: Boolean(service),
+      ...(service?.message ? { message: service.message } : {}),
+    },
+    project: {
+      status: project?.status ?? "not-running",
+      registered: Boolean(project),
+      ...(project?.message ? { message: project.message } : {}),
+      ...(project?.entry.lifecycle.status ? { lifecycleStatus: project.entry.lifecycle.status } : {}),
+    },
+  };
+}
+
+async function settleStartingRuntimeForDoctor(rootDir: string): Promise<void> {
+  const inspection = await inspectProjectRuntime(rootDir);
+  if (inspection?.status !== RuntimeStatus.Starting) return;
+  try {
+    await waitForProjectRuntimeReady(rootDir, { timeoutMs: DoctorProjectRuntimeReadyTimeoutMs });
+  } catch {
+    // Doctor reports the final inspected runtime state below; it should not crash
+    // before rendering the actionable runtime-health check.
+  }
 }
 
 function printHelp(): void {
-  console.log(`Usage:
-  opencanon context --files <paths...>
+  console.log(`OpenCanon keeps Project Canon, runtime proof, and project knowledge in sync.
+
+Usage:
+  opencanon <command> [options]
+
+Daily workflow:
+  opencanon --version
+  opencanon status
+  opencanon status --format json
   opencanon setup --yes
-  opencanon init --non-interactive
-  opencanon rules --validator <id>
-  opencanon search <query>
+  opencanon setup --yes --hooks codex
+  opencanon context --files <paths...>
+  opencanon brief --format json
+  opencanon validate --changed
   opencanon validate --files <paths...>
-  opencanon update check --manifest <path-or-url>
+  opencanon doctor
+  opencanon review
+  opencanon languages
+  opencanon search <query>
+  opencanon ask "where is auth enforced?"
+  opencanon rules --validator <id>
+
+Project Canon:
+  opencanon canon list
+  opencanon canon map
+  opencanon canon draft convention <id> --title <title> --rule <rule>
+  opencanon canon render conventions
+  opencanon canon render areas
+  opencanon canon render specs
+  opencanon changes list
+  opencanon worktree create <change-id> --task <task-id>
+  opencanon worktree list
+
+Project runtime:
+  opencanon project status
+  opencanon project status --format json
+  opencanon project start
+  opencanon project index
+  opencanon project logs --tail 200
+  opencanon project list
+  opencanon service status
+
+Agent and integration:
   opencanon feedback --files <paths...>
   opencanon gate approve <gate-id> --summary <summary>
   opencanon gate pending --format json
   opencanon hook <codex|claude|opencode>
   opencanon hook install --all
-  opencanon doctor
-  opencanon daemon start
-  opencanon dev
+  opencanon mcp
+
+Advanced and operations:
+  opencanon project start --foreground
+  opencanon update check --manifest <path-or-url>
   opencanon baseline check
-  opencanon bundle install <bundle.ts|bundle.json> --option key=value
   opencanon symbols <query>
+  opencanon graph callers <symbol>
   opencanon refactor rename-symbol <from> <to>
-  opencanon project-types generate
+  opencanon state status
+  opencanon benchmark --sizes 1000,10000
 
-Commands:
-  context    Load scoped docs, decisions, validators, and git evidence.
-  setup      First-run scaffold, hook install, validation, doctor, and daemon start.
-  init       Scaffold OpenCanon skill files, validators, optional config, and ignore rules.
-  rules      List validator summaries, scopes, decisions, and fixture coverage.
-  search     Search symbols, decisions, validators, and docs deterministically.
-  validate   Run validators against files, changed files, fixtures, or the project.
-  update     Check or install verified engine runtime assets from a release manifest.
-  feedback   Run validators and render concise agent feedback.
-  gate       Record user clarification for commit gates.
-  hook       Adapt host hook payloads to OpenCanon feedback.
-  doctor     Check core setup, validator coverage, dependencies, and hooks.
-  daemon     Start or inspect the daemon runtime.
-  dev        Start the daemon and serve the built UI.
-  baseline   Show or update the known findings baseline.
-  bundle     Inspect, plan, install, or update canon bundles.
-  symbols    Search the deterministic TS/JS code symbol graph by query, kind, or scope.
-  graph      Inspect deterministic callers, callees, and impact edges.
-  refactor   Plan or apply deterministic symbol/import/file refactors.
-  project-types Generate typed package/import constants for validator authoring.
+Command groups:
+  status     Show global service and current project runtime status.
+  context    Load the Project Canon and knowledge that apply to files, changes, or a topic.
+  search     Search project symbols, canon definitions, validators, docs, and indexed knowledge.
+  languages  Show explicit parser, facts, graph, and refactor support by language.
+  review     Produce a read-only local/CI report for changed files.
+  ask        Ask evidence-backed questions over the current project knowledge index.
+  setup      Initialize this repo and emit an agent setup packet for Project Canon.
+  init       Scaffold or repair the deterministic OpenCanon project files.
+  canon      Browse, draft, render, and inspect durable Project Canon definitions.
+  changes    List active Changes, run declared checks, and record runtime events.
+  worktree   Create, list, remove, and reap managed worktrees for parallel agents.
+  brief      Build an agent-ready briefing with ready work and scoped Project Canon.
+  project    Start, inspect, reindex, open, or stop this project's runtime.
+  service    Start, inspect, open, or stop the global OpenCanon control plane.
 
-Maintenance:
-  db         Inspect or reset generated daemon state.
-  benchmark  Generate synthetic repos and profile discovery/parsing tiers.
+Run opencanon <command> --help for command-specific options.
 `);
 }
 
-function runDbCommand(args: string[], cwd: string): void {
+function readCliVersion(): string {
+  for (const candidate of [
+    new URL("./package.json", import.meta.url),
+    new URL("../package.json", import.meta.url),
+    new URL("../../../package.json", import.meta.url),
+  ]) {
+    try {
+      const parsed = JSON.parse(readFileSync(candidate, "utf8")) as unknown;
+      if (isRecord(parsed) && typeof parsed.version === "string" && parsed.version.trim()) return parsed.version;
+    } catch {
+      // Source, workspace, and bundled runtime layouts use different package.json locations.
+    }
+  }
+  return "0.0.0-dev";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function runStateCommand(args: string[], cwd: string): void {
   const [command = "status", ...rest] = args;
   if (command === "reset") {
-    const cli = cac("opencanon db reset");
+    const cli = cac("opencanon state reset");
     cli.option("--confirm", "Confirm generated state deletion.");
     cli.option("-h, --help", "Show help.");
     const parsed = cli.parse(["node", "opencanon", ...rest], { run: false });
     const options = parsed.options as Record<string, unknown>;
-    if (options.help || options.h) {
-      printDbHelp();
+    if (booleanOption(options.help) || booleanOption(options.h)) {
+      printStateHelp();
       return;
     }
     if (options.confirm !== true) fail("Refusing to reset generated state without --confirm.");
     const rootDir = resolveRootDir(cwd);
     const statePath = path.join(rootDir, ".opencanon", "state.sqlite");
     for (const file of [statePath, `${statePath}-wal`, `${statePath}-shm`]) rmSync(file, { force: true });
-    console.log(`# OpenCanon DB\n\nStatus: reset\nPath: ${statePath}`);
+    console.log(`# OpenCanon State\n\nStatus: reset\nPath: ${statePath}`);
     return;
   }
   if (command === "status") {
     const rootDir = resolveRootDir(cwd);
-    console.log(`# OpenCanon DB\n\nPath: ${path.join(rootDir, ".opencanon", "state.sqlite")}`);
+    console.log(`# OpenCanon State\n\nPath: ${path.join(rootDir, ".opencanon", "state.sqlite")}`);
     return;
   }
   if (command === "-h" || command === "--help" || command === "help") {
-    printDbHelp();
+    printStateHelp();
     return;
   }
-  fail(`Unknown db command: ${command}`);
+  fail(`Unknown state command: ${command}`);
 }
 
-function printDbHelp(): void {
+function printStateHelp(): void {
   console.log(`Usage:
-  bun run opencanon db status
-  bun run opencanon db reset --confirm
+  opencanon state status
+  opencanon state reset --confirm
 
 Commands:
   status  Show the generated project state path.
@@ -289,12 +456,12 @@ Commands:
 
 function printDoctorHelp(): void {
   console.log(`Usage:
-  bun run opencanon doctor
-  bun run opencanon doctor --fix --dry-run
+  opencanon doctor
+  opencanon doctor --fix --dry-run
 
 Options:
   --format markdown|json     Output format. Default: markdown.
-  --fix [safe|suggested|all] Apply setup fixes. Default with --fix: safe.
+  --fix [safe|suggested|all] Apply init fixes. Default with --fix: safe.
   --dry-run                  Show selected fixes without writing files.
   --run-external-tools       Execute configured external tool checks.
 `);

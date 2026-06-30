@@ -1,6 +1,6 @@
 [package]
 name = "opencanon-engine"
-version = "0.3.14"
+version = "0.4.0"
 license = "MIT"
 edition = "2021"
 rust-version = "1.95"
@@ -14,6 +14,8 @@ globset = "=0.4.18"
 napi = "=3.9.0"
 napi-derive = "=3.5.6"
 notify = "=9.0.0-rc.4"
+opencanon-inference = { path = "../opencanon-inference" }
+opencanon-vector = { path = "../opencanon-vector" }
 oxc_allocator = "=0.128.0"
 oxc_ast = "=0.128.0"
 oxc_ast_visit = "=0.128.0"
@@ -21,6 +23,8 @@ oxc_parser = "=0.128.0"
 oxc_semantic = "=0.128.0"
 oxc_span = "=0.128.0"
 oxc_syntax = "=0.128.0"
+rustpython-ast = { version = "0.4", features = ["visitor"] }
+rustpython-parser = "0.4"
 rusqlite = { version = "=0.39.0", features = ["bundled"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"

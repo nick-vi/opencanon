@@ -3,8 +3,11 @@
 
   const contextCommands = `opencanon context --files src/services/company.service.ts
 opencanon context --list-exceptions`;
+  const canonCommands = `opencanon canon list areas
+opencanon canon list specs
+opencanon changes list`;
   const rulesCommands = `opencanon rules --validator service-no-db-client
-opencanon rules --decision service-db-boundary
+opencanon rules --convention service-db-boundary
 opencanon rules --tree --validator service-no-db-client`;
   const graphCommands = `opencanon search loadCompany --kind symbol --symbol-kind function --scope "src/services/**"
 opencanon symbols loadCompany --kind function --scope "src/services/**"
@@ -21,45 +24,49 @@ opencanon gate approve <gate-id> \\
   --via agent`;
   const feedbackCommands = `opencanon feedback --changed
 opencanon feedback --changed --strict-warnings`;
-  const daemonCommands = `opencanon daemon start
-opencanon daemon status
-opencanon daemon list
-opencanon daemon open
-opencanon daemon stop
-opencanon daemon check`;
+  const runtimeCommands = `opencanon service start
+opencanon service status
+opencanon project status
+opencanon project index
+opencanon project logs --tail 200
+opencanon project stop`;
   const diagnosticCommands = `opencanon doctor
 opencanon benchmark --sizes 1000,10000,50000`;
-  const bundleCommands = `opencanon bundle list
-opencanon bundle inspect ./opencanon.bundle.ts
-opencanon bundle plan ./opencanon.bundle.ts --option sourceRoot=src
-opencanon bundle install ./opencanon.bundle.ts --option sourceRoot=src`;
   const updateCommands = `opencanon update check --manifest ./opencanon-runtime-manifest.json
 opencanon update apply --manifest ./opencanon-runtime-manifest.json --dry-run`;
   const baselineCommands = `opencanon baseline check
 opencanon baseline update`;
-  const stateCommands = `opencanon db status
-opencanon db reset --confirm`;
+  const stateCommands = `opencanon state status
+opencanon state reset --confirm`;
 </script>
 
 <svelte:head><title>CLI | OpenCanon</title></svelte:head>
 
 <h1>CLI</h1>
 <p class="lead">
-  The <code>opencanon</code> binary talks to the daemon. If no daemon is running,
-  it can start one for a single request.
+  The <code>opencanon</code> binary is the primary product surface. It talks to
+  the local service, starts project runtimes on demand, and exposes the same
+  model to humans, hooks, MCP, and CI.
 </p>
 
 <h2>Context</h2>
 <CodeBlock title="context" language="shell" code={contextCommands} />
 <p>
-  Loads docs, decisions, validators, and optional Git history for files or
-  topics.
+  Loads scoped Project Canon, Proof checks, Knowledge evidence, impact context,
+  and optional Git history for files or topics.
+</p>
+
+<h2>Project Canon</h2>
+<CodeBlock title="canon" language="shell" code={canonCommands} />
+<p>
+  Lists durable Areas and Specs plus active Changes that agents can follow.
 </p>
 
 <h2>Rules</h2>
 <CodeBlock title="rules" language="shell" code={rulesCommands} />
 <p>
-  Lists validator summaries, scopes, decisions, and fixture coverage.
+  Lists convention summaries, scopes, generated docs, runtime checks, and
+  fixture coverage.
   <code>--tree</code> shows the file scope.
 </p>
 
@@ -88,22 +95,15 @@ opencanon db reset --confirm`;
   Writes concise findings for an agent after edits.
 </p>
 
-<h2>Daemon</h2>
-<CodeBlock title="daemon" language="shell" code={daemonCommands} />
-
-<h2>Bundles</h2>
-<CodeBlock title="bundle" language="shell" code={bundleCommands} />
-<p>
-  Bundles list local examples, inspect metadata, plan installs, and install docs,
-  decisions, validators, impact surfaces, external tool declarations, and owned
-  files.
-</p>
+<h2>Runtime</h2>
+<CodeBlock title="runtime" language="shell" code={runtimeCommands} />
 
 <h2>Runtime Updates</h2>
 <CodeBlock title="update" language="shell" code={updateCommands} />
 <p>
   Updates read a manifest, select the current engine target, and verify
-  checksums before writing runtime assets.
+  checksums before writing runtime assets. Writes fail while the service or
+  current project runtime is running.
 </p>
 
 <h2>Baselines</h2>
@@ -117,4 +117,4 @@ opencanon db reset --confirm`;
 <CodeBlock title="diagnostics" language="shell" code={diagnosticCommands} />
 
 <h2>Local State</h2>
-<CodeBlock title="db" language="shell" code={stateCommands} />
+<CodeBlock title="state" language="shell" code={stateCommands} />

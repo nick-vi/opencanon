@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import type { DaemonSnapshot } from "@opencanon/daemon";
+import type { RuntimeSnapshot } from "@opencanon/runtime";
 import { booleanOption, fixModeOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
-import { loadValidators } from "./project.ts";
+import { loadProjectContext } from "./project.ts";
 import {
   createCommitApprovalContext,
   getCommitGateFiles,
@@ -14,11 +14,11 @@ import {
   createPaths,
   fail,
   getChangedFiles,
+  isSupportedSourceFile,
   listFiles,
   loadCommitApprovalsWithDiagnostics,
-  loadContextFiles,
-  loadImpactSurfaces,
   matchesProjectFileScope,
+  resolveGoverningConventionsForFiles,
   toPendingCommitGates,
   relative,
   resolveCommitGates,
@@ -28,19 +28,23 @@ import {
   toRepoRelativePath,
   unique,
   validateConfig,
-  validateContext,
 } from "@opencanon/core";
-import type { Format } from "@opencanon/core";
+import type { ProducerStatus } from "@opencanon/core";
+import { Format } from "@opencanon/core";
 import { applyFindingFixes } from "@opencanon/core";
 import type { FixMode } from "@opencanon/core";
 import { createProfiler, renderProfileMarkdown } from "@opencanon/core";
-import type { Profiler } from "@opencanon/core";
 import type { Finding, Validator } from "@opencanon/core";
 import { createRuntime, createValidationContextFromFixture, createValidationContextFromFixtureFile, flushValidationContextCache, validateFindings } from "@opencanon/core";
 import type { ValidationResult } from "@opencanon/core";
 import type { ResolvedCommitGate } from "@opencanon/core";
-import { selectValidators } from "@opencanon/core";
-import { DaemonApiRoute, withDaemonClient } from "./daemon-client.ts";
+import { selectValidators, validatorGraphHash, validatorMatchesFile } from "@opencanon/core";
+import { RuntimeApiRoute, fetchRunningRuntimeProducers, withRuntimeClient } from "./runtime-client.ts";
+import { DiagnosticSeverity, ProducerStatusKind, ValidatorDomain, ValidatorOutcomeStatus, resolveProducerStatuses } from "@opencanon/core";
+
+// Single source of truth for fixture case names; reference members instead of inlining the strings.
+const FixtureCase = { Valid: "valid", Invalid: "invalid", Fixed: "fixed" } as const;
+type FixtureCase = (typeof FixtureCase)[keyof typeof FixtureCase];
 
 type Query = {
   files: string[];
@@ -55,13 +59,15 @@ type Query = {
   dryRun: boolean;
   profile: boolean;
   strictWarnings: boolean;
+  requireProducers: string[];
+  strictProducers: boolean;
   help: boolean;
 };
 
 let rootDir = "";
 let paths: ReturnType<typeof createPaths>;
 
-export async function runValidateCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runValidateCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   rootDir = resolveRootDir(cwd);
   paths = createPaths(rootDir);
   const query = parseArgs(args);
@@ -71,48 +77,41 @@ export async function runValidateCommand(args = Bun.argv.slice(2), cwd = process
   }
 
   assertValidConfig(paths);
+  if (query.requireProducers.length > 0) await assertProducersReady(cwd, query.requireProducers);
   resolveChangedFiles(query);
 
   if (query.list) {
-    const snapshot = await withDaemonClient(cwd, (client) => client.get<DaemonSnapshot>(DaemonApiRoute.Snapshot));
+    const snapshot = await withRuntimeClient(cwd, (client) => client.get<RuntimeSnapshot>(RuntimeApiRoute.Snapshot));
     const rows = snapshot.validators.map((validator) => ({
       id: validator.id,
       severity: validator.severity,
       summary: validator.summary,
       topics: validator.topics,
       applies: validator.appliesScopes.length === 0 ? ["<project>"] : validator.appliesScopes.map((patterns) => patterns.join(" && ")),
-      decisionIds: validator.decisionIds ?? [],
+      conventionIds: validator.conventionIds ?? [],
       docs: validator.docs ?? [],
     }));
-    if (query.format === "json") writeJson({ validators: rows });
+    if (query.format === Format.Json) writeJson({ validators: rows });
     else console.log(rows.map((row) => `- ${row.id} (${row.severity}) topics=${row.topics.join(",")}${row.summary ? ` summary=${row.summary}` : ""}`).join("\n"));
     return;
   }
 
   if (query.checkFixtures) {
     const profiler = createProfiler(query.profile);
-    const { decisions } = profiler.measure("load.context", () => loadContextFiles(paths));
-    const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = profiler.measure("load.impact", () => loadImpactSurfaces(paths));
-    const validators = await profiler.measureAsync("load.validators", () => loadValidators(rootDir, paths));
-    const diagnostics = [...impactDiagnostics, ...validateContext({ decisions, validators, impactSurfaces, paths })];
-    if (diagnostics.length > 0) {
-      console.error("OpenCanon files are invalid. Run bun run opencanon context --check for details.");
-      process.exit(1);
+    const project = await profiler.measureAsync("load.context", () => loadProjectContext(rootDir));
+    const validators = project.validators;
+    const fixtureValidators = selectValidators(validators, {
+      topics: query.topics,
+      validatorIds: query.validatorIds,
+    });
+    const result = await profiler.measureAsync("fixtures.check", () => checkFixtures(fixtureValidators, createRuntime(paths, project.conventions), profiler));
+    if (query.format === Format.Json) {
+      writeJson({ ...result, profile: query.profile ? profiler.entries() : undefined });
+    } else {
+      console.log(renderFixtureResult(result));
+      if (query.profile) console.log(`\n${renderProfileMarkdown(profiler.entries())}`);
     }
-    if (query.checkFixtures) {
-      const fixtureValidators = selectValidators(validators, {
-        topics: query.topics,
-        validatorIds: query.validatorIds,
-      });
-      const result = await profiler.measureAsync("fixtures.check", () => checkFixtures(fixtureValidators, createRuntime(paths, decisions), profiler));
-      if (query.format === "json") {
-        writeJson({ ...result, profile: query.profile ? profiler.entries() : undefined });
-      } else {
-        console.log(renderFixtureResult(result));
-        if (query.profile) console.log(`\n${renderProfileMarkdown(profiler.entries())}`);
-      }
-      process.exit(result.failed === 0 ? 0 : 1);
-    }
+    process.exit(result.failed === 0 ? 0 : 1);
   }
 
   if (query.changed && query.files.length === 0) {
@@ -125,29 +124,45 @@ export async function runValidateCommand(args = Bun.argv.slice(2), cwd = process
     process.exit(1);
   }
 
-  let result = await withDaemonClient(cwd, (client) =>
-    client.post<ValidationResult>(DaemonApiRoute.Validate, {
-      files: query.files,
-      topics: query.topics,
-      validatorIds: query.validatorIds,
-      project: query.project,
-      fixMode: query.fixMode,
-      dryRun: query.dryRun,
-      profile: query.profile,
-    }),
+  const noRuntimeResult = await resolveNoRuntimeFileValidation(query);
+  if (noRuntimeResult) {
+    if (query.format === Format.Json) writeJson(noRuntimeResult);
+    else console.log(renderFindings(noRuntimeResult));
+    process.exit(validationExitCode(noRuntimeResult, query));
+  }
+
+  let result = await withRuntimeClient(
+    cwd,
+    (client) =>
+      client.post<ValidationResult>(RuntimeApiRoute.Validate, {
+        files: query.files,
+        topics: query.topics,
+        validatorIds: query.validatorIds,
+        project: query.project,
+        fixMode: query.fixMode,
+        dryRun: query.dryRun,
+        profile: query.profile,
+        strictProducers: query.strictProducers,
+      }),
   );
   result = query.changed ? resolveValidationCommitGates(result, true) : { ...result, commitGates: [] };
 
-  if (query.format === "json") writeJson(result);
+  if (query.format === Format.Json) writeJson(result);
   else console.log(renderFindings(result));
   process.exit(validationExitCode(result, query));
 }
 
-function validationExitCode(result: ValidationResult, query: Pick<Query, "changed" | "strictWarnings">): number {
+export function validationExitCode(result: ValidationResult, query: Pick<Query, "changed" | "strictWarnings" | "strictProducers">): number {
   if (result.diagnostics.length > 0 || result.fixes?.diagnostics.length) return 1;
-  if (result.findings.some((finding) => finding.severity === "error")) return 1;
+  if (result.findings.some((finding) => finding.severity === DiagnosticSeverity.Error)) return 1;
+  // Outcomes, not findings, drive producer/runtime exit codes (meta is OFF findings).
+  // A validator-runtime error outcome is always nonzero. Producer skips are
+  // advisory (exit 0) unless --strict-producers escalates them.
+  const outcomes = result.validatorOutcomes ?? [];
+  if (outcomes.some((outcome) => outcome.status === ValidatorOutcomeStatus.Error)) return 1;
+  if (query.strictProducers && outcomes.some((outcome) => outcome.status === ValidatorOutcomeStatus.Skipped && outcome.producer)) return 1;
   if (query.changed && (result.commitGates ?? []).some((gate) => gate.status !== "approved")) return 1;
-  if (query.strictWarnings && result.findings.some((finding) => finding.severity === "warning")) return 1;
+  if (query.strictWarnings && result.findings.some((finding) => finding.severity === DiagnosticSeverity.Warning)) return 1;
   return 0;
 }
 
@@ -156,6 +171,31 @@ function assertValidConfig(paths: ReturnType<typeof createPaths>): void {
   if (diagnostics.length === 0) return;
   console.error("OpenCanon config is invalid:\n");
   for (const diagnostic of diagnostics) console.error(`- ${diagnostic}`);
+  process.exit(1);
+}
+
+async function assertProducersReady(cwd: string, required: string[]): Promise<void> {
+  // Authoritative producer status WITHOUT spawning an ephemeral runtime: a fresh
+  // runtime's lazy live producer is cold (`warming`) until first queried, so
+  // sampling it here would fail the gate spuriously. Prefer an already-running
+  // runtime (it owns the warm live producer); otherwise resolve in-process, which
+  // sees a fresh `opencanon analyze --typed` sidecar — the documented CI path.
+  const rootDir = resolveRootDir(cwd);
+  const producers =
+    (await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir)) ?? resolveProducerStatuses(rootDir);
+  const byLanguage = new Map(producers.map((status) => [status.language, status]));
+  const unmet = required
+    .map((language) => byLanguage.get(language) ?? { language, kind: "not-implemented" as const })
+    .filter((status) => status.kind !== ProducerStatusKind.Ready);
+  if (unmet.length === 0) return;
+  console.error("--require-producer: one or more required type producers are not ready:");
+  for (const status of unmet) {
+    const detail = "detail" in status && status.detail ? ` — ${status.detail}` : "";
+    console.error(`- ${status.language}: ${status.kind}${detail}`);
+  }
+  console.error(
+    "Install typescript + a tsconfig (live producer) or run `opencanon analyze --typed` (sidecar) so the producer reports ready.",
+  );
   process.exit(1);
 }
 
@@ -170,6 +210,8 @@ function parseArgs(args: string[]): Query {
   cli.option("--fix [mode]", "Apply structured fixes.");
   cli.option("--profile", "Show validation timing breakdown.");
   cli.option("--strict-warnings", "Exit nonzero when warnings are present.");
+  cli.option("--require-producer <langs>", "Fail unless the named type producers are ready (comma-separated).");
+  cli.option("--strict-producers", "Escalate every validator producer skip to an error (nonzero exit).");
   cli.option("--format <format>", "Output format.");
   cli.option("--topic <topic>", "Run validators for a topic.");
   cli.option("--topics <topics>", "Run validators for topics.");
@@ -189,6 +231,8 @@ function parseArgs(args: string[]): Query {
     "fix",
     "profile",
     "strictWarnings",
+    "requireProducer",
+    "strictProducers",
     "format",
     "topic",
     "topics",
@@ -209,6 +253,8 @@ function parseArgs(args: string[]): Query {
     dryRun: booleanOption(options.dryRun),
     profile: booleanOption(options.profile),
     strictWarnings: booleanOption(options.strictWarnings),
+    requireProducers: unique(stringValues(options.requireProducer).flatMap(splitList)),
+    strictProducers: booleanOption(options.strictProducers),
     help: booleanOption(options.help) || booleanOption(options.h),
   };
   return query;
@@ -221,15 +267,94 @@ function resolveChangedFiles(query: Query): void {
   query.files = unique([...query.files, ...result.files.filter((file) => matchesProjectFileScope(paths, file))]);
 }
 
+async function resolveNoRuntimeFileValidation(query: Query): Promise<ValidationResult | undefined> {
+  if (query.project || query.files.length === 0 || query.fixMode || query.dryRun || query.profile) return undefined;
+
+  const project = await loadProjectContext(rootDir);
+  const selectedValidators = selectValidators(project.validators, {
+    topics: query.topics,
+    validatorIds: query.validatorIds,
+  });
+  const runtime = createRuntime(paths, project.conventions, {
+    areas: project.areas,
+    specs: project.specs,
+    changes: project.changes,
+  });
+  const existingFiles = query.files.filter((file) => existsSync(path.join(rootDir, file)));
+  const runnable = selectedValidators.filter((validator) => validatorCanRunForFiles(validator, existingFiles, runtime));
+  if (runnable.length > 0) return undefined;
+
+  const findings: Finding[] = query.files
+    .filter((file) => !existsSync(path.join(rootDir, file)))
+    .map((file) => ({
+      validatorId: "file-exists",
+      severity: DiagnosticSeverity.Error,
+      file,
+      line: 1,
+      message: "File does not exist.",
+      fix: {
+        safety: "manual",
+        description: "Create the file or remove it from the validation target set.",
+      },
+    }));
+  return {
+    files: query.files,
+    validators: selectedValidators.map((validator) => validator.id),
+    validatorGraphHash: validatorGraphHash(selectedValidators),
+    findingCount: findings.length,
+    diagnostics: [],
+    findings,
+    validatorOutcomes: [],
+    producerSnapshot: {},
+    commitGates: [],
+    governingConventions: resolveGoverningConventionsForFiles({
+      files: query.files,
+      conventions: project.conventions,
+      impactSurfaces: project.impactSurfaces,
+    }),
+  };
+}
+
+function validatorCanRunForFiles(
+  validator: Validator,
+  existingFiles: string[],
+  runtime: Pick<ReturnType<typeof createRuntime>, "definitions">,
+): boolean {
+  const targetFiles = validator.appliesScopes.length === 0
+    ? validatorTargetsExplicitFiles(validator) ? existingFiles : []
+    : existingFiles.filter((file) => validatorMatchesFile(validator, file));
+  if (targetFiles.length > 0) return true;
+  if (validator.domain === ValidatorDomain.Definition) return targetsDefinitionSource(existingFiles, runtime);
+  return false;
+}
+
+function validatorTargetsExplicitFiles(validator: Validator): boolean {
+  return validator.domain === ValidatorDomain.File || validator.domain === ValidatorDomain.ImportEdge;
+}
+
+function targetsDefinitionSource(files: string[], runtime: Pick<ReturnType<typeof createRuntime>, "definitions">): boolean {
+  const definitionSources = new Set(
+    runtime.definitions
+      .all()
+      .map((definition) => definition.source?.split("#", 1)[0])
+      .filter((source): source is string => Boolean(source)),
+  );
+  return files.some((file) => definitionSources.has(file));
+}
+
 async function checkFixtures(validators: Validator[], runtime = createRuntime(paths, []), profiler = createProfiler(false)) {
   const checks: Array<{ validatorId: string; case: "valid" | "invalid" | "fixed"; file: string; passed: boolean; findings: Finding[]; details?: string[] }> = [];
   const findingValidationContext = {
     paths,
-    decisionIds: new Set(runtime.decisions.all.map((decision) => decision.id)),
+    conventionIds: new Set(runtime.conventions.all.map((convention) => convention.id)),
   };
 
   for (const validator of validators) {
-    for (const fixtureCase of ["valid", "invalid"] as const) {
+    // Typed rules whose findings need checked types the ephemeral fixture harness
+    // cannot produce declare `fixtures: "valid-only"`; they require only a `valid.ts`
+    // proving no false positive and are otherwise covered by a unit test.
+    const fixtureCases = validator.fixtures === "valid-only" ? (["valid"] as const) : (["valid", "invalid"] as const);
+    for (const fixtureCase of fixtureCases) {
       const fixturePath = path.join(paths.fixturesDir, validator.id, `${fixtureCase}.ts`);
       if (!existsSync(fixturePath)) {
         checks.push({
@@ -257,7 +382,7 @@ async function checkFixtures(validators: Validator[], runtime = createRuntime(pa
         validatorId: validator.id,
         case: fixtureCase,
         file: files.join(", ") || "<none>",
-        passed: (fixtureCase === "valid" ? findings.length === 0 : findings.length > 0) && details.length === 0,
+        passed: (fixtureCase === FixtureCase.Valid ? findings.length === 0 : findings.length > 0) && details.length === 0,
         findings,
         details,
       });
@@ -338,6 +463,12 @@ function renderFindings(result: ValidationResult): string {
   lines.push(`Files: ${result.files.length > 0 ? result.files.join(", ") : "<project>"}`);
   lines.push(`Validators: ${result.validators.join(", ")}`);
   lines.push(`Findings: ${result.findingCount}`);
+  const skippedOutcomes = (result.validatorOutcomes ?? []).filter((outcome) => outcome.status !== ValidatorOutcomeStatus.Ran);
+  if (skippedOutcomes.length > 0) {
+    const skipped = skippedOutcomes.filter((outcome) => outcome.status === ValidatorOutcomeStatus.Skipped).length;
+    const errored = skippedOutcomes.filter((outcome) => outcome.status === ValidatorOutcomeStatus.Error).length;
+    lines.push(`Outcomes: ${skipped} skipped, ${errored} errored validators`);
+  }
   if (commitGates.length > 0) {
     lines.push(`Commit gates: ${commitGates.filter((gate) => gate.status !== "approved").length} unresolved, ${commitGates.filter((gate) => gate.status === "approved").length} approved`);
   }
@@ -370,14 +501,15 @@ function renderFindings(result: ValidationResult): string {
       lines.push(`  ${gate.title}`);
       lines.push(`  Reason: ${gate.reason}`);
       if (gate.file) lines.push(`  File: ${gate.file}${gate.line ? `:${gate.line}` : ""}`);
-      if (gate.decisionIds && gate.decisionIds.length > 0) lines.push(`  Decisions: ${gate.decisionIds.join(", ")}`);
+      if (gate.conventionIds && gate.conventionIds.length > 0) lines.push(`  Conventions: ${gate.conventionIds.join(", ")}`);
       if (gate.impactSurfaceIds && gate.impactSurfaceIds.length > 0) lines.push(`  Impact surfaces: ${gate.impactSurfaceIds.join(", ")}`);
       for (const evidence of gate.evidence ?? []) {
         const location = evidence.file ? `${evidence.file}${evidence.line ? `:${evidence.line}` : ""}` : "";
         lines.push(`  Evidence: ${[location, evidence.message].filter(Boolean).join(" ")}`);
       }
-      lines.push(`  Record after explicit user approval: bun run opencanon gate approve ${gate.id} --summary "<user explicit answer to the gate question>" --via agent`);
+      lines.push(`  Record after explicit user approval: opencanon gate approve ${gate.id} --summary "<user explicit answer to the gate question>" --via agent`);
     }
+    renderGoverningConventions(lines, result.governingConventions);
     lines.push("");
     lines.push("AGENT ACTION REQUIRED:");
     lines.push("- You are blocked by an OpenCanon commit gate.");
@@ -404,12 +536,23 @@ function renderFindings(result: ValidationResult): string {
           agentProtocol: commitGateAgentProtocol(),
           choices: commitGateApprovalChoices(),
           pending: toPendingCommitGates(commitGates),
+          governingConventions: result.governingConventions,
         },
         null,
         2,
       ),
     );
     lines.push("```");
+    lines.push("");
+  }
+
+  if (skippedOutcomes.length > 0) {
+    lines.push("Skipped/Errored Validators (not findings):");
+    for (const outcome of skippedOutcomes) {
+      const label = outcome.status === ValidatorOutcomeStatus.Error ? "error" : "skipped";
+      const producer = outcome.producer ? ` [${outcome.producer.language} gen ${outcome.producer.generation}]` : "";
+      lines.push(`- [${label}] ${outcome.validatorId}${producer}: ${outcome.reason ?? ""}`);
+    }
     lines.push("");
   }
 
@@ -430,25 +573,25 @@ function renderFindings(result: ValidationResult): string {
       if (finding.fix.command) lines.push(`  Command: ${finding.fix.command}`);
       if (finding.fix.edits && finding.fix.edits.length > 0) lines.push(`  Edits: ${finding.fix.edits.length}`);
     }
-    if (finding.decisionIds && finding.decisionIds.length > 0) lines.push(`  Decisions: ${finding.decisionIds.join(", ")}`);
+    if (finding.conventionIds && finding.conventionIds.length > 0) lines.push(`  Conventions: ${finding.conventionIds.join(", ")}`);
     if (finding.docs && finding.docs.length > 0) lines.push(`  Docs: ${finding.docs.join(", ")}`);
   }
   if (result.findings.length > 0) {
     lines.push("");
     lines.push("Finding Resolution Policy:");
     lines.push("- Any finding must be addressed before the agent completes the task.");
-    lines.push("- Fix code to match the current decision whenever the finding is valid.");
-    lines.push("- If the validator is wrong, fix the validator and add or update valid/invalid fixtures.");
-    lines.push("- If the convention itself changed, ask the user before editing decisions with this template:");
+    lines.push("- Fix code to match the current convention whenever the finding is valid.");
+    lines.push("- If the convention runtime is wrong, fix it and add or update valid/invalid fixtures.");
+    lines.push("- If the convention itself changed, ask the user before editing conventions with this template:");
     lines.push("");
     lines.push("```text");
-    lines.push("Decision update needed");
+    lines.push("Convention update needed");
     lines.push("Finding: <validator-id> at <file:line>");
-    lines.push("Current decision: <decision-id or topic>");
+    lines.push("Current convention: <convention-id or topic>");
     lines.push("Why current canon does not fit: <short reason>");
     lines.push("Proposed new required pattern: <specific rule>");
     lines.push("Code impact: <files/layers affected>");
-    lines.push("Validator impact: <validators/fixtures to update>");
+    lines.push("Convention impact: <conventions/fixtures to update>");
     lines.push("Exception needed: no by default; yes only for external contracts, persisted data, migrations, or integration formats.");
     lines.push("```");
     lines.push("");
@@ -459,7 +602,7 @@ function renderFindings(result: ValidationResult): string {
     lines.push("Audit documented exceptions with:");
     lines.push("");
     lines.push("```bash");
-    lines.push("bun run opencanon context --list-exceptions");
+    lines.push("opencanon context --list-exceptions");
     lines.push("```");
   }
   if (result.profile) {
@@ -467,6 +610,21 @@ function renderFindings(result: ValidationResult): string {
     lines.push(renderProfileMarkdown(result.profile));
   }
   return lines.join("\n");
+}
+
+function renderGoverningConventions(lines: string[], governingConventions: ValidationResult["governingConventions"]): void {
+  if (!governingConventions || governingConventions.conventions.length === 0) return;
+  lines.push("");
+  lines.push("Governing Conventions:");
+  for (const convention of governingConventions.conventions) {
+    lines.push(`- ${convention.id}: ${convention.title}`);
+    lines.push(`  Rule: ${convention.rule}`);
+    if (convention.docs.length > 0) lines.push(`  Docs: ${convention.docs.join(", ")}`);
+    if (convention.impactSurfaceIds.length > 0) lines.push(`  Impact surfaces: ${convention.impactSurfaceIds.join(", ")}`);
+  }
+  if (governingConventions.truncated) {
+    lines.push(`- ${governingConventions.omittedConventions} more relevant convention(s) omitted from commit-gate feedback.`);
+  }
 }
 
 function resolveValidationCommitGates(result: ValidationResult, updatePendingCache: boolean): ValidationResult {
@@ -480,6 +638,7 @@ function resolveValidationCommitGates(result: ValidationResult, updatePendingCac
       context: approvalContext,
       gates: resolved,
       diagnostics: [...approvalContext.diagnostics, ...approvals.diagnostics],
+      governingConventions: result.governingConventions,
     });
   }
   return {
@@ -543,7 +702,7 @@ function compareFixtureTrees(actualRoot: string, expectedRoot: string): string[]
 
 function isFixtureComparableFile(file: string): boolean {
   const relativeFile = file.split(path.sep).join("/");
-  return !relativeFile.includes("/.opencanon/") && /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
+  return !relativeFile.includes("/.opencanon/") && isSupportedSourceFile(file);
 }
 
 function writeJson(value: unknown): void {
@@ -552,14 +711,14 @@ function writeJson(value: unknown): void {
 
 function printHelp(): void {
   console.log(`Usage:
-  bun run opencanon validate --files <paths...>
-  bun run opencanon validate --files <paths...> --topic <topic>
-  bun run opencanon validate --files <paths...> --validator <id>
-  bun run opencanon validate --changed
-  bun run opencanon validate --project
-  bun run opencanon validate --list
-  bun run opencanon validate --check-fixtures
-  bun run opencanon validate --check-fixtures --validator <id>
+  opencanon validate --files <paths...>
+  opencanon validate --files <paths...> --topic <topic>
+  opencanon validate --files <paths...> --validator <id>
+  opencanon validate --changed
+  opencanon validate --project
+  opencanon validate --list
+  opencanon validate --check-fixtures
+  opencanon validate --check-fixtures --validator <id>
 
 Options:
   --format markdown|json   Output format. Default: markdown.
@@ -572,6 +731,8 @@ Options:
                             Apply structured fixes. Default with --fix: safe.
   --dry-run                Show selected fixes without writing files.
   --strict-warnings        Exit nonzero when warnings are present.
+  --require-producer <langs>  Fail unless the named type producers are ready (comma-separated, e.g. typescript).
+  --strict-producers       Escalate every validator producer skip to an error.
   --profile                Show validation timing breakdown.
   --check-fixtures         Validate validator fixtures. Combine with --validator or --topic to filter.
 `);

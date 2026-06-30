@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun \"$(git rev-parse --show-toplevel)/.agents/skills/opencanon/scripts/opencanon.ts\" hook codex",
+            "command": "opencanon hook codex",
             "statusMessage": "Running OpenCanon feedback"
           }
         ]

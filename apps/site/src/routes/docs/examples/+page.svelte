@@ -7,28 +7,27 @@
       id: 'migration',
       label: 'Migration Control',
       summary:
-        'Block new usage of a replaced API while keeping existing migration debt visible.',
+        'Turn an active migration into a convention, fixtures, generated docs, and a changed-file check.',
       steps: [
         {
-          label: 'Inspect',
-          command: 'opencanon bundle inspect examples/bundles/migration-control.bundle.ts',
-          output: 'Bundle: migration-control\nDocs: migrations.md\nFiles: migration-control.ts, old-api-migration fixtures'
+          label: 'Initialize',
+          command: 'opencanon setup --yes --hooks codex',
+          output: 'Project Canon scaffolded. Hooks installed. Doctor checked.'
         },
         {
-          label: 'Plan',
-          command:
-            'opencanon bundle plan examples/bundles/migration-control.bundle.ts --option oldPattern="\\\\boldApi\\\\b" --option replacement=currentApi',
-          output: 'Plan: add migration docs, decision, validator, valid fixture, invalid fixture'
+          label: 'Define',
+          command: 'edit opencanon/conventions/index.ts',
+          output: 'Added migration-control convention with runtime validator and fixtures.'
+        },
+        {
+          label: 'Render',
+          command: 'opencanon canon render conventions',
+          output: 'Rendered docs/opencanon/canon/migrations.md from the convention definition.'
         },
         {
           label: 'Validate',
           command: 'opencanon validate --changed',
           output: 'old-api-migration src/orders.ts:2 Replaced API usage must not be introduced.'
-        },
-        {
-          label: 'Fix',
-          command: 'opencanon validate --changed --fix suggested',
-          output: 'Fix plan: replace oldApi with currentApi in src/orders.ts'
         }
       ],
       treeBefore: `migration-control/before
@@ -40,16 +39,12 @@
 ├─ .gitignore
 ├─ src/
 │  └─ orders.ts
+├─ opencanon/
+│  ├─ conventions/index.ts
+│  └─ fixtures/migration-control/
 ├─ docs/opencanon/
-│  ├─ canon/migrations.md
-│  └─ decisions.json
-├─ .opencanon/
-│  └─ cache/ # gitignored
-└─ .agents/skills/opencanon/
-   ├─ .gitignore
-   ├─ validators/migration-control.ts
-   ├─ fixtures/old-api-migration/
-   └─ runtime/ # gitignored`,
+│  └─ canon/migrations.md
+└─ .opencanon/ # gitignored derived state`,
       finding: {
         rule: 'old-api-migration',
         severity: 'error',
@@ -68,59 +63,57 @@
         },
         docs: {
           before: `# No local migration rule yet`,
-          after: `# Migrations
+          after: `# Migration control
 
-## Migration Control
+Rule: New code must not call replaced APIs.
 
-New code must not call replaced APIs. Existing matches can be recorded in the baseline while they are being retired.`
+Proof: changed-file validation blocks new matches and fixtures pin the behavior.`
         },
-        validator: {
-          before: `// no migration validator installed`,
-          after: `export default migrationReferences({
+        definition: {
+          before: `// no Project Canon definition yet`,
+          after: `defineConvention({
   id: "old-api-migration",
-  in: ["src/**/*.ts"],
-  pattern: "\\\\boldApi\\\\b",
-  replacement: "currentApi",
-  fixSafety: "suggested",
-  existingSeverity: "warning",
-  newSeverity: "error",
-  message: "Replaced API usage must not be introduced.",
+  title: "Old API usage does not spread",
+  rule: "New code must call currentApi instead of oldApi.",
+  applies: { kind: "files", globs: ["src/**/*.ts"] },
+  render: { kind: "generated", docs: "docs/opencanon/canon/migrations.md" },
+  runtime: { kind: "validator", severity: "error", scope: "file", facts: [] }
 });`
         },
         fixture: {
           before: `// no fixture coverage`,
-          after: `valid/src/orders.ts
+          after: `valid.ts
 currentApi();
 
-invalid/src/orders.ts
+invalid.ts
 oldApi();`
         }
       }
     },
     {
       id: 'dry',
-      label: 'Graph DRY',
-      summary: 'Use literals, symbols, and callee facts to flag likely duplicate behavior.',
+      label: 'Graph-backed DRY',
+      summary: 'Use symbols, literals, and callee facts to catch repeated domain behavior before it spreads.',
       steps: [
         {
+          label: 'Explore',
+          command: 'opencanon search loadCompany',
+          output: 'Found function loadCompany and related docs, conventions, and graph facts.'
+        },
+        {
           label: 'Inspect',
-          command: 'opencanon bundle inspect examples/bundles/dry-graph.bundle.ts',
-          output: 'Bundle: dry-graph\nValidators: repeated-domain-literals, similar-functions'
+          command: 'opencanon graph callees loadCompany',
+          output: 'loadCompany calls normalizeCompany.'
         },
         {
-          label: 'Plan',
-          command: 'opencanon bundle plan examples/bundles/dry-graph.bundle.ts',
-          output: 'Plan: add DRY docs, decision, graph-backed validators, similar-function fixtures'
-        },
-        {
-          label: 'Validate',
+          label: 'Prove',
           command: 'opencanon validate --project',
-          output: 'similar-functions at src/company.ts line 5: duplicate-looking function surface.'
+          output: 'similar-functions src/company.ts:9 Similar function surfaces may duplicate behavior.'
         },
         {
-          label: 'Review',
-          command: 'opencanon graph callees loadCompany && opencanon graph callees fetchCompany',
-          output: 'Both functions call normalizeCompany. Agent merges the duplicate surface and extracts CompanyTable.'
+          label: 'Fix',
+          command: 'opencanon changes check area-change-model --task examples-current-canon --all',
+          output: 'Declared checks passed after merging duplicate surface and extracting CompanyTable.'
         }
       ],
       treeBefore: `dry-graph/before
@@ -132,83 +125,59 @@ oldApi();`
 ├─ .gitignore
 ├─ src/
 │  └─ company.ts
+├─ opencanon/
+│  ├─ conventions/index.ts
+│  └─ fixtures/fact-backed-dry/
 ├─ docs/opencanon/
-│  ├─ canon/dry.md
-│  └─ decisions.json
-├─ .opencanon/
-│  └─ cache/ # gitignored
-└─ .agents/skills/opencanon/
-   ├─ .gitignore
-   ├─ validators/dry-graph.ts
-   ├─ fixtures/similar-functions/
-   └─ runtime/ # gitignored`,
+│  └─ canon/dry.md
+└─ .opencanon/ # gitignored derived state`,
       finding: {
         rule: 'similar-functions',
         severity: 'warning',
-        file: 'src/company.ts:5',
+        file: 'src/company.ts:9',
         message: 'Similar function surfaces may duplicate behavior.',
         fix: 'manual review: compare callers/callees, then merge or rename'
       },
       artifacts: {
         code: {
-          before: `function normalizeCompany(id: string) {
-  return id.trim().toLowerCase();
-}
-
-export function loadCompany(id: string) {
-  const normalized = normalizeCompany(id);
-  return { table: "companies", normalized };
+          before: `export function loadCompany(id: string) {
+  return { table: "companies", normalized: normalizeCompany(id) };
 }
 
 export function fetchCompany(id: string) {
-  const normalized = normalizeCompany(id);
-  return { table: "companies", normalized };
+  return { table: "companies", normalized: normalizeCompany(id) };
 }`,
           after: `const CompanyTable = "companies";
 
-function normalizeCompany(id: string) {
-  return id.trim().toLowerCase();
-}
-
 export function loadCompany(id: string) {
-  const normalized = normalizeCompany(id);
-  return { table: CompanyTable, normalized };
+  return { table: CompanyTable, normalized: normalizeCompany(id) };
 }`
         },
         docs: {
-          before: `# No DRY convention yet`,
-          after: `# Code Quality
+          before: `# No local DRY rule yet`,
+          after: `# Graph-backed DRY
 
-## Graph Backed DRY
-
-Repeated domain literals and similar function surfaces should be reviewed before adding another copy.`
+Rule: Repeated domain literals and similar function surfaces should be reviewed before adding another copy.`
         },
-        validator: {
-          before: `// no graph-backed DRY validator installed`,
-          after: `export default [
-  repeatedLiterals({
-    id: "repeated-domain-literals",
-    minOccurrences: 2,
-    message: "Repeated domain literals should be extracted.",
-  }),
-  similarFunctionNames({
-    id: "similar-functions",
-    requireSharedCallees: true,
-    message: "Similar function surfaces may duplicate behavior.",
-  }),
-];`
+        definition: {
+          before: `// no graph-backed convention yet`,
+          after: `defineConvention({
+  id: "fact-backed-dry",
+  title: "Graph facts guide DRY cleanup",
+  rule: "Repeated literals and similar functions should be reviewed before duplication spreads.",
+  applies: { kind: "files", globs: ["src/**/*.ts"] },
+  runtime: { kind: "validator", severity: "warning", scope: "project", facts: ["graph"] }
+});`
         },
         fixture: {
           before: `// no fixture coverage`,
-          after: `valid/src/company.ts
-function normalizeCompany() { return true; }
-export function loadCompany() { return normalizeCompany(); }
-export function renderAccount() { return true; }
+          after: `valid.ts
+loadCompany();
+renderAccount();
 
-invalid/src/company.ts
-function normalizeCompany() { return true; }
-export function loadCompany() { return normalizeCompany(); }
-export function fetchCompany() { return normalizeCompany(); }`
+invalid.ts
+loadCompany();
+fetchCompany();`
         }
       }
     }
@@ -217,7 +186,7 @@ export function fetchCompany() { return normalizeCompany(); }`
   const artifactTabs = [
     { id: 'code', label: 'Source' },
     { id: 'docs', label: 'Docs' },
-    { id: 'validator', label: 'Validator' },
+    { id: 'definition', label: 'Definition' },
     { id: 'fixture', label: 'Fixtures' }
   ];
 
@@ -241,8 +210,8 @@ export function fetchCompany() { return normalizeCompany(); }`
 
 <h1>Project Examples</h1>
 <p class="lead">
-  Small before and after projects that show how bundles install docs, validators, fixtures,
-  and agent-facing checks.
+  Small before and after projects showing how Project Canon definitions, generated docs,
+  fixtures, Knowledge, and Proof work together.
 </p>
 
 <div class="scenario-tabs" role="tablist" aria-label="Example scenarios">
@@ -303,7 +272,7 @@ export function fetchCompany() { return normalizeCompany(); }`
 <section class="example-section">
   <div class="section-heading">
     <h2>Project Shape</h2>
-    <p>What the project looks like before and after installing the bundle.</p>
+    <p>What the project looks like before and after OpenCanon setup.</p>
   </div>
   <BeforeAfter before={scenario.treeBefore} after={scenario.treeAfter} language="tree" />
 </section>
@@ -311,7 +280,7 @@ export function fetchCompany() { return normalizeCompany(); }`
 <section class="example-section">
   <div class="section-heading">
     <h2>Artifacts</h2>
-    <p>Switch between the source, docs, validator, and fixture files created by the bundle.</p>
+    <p>Switch between source, generated docs, Project Canon source, and fixtures.</p>
   </div>
 
   <div class="artifact-tabs" role="tablist" aria-label="Artifact type">
@@ -385,73 +354,37 @@ export function fetchCompany() { return normalizeCompany(); }`
     margin: 0;
   }
 
-  .section-heading :global(h2) {
-    border-top: 0;
-    padding-top: 0;
-    font-size: 1.05rem;
-  }
-
-  .section-heading p {
-    color: var(--c-ink-soft);
-  }
-
   .command-card {
-    border: 1px solid var(--c-rule);
-    border-radius: var(--radius-2);
-    background: var(--c-surface);
-    padding: var(--space-3);
-  }
-
-  .eyebrow {
-    margin: var(--space-3) 0 var(--space-2);
-    color: var(--c-ink-soft);
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .eyebrow:first-child {
-    margin-top: 0;
-  }
-
-  .eyebrow + :global(.code-block) {
-    margin-bottom: var(--space-3);
-  }
-
-  .command-card :global(.code-block) {
-    margin-top: 0;
-    margin-bottom: 0;
+    display: grid;
+    gap: var(--space-3);
   }
 
   .finding {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-3);
     margin: 0;
   }
 
   .finding div {
     border: 1px solid var(--c-rule);
     border-radius: var(--radius-1);
-    padding: 0.8rem;
+    padding: var(--space-3);
     background: var(--c-surface);
   }
 
   .finding dt {
-    color: var(--c-ink-soft);
-    font-size: 0.78rem;
+    font: 700 0.74rem/1 var(--font-sans);
+    color: var(--c-ink-muted);
+    text-transform: uppercase;
   }
 
   .finding dd {
-    margin: 0.2rem 0 0;
-    overflow-wrap: anywhere;
+    margin: var(--space-2) 0 0;
+    color: var(--c-ink);
   }
 
   @media (max-width: 760px) {
-    .command-card {
-      padding: var(--space-3);
-    }
-
     .finding {
       grid-template-columns: 1fr;
     }

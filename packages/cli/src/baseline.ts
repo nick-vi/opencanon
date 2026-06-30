@@ -5,6 +5,7 @@ import {
   createPaths,
   createProfiler,
   fail,
+  Format,
   loadBaseline,
   relative,
   resolveRootDir,
@@ -16,7 +17,7 @@ import {
 import { booleanOption, formatOption, rejectUnknownOptions } from "./options.ts";
 import { loadProjectContext } from "./project.ts";
 
-export async function runBaselineCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runBaselineCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const [command = "check", ...rest] = args;
   if (command === "check") {
     runBaselineCheckCommand(rest, cwd);
@@ -47,7 +48,7 @@ function runBaselineCheckCommand(args: string[], cwd: string): void {
   const rootDir = resolveRootDir(cwd);
   const paths = createPaths(rootDir);
   const baseline = loadBaseline(paths);
-  if (formatOption(options.format) === "json") console.log(JSON.stringify(baseline, null, 2));
+  if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(baseline, null, 2));
   else console.log(`# OpenCanon Baseline\n\nPath: ${relative(rootDir, paths.baselinePath)}\nFindings: ${baseline.findings.length}`);
 }
 
@@ -67,11 +68,11 @@ async function runBaselineUpdateCommand(args: string[], cwd: string): Promise<vo
   const paths = createPaths(rootDir);
   const configDiagnostics = validateConfig(paths);
   if (configDiagnostics.length > 0) fail(configDiagnostics.join("\n"));
-  const { decisions, validators } = await loadProjectContext(cwd);
+  const { conventions, validators } = await loadProjectContext(cwd);
   const result = await runValidation({
     rootDir,
     paths,
-    decisions,
+    conventions,
     validators,
     project: true,
     profiler: createProfiler(false),
@@ -90,14 +91,14 @@ async function runBaselineUpdateCommand(args: string[], cwd: string): Promise<vo
     mkdirSync(path.dirname(paths.baselinePath), { recursive: true });
     writeAtomicJsonFileSync(paths.baselinePath, baseline);
   }
-  if (formatOption(options.format) === "json") console.log(JSON.stringify(baseline, null, 2));
+  if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(baseline, null, 2));
   else console.log(`# OpenCanon Baseline\n\n${booleanOption(options.dryRun) ? "Dry run: yes\n" : ""}Findings: ${baseline.findings.length}`);
 }
 
 function printBaselineHelp(): void {
   console.log(`Usage:
-  bun run opencanon baseline check
-  bun run opencanon baseline update
+  opencanon baseline check
+  opencanon baseline update
 
 Commands:
   check   Show baseline status.

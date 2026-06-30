@@ -1,137 +1,86 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { currentEngineTarget, engineRuntimePathForTarget } from "@opencanon/daemon";
 
-const script = path.join(process.cwd(), ".agents/skills/opencanon/scripts/opencanon.ts");
+const script = path.join(process.cwd(), "packages/cli/src/index.ts");
 
-test("setup scaffolds missing files, installs requested hooks, validates, and writes setup state", () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-setup-"));
+test("setup requires explicit consent before writing", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-setup-consent-"));
   try {
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
-    writeFileSync(path.join(rootDir, "sample.ts"), "export const sample = true;\n");
 
-    const result = spawnSync("bun", [script, "setup", "--yes", "--hooks", "opencode", "--no-daemon", "--format", "json"], {
+    const result = spawnSync(process.execPath, [script, "setup", "--no-runtime"], {
       cwd: rootDir,
       encoding: "utf8",
+    });
+
+    assert.notEqual(result.status, 0);
+    assert(`${result.stderr}\n${result.stdout}`.includes("opencanon setup requires explicit consent"));
+    assert.equal(existsSync(path.join(rootDir, "AGENTS.md")), false);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("setup dry-run reports init actions without writing files", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-setup-dry-run-"));
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+
+    const result = spawnSync(process.execPath, [script, "setup", "--dry-run", "--no-runtime", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout) as { dryRun: boolean; packet?: unknown; init: { steps: Array<{ id: string; status: string }> } };
+    assert.equal(payload.dryRun, true);
+    assert.equal(payload.packet, undefined);
+    assert.equal(payload.init.steps.find((step) => step.id === "scaffold")?.status, "pass");
+    assert.equal(existsSync(path.join(rootDir, "AGENTS.md")), false);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("setup initializes a repo and emits an agent setup packet", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-setup-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(path.join(rootDir, "src/app.ts"), "export const app = true;\n");
+
+    const result = spawnSync(process.execPath, [script, "setup", "--yes", "--no-runtime", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      timeout: 30_000,
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const payload = JSON.parse(result.stdout) as {
       status: string;
-      steps: Array<{ id: string; status: string }>;
-      init?: Record<string, unknown>;
+      packet: {
+        schema: string;
+        discovery: { fileCount: number; languageCounts: Record<string, number>; sampleFiles: string[] };
+        existingCanon: { areas: number; specs: number; changes: number; conventions: number };
+        agentWorkflow: string[];
+        suggestedCommands: string[];
+      };
     };
-    assert.equal(payload.status, "warn");
-    assert.equal(payload.steps.find((step) => step.id === "scaffold")?.status, "pass");
-    assert.equal(payload.steps.find((step) => step.id === "feedback-hooks")?.status, "pass");
-    assert.equal(payload.steps.find((step) => step.id === "context")?.status, "pass");
-    assert.equal(payload.steps.find((step) => step.id === "project-validation")?.status, "pass");
-    assert.equal(payload.steps.find((step) => step.id === "daemon")?.status, "skip");
-
-    assert(existsSync(path.join(rootDir, ".agents/skills/opencanon/runtime/cli.js")));
-    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\ngenerated/\n");
-    assert(existsSync(path.join(rootDir, ".opencode/plugins/opencanon.ts")));
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/setup.json"));
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/*.sqlite"));
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/daemon.log"));
-    assert(!readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
-    const setupState = JSON.parse(readFileSync(path.join(rootDir, ".opencanon/setup.json"), "utf8")) as { status: string; steps: unknown[] };
-    assert.equal(setupState.status, "warn");
-    assert(setupState.steps.length >= payload.steps.length);
-
-    writeFileSync(path.join(rootDir, ".gitignore"), readFileSync(path.join(rootDir, ".gitignore"), "utf8").replace(".opencanon/cache/\n", ""));
-
-    const rerun = spawnSync("bun", [script, "setup", "--yes", "--no-daemon", "--format", "json"], {
-      cwd: rootDir,
-      encoding: "utf8",
-    });
-    assert.equal(rerun.status, 0, rerun.stderr || rerun.stdout);
-    const rerunPayload = JSON.parse(rerun.stdout) as { steps: Array<{ id: string; status: string }> };
-    assert.equal(rerunPayload.steps.find((step) => step.id === "scaffold")?.status, "skip");
-    assert.equal(rerunPayload.steps.find((step) => step.id === "cache-ignore")?.status, "pass");
-    assert.equal(rerunPayload.steps.find((step) => step.id === "skill-runtime-ignore")?.status, "pass");
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
-    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\ngenerated/\n");
-  } finally {
-    rmSync(rootDir, { recursive: true, force: true });
-  }
-});
-
-test("setup dry-run reports planned scaffold without writing files", () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-setup-dry-run-"));
-  try {
-    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
-
-    const result = spawnSync("bun", [script, "setup", "--yes", "--dry-run", "--no-daemon", "--format", "json"], {
-      cwd: rootDir,
-      encoding: "utf8",
-    });
-
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const payload = JSON.parse(result.stdout) as { status: string; steps: Array<{ id: string; status: string }> };
-    assert.equal(payload.status, "pass");
-    assert.equal(payload.steps.find((step) => step.id === "scaffold")?.status, "pass");
-    assert.equal(payload.steps.find((step) => step.id === "validation")?.status, "skip");
-    assert.equal(payload.steps.find((step) => step.id === "setup-state")?.status, "skip");
-    assert.equal(existsSync(path.join(rootDir, ".agents/skills/opencanon/SKILL.md")), false);
-    assert.equal(existsSync(path.join(rootDir, ".opencanon/setup.json")), false);
-  } finally {
-    rmSync(rootDir, { recursive: true, force: true });
-  }
-});
-
-test("setup can install engine runtime from a release manifest", () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-setup-manifest-"));
-  const target = currentEngineTarget();
-  const manifestPath = path.join(rootDir, "manifest.json");
-  const engineBindingSuffixes: Record<string, string> = {
-    "darwin-arm64": "darwin-arm64",
-    "darwin-x64": "darwin-x64",
-    "linux-arm64": "linux-arm64-gnu",
-    "linux-x64": "linux-x64-gnu",
-    "win32-x64": "win32-x64-msvc",
-  };
-
-  try {
-    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
-    writeFileSync(path.join(rootDir, "sample.ts"), "export const sample = true;\n");
-
-    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
-    const stage = path.join(rootDir, "stage");
-    mkdirSync(path.join(stage, "engine", target), { recursive: true });
-    writeFileSync(path.join(stage, "cli.js"), "export const runtime = true;\n");
-    writeFileSync(path.join(stage, "validators.js"), "export const validators = true;\n");
-    writeFileSync(path.join(stage, "engine", target, `opencanon.${engineBindingSuffixes[target]}.node`), "manifest-engine-runtime");
-    const bundlePath = path.join(rootDir, "bundle.tar.gz");
-    const tarResult = spawnSync("tar", ["-czf", bundlePath, "-C", stage, "."], { encoding: "utf8" });
-    assert.equal(tarResult.status, 0, tarResult.stderr);
-    const sha256 = createHash("sha256").update(readFileSync(bundlePath)).digest("hex");
-
-    writeFileSync(
-      manifestPath,
-      JSON.stringify({
-        version: 1,
-        skillVersion: "0.1.0",
-        requiredBun: "1.3.13",
-        bundles: { [target]: { url: "./bundle.tar.gz", sha256 } },
-      }),
-    );
-
-    const result = spawnSync("bun", [script, "setup", "--yes", "--manifest", manifestPath, "--no-daemon", "--format", "json"], {
-      cwd: rootDir,
-      encoding: "utf8",
-    });
-
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const payload = JSON.parse(result.stdout) as { steps: Array<{ id: string; status: string }> };
-    assert.equal(payload.steps.find((step) => step.id === "runtime-update")?.status, "pass");
-    assert.equal(readFileSync(engineRuntimePathForTarget(path.join(rootDir, ".agents/skills/opencanon/runtime"), target)).toString(), "manifest-engine-runtime");
+    assert.notEqual(payload.status, "fail");
+    assert.equal(payload.packet.schema, "opencanon.setup-packet.v1");
+    assert(payload.packet.discovery.fileCount >= 2);
+    assert.equal(payload.packet.discovery.languageCounts.ts, 1);
+    assert(payload.packet.discovery.sampleFiles.includes("src/app.ts"));
+    assert.deepEqual(payload.packet.existingCanon, { areas: 0, specs: 0, changes: 0, conventions: 0, validators: 0, impactSurfaces: 0 });
+    assert(payload.packet.agentWorkflow.some((item) => item.includes("Ask the user")));
+    assert(payload.packet.suggestedCommands.includes("opencanon brief --format json"));
+    assert(readFileSync(path.join(rootDir, "AGENTS.md"), "utf8").includes("opencanon brief --format json"));
+    assert(readFileSync(path.join(rootDir, "AGENTS.md"), "utf8").includes("Treat human attention as scarce."));
+    assert(readFileSync(path.join(rootDir, ".agents/skills/opencanon/SKILL.md"), "utf8").includes("opencanon setup --yes --format json"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

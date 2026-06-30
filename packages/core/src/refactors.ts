@@ -1,13 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { listFiles } from "./discovery.ts";
+import { importRewritableExtensions } from "./language-registry.ts";
 import { resolveInsideRoot } from "./paths.ts";
 import type { CodeReference, CodeSymbol } from "./contracts.ts";
 import type { TextEdit } from "./validator-types.ts";
 
 const TextEncoding = "utf8";
-const SourceExtensions = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".svelte"] as const;
-const PackageRenameExtensions = [...SourceExtensions, ".json", ".jsonc", ".lock"] as const;
+// Files whose imports the refactor engine rewrites — sourced from the registry's
+// TypeScript-resolution languages (TS/JS family + Svelte), plus config files that
+// move with a package rename but carry no rewritable imports.
+const SourceExtensions = importRewritableExtensions;
+const PackageRenameExtensions = [...SourceExtensions, ".json", ".jsonc", ".lock"];
 
 export type RefactorPlanKind = "rename-symbol" | "update-imports" | "move-file" | "move-dir" | "rename-package" | "split-module";
 
@@ -295,7 +299,7 @@ function uniqueEdits(edits: TextEdit[]): TextEdit[] {
 function replaceStringLiteralEdits(rootDir: string, file: string, from: string, to: string): TextEdit[] {
   const text = readProjectText(rootDir, file);
   if (text === null) return [];
-  return matchEdits(file, text, new RegExp(`(["'])${escapeRegExp(from)}\\1`, "g"), (match) => `${match[1]}${to}${match[1]}`);
+  return matchEdits(file, text, new RegExp(`(["'])${RegExp.escape(from)}\\1`, "g"), (match) => `${match[1]}${to}${match[1]}`);
 }
 
 function updateImportEdits(rootDir: string, file: string, from: string, to: string): TextEdit[] {
@@ -413,15 +417,11 @@ function normalizeProjectPath(file: string): string {
 }
 
 function identifierPattern(name: string): RegExp {
-  return new RegExp(`(?<![A-Za-z0-9_$])${escapeRegExp(name)}(?![A-Za-z0-9_$])`, "g");
+  return new RegExp(`(?<![A-Za-z0-9_$])${RegExp.escape(name)}(?![A-Za-z0-9_$])`, "g");
 }
 
 function identifierPatternSource(name: string): boolean {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function offsetToPosition(text: string, offset: number): { line: number; column: number } {

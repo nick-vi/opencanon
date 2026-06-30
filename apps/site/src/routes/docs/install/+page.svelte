@@ -1,84 +1,86 @@
 <script>
   import CodeBlock from '$lib/components/CodeBlock.svelte';
   import {
-    DAEMON_COMMAND,
-    INIT_COMMAND,
+    INSTALL_COMMAND,
     RELEASE_MANIFEST_URL,
-    SKILL_COMMAND,
+    SERVICE_COMMAND,
+    SETUP_COMMAND,
     SITE,
     SKILLS_INSTALL_COMMAND
   } from '$lib/site.config.js';
 
-  const releaseProducerCommand = `bun run release:publish -- 0.3.14`;
+  const releaseProducerCommand = `npm run release:publish -- 0.4.0`;
 </script>
 
 <svelte:head><title>Install | OpenCanon</title></svelte:head>
 
 <h1>Install</h1>
 <p class="lead">
-  Add the OpenCanon skill, then let setup install the engine runtime for the
-  current machine.
+  Install OpenCanon once, then set up each repository with Project Canon that is
+  agent-ready, human-readable, and runtime-enforced.
 </p>
 
 <h2>Prerequisites</h2>
 <ul>
   <li>
-    Bun <code>{SITE.bunVersion}</code> to execute the bundled CLI and daemon.
+    Node <code>&gt;=24.12.0</code> for the installed CLI and local service.
   </li>
   <li>A Git repository (Git-backed discovery is the default).</li>
   <li>
-    An agent host with a skills directory: Claude Code, OpenCode, or Codex.
-    Standalone CLI use without an agent host is also supported.
+    Optional agent host: Claude Code, OpenCode, Codex, or any MCP-capable tool.
   </li>
-  <li>No npm install is needed after cloning the skill.</li>
+  <li>No repository dependency install is required just to use OpenCanon.</li>
 </ul>
 
-<h2>Add the skill</h2>
+<h2>Install the runtime</h2>
 <p>
-  Use the skills.sh CLI to install the OpenCanon skill into the current
-  repository.
+  The installer fetches the signed runtime release for the current platform and
+  makes the <code>opencanon</code> command available locally.
 </p>
-<CodeBlock title="skills.sh" language="shell" code={SKILLS_INSTALL_COMMAND} />
+<CodeBlock title="install" language="shell" code={INSTALL_COMMAND} />
 <p>
-  The installed skill bootstraps the CLI, validators, daemon, UI assets, and
-  engine runtime from the signed release assets during setup. Bun is the
-  runtime, not a package installation step.
+  Agent skills and entry files are guidance only. The installed runtime owns the
+  CLI, local service, updater, project runtimes, engine, and local API.
 </p>
 
-<h2>Install engine runtime</h2>
+<h2>Optional agent skill</h2>
 <p>
-  Release installs use a manifest. Setup detects the current platform, selects
-  the matching engine asset, verifies SHA-256, and writes the binary into the
-  skill runtime.
+  Agent hosts that support skills can install the OpenCanon skill for progressive
+  workflow instructions. The skill points back to the live CLI instead of
+  shipping its own implementation.
 </p>
-<CodeBlock
-  title="setup with release manifest"
-  language="shell"
-  code={`${SKILL_COMMAND} setup --yes --hooks codex --manifest ${RELEASE_MANIFEST_URL}`}
-/>
+<CodeBlock title="agent skill" language="shell" code={SKILLS_INSTALL_COMMAND} />
 
 <h2>Initialize a repository</h2>
 <p>
-  Run setup in the repository root. It creates starter
-  docs, decisions, validators, fixtures, cache ignores, and optional hooks.
+  Run setup in the repository root. It creates source definitions, generated
+  docs, fixtures, cache ignores, optional hooks, and an agent setup packet.
 </p>
 <p>
-  Commit the docs, decisions, validators, fixtures, hook config, skill wrapper
-  files, the skill-local <code>.gitignore</code>, <code>skills-lock.json</code>,
-  and package script. Runtime assets under
-  <code>.agents/skills/opencanon/runtime/</code> are ignored by
-  <code>.agents/skills/opencanon/.gitignore</code>. Generated state under
-  <code>.opencanon/</code> is ignored by the root <code>.gitignore</code>.
+  Commit generated docs, Project Canon definitions under <code>opencanon/</code>,
+  fixtures, hook config, managed agent guidance, and package script. Generated
+  state under <code>.opencanon/</code> stays ignored.
 </p>
-<CodeBlock title="initialize" language="shell" code={INIT_COMMAND} />
+<CodeBlock title="setup" language="shell" code={SETUP_COMMAND} />
 
-<h2>Start the daemon</h2>
+<h2>Start the service</h2>
 <p>
-  The daemon runs per repository. Repo state lives under
-  <code>.opencanon/</code> and is ignored by Git; the supervisor registry lives at
-  <code>~/.opencanon/daemons.json</code>.
+  The global service starts project runtimes lazily. Repo state lives under
+  <code>.opencanon/</code> and is ignored by Git; the service registry lives
+  under the OpenCanon home directory.
 </p>
-<CodeBlock title="daemon" language="shell" code={DAEMON_COMMAND} />
+<CodeBlock title="service" language="shell" code={SERVICE_COMMAND} />
+
+<h2>Runtime manifest</h2>
+<p>
+  Release installs use a manifest. Setup detects the current platform, selects
+  the matching asset, verifies SHA-256, and writes runtime files atomically.
+</p>
+<CodeBlock
+  title="manifest"
+  language="shell"
+  code={`opencanon update check --manifest ${RELEASE_MANIFEST_URL}`}
+/>
 
 <h2>Release producer flow</h2>
 <p>
@@ -92,5 +94,5 @@
 <h2>Next</h2>
 <p>
   Continue with the <a href="/docs/quickstart">Quickstart</a> to load context,
-  run validators, and produce findings.
+  run Proof, and produce findings.
 </p>

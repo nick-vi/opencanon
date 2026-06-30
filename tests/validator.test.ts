@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
+
+function createHashHex(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
 import {
   applyDoctorFixes,
   applyFindingFixes,
@@ -11,25 +16,38 @@ import {
   createPaths,
   createCommitApprovalContext,
   createCommitApprovalRecord,
+  defineArea,
   createRuntime,
-  defineValidator,
-  createValidatorFactory,
+  createConventionFactory,
+  conventionToValidator,
+  defineConvention,
+  pickAuthoritativeStatus,
   createValidationContext,
   discoverProjectFiles,
+  DoctorStatus,
   flushValidationContextCache,
   FixModeValue,
+  generateProjectTypes,
   getChangedFiles,
   loadCommitApprovalsWithDiagnostics,
+  ProjectTypesFilePath,
+  OpenCanonSkillFilePath,
+  renderOpenCanonAgentEntryBlock,
   toPendingCommitGates,
   resolveCommitGates,
   resolveValidators,
   runValidation,
+  ValidatorOutcomeStatus,
+  LiteralContext,
+  LiteralValueKind,
   savePendingCommitGates,
   upsertCommitApproval,
   validateConfig,
   validateContext,
   validateValidatorDefinitions,
 } from "@opencanon/core";
+import type { Convention } from "@opencanon/core";
+import type { ValidatorDefinition } from "../packages/core/src/validator-types.ts";
 import {
   externalCommand,
   externalDiagnostics,
@@ -45,8 +63,45 @@ import {
   requiredFunctionParam,
   restrictedSymbols,
   similarFunctionNames,
-  tauriCommandParity,
 } from "@opencanon/validators";
+
+function resolveTestValidators(input: unknown) {
+  const normalize = (value: unknown) => (isConvention(value) ? conventionToValidator(value) : value);
+  return resolveValidators(Array.isArray(input) ? input.map(normalize).filter(Boolean) : normalize(input));
+}
+
+function isConvention(value: unknown): value is Convention {
+  return Boolean(value && typeof value === "object" && "applies" in value && "render" in value && "runtime" in value);
+}
+
+function testValidatorDefinition(definition: ValidatorDefinition): ValidatorDefinition {
+  return definition;
+}
+
+function isolatedCliEnv(rootDir: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === "string") env[key] = value;
+  }
+  env.OPENCANON_SERVICE_REGISTRY_PATH = path.join(rootDir, "global", "service.json");
+  return env;
+}
+
+function stopIsolatedCliRuntime(rootDir: string): void {
+  const script = path.join(process.cwd(), "packages/cli/src/index.ts");
+  const env = isolatedCliEnv(rootDir);
+  for (const args of [
+    ["project", "stop", "--format", "json"],
+    ["service", "stop", "--format", "json"],
+  ]) {
+    spawnSync(process.execPath, [script, ...args], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env,
+      timeout: 15_000,
+    });
+  }
+}
 
 test("validator definitions reject unknown keys generically", () => {
   const diagnostics = validateValidatorDefinitions({
@@ -87,111 +142,105 @@ test("validator definitions require explicit leaf scope and known facts", () => 
         return [];
       },
     }),
-    ["Validator bad-facts facts must be known fact kinds: imports, exports, symbols, calls, literals, comments, references, annotations, diagnostics, duplicates."],
+    ["Validator bad-facts facts must be known fact kinds: imports, exports, symbols, declarations, calls, literals, comments, references, annotations, diagnostics, duplicates."],
   );
 });
 
-test("validator definitions carry docs references through factory metadata", () => {
-  const customFactory = createValidatorFactory<{ in: string[] }>((options) => ({
+test("validator definitions derive generated docs references through factory metadata", () => {
+  const customFactory = createConventionFactory<{ in: string[] }>((options) => testValidatorDefinition({
     id: options.id,
     topics: options.topics,
     applies: options.in,
     severity: options.severity,
     scope: "file",
-    decisionIds: options.decisionIds,
+    conventionIds: options.related,
     validate() {
       return [];
     },
   }));
 
-  const resolved = resolveValidators(
+  const resolved = resolveTestValidators(
     customFactory({
       id: "documented-rule",
       topics: ["sample"],
       severity: "warning",
-      decisionIds: ["sample-decision"],
-      docs: ["docs/opencanon/decisions.json#sample-decision"],
+      related: ["sample-decision"],
+      docs: ["docs/opencanon/canon/sample.md#sample-decision"],
       in: ["src/**/*.ts"],
     }),
   );
 
   assert.deepEqual(resolved.diagnostics, []);
-  assert.deepEqual(resolved.validators[0].docs, ["docs/opencanon/decisions.json#sample-decision"]);
+  assert.deepEqual(resolved.validators[0].docs, ["docs/opencanon/canon/documented-rule.md#documented-rule"]);
 });
 
-test("context validation checks validator decision and docs references", () => {
+test("context validation checks validator convention and docs references", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-context-links-"));
   try {
     mkdirSync(path.join(rootDir, "docs/opencanon/canon"), { recursive: true });
-    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "[]\n");
     writeFileSync(path.join(rootDir, "docs/opencanon/canon/architecture.md"), "# Architecture\n\n## Existing Heading\n\nCurrent docs.\n");
     const paths = createPaths(rootDir);
     const diagnostics = validateContext({
       paths,
-      decisions: [
-        {
-          id: "current-decision",
-          date: "2026-04-28",
-          status: "current",
-          title: "Current decision",
+      conventions: [
+        defineConvention({
+          id: "current-convention",
+          title: "Current convention",
           topics: ["sample"],
-          applies: ["src/**/*.ts"],
-          summary: "Sample decision.",
-          validatorIds: ["missing-validator"],
-          docs: ["docs/opencanon/canon/architecture.md#missing-heading"],
-        },
+          rule: "Sample convention.",
+          applies: { kind: "files", globs: ["src/**/*.ts"] },
+          render: { kind: "generated", docs: "docs/opencanon/canon/architecture.md#missing-heading", style: "reference" },
+          runtime: { kind: "none" },
+        }),
       ],
       validators: [
         {
           id: "sample-rule",
-          decisionIds: ["missing-decision"],
-          docs: ["docs/opencanon/decisions.json#missing-decision", "docs/opencanon/canon/architecture.md#missing-heading"],
+          conventionIds: ["missing-convention"],
+          docs: ["docs/opencanon/canon/architecture.md#missing-heading"],
         },
       ],
     });
 
-    assert(diagnostics.includes("Decision current-decision references missing validator: missing-validator"));
-    assert(diagnostics.includes("Decision current-decision docs reference points at missing heading: docs/opencanon/canon/architecture.md#missing-heading"));
-    assert(diagnostics.includes("Validator sample-rule references missing decision: missing-decision"));
-    assert(diagnostics.includes("Validator sample-rule docs reference points at missing decision: docs/opencanon/decisions.json#missing-decision"));
+    assert(diagnostics.includes("Convention current-convention generated docs path must not include #<heading-slug>: docs/opencanon/canon/architecture.md#missing-heading"));
+    assert(diagnostics.includes("Validator sample-rule references missing convention: missing-convention"));
     assert(diagnostics.includes("Validator sample-rule docs reference points at missing heading: docs/opencanon/canon/architecture.md#missing-heading"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
 
-test("context validation enforces decision and validator back-references", () => {
+test("context validation enforces convention and validator back-references", () => {
   const diagnostics = validateContext({
-    decisions: [
-      {
-        id: "decision-a",
-        date: "2026-04-28",
-        status: "current" as const,
-        title: "Decision A",
+    conventions: [
+      defineConvention({
+        id: "convention-a",
+        title: "Convention A",
         topics: ["sample"],
-        applies: ["src/**/*.ts"],
-        summary: "Decision A.",
-        validatorIds: ["validator-a"],
-      },
-      {
-        id: "decision-b",
-        date: "2026-04-28",
-        status: "current" as const,
-        title: "Decision B",
+        related: ["validator-a"],
+        rule: "Convention A.",
+        applies: { kind: "files", globs: ["src/**/*.ts"] },
+        render: { kind: "none" },
+        runtime: { kind: "none" },
+      }),
+      defineConvention({
+        id: "convention-b",
+        title: "Convention B",
         topics: ["sample"],
-        applies: ["src/**/*.ts"],
-        summary: "Decision B.",
-        validatorIds: [],
-      },
+        related: [],
+        rule: "Convention B.",
+        applies: { kind: "files", globs: ["src/**/*.ts"] },
+        render: { kind: "none" },
+        runtime: { kind: "none" },
+      }),
     ],
     validators: [
-      { id: "validator-a", decisionIds: [], docs: [] },
-      { id: "validator-b", decisionIds: ["decision-b"], docs: [] },
+      { id: "validator-a", conventionIds: [], docs: [] },
+      { id: "validator-b", conventionIds: ["convention-b"], docs: [] },
     ],
   });
 
-  assert(diagnostics.includes("Decision decision-a references validator validator-a, but validator validator-a does not reference decision decision-a."));
-  assert(diagnostics.includes("Validator validator-b references decision decision-b, but decision decision-b does not reference validator validator-b."));
+  assert(diagnostics.includes("Validator validator-b references convention convention-b, but convention convention-b does not reference validator validator-b."));
 });
 
 test("runtime validation reports broken finding docs references", async () => {
@@ -204,44 +253,47 @@ test("runtime validation reports broken finding docs references", async () => {
     writeFileSync(path.join(rootDir, "docs/opencanon/canon/architecture.md"), "# Architecture\n\n## Existing Heading\n\nCurrent docs.\n");
 
     const paths = createPaths(rootDir);
-    const decisions = [
-      {
-        id: "sample-decision",
-        date: "2026-04-28",
-        status: "current" as const,
-        title: "Sample decision",
+    const conventions = [
+      defineConvention({
+        id: "sample-convention",
+        title: "Sample convention",
         topics: ["sample"],
-        applies: ["src/**/*.ts"],
-        summary: "Sample decision.",
-        validatorIds: ["broken-doc-finding"],
-      },
+        related: ["broken-doc-finding"],
+        rule: "Sample convention.",
+        applies: { kind: "files", globs: ["src/**/*.ts"] },
+        render: { kind: "none" },
+        runtime: { kind: "none" },
+      }),
     ];
-    const validators = resolveValidators(
-      defineValidator({
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
         id: "broken-doc-finding",
         topics: ["sample"],
         severity: "error",
         scope: "file",
         applies: ["src/**/*.ts"],
-        decisionIds: ["sample-decision"],
+        conventionIds: ["sample-convention"],
         validate({ ctx }) {
           return ctx.targetFiles.map((file) =>
             file.report({
               line: 1,
               message: "Finding with broken refs.",
               docs: ["docs/opencanon/canon/architecture.md#missing-heading"],
-              decisionIds: ["missing-decision"],
+              conventionIds: ["missing-convention"],
             }),
           );
         },
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, decisions, validators, files: ["src/a.ts"] });
-    const runtimeMessages = result.findings.filter((finding) => finding.validatorId === "validator-runtime").map((finding) => finding.message);
+    const result = await runValidation({ rootDir, paths, conventions, validators, files: ["src/a.ts"] });
+    // Runtime contract violations are `error` outcomes, never findings.
+    const runtimeMessages = result.validatorOutcomes
+      .filter((outcome) => outcome.status === ValidatorOutcomeStatus.Error)
+      .map((outcome) => outcome.reason ?? "");
 
     assert(runtimeMessages.includes("Finding from broken-doc-finding docs reference points at missing heading: docs/opencanon/canon/architecture.md#missing-heading"));
-    assert(runtimeMessages.includes("Finding from broken-doc-finding references missing decision: missing-decision."));
+    assert(runtimeMessages.includes("Finding from broken-doc-finding references missing convention: missing-convention."));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -299,8 +351,8 @@ test("validators can emit diff-bound commit gates", async () => {
     git(rootDir, ["add", targetFile]);
 
     const paths = createPaths(rootDir);
-    const validators = resolveValidators(
-      defineValidator({
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
         id: "auth-session-intent",
         topics: ["auth"],
         severity: "warning",
@@ -323,7 +375,7 @@ test("validators can emit diff-bound commit gates", async () => {
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, decisions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
     assert.equal(result.findings.length, 0);
     assert.equal(result.commitGates.length, 1);
     assert.equal(result.commitGates[0]?.id, "auth-session-change");
@@ -384,16 +436,16 @@ test("validator graph hash is based on metadata instead of function source", asy
       scope: "file" as const,
       applies: ["src/auth/**"],
     };
-    const first = resolveValidators(
-      defineValidator({
+    const first = resolveTestValidators(
+      testValidatorDefinition({
         ...validatorBase,
         validate() {
           return [];
         },
       }),
     ).validators;
-    const second = resolveValidators(
-      defineValidator({
+    const second = resolveTestValidators(
+      testValidatorDefinition({
         ...validatorBase,
         validate({ ctx }) {
           return ctx.targetFiles.length > 100 ? [] : [];
@@ -401,15 +453,15 @@ test("validator graph hash is based on metadata instead of function source", asy
       }),
     ).validators;
 
-    const firstResult = await runValidation({ rootDir, paths, decisions: [], validators: first, files: [targetFile] });
-    const secondResult = await runValidation({ rootDir, paths, decisions: [], validators: second, files: [targetFile] });
+    const firstResult = await runValidation({ rootDir, paths, conventions: [], validators: first, files: [targetFile] });
+    const secondResult = await runValidation({ rootDir, paths, conventions: [], validators: second, files: [targetFile] });
     assert.equal(firstResult.validatorGraphHash, secondResult.validatorGraphHash);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
 
-test("invalid commit gate definitions are validator-runtime findings", async () => {
+test("invalid commit gate definitions are validator-runtime error outcomes (not findings)", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-invalid-commit-gate-"));
   const targetFile = "src/auth/session.ts";
 
@@ -417,8 +469,8 @@ test("invalid commit gate definitions are validator-runtime findings", async () 
     mkdirSync(path.join(rootDir, "src/auth"), { recursive: true });
     writeFileSync(path.join(rootDir, targetFile), "export const sessionTtl = 60;\n");
     const paths = createPaths(rootDir);
-    const validators = resolveValidators(
-      defineValidator({
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
         id: "auth-session-invalid-gate",
         topics: ["auth"],
         severity: "warning",
@@ -436,10 +488,57 @@ test("invalid commit gate definitions are validator-runtime findings", async () 
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, decisions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
     assert.equal(result.commitGates.length, 0);
-    assert.equal(result.findings[0]?.validatorId, "validator-runtime");
-    assert.match(result.findings[0]?.message ?? "", /needs a non-empty question/);
+    assert.equal(result.findings.length, 0, "a runtime contract violation is an outcome, not a finding");
+    const errorOutcome = result.validatorOutcomes.find((outcome) => outcome.status === ValidatorOutcomeStatus.Error);
+    assert.equal(errorOutcome?.validatorId, "auth-session-invalid-gate");
+    assert.match(errorOutcome?.reason ?? "", /needs a non-empty question/);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("a validator that throws is isolated as an error outcome; other validators still run", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validator-throw-"));
+  const targetFile = "src/a.ts";
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, targetFile), "export const x = 1;\n");
+    const paths = createPaths(rootDir);
+    const validators = resolveTestValidators([
+      testValidatorDefinition({
+        id: "boom",
+        topics: ["isolation"],
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**/*.ts"],
+        validate() {
+          throw new Error("kaboom");
+        },
+      }),
+      testValidatorDefinition({
+        id: "healthy",
+        topics: ["isolation"],
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**/*.ts"],
+        validate({ ctx }) {
+          return ctx.targetFiles.map((file) => file.report({ line: 1, message: "healthy ran" }));
+        },
+      }),
+    ]).validators;
+
+    // The run must NOT reject — one throwing validator cannot abort the whole run.
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+
+    const boom = result.validatorOutcomes.find((outcome) => outcome.validatorId === "boom");
+    assert.equal(boom?.status, "error");
+    assert.match(boom?.reason ?? "", /validator threw: kaboom/);
+
+    // The healthy validator still produced its finding + a `ran` outcome.
+    assert.equal(result.findings.filter((finding) => finding.validatorId === "healthy").length, 1);
+    assert.equal(result.validatorOutcomes.find((outcome) => outcome.validatorId === "healthy")?.status, "ran");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -494,8 +593,8 @@ test("file-scoped commit gate approvals bind to current file content", async () 
     git(rootDir, ["add", targetFile]);
 
     const paths = createPaths(rootDir);
-    const validators = resolveValidators(
-      defineValidator({
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
         id: "auth-session-file-intent",
         topics: ["auth"],
         severity: "warning",
@@ -518,7 +617,7 @@ test("file-scoped commit gate approvals bind to current file content", async () 
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, decisions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
     const context = createCommitApprovalContext(paths, result.validatorGraphHash);
     const approval = createCommitApprovalRecord({
       gate: result.commitGates[0]!,
@@ -554,37 +653,37 @@ test("structured fixes expose command fixes without executing them", () => {
           fix: {
             safety: "suggested",
             description: "Run the project formatter.",
-            command: "bun run format",
+            command: "npm run format",
           },
         },
       ],
     });
 
     assert.equal(result.appliedEdits, 0);
-    assert.equal(result.skipped[0].reason, "Fix command is advisory and is not auto-executed: bun run format");
+    assert.equal(result.skipped[0].reason, "Fix command is advisory and is not auto-executed: npm run format");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
 
 test("validator summary callbacks resolve from effective metadata", () => {
-  const resolved = resolveValidators(
-    defineValidator({
+  const resolved = resolveTestValidators(
+    testValidatorDefinition({
       id: "parent-rule",
       topics: ["parent"],
       applies: ["src/**"],
       severity: "warning",
       scope: "file",
       facts: ["imports"],
-      decisionIds: ["parent-decision"],
+      conventionIds: ["parent-decision"],
       validators: [
-        defineValidator({
+        testValidatorDefinition({
           id: "child-rule",
           topics: ["child"],
           applies: ["**/*.ts"],
-          decisionIds: ["child-decision"],
-          summary: ({ id, topics, applies, severity, scope, facts, decisionIds }) =>
-            `${id} ${topics.join("+")} ${applies.join("|")} ${severity} ${scope} ${facts.join("+")} ${decisionIds.join("+")}`,
+          conventionIds: ["child-decision"],
+          summary: ({ id, topics, applies, severity, scope, facts, conventionIds }) =>
+            `${id} ${topics.join("+")} ${applies.join("|")} ${severity} ${scope} ${facts.join("+")} ${conventionIds.join("+")}`,
           validate() {
             return [];
           },
@@ -614,13 +713,13 @@ test("validator summary callback failures are definition diagnostics", () => {
   assert.deepEqual(diagnostics, ["Validator sample-validator summary function failed: boom"]);
 });
 
-test("createValidatorFactory returns plain validator definitions", async () => {
-  const noDebugFlag = createValidatorFactory<{ in: string[] }>(({ id, topics, severity, decisionIds, docs, in: applies }) => ({
+test("createConventionFactory returns conventions adapted to validator definitions", async () => {
+  const noDebugFlag = createConventionFactory<{ in: string[] }>(({ id, topics, severity, related, docs, in: applies }) => ({
     id,
     topics,
     severity,
     scope: "file",
-    decisionIds,
+    conventionIds: related,
     applies,
     validate({ ctx }) {
       return ctx.targetFiles.flatMap((file) =>
@@ -640,17 +739,17 @@ test("createValidatorFactory returns plain validator definitions", async () => {
     id: "no-debugger",
     topics: ["hygiene"],
     severity: "warning",
-    decisionIds: ["comments-current"],
-    docs: ["docs/opencanon/decisions.json#comments-current"],
+    related: ["comments-current"],
+    docs: ["docs/opencanon/canon/lifecycle.md#comments"],
     in: ["src/**/*.{ts,tsx}"],
   });
-  const resolved = resolveValidators(definition);
+  const resolved = resolveTestValidators(definition);
   assert.deepEqual(resolved.diagnostics, []);
   assert.equal(resolved.validators.length, 1);
   assert.equal(resolved.validators[0].id, "no-debugger");
   assert.equal(resolved.validators[0].scope, "file");
   assert.deepEqual(resolved.validators[0].topics, ["hygiene"]);
-  assert.deepEqual(resolved.validators[0].decisionIds, ["comments-current"]);
+  assert.deepEqual(resolved.validators[0].conventionIds, ["no-debugger", "comments-current"]);
 
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-factory-"));
   try {
@@ -667,7 +766,7 @@ test("createValidatorFactory returns plain validator definitions", async () => {
     assert.equal(findings.length, 1);
     assert.equal(findings[0].validatorId, "no-debugger");
     assert.equal(findings[0].severity, "warning");
-    assert.equal(findings[0].docs?.[0], "docs/opencanon/decisions.json#comments-current");
+    assert.equal(findings[0].docs?.[0], "docs/opencanon/canon/lifecycle.md#comments");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -707,31 +806,31 @@ test("validation context exposes graph callers and callees", () => {
 test("validator analysis globs expose cross-scope project files", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-analysis-scope-"));
   try {
-    mkdirSync(path.join(rootDir, "src-tauri/src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "generated/contracts"), { recursive: true });
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\"}\n");
-    writeFileSync(path.join(rootDir, "src/frontend.ts"), "export const command = 'load_company';\n");
-    writeFileSync(path.join(rootDir, "src-tauri/src/commands.rs"), "#[tauri::command]\nfn load_company() {}\n");
+    writeFileSync(path.join(rootDir, "src/service.ts"), "export const contract = 'company';\n");
+    writeFileSync(path.join(rootDir, "generated/contracts/company.json"), "{\"name\":\"company\"}\n");
     writeFileSync(
       path.join(rootDir, "opencanon.config.json"),
       JSON.stringify({
         fileDiscovery: "filesystem",
-        projectFilePatterns: ["src/**/*.ts", "src-tauri/src/**/*.rs"],
+        projectFilePatterns: ["src/**/*.ts", "generated/contracts/**/*.json"],
       }),
     );
 
     const paths = createPaths(rootDir);
-    const validator = defineValidator({
-      id: "tauri-parity",
-      topics: ["tauri"],
+    const validator = testValidatorDefinition({
+      id: "contract-manifest-parity",
+      topics: ["contracts"],
       applies: ["src/**/*.ts"],
-      analysis: ["src-tauri/src/**/*.rs"],
+      analysis: ["generated/contracts/**/*.json"],
       severity: "error",
       scope: "project",
       validate({ ctx }) {
-        assert.deepEqual(ctx.targetFiles.map((file) => file.path), ["src/frontend.ts"]);
-        assert(ctx.files.some((file) => file.path === "src-tauri/src/commands.rs"));
-        assert(ctx.projectFiles(["src-tauri/src/**/*.rs"]).some((file) => file.path === "src-tauri/src/commands.rs"));
+        assert.deepEqual(ctx.targetFiles.map((file) => file.path), ["src/service.ts"]);
+        assert(ctx.files.some((file) => file.path === "generated/contracts/company.json"));
+        assert(ctx.projectFiles(["generated/contracts/**/*.json"]).some((file) => file.path === "generated/contracts/company.json"));
         return [];
       },
     });
@@ -739,62 +838,12 @@ test("validator analysis globs expose cross-scope project files", async () => {
     const result = await runValidation({
       rootDir,
       paths,
-      decisions: [],
-      validators: resolveValidators(validator).validators,
-      files: ["src/frontend.ts"],
+      conventions: [],
+      validators: resolveTestValidators(validator).validators,
+      files: ["src/service.ts"],
     });
 
     assert.equal(result.findingCount, 0);
-  } finally {
-    rmSync(rootDir, { recursive: true, force: true });
-  }
-});
-
-test("tauriCommandParity links frontend invokes to Rust commands", async () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-tauri-parity-"));
-  try {
-    mkdirSync(path.join(rootDir, "src-tauri/src"), { recursive: true });
-    mkdirSync(path.join(rootDir, "src"), { recursive: true });
-    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\"}\n");
-    writeFileSync(
-      path.join(rootDir, "src/frontend.ts"),
-      "invoke('load_company');\ntauriInvoke<Result>('typed_missing');\ntauriListen<void>('company-updated');\n",
-    );
-    writeFileSync(
-      path.join(rootDir, "src-tauri/src/main.rs"),
-      "#[tauri::command]\nfn load_company() {}\nfn main() { tauri::generate_handler!{load_company}; app.emit(\"company-updated\", ()); }\n",
-    );
-    writeFileSync(
-      path.join(rootDir, "opencanon.config.json"),
-      JSON.stringify({
-        fileDiscovery: "filesystem",
-        projectFilePatterns: ["src/**/*.ts", "src-tauri/src/**/*.rs"],
-      }),
-    );
-    const paths = createPaths(rootDir);
-    const validator = tauriCommandParity({
-      id: "tauri-command-parity",
-      topics: ["tauri"],
-      frontend: ["src/**/*.ts"],
-      rust: ["src-tauri/src/**/*.rs"],
-      invokeFunctions: ["invoke", "tauriInvoke"],
-      listenFunctions: ["listen", "tauriListen"],
-      checkEvents: true,
-      checkHandlerRegistration: true,
-      severity: "error",
-      message: "Tauri frontend calls must resolve to Rust.",
-    });
-
-    const result = await runValidation({
-      rootDir,
-      paths,
-      decisions: [],
-      validators: resolveValidators(validator).validators,
-      files: ["src/frontend.ts"],
-    });
-
-    assert.equal(result.findingCount, 1);
-    assert(result.findings[0].message.includes("typed_missing"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -816,7 +865,7 @@ test("noUnusedExports reports exported symbols without graph callers", async () 
       in: ["src/**/*.ts"],
       message: "Exported symbol has no known project caller.",
     });
-    const resolved = resolveValidators(validator);
+    const resolved = resolveTestValidators(validator);
     assert.deepEqual(resolved.diagnostics, []);
     const [definition] = resolved.validators;
     const ctx = createValidationContext({
@@ -842,7 +891,7 @@ test("noUnusedExports ignores configured public surfaces", async () => {
     mkdirSync(path.join(rootDir, "src/api"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/api/public.ts"), "export function publicCompany() { return true; }\n");
     writeFileSync(path.join(rootDir, "src/internal.ts"), "export function internalCompany() { return false; }\n");
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       noUnusedExports({
         id: "no-unused-exports",
         topics: ["dead-code"],
@@ -874,7 +923,7 @@ test("migrationReferences downgrades baseline-known matches", async () => {
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/old.ts"), "oldApi();\noldApi();\n");
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       migrationReferences({
         id: "old-api-migration",
         topics: ["migration"],
@@ -918,7 +967,7 @@ test("migrationReferences can emit structured replacement fixes", async () => {
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/old.ts"), "oldApi();\n");
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       migrationReferences({
         id: "old-api-migration",
         topics: ["migration"],
@@ -964,7 +1013,7 @@ test("similarFunctionNames reports graph-backed likely DRY overlaps", async () =
         "",
       ].join("\n"),
     );
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       similarFunctionNames({
         id: "similar-functions",
         topics: ["dry"],
@@ -996,7 +1045,7 @@ test("curated validators cover function params, siblings, and exports", async ()
   try {
     mkdirSync(path.join(rootDir, "src/services"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/services/company.service.ts"), "export function loadCompany(id: string) {\n  return id;\n}\n");
-    const validators = resolveValidators([
+    const validators = resolveTestValidators([
       requiredFunctionParam({
         id: "require-tx-param",
         topics: ["dal"],
@@ -1056,7 +1105,7 @@ test("comment policy validators block headers and bypass comments", async () => 
     writeFileSync(path.join(rootDir, "src/bypass.ts"), "export const value = 1;\n// eslint-disable-next-line no-console\nconsole.log(value);\n");
     writeFileSync(path.join(rootDir, "src/approved.ts"), "export const value = 1;\n// eslint-disable-next-line no-console APPROVED-123\nconsole.log(value);\n");
 
-    const resolved = resolveValidators([
+    const resolved = resolveTestValidators([
       noHeaderComments({
         id: "no-header-comments",
         topics: ["comments"],
@@ -1355,7 +1404,7 @@ test("typescript literal parser powers repeated literal validators", async () =>
       ].join("\n"),
     );
 
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       repeatedLiterals({
         id: "repeated-domain-literals",
         topics: ["type-patterns"],
@@ -1411,10 +1460,12 @@ test("security literal validators flag secrets and environment config", async ()
         "export const callbackUrl = \"https://api.example.com/callback\";",
         "export const safeName = \"company\";",
         "export const localPort = 4767;",
+        "export const buttonClassName = \"inline-flex shrink-0 items-center ring-[3px] shadow-xs token-list\";",
+        "export const generatedAccessToken = \"N8f7a2b9C4d6e8f0A1b3c5d7E9f1a2b4C6d8e0f2A4b6c8d0\";",
       ].join("\n"),
     );
 
-    const secretValidator = resolveValidators(
+    const secretValidator = resolveTestValidators(
       noSecretLikeLiterals({
         id: "no-secret-like-literals",
         topics: ["security"],
@@ -1423,7 +1474,7 @@ test("security literal validators flag secrets and environment config", async ()
         message: "Secret-like literals must not be committed.",
       }),
     ).validators[0];
-    const configValidator = resolveValidators(
+    const configValidator = resolveTestValidators(
       noHardcodedConfigValues({
         id: "no-hardcoded-config-values",
         topics: ["configuration"],
@@ -1443,9 +1494,10 @@ test("security literal validators flag secrets and environment config", async ()
 
     const runtime = createRuntime(createPaths(rootDir), []);
     const secretFindings = await secretValidator.validate({ ctx, runtime });
-    assert.equal(secretFindings.length, 1);
+    assert.equal(secretFindings.length, 2);
     assert.equal(secretFindings[0].severity, "error");
     assert.equal(secretFindings[0].line, 1);
+    assert.equal(secretFindings[1].line, 7);
 
     const configCtx = createValidationContext({
       rootDir,
@@ -1458,6 +1510,76 @@ test("security literal validators flag secrets and environment config", async ()
     assert.equal(configFindings.length, 1);
     assert.equal(configFindings[0].severity, "warning");
     assert.equal(configFindings[0].line, 5);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("validator runtime context exposes deterministic project coverage", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-context-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/billing.ts"), "export const invoice = 'paid';\n");
+    writeFileSync(
+      path.join(rootDir, "docs/opencanon/impact-surfaces.json"),
+      JSON.stringify([
+        {
+          id: "billing-surface",
+          title: "Billing Surface",
+          applies: ["src/billing.ts"],
+          conventionIds: ["billing-convention"],
+          changePolicy: {
+            requiresTests: ["tests/billing.test.ts"],
+            requiresDocs: [],
+            requiresApproval: false,
+            reviewers: [],
+          },
+        },
+      ]),
+    );
+
+    const paths = createPaths(rootDir);
+    const convention = defineConvention({
+      id: "billing-convention",
+      title: "Billing Convention",
+      rule: "Billing source stays governed.",
+      topics: ["billing"],
+      applies: { kind: "files", globs: ["src/**/*.ts"] },
+      render: { kind: "none" },
+      runtime: {
+        kind: "validator",
+        severity: "warning",
+        scope: "file",
+        facts: [],
+        validate() {
+          return [];
+        },
+      },
+    });
+    const area = defineArea({
+      id: "billing-context",
+      title: "Billing Context",
+      summary: "Billing source is covered by Project Context.",
+      surfaces: ["billing-surface"],
+      owns: [{ kind: "file", path: "src/billing.ts" }],
+      checks: [{ id: "billing-test", kind: "test", target: "tests/billing.test.ts" }],
+      render: { kind: "none" },
+    });
+    const runtime = createRuntime(paths, [convention], { areas: [area] });
+    const coverage = runtime.context.coverageForFile("src/billing.ts");
+
+    assert.equal(coverage.governed, true);
+    assert.deepEqual(coverage.definitions.map((definition) => definition.id), ["billing-context", "billing-convention"]);
+    assert.deepEqual(coverage.conventions.map((item) => item.id), ["billing-convention"]);
+    assert.deepEqual(coverage.surfaces.map((surface) => surface.id), ["billing-surface"]);
+    assert.deepEqual(coverage.checks.sort(), ["billing-convention", "billing-test", "tests/billing.test.ts"]);
+    assert.deepEqual(runtime.context.filesForDefinition("area", "billing-context"), ["src/billing.ts"]);
+    assert.deepEqual(runtime.context.checksForDefinition("area", "billing-context"), ["billing-test"]);
+    assert.deepEqual(runtime.context.filesForSurface("billing-surface"), ["src/billing.ts"]);
+    assert.deepEqual(runtime.context.definitionsForSurface("billing-surface").map((definition) => definition.id), ["billing-context", "billing-convention"]);
+    assert.deepEqual(runtime.context.conventionsForSurface("billing-surface").map((item) => item.id), ["billing-convention"]);
+    assert.deepEqual(runtime.context.checksForSurface("billing-surface").sort(), ["billing-convention", "billing-test", "tests/billing.test.ts"]);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -1476,7 +1598,7 @@ test("restricted symbol and external command validators are generic project chec
         projectFilePatterns: ["apps/**/*.ts", "packages/**/*.ts", "**/package.json"],
         ignore: ["node_modules/**", ".git/**"],
         externalTools: {
-          "failing-smoke": ["bun", "-e", "console.error('external failed'); process.exit(2);"],
+          "failing-smoke": [process.execPath, "-e", "console.error('external failed'); process.exit(2);"],
         },
       }),
     );
@@ -1485,7 +1607,7 @@ test("restricted symbol and external command validators are generic project chec
     writeFileSync(path.join(rootDir, "packages/db/package.json"), JSON.stringify({ name: "@demo/db" }));
     writeFileSync(path.join(rootDir, "packages/db/src/schema.ts"), "export const internalTable = 'internal';\n");
 
-    const resolved = resolveValidators([
+    const resolved = resolveTestValidators([
       restrictedSymbols({
         id: "db-symbol-boundary",
         topics: ["boundaries"],
@@ -1538,12 +1660,12 @@ test("external command validators have bounded execution", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-external-"));
   try {
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       externalCommand({
         id: "external-timeout",
         topics: ["doctor"],
         severity: "warning",
-        command: "bun",
+        command: process.execPath,
         args: ["-e", "setTimeout(() => {}, 10_000);"],
         timeoutMs: 10,
         maxBufferBytes: 1024,
@@ -1571,12 +1693,12 @@ test("external command validators reject cwd outside project root", async () => 
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-external-cwd-"));
   try {
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       externalCommand({
         id: "external-cwd",
         topics: ["doctor"],
         severity: "warning",
-        command: "bun",
+        command: process.execPath,
         args: ["--version"],
         cwd: "../outside",
         message: "External project check could not run.",
@@ -1609,7 +1731,7 @@ test("external diagnostics resolve declared tools and file tokens", async () => 
     writeFileSync(
       path.join(rootDir, "tools/demo-lint.ts"),
       [
-        "const args = Bun.argv.slice(2);",
+        "const args = process.argv.slice(2);",
         "if (args.includes('--version')) { console.log('demo-lint 1.0.0'); process.exit(0); }",
         "if (!args.includes('opencanon.config.json')) { console.error('missing config'); process.exit(3); }",
         "const files = args.filter((arg) => arg.endsWith('.ts'));",
@@ -1624,7 +1746,7 @@ test("external diagnostics resolve declared tools and file tokens", async () => 
         ignore: [],
         externalTools: {
           "demo-lint": {
-            command: ["bun", "tools/demo-lint.ts"],
+            command: [process.execPath, "tools/demo-lint.ts"],
             versionArgs: ["--version"],
             missingSeverity: "error",
           },
@@ -1633,7 +1755,7 @@ test("external diagnostics resolve declared tools and file tokens", async () => 
     );
 
     const paths = createPaths(rootDir);
-    const validator = resolveValidators(
+    const validator = resolveTestValidators(
       externalDiagnostics({
         id: "demo-lint",
         topics: ["external"],
@@ -1672,7 +1794,7 @@ test("doctor checks configured external tools with severity", () => {
     mkdirSync(path.join(rootDir, "tools"), { recursive: true });
     writeFileSync(
       path.join(rootDir, "tools/demo-lint.ts"),
-      "if (Bun.argv.includes('--version')) { console.log('demo-lint 1.0.0'); process.exit(0); }\n",
+      "if (process.argv.includes('--version')) { console.log('demo-lint 1.0.0'); process.exit(0); }\n",
     );
     writeFileSync(
       path.join(rootDir, "opencanon.config.json"),
@@ -1682,7 +1804,7 @@ test("doctor checks configured external tools with severity", () => {
         ignore: [],
         externalTools: {
           "demo-lint": {
-            command: ["bun", "tools/demo-lint.ts"],
+            command: [process.execPath, "tools/demo-lint.ts"],
             versionArgs: ["--version"],
           },
           "optional-missing": {
@@ -1698,13 +1820,13 @@ test("doctor checks configured external tools with severity", () => {
     );
 
     const paths = createPaths(rootDir);
-    const skippedReport = buildDoctorReport({ paths, decisions: [], validators: [] });
+    const skippedReport = buildDoctorReport({ paths, conventions: [], validators: [] });
     const skippedCheck = skippedReport.checks.find((item) => item.id === "external-tools");
 
     assert.equal(skippedCheck?.status, "warn");
     assert(skippedCheck?.message.includes("not executed"));
 
-    const report = buildDoctorReport({ paths, decisions: [], validators: [], runExternalTools: true });
+    const report = buildDoctorReport({ paths, conventions: [], validators: [], runExternalTools: true });
     const check = report.checks.find((item) => item.id === "external-tools");
 
     assert.equal(check?.status, "fail");
@@ -1729,7 +1851,7 @@ test("doctor reports invalid project discovery config", () => {
     );
 
     const paths = createPaths(rootDir);
-    const report = buildDoctorReport({ paths, decisions: [], validators: [] });
+    const report = buildDoctorReport({ paths, conventions: [], validators: [] });
     const check = report.checks.find((item) => item.id === "project-discovery");
 
     assert.equal(check?.status, "fail");
@@ -1741,16 +1863,82 @@ test("doctor reports invalid project discovery config", () => {
   }
 });
 
+test("doctor uses the authoritative producer statuses when provided (live producer beats absent sidecar)", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-producers-"));
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
+    const paths = createPaths(rootDir);
+
+    // No sidecar on disk. Headless resolve would report typescript "stale".
+    // But when the running runtime's authoritative status (live producer ready)
+    // is passed in, doctor must report it ready — not inspect the sidecar fs.
+    const report = buildDoctorReport({
+      paths,
+      conventions: [],
+      validators: [],
+      producerStatuses: [{ language: "typescript", kind: "ready", generation: 3 }],
+    });
+    const check = report.checks.find((item) => item.id === "type-producers");
+    assert.equal(check?.status, "pass");
+    assert(check?.details?.some((line) => line.includes("typescript: ready")));
+    assert(!check?.details?.some((line) => line.includes("analyze --typed")), "no stale/run-analyze hint when live is ready");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("doctor treats TypeScript producer as not applicable for JavaScript-only projects", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-js-producer-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "opencanon/conventions"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
+    writeFileSync(path.join(rootDir, "src/index.js"), "export const ok = true;\n");
+    writeFileSync(path.join(rootDir, "opencanon/conventions/index.ts"), "export default [];\n");
+    writeFileSync(path.join(rootDir, "opencanon/tsconfig.json"), "{\"compilerOptions\":{\"noEmit\":true}}\n");
+
+    const report = buildDoctorReport({ paths: createPaths(rootDir), conventions: [], validators: [] });
+    const check = report.checks.find((item) => item.id === "type-producers");
+    assert.equal(check?.status, "pass");
+    assert(check?.details?.some((line) => line.includes("typescript: not-implemented")));
+    assert(check?.details?.some((line) => line.includes("No root tsconfig.json or user TypeScript source files")));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("doctor treats missing config as built-in defaults", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-defaults-"));
   try {
     writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
 
-    const report = buildDoctorReport({ paths: createPaths(rootDir), decisions: [], validators: [] });
+    const report = buildDoctorReport({ paths: createPaths(rootDir), conventions: [], validators: [] });
     const check = report.checks.find((item) => item.id === "config");
 
     assert.equal(check?.status, "pass");
     assert(check?.message.includes("built-in defaults"));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("doctor fails registered unhealthy runtime state", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-runtime-health-"));
+  try {
+    const report = buildDoctorReport({
+      paths: createPaths(rootDir),
+      conventions: [],
+      validators: [],
+      runtimeHealth: {
+        service: { status: "running", registered: true, message: "OpenCanon service health endpoint is ready." },
+        project: { status: "stale", registered: true, lifecycleStatus: "backing-off", message: "Registered process is not running." },
+      },
+    });
+    const check = report.checks.find((item) => item.id === "runtime-health");
+
+    assert.equal(report.status, DoctorStatus.Fail);
+    assert.equal(check?.status, DoctorStatus.Fail);
+    assert(check?.details?.some((detail) => detail.includes("Project runtime is stale")));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -1764,23 +1952,25 @@ test("doctor reports and fixes unignored cache files", () => {
     spawnSync("git", ["init"], { cwd: rootDir, stdio: "ignore" });
 
     const paths = createPaths(rootDir);
-    const report = buildDoctorReport({ paths, decisions: [], validators: [] });
+    const report = buildDoctorReport({ paths, conventions: [], validators: [] });
     const check = report.checks.find((item) => item.id === "cache-ignore");
     const generatedCheck = report.checks.find((item) => item.id === "generated-ignore");
 
     assert.equal(check?.status, "fail");
     assert(check?.details?.some((detail) => detail.includes(".opencanon/cache/")));
     assert.equal(generatedCheck?.status, "fail");
-    assert(generatedCheck?.details?.some((detail) => detail.includes(".agents/skills/opencanon/.gitignore")));
+    assert(generatedCheck?.details?.some((detail) => detail.includes(".opencanon/generated/")));
 
     const fix = applyDoctorFixes({ paths, report, mode: "safe", dryRun: false });
     assert.equal(fix.diagnostics.length, 0);
     const gitignore = readFileSync(path.join(rootDir, ".gitignore"), "utf8");
     assert(gitignore.includes(".opencanon/cache/"));
+    assert(gitignore.includes(".opencanon/generated/"));
+    assert(gitignore.includes(".opencanon/worker.lock"));
     assert(gitignore.includes(".opencanon/*.sqlite"));
-    assert.equal(readFileSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore"), "utf8"), "runtime/\ngenerated/\n");
+    assert.equal(existsSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore")), false);
 
-    const fixedReport = buildDoctorReport({ paths, decisions: [], validators: [] });
+    const fixedReport = buildDoctorReport({ paths, conventions: [], validators: [] });
     assert.equal(fixedReport.checks.find((item) => item.id === "cache-ignore")?.status, "pass");
     assert.equal(fixedReport.checks.find((item) => item.id === "generated-ignore")?.status, "pass");
   } finally {
@@ -1788,66 +1978,104 @@ test("doctor reports and fixes unignored cache files", () => {
   }
 });
 
-test("doctor fixes missing decision validator backrefs", () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-decision-backrefs-"));
+test("doctor reports and fixes stale generated project authoring support", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-project-authoring-"));
   try {
-    mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
-    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\"}\n");
-    const decisions = [
-      {
-        id: "company-current",
-        date: "2026-05-21",
-        status: "current" as const,
-        title: "Company rule",
-        topics: ["company"],
-        applies: ["src/**"],
-        summary: "Company rule.",
-        rationale: [],
-        required: [],
-        replaced: [],
-        agentPolicy: [],
-        exceptions: [],
-        docs: [],
-        validatorIds: [],
-      },
-    ];
-    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), `${JSON.stringify(decisions, null, 2)}\n`);
+    writeFileSync(path.join(rootDir, "package.json"), "{\"name\":\"demo\",\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
     const paths = createPaths(rootDir);
-    const validators = resolveValidators({
-      id: "company-rule",
-      topics: ["company"],
-      decisionIds: ["company-current"],
-      severity: "error",
-      scope: "project",
-      validate() {
-        return [];
-      },
-    }).validators;
-    const report = buildDoctorReport({ paths, decisions, validators });
-    assert.equal(report.checks.find((check) => check.id === "context-files")?.status, "fail");
+    generateProjectTypes(rootDir, paths);
+    const generatedPath = path.join(rootDir, ProjectTypesFilePath);
+    writeFileSync(generatedPath, "// stale generated authoring support\n");
 
-    const fix = applyDoctorFixes({ paths, report, mode: "safe", dryRun: false, decisions, validators });
+    const report = buildDoctorReport({ paths, conventions: [], validators: [] });
+    const check = report.checks.find((item) => item.id === "project-authoring");
+    assert.equal(check?.status, "fail");
+    assert(check?.details?.some((detail) => detail.includes("drifted")));
+
+    const fix = applyDoctorFixes({ paths, report, mode: FixModeValue.Safe, dryRun: false });
     assert.equal(fix.diagnostics.length, 0);
-    const updated = JSON.parse(readFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "utf8"));
-    assert.deepEqual(updated[0].validatorIds, ["company-rule"]);
+    assert.equal(fix.skipped.length, 0);
+
+    const fixedSource = readFileSync(generatedPath, "utf8");
+    assert(fixedSource.includes("Generated by OpenCanon"));
+    assert(fixedSource.includes("export const Packages"));
+    const fixedReport = buildDoctorReport({ paths, conventions: [], validators: [] });
+    assert.equal(fixedReport.checks.find((item) => item.id === "project-authoring")?.status, "pass");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
 
-test("context command lists decision exceptions", () => {
-  const result = spawnSync("bun", [".agents/skills/opencanon/scripts/opencanon.ts", "context", "--list-exceptions", "--format", "json"], {
+test("doctor reports and fixes managed agent entry blocks", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-agent-entry-"));
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), "{\"name\":\"demo\",\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
+    writeFileSync(path.join(rootDir, "AGENTS.md"), "# Team Rules\n\nKeep this note.\n\n<opencanon>\nstale\n</opencanon>\n");
+    const paths = createPaths(rootDir);
+
+    const report = buildDoctorReport({ paths, conventions: [], validators: [] });
+    const check = report.checks.find((item) => item.id === "agent-entry");
+    assert.equal(check?.status, "fail");
+    assert(check?.details?.some((detail) => detail.includes("AGENTS.md managed")));
+    assert(check?.details?.some((detail) => detail.includes("CLAUDE.md is missing")));
+
+    const fix = applyDoctorFixes({ paths, report, mode: FixModeValue.Safe, dryRun: false });
+    assert.equal(fix.diagnostics.length, 0);
+    assert.equal(fix.skipped.length, 0);
+
+    const agents = readFileSync(path.join(rootDir, "AGENTS.md"), "utf8");
+    assert(agents.includes("Keep this note."));
+    assert(agents.includes(renderOpenCanonAgentEntryBlock()));
+    assert(readFileSync(path.join(rootDir, "CLAUDE.md"), "utf8").includes(renderOpenCanonAgentEntryBlock()));
+    const fixedReport = buildDoctorReport({ paths, conventions: [], validators: [] });
+    assert.equal(fixedReport.checks.find((item) => item.id === "agent-entry")?.status, "pass");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports and fixes managed OpenCanon skill files", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-skill-"));
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), "{\"name\":\"demo\",\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
+    const skillPath = path.join(rootDir, OpenCanonSkillFilePath);
+    mkdirSync(path.dirname(skillPath), { recursive: true });
+    writeFileSync(skillPath, "# OpenCanon\n\nstale\n");
+    const paths = createPaths(rootDir);
+
+    const report = buildDoctorReport({ paths, conventions: [], validators: [] });
+    const check = report.checks.find((item) => item.id === "opencanon-skill");
+    assert.equal(check?.status, "fail");
+    assert(check?.details?.some((detail) => detail.includes("OpenCanon skill file drifted")));
+    assert(check?.details?.some((detail) => detail.includes("references/implementation.md")));
+
+    const fix = applyDoctorFixes({ paths, report, mode: FixModeValue.Safe, dryRun: false });
+    assert.equal(fix.diagnostics.length, 0);
+    assert.equal(fix.skipped.length, 0);
+
+    const fixedSkill = readFileSync(skillPath, "utf8");
+    assert(fixedSkill.includes("Progressive References"));
+    assert(readFileSync(path.join(rootDir, ".agents/skills/opencanon/references/implementation.md"), "utf8").includes("Implementation Workflow"));
+    assert.notEqual(statSync(path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon-brief-context.sh")).mode & 0o111, 0);
+    const fixedReport = buildDoctorReport({ paths, conventions: [], validators: [] });
+    assert.equal(fixedReport.checks.find((item) => item.id === "opencanon-skill")?.status, "pass");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("context command lists convention exceptions", () => {
+  const result = spawnSync(process.execPath, ["packages/cli/src/index.ts", "context", "--list-exceptions", "--format", "json"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr);
-  const parsed = JSON.parse(result.stdout) as { exceptions: Array<{ id: string; exceptions: string[] }> };
-  assert(parsed.exceptions.some((decision) => decision.id === "const-object-enums" && decision.exceptions.length > 0));
+  assert.deepEqual(JSON.parse(result.stdout), { exceptions: [] });
 });
 
 test("fixture checks can be scoped to one validator", () => {
-  const result = spawnSync("bun", [".agents/skills/opencanon/scripts/opencanon.ts", "validate", "--check-fixtures", "--validator", "no-native-enums"], {
+  const result = spawnSync(process.execPath, ["packages/cli/src/index.ts", "validate", "--check-fixtures", "--validator", "no-native-enums"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
@@ -1862,33 +2090,41 @@ test("fixture checks fail when required flat fixture files are missing", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-missing-fixtures-"));
   try {
     mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
-    mkdirSync(path.join(rootDir, "validators"), { recursive: true });
+    mkdirSync(path.join(rootDir, "conventions"), { recursive: true });
     mkdirSync(path.join(rootDir, "fixtures/missing-invalid"), { recursive: true });
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(
       path.join(rootDir, "opencanon.config.json"),
       JSON.stringify({
         fileDiscovery: "filesystem",
-        decisionsPath: "docs/opencanon/decisions.json",
-        validatorsPath: "validators/index.ts",
+        conventionsPath: "conventions/index.ts",
         fixturesDir: "fixtures",
         projectFilePatterns: ["src/**/*.ts"],
         ignore: ["node_modules/**", ".git/**"],
         requiredPackageScripts: [],
       }),
     );
-    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "[]\n");
     writeFileSync(
-      path.join(rootDir, "validators/index.ts"),
-      `export default {
+      path.join(rootDir, "conventions/index.ts"),
+      `import { defineConvention } from "@opencanon/core";
+
+export default defineConvention({
   id: "missing-invalid",
+  title: "Missing invalid",
   topics: ["test"],
-  severity: "error",
-  scope: "file",
-  validate() {
-    return [];
+  rule: "Missing invalid.",
+  applies: { kind: "files", globs: ["src/**/*.ts"] },
+  render: { kind: "none" },
+  runtime: {
+    kind: "validator",
+    severity: "error",
+    scope: "file",
+    facts: [],
+    validate() {
+      return [];
+    },
   },
-};
+});
 `,
     );
     writeFileSync(
@@ -1896,14 +2132,13 @@ test("fixture checks fail when required flat fixture files are missing", () => {
       ['import { defineFixture } from "@opencanon/core/testing";', "", "export default defineFixture({});", ""].join("\n"),
     );
 
-    const script = path.join(process.cwd(), ".agents/skills/opencanon/scripts/opencanon.ts");
-    const result = spawnSync("bun", [script, "validate", "--check-fixtures"], {
+    const script = path.join(process.cwd(), "packages/cli/src/index.ts");
+    const result = spawnSync(process.execPath, [script, "validate", "--check-fixtures"], {
       cwd: rootDir,
       encoding: "utf8",
     });
 
     assert.equal(result.status, 1, result.stderr || result.stdout);
-    assert(result.stdout.includes("FAIL missing-invalid/invalid/fixtures/missing-invalid/invalid.ts"));
     assert(result.stdout.includes("Missing required fixture file: fixtures/missing-invalid/invalid.ts"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -1911,7 +2146,7 @@ test("fixture checks fail when required flat fixture files are missing", () => {
 });
 
 test("rules command renders validator summaries and fixture coverage", () => {
-  const result = spawnSync("bun", [".agents/skills/opencanon/scripts/opencanon.ts", "rules", "--validator", "no-native-enums"], {
+  const result = spawnSync(process.execPath, ["packages/cli/src/index.ts", "rules", "--validator", "no-native-enums"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
@@ -1924,8 +2159,8 @@ test("rules command renders validator summaries and fixture coverage", () => {
   assert(!result.stdout.includes("## dal-transaction-param"));
 });
 
-test("rules command filters validators by linked decision", () => {
-  const result = spawnSync("bun", [".agents/skills/opencanon/scripts/opencanon.ts", "rules", "--decision", "const-object-enums"], {
+test("rules command filters validators by linked convention", () => {
+  const result = spawnSync(process.execPath, ["packages/cli/src/index.ts", "rules", "--convention", "const-object-enums"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
@@ -1937,7 +2172,7 @@ test("rules command filters validators by linked decision", () => {
 });
 
 test("rules command renders tree visualizations", () => {
-  const result = spawnSync("bun", [".agents/skills/opencanon/scripts/opencanon.ts", "rules", "--tree", "--validator", "no-dumpster-folders", "--ascii", "--no-color"], {
+  const result = spawnSync(process.execPath, ["packages/cli/src/index.ts", "rules", "--tree", "--validator", "no-dumpster-folders", "--ascii", "--no-color"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
@@ -1950,7 +2185,7 @@ test("rules command renders tree visualizations", () => {
 });
 
 test("rules command renders boundary visualizations as edge trees", () => {
-  const result = spawnSync("bun", [".agents/skills/opencanon/scripts/opencanon.ts", "rules", "--tree", "--validator", "service-no-db-client", "--ascii", "--no-color"], {
+  const result = spawnSync(process.execPath, ["packages/cli/src/index.ts", "rules", "--tree", "--validator", "service-no-db-client", "--ascii", "--no-color"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
@@ -1966,61 +2201,72 @@ test("validate strict-warnings controls warning exit status", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-strict-warnings-"));
   try {
     mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
-    mkdirSync(path.join(rootDir, "validators"), { recursive: true });
+    mkdirSync(path.join(rootDir, "conventions"), { recursive: true });
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(
       path.join(rootDir, "opencanon.config.json"),
       JSON.stringify({
         fileDiscovery: "filesystem",
-        decisionsPath: "docs/opencanon/decisions.json",
-        validatorsPath: "validators/index.ts",
+        conventionsPath: "conventions/index.ts",
         fixturesDir: "fixtures",
         projectFilePatterns: ["src/**/*.ts"],
         ignore: ["node_modules/**", ".git/**"],
         requiredPackageScripts: [],
       }),
     );
-    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "[]\n");
     writeFileSync(path.join(rootDir, "src/a.ts"), "const value = 'warn';\n");
     writeFileSync(
-      path.join(rootDir, "validators/index.ts"),
-      `export default {
+      path.join(rootDir, "conventions/index.ts"),
+      `import { defineConvention } from "@opencanon/core";
+
+export default defineConvention({
   id: "warning-rule",
+  title: "Warning rule",
   topics: ["test"],
-  severity: "warning",
-  scope: "file",
-  applies: ["src/**/*.ts"],
-  validate({ ctx }) {
-    return ctx.targetFiles.flatMap((file) =>
-      file.find("warn").map((match) =>
-        file.report({
-          line: match.line,
-          column: match.column,
-          message: "Warning finding.",
-        }),
-      ),
-    );
+  rule: "Warning rule.",
+  applies: { kind: "files", globs: ["src/**/*.ts"] },
+  render: { kind: "none" },
+  runtime: {
+    kind: "validator",
+    severity: "warning",
+    scope: "file",
+    facts: [],
+    validate({ ctx }) {
+      return ctx.targetFiles.flatMap((file) =>
+        file.find("warn").map((match) =>
+          file.report({
+            line: match.line,
+            column: match.column,
+            message: "Warning finding.",
+          }),
+        ),
+      );
+    },
   },
-};
+});
 `,
     );
 
-    const script = path.join(process.cwd(), ".agents/skills/opencanon/scripts/opencanon.ts");
-    const normal = spawnSync("bun", [script, "validate", "--files", "src/a.ts"], {
+    const script = path.join(process.cwd(), "packages/cli/src/index.ts");
+    const env = isolatedCliEnv(rootDir);
+    const normal = spawnSync(process.execPath, [script, "validate", "--files", "src/a.ts"], {
       cwd: rootDir,
       encoding: "utf8",
+      env,
     });
     assert.equal(normal.status, 0, normal.stderr || normal.stdout);
     assert(normal.stdout.includes("Finding Resolution Policy"));
     assert(normal.stdout.includes("warning: non-blocking finding"));
 
-    const strict = spawnSync("bun", [script, "validate", "--files", "src/a.ts", "--strict-warnings"], {
+    const strict = spawnSync(process.execPath, [script, "validate", "--files", "src/a.ts", "--strict-warnings"], {
       cwd: rootDir,
       encoding: "utf8",
+      env,
     });
     assert.equal(strict.status, 1, strict.stderr || strict.stdout);
   } finally {
+    stopIsolatedCliRuntime(rootDir);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -2029,64 +2275,74 @@ test("validator graph resolves OpenCanon package-prefixed authoring imports", ()
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-authoring-imports-"));
   try {
     mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
-    mkdirSync(path.join(rootDir, "validators"), { recursive: true });
+    mkdirSync(path.join(rootDir, "conventions"), { recursive: true });
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(
       path.join(rootDir, "opencanon.config.json"),
       JSON.stringify({
         fileDiscovery: "filesystem",
-        decisionsPath: "docs/opencanon/decisions.json",
-        validatorsPath: "validators/index.ts",
+        conventionsPath: "conventions/index.ts",
         fixturesDir: "fixtures",
         projectFilePatterns: ["src/**/*.ts"],
         ignore: ["node_modules/**", ".git/**"],
         requiredPackageScripts: [],
       }),
     );
-    writeFileSync(path.join(rootDir, "docs/opencanon/decisions.json"), "[]\n");
     writeFileSync(path.join(rootDir, "src/a.ts"), "const value = 'warn';\n");
     writeFileSync(
-      path.join(rootDir, "validators/index.ts"),
-      `import { defineValidator } from "@opencanon/core";
+      path.join(rootDir, "conventions/index.ts"),
+      `import { defineConvention } from "@opencanon/core";
 import { Packages } from "@opencanon/project";
 
-export default defineValidator({
+export default defineConvention({
   id: "package-import-rule",
+  title: "Package import rule",
   topics: ["test"],
-  severity: "warning",
-  scope: "file",
-  applies: ["src/**/*.ts"],
-  validate({ ctx }) {
-    return ctx.targetFiles.flatMap((file) =>
-      file.find("warn").map((match) =>
-        file.report({
-          line: match.line,
-          column: match.column,
-          message: \`Package import finding from \${Packages.ROOT}.\`,
-        }),
-      ),
-    );
+  rule: "Package import rule.",
+  applies: { kind: "files", globs: ["src/**/*.ts"] },
+  render: { kind: "none" },
+  runtime: {
+    kind: "validator",
+    severity: "warning",
+    scope: "file",
+    facts: [],
+    validate({ ctx }) {
+      return ctx.targetFiles.flatMap((file) =>
+        file.find("warn").map((match) =>
+          file.report({
+            line: match.line,
+            column: match.column,
+            message: \`Package import finding from \${Packages.ROOT}.\`,
+          }),
+        ),
+      );
+    },
   },
 });
 `,
     );
 
-    const script = path.join(process.cwd(), ".agents/skills/opencanon/scripts/opencanon.ts");
-    const generated = spawnSync("bun", [script, "project-types", "generate"], {
+    const script = path.join(process.cwd(), "packages/cli/src/index.ts");
+    const env = isolatedCliEnv(rootDir);
+    const setup = spawnSync(process.execPath, [script, "init", "--yes", "--no-runtime"], {
       cwd: rootDir,
       encoding: "utf8",
+      env,
     });
-    assert.equal(generated.status, 0, generated.stderr || generated.stdout);
+    assert.equal(setup.status, 0, setup.stderr || setup.stdout);
+    assert.equal(existsSync(path.join(rootDir, ".opencanon/generated/authoring/project.ts")), true);
 
-    const result = spawnSync("bun", [script, "validate", "--files", "src/a.ts"], {
+    const result = spawnSync(process.execPath, [script, "validate", "--files", "src/a.ts"], {
       cwd: rootDir,
       encoding: "utf8",
+      env,
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert(result.stdout.includes("Package import finding from <root>."));
   } finally {
+    stopIsolatedCliRuntime(rootDir);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -2132,3 +2388,1173 @@ function git(rootDir: string, args: string[]): void {
   const result = spawnSync("git", args, { cwd: rootDir, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 }
+
+test("literal facts carry declarationSourceId for const-object and type-union shapes", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-decl-source-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(rootDir, "src/status.ts"),
+      [
+        "export const CompanyStatus = {",
+        "  ACTIVE: \"active\",",
+        "  INACTIVE: \"inactive\",",
+        "} as const;",
+        "export type Mode = \"on\" | \"off\";",
+        "export function pick(value: string) {",
+        "  return value === \"active\" ? CompanyStatus.ACTIVE : CompanyStatus.INACTIVE;",
+        "}",
+      ].join("\n"),
+    );
+
+    const validator = resolveTestValidators(
+      testValidatorDefinition({
+        id: "decl-source-id-probe",
+        topics: ["typed-literals"],
+        severity: "warning",
+        scope: "file",
+        facts: ["literals"],
+        applies: ["src/**/*.ts"],
+        validate: () => [],
+      }),
+    ).validators[0];
+    const ctx = createValidationContext({
+      rootDir,
+      files: ["src/status.ts"],
+      targetFiles: ["src/status.ts"],
+      analysisFiles: ["src/status.ts"],
+      validator,
+    });
+
+    const declared = ctx.facts.literals().filter((literal) => literal.declarationSourceId);
+    const byName = new Map<string, Set<string>>();
+    for (const literal of declared) {
+      const set = byName.get(literal.declarationSourceId!) ?? new Set<string>();
+      set.add(literal.value);
+      byName.set(literal.declarationSourceId!, set);
+    }
+    assert.deepEqual([...(byName.get("CompanyStatus") ?? [])].sort(), ["active", "inactive"]);
+    assert.deepEqual([...(byName.get("Mode") ?? [])].sort(), ["off", "on"]);
+
+    // Comparison literals outside the declaration must not be tagged.
+    const comparison = ctx.facts.literals().find((literal) => literal.context === LiteralContext.Comparison && literal.value === "active");
+    assert(comparison);
+    assert.equal(comparison?.declarationSourceId, undefined);
+
+    // ctx.typed.literal narrows by declarationSourceId and resolves via the Tier 1 analyzer.
+    const matches = ctx.typed.literal({ declarationSourceId: "CompanyStatus", valueKind: "string" });
+    assert.equal(matches.length, 2);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("SidecarTypeFactsProvider serves finite-set hits only when ready; non-finite is absent", async () => {
+  const { SidecarTypeFactsProvider, siteKey } = await import("@opencanon/core");
+  const payload = {
+    version: 1 as const,
+    generatedAt: "x",
+    tsconfigPath: "tsconfig.json",
+    tsconfigHash: "h",
+    tsVersion: "5.9.0",
+    gitHead: "",
+    sourceFiles: [],
+    membershipHash: "m",
+    coverage: { programFiles: 1, comparisonSites: 1, checkedSites: 1 },
+    entries: [
+      {
+        file: "src/x.ts",
+        line: 10,
+        column: 5,
+        display: "Status",
+        symbolId: "Status",
+        typeSource: "declared" as const,
+        kind: "literal-union" as const,
+        members: [
+          { value: { kind: "string" as const, value: "on" }, display: '"on"' },
+          { value: { kind: "string" as const, value: "off" }, display: '"off"' },
+        ],
+        syntax: "ts-union" as const,
+      },
+      // A non-finite ("other") site recorded internally — must NEVER surface.
+      { file: "src/x.ts", line: 2, column: 1, display: "Mode", symbolId: "Mode", typeSource: "declared" as const, kind: "other" as const },
+    ],
+  };
+  const ready = new SidecarTypeFactsProvider(payload, { language: "typescript", kind: "ready" });
+  assert.equal(ready.status().kind, "ready");
+  const map = await ready.resolveTypes([
+    { file: "src/x.ts", line: 10, column: 5 },
+    { file: "src/x.ts", line: 2, column: 1 },
+  ]);
+  // Finite-set hit reconstructed as a literal-union (no confidence field).
+  assert.deepEqual(map.get(siteKey("src/x.ts", 10, 5)), {
+    kind: "literal-union",
+    language: "typescript",
+    display: "Status",
+    symbolId: "Status",
+    typeSource: "declared",
+    members: [
+      { value: { kind: "string", value: "on" }, display: '"on"' },
+      { value: { kind: "string", value: "off" }, display: '"off"' },
+    ],
+    syntax: "ts-union",
+  });
+  // Non-finite ("other") site never surfaces.
+  assert.equal(map.has(siteKey("src/x.ts", 2, 1)), false);
+
+  // A stale producer serves NOTHING, even for finite-set entries (binary).
+  const stale = new SidecarTypeFactsProvider(payload, { language: "typescript", kind: "stale", detail: "source-drift" });
+  const staleMap = await stale.resolveTypes([{ file: "src/x.ts", line: 10, column: 5 }]);
+  assert.equal(staleMap.size, 0);
+});
+
+test("asFiniteLiteralSet / finiteLiteralIncludes capability accessors", async () => {
+  const { asFiniteLiteralSet, finiteLiteralIncludes } = await import("@opencanon/core");
+  const union = {
+    kind: "literal-union" as const,
+    language: "typescript",
+    display: "Status",
+    typeSource: "declared" as const,
+    syntax: "ts-union" as const,
+    members: [
+      { value: { kind: "string" as const, value: "on" }, display: '"on"' },
+      { value: { kind: "string" as const, value: "off" }, display: '"off"' },
+    ],
+  };
+
+  const set = asFiniteLiteralSet(union);
+  assert.ok(set);
+  assert.deepEqual(set!.members.map((m) => m.value && m.value.kind === LiteralValueKind.String ? m.value.value : undefined), ["on", "off"]);
+  assert.equal(asFiniteLiteralSet(undefined), undefined);
+
+  assert.equal(finiteLiteralIncludes(union, "on"), true);
+  assert.equal(finiteLiteralIncludes(union, "nope"), false);
+  assert.equal(finiteLiteralIncludes(undefined, "on"), false);
+});
+
+test("ctx.typed.literal returns surroundingType only when the producer is ready", async () => {
+  const { prewarmTypeFacts, createValidationContextFromFixture, flushValidationContextCache, siteKey } =
+    await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-prewarm-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const srcText = "export function f(value: Mode) {\n  return value === \"on\";\n}\n";
+    writeFileSync(path.join(rootDir, "src", "x.ts"), srcText);
+    const ctx = createValidationContextFromFixture({ rootDir, validator: { id: "t", severity: "warning" } });
+    const literals = ctx.facts.literals().filter((l) => l.context === LiteralContext.Comparison && l.value === "on");
+    assert.equal(literals.length, 1);
+    const site = literals[0];
+    const resolution = {
+      kind: "literal-union" as const,
+      language: "typescript",
+      display: "Mode",
+      symbolId: "Mode",
+      typeSource: "declared" as const,
+      members: [{ value: { kind: "string" as const, value: "on" }, display: '"on"' }],
+      syntax: "ts-union" as const,
+    };
+
+    // 1. A non-ready (stale) producer resolves nothing → no surroundingType.
+    const staleProvider = {
+      language: "typescript",
+      status() {
+        return { language: "typescript", kind: "stale" as const, detail: "source-drift" };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        return new Map();
+      },
+    };
+    await prewarmTypeFacts(ctx, staleProvider);
+    assert.equal(ctx.typed.literal({ surroundingTypeName: "Mode" }).length, 0);
+    assert.equal(ctx.typed.producerStatus("typescript").kind, "stale");
+
+    // 2. A ready producer covering the site → surroundingType present.
+    const readyProvider = {
+      language: "typescript",
+      status() {
+        return { language: "typescript", kind: "ready" as const };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes(sites: { file: string; line: number; column: number }[]) {
+        const map = new Map();
+        for (const s of sites) map.set(siteKey(s.file, s.line, s.column), resolution);
+        return map;
+      },
+    };
+    await prewarmTypeFacts(ctx, readyProvider);
+    const hit = ctx.typed.literal({ surroundingTypeName: "Mode" });
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].surroundingType?.display, "Mode");
+    assert.equal(ctx.typed.producerStatus("typescript").kind, "ready");
+    void site;
+    flushValidationContextCache(ctx);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveProducerStatuses reports ready / stale / disabled / not-implemented", async () => {
+  const { resolveProducerStatuses, membershipHashOf, listMembershipFiles } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-producer-status-"));
+  try {
+    // No tsconfig + typescript present (resolved via cwd) → missing-tsconfig.
+    // (typescript resolves from the workspace cwd in this monorepo.)
+    const initial = resolveProducerStatuses(rootDir);
+    assert.equal(initial.length, 1);
+    assert.equal(initial[0].language, "typescript");
+    assert.ok(["missing-tsconfig", "missing-package"].includes(initial[0].kind));
+
+    // Add tsconfig + a fresh sidecar → ready.
+    const tsconfig = JSON.stringify({ compilerOptions: { noEmit: true, skipLibCheck: true }, include: ["src/**/*"] });
+    writeFileSync(path.join(rootDir, "tsconfig.json"), tsconfig);
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const srcPath = path.join(rootDir, "src", "x.ts");
+    const srcText = "export type Status = 'on' | 'off';\n";
+    writeFileSync(srcPath, srcText);
+    const srcStat = statSync(srcPath);
+    mkdirSync(path.join(rootDir, ".opencanon", "cache"), { recursive: true });
+    const sidecarPath = path.join(rootDir, ".opencanon", "cache", "typed-comparisons.json");
+    writeFileSync(sidecarPath, JSON.stringify({
+      version: 1,
+      generatedAt: "x",
+      tsconfigPath: "tsconfig.json",
+      tsconfigHash: createHashHex(tsconfig),
+      tsVersion: "",
+      gitHead: "",
+      sourceFiles: [{ path: "src/x.ts", sha256: createHashHex(srcText), mtimeMs: srcStat.mtimeMs, size: srcStat.size }],
+      membershipHash: membershipHashOf(listMembershipFiles(rootDir)),
+      coverage: { programFiles: 1, comparisonSites: 1, checkedSites: 1 },
+      entries: [],
+    }));
+    assert.equal(resolveProducerStatuses(rootDir)[0].kind, "ready");
+
+    // Editing the source invalidates the sidecar → stale.
+    writeFileSync(srcPath, "export type Status = 'on' | 'off' | 'pending';\n");
+    assert.equal(resolveProducerStatuses(rootDir)[0].kind, "stale");
+
+    // Env opt-out → disabled (folds OPENCANON_TYPED_PRODUCER into status).
+    const prev = process.env.OPENCANON_TYPED_PRODUCER;
+    process.env.OPENCANON_TYPED_PRODUCER = "off";
+    try {
+      assert.equal(resolveProducerStatuses(rootDir)[0].kind, "disabled");
+    } finally {
+      if (prev === undefined) delete process.env.OPENCANON_TYPED_PRODUCER;
+      else process.env.OPENCANON_TYPED_PRODUCER = prev;
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("opencanon analyze --typed writes a sidecar with comparison-context entries", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-sidecar-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { strict: true, target: "es2022", module: "esnext", moduleResolution: "bundler", noEmit: true, skipLibCheck: true },
+      include: ["src/**/*"],
+    }));
+    writeFileSync(
+      path.join(rootDir, "src/status.ts"),
+      [
+        "export type Status = \"on\" | \"off\";",
+        "export function isOn(value: Status) {",
+        "  return value === \"on\";",
+        "}",
+      ].join("\n"),
+    );
+
+    const analyzeUrl = new URL("../packages/cli/src/analyze.ts", import.meta.url).href;
+    const { runAnalyzeCommand } = (await import(analyzeUrl)) as typeof import("../packages/cli/src/analyze.ts");
+    await runAnalyzeCommand(["--typed"], rootDir);
+    const sidecarPath = path.join(rootDir, ".opencanon", "cache", "typed-comparisons.json");
+    assert(existsSync(sidecarPath), "sidecar should be written");
+    const payload = JSON.parse(readFileSync(sidecarPath, "utf8"));
+    assert.equal(payload.version, 1);
+    assert(Array.isArray(payload.entries));
+    assert(Array.isArray(payload.sourceFiles), "sidecar records source fingerprints");
+    assert(payload.sourceFiles.length > 0);
+    assert(payload.sourceFiles.every((sf: { sha256: string; size: number }) => sf.sha256.length === 64 && sf.size >= 0));
+    assert(typeof payload.tsVersion === "string" && payload.tsVersion.length > 0);
+    assert(payload.coverage && payload.coverage.programFiles >= 1, "sidecar records coverage");
+    assert.equal(payload.coverage.comparisonSites, 1);
+    assert.equal(payload.coverage.checkedSites, 1);
+    assert(typeof payload.membershipHash === "string" && payload.membershipHash.length === 64, "sidecar records membershipHash");
+    // `value: Status` where `Status = "on" | "off"` → literal-union with enumerated members.
+    const onEntry = payload.entries.find((entry: { display: string }) => entry.display === "Status");
+    assert(onEntry, `sidecar should contain Status entry, got: ${JSON.stringify(payload.entries)}`);
+    assert.equal(onEntry.kind, "literal-union", "string-literal union resolves to literal-union");
+    const memberValues = (onEntry.members ?? []).map((m: { value?: { kind: string; value?: string } }) => m.value?.value).sort();
+    assert.deepEqual(memberValues, ["off", "on"], "members enumerate the union arms as tagged string LiteralValues");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("declarationSourceId does not tag non-literal type aliases or property keys", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-literal-source-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(rootDir, "src/literals.ts"),
+      [
+        "type Alias = SomeOtherType;",
+        "type Status = 'on' | 'off';",
+        "export const Sort = {",
+        "  'createdAt': 'createdAt',",
+        "  updatedAt: 'updatedAt',",
+        "} as const;",
+      ].join("\n"),
+    );
+    const ctx = createValidationContext({
+      rootDir,
+      paths: createPaths(rootDir),
+      files: ["src/literals.ts"],
+      validator: { id: "literal-source-test", severity: "warning" },
+    });
+    const literals = ctx.facts.literals();
+
+    assert(!literals.some((lit) => lit.declarationSourceId === "Alias"), "non-literal alias must not tag literals");
+
+    const statusValues = literals.filter((lit) => lit.declarationSourceId === "Status").map((lit) => lit.value).sort();
+    assert.deepEqual(statusValues, ["off", "on"]);
+
+    const taggedSortValues = literals.filter((lit) => lit.declarationSourceId === "Sort").map((lit) => lit.value);
+    assert(taggedSortValues.includes("createdAt"));
+    assert(taggedSortValues.includes("updatedAt"));
+    assert.equal(taggedSortValues.filter((v) => v === "createdAt").length, 1, "key occurrence of 'createdAt' must not be tagged");
+    flushValidationContextCache(ctx);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("readSidecarPayloadDetailed enforces content-addressed freshness", async () => {
+  const { readSidecarPayloadDetailed } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-sidecar-neg-"));
+  try {
+    const cacheDir = path.join(rootDir, ".opencanon", "cache");
+    mkdirSync(cacheDir, { recursive: true });
+    const sidecarPath = path.join(cacheDir, "typed-comparisons.json");
+
+    // Real analyzed source file the sidecar fingerprints.
+    const srcPath = path.join(rootDir, "src.ts");
+    const srcText = "export type Status = 'on' | 'off';\n";
+    writeFileSync(srcPath, srcText);
+    const srcHash = createHashHex(srcText);
+    const srcStat = statSync(srcPath);
+
+    const expect = {
+      rootDir,
+      tsconfigHash: (_p: string) => "matching-hash",
+      tsVersion: () => "5.9.0",
+    };
+    const freshPayload = () => ({
+      version: 1 as const,
+      generatedAt: "2026-01-01T00:00:00Z",
+      tsconfigPath: "tsconfig.json",
+      tsconfigHash: "matching-hash",
+      tsVersion: "5.9.0",
+      gitHead: "anything-metadata-only",
+      sourceFiles: [{ path: "src.ts", sha256: srcHash, mtimeMs: srcStat.mtimeMs, size: srcStat.size }],
+      membershipHash: "m",
+      coverage: { programFiles: 1, comparisonSites: 0, checkedSites: 0 },
+      entries: [],
+    });
+
+    // 1. Fresh → loads.
+    writeFileSync(sidecarPath, JSON.stringify(freshPayload()));
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, null, "fresh payload should load");
+
+    // 2. gitHead is metadata only — a different value must NOT reject.
+    writeFileSync(sidecarPath, JSON.stringify({ ...freshPayload(), gitHead: "totally-different" }));
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, null, "gitHead must not gate freshness");
+
+    // 3. tsconfigHash mismatch → reject.
+    writeFileSync(sidecarPath, JSON.stringify({ ...freshPayload(), tsconfigHash: "stale" }));
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, "tsconfig");
+
+    // 4. tsVersion mismatch → reject.
+    writeFileSync(sidecarPath, JSON.stringify({ ...freshPayload(), tsVersion: "5.0.0" }));
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, "ts-version");
+
+    // 5. Source content drift (edit the file) → reject. This is the mid-commit hole.
+    writeFileSync(sidecarPath, JSON.stringify(freshPayload()));
+    writeFileSync(srcPath, "export type Status = 'on' | 'off' | 'pending';\n");
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, "source-drift", "editing a source file must invalidate");
+
+    // 6. Deleted source file → reject.
+    rmSync(srcPath);
+    writeFileSync(sidecarPath, JSON.stringify(freshPayload()));
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, "source-drift");
+
+    // 7. Malformed JSON → reject.
+    writeFileSync(sidecarPath, "{ not valid json");
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, "malformed");
+
+    // 8. Wrong version → reject.
+    writeFileSync(sidecarPath, JSON.stringify({ ...freshPayload(), version: 2 }));
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, "version");
+
+    // 9. Missing membershipHash → reject.
+    writeFileSync(srcPath, srcText);
+    const { membershipHash: _omit, ...noMembership } = freshPayload();
+    void _omit;
+    writeFileSync(sidecarPath, JSON.stringify(noMembership));
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, "version");
+
+    // 10. Membership drift (added/removed ambient file) → reject, only when the caller supplies the current hash.
+    writeFileSync(sidecarPath, JSON.stringify(freshPayload())); // membershipHash: "m"
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, { ...expect, membershipHash: "m" }).staleReason, null, "matching membership loads");
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, { ...expect, membershipHash: "different" }).staleReason, "membership-drift");
+    // Without a supplied hash, membership is not gated (per-validation path).
+    assert.equal(readSidecarPayloadDetailed(sidecarPath, expect).staleReason, null, "membership not gated when hash omitted");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("opencanon analyze --typed fails loudly on invalid tsconfig and empty resolution", async () => {
+  const analyzeUrl = new URL("../packages/cli/src/analyze.ts", import.meta.url).href;
+  const { runAnalyzeCommand } = (await import(analyzeUrl)) as typeof import("../packages/cli/src/analyze.ts");
+
+  const badRoot = mkdtempSync(path.join(tmpdir(), "opencanon-analyze-bad-"));
+  try {
+    writeFileSync(path.join(badRoot, "tsconfig.json"), "{ not valid json");
+    let threw = false;
+    try {
+      await runAnalyzeCommand(["--typed"], badRoot);
+    } catch {
+      threw = true;
+    }
+    assert(threw, "analyze --typed must throw on malformed tsconfig");
+    assert(!existsSync(path.join(badRoot, ".opencanon", "cache", "typed-comparisons.json")), "no sidecar should be written");
+  } finally {
+    rmSync(badRoot, { recursive: true, force: true });
+  }
+
+  const emptyRoot = mkdtempSync(path.join(tmpdir(), "opencanon-analyze-empty-"));
+  try {
+    writeFileSync(path.join(emptyRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { noEmit: true, skipLibCheck: true },
+      include: [],
+      files: [],
+    }));
+    let threw = false;
+    try {
+      await runAnalyzeCommand(["--typed"], emptyRoot);
+    } catch {
+      threw = true;
+    }
+    assert(threw, "analyze --typed must throw when tsconfig resolves zero files");
+  } finally {
+    rmSync(emptyRoot, { recursive: true, force: true });
+  }
+});
+
+test("C3: sidecar with an absolute or escaping source path is rejected (treated stale)", async () => {
+  const { readSidecarPayloadDetailed } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-c3-traversal-"));
+  try {
+    const sidecarPath = path.join(rootDir, "sidecar.json");
+    const expected = {
+      rootDir,
+      tsconfigHash: () => "irrelevant",
+      tsVersion: () => null,
+    };
+
+    // (a) Absolute tsconfigPath → rejected before any FS access.
+    writeFileSync(
+      sidecarPath,
+      JSON.stringify({
+        version: 1,
+        generatedAt: "x",
+        tsconfigPath: "/etc/passwd",
+        tsconfigHash: "h",
+        tsVersion: "6.0.0",
+        gitHead: "",
+        sourceFiles: [],
+        membershipHash: "m",
+        coverage: { programFiles: 0, comparisonSites: 0, checkedSites: 0 },
+        entries: [],
+      }),
+    );
+    let result = readSidecarPayloadDetailed(sidecarPath, expected);
+    assert.equal(result.payload, null, "absolute tsconfigPath must be rejected");
+    assert.equal(result.staleReason, "malformed");
+
+    // (b) Escaping ../ source path → rejected.
+    writeFileSync(
+      sidecarPath,
+      JSON.stringify({
+        version: 1,
+        generatedAt: "x",
+        tsconfigPath: "tsconfig.json",
+        tsconfigHash: "h",
+        tsVersion: "6.0.0",
+        gitHead: "",
+        sourceFiles: [{ path: "../../../../etc/passwd", sha256: "x", mtimeMs: 0, size: 0 }],
+        membershipHash: "m",
+        coverage: { programFiles: 0, comparisonSites: 0, checkedSites: 0 },
+        entries: [],
+      }),
+    );
+    result = readSidecarPayloadDetailed(sidecarPath, expected);
+    assert.equal(result.payload, null, "escaping source path must be rejected");
+    assert.equal(result.staleReason, "malformed");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("C4: a throwing type-facts provider records crashed status and no checked facts", async () => {
+  const { prewarmContextTypeFacts, createValidationContext } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-c4-prewarm-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/a.ts"), 'function f(m: "x" | "y") { return m === "x"; }\n');
+    const ctx = createValidationContext({
+      rootDir,
+      files: ["src/a.ts"],
+      targetFiles: ["src/a.ts"],
+      analysisFiles: ["src/a.ts"],
+      validator: { id: "c4", severity: "error" },
+    });
+    const throwingProvider = {
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "ready" as const };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      resolveTypes() {
+        throw new Error("provider boom");
+      },
+    };
+    // Must resolve (not reject), install an empty map, and record explicit crashed status.
+    await prewarmContextTypeFacts(ctx, rootDir, throwingProvider);
+    const literals = ctx.typed.literal({ surroundingTypeName: "x" });
+    assert.equal(literals.length, 0, "no facts when the provider throws");
+    assert.equal(ctx.typed.producerStatus("typescript").kind, "crashed");
+    assert.match(ctx.typed.producerStatus("typescript").detail ?? "", /provider boom/);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("H1: non-git root yields a non-empty membership set via fs fallback", async () => {
+  const { listMembershipFiles, membershipHashOf } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-h1-nogit-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/a.ts"), "export const a = 1;\n");
+    writeFileSync(path.join(rootDir, "src/b.tsx"), "export const b = 2;\n");
+    writeFileSync(path.join(rootDir, "README.md"), "# x\n");
+    // No `git init` → git ls-files fails → fs fallback.
+    const files = listMembershipFiles(rootDir);
+    assert.deepEqual(files.sort(), ["src/a.ts", "src/b.tsx"], "fs fallback finds TS/TSX, not the .md");
+
+    // A sidecar built for a DIFFERENT file set is rejected via membership-drift.
+    const builtForDifferentSet = membershipHashOf(["src/a.ts"]);
+    const currentHash = membershipHashOf(files);
+    assert.notEqual(builtForDifferentSet, currentHash, "different membership sets hash differently (not both empty)");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("H2: a multi-validator run issues a single resolveTypes batch", async () => {
+  const { resolveRunTypeFacts, createValidationContext } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-h2-batch-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/a.ts"), 'function f(m: "x" | "y") { return m === "x"; }\n');
+    writeFileSync(path.join(rootDir, "src/b.ts"), 'function g(n: "p" | "q") { return n === "p"; }\n');
+    const makeCtx = (file: string) =>
+      createValidationContext({
+        rootDir,
+        files: [file],
+        targetFiles: [file],
+        analysisFiles: [file],
+        validator: { id: file, severity: "error" },
+      });
+    const contexts = [makeCtx("src/a.ts"), makeCtx("src/b.ts")];
+
+    // Count how many times resolveTypes is called by installing a stub provider.
+    let calls = 0;
+    let lastSiteCount = 0;
+    const core = await import("@opencanon/core");
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "ready" as const };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes(sites: { file: string; line: number; column: number }[]) {
+        calls += 1;
+        lastSiteCount = sites.length;
+        return new Map();
+      },
+    }));
+    try {
+      const facts = await resolveRunTypeFacts(contexts, rootDir);
+      assert.equal(facts.statuses[0]?.kind, "ready");
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+    assert.equal(calls, 1, "exactly one resolveTypes batch for the whole run");
+    assert.equal(lastSiteCount, 2, "the single batch carries the union of both contexts' sites");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("a requiresProducers validator skips with a diagnostic when its producer isn't ready; --strict-producers escalates", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-requires-producers-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    // No tsconfig + no sidecar in this temp root → the typescript producer is NOT ready.
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+    let ran = false;
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "needs-ts",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        requiresProducers: ["typescript"],
+        validate() {
+          ran = true;
+          return [];
+        },
+      }),
+    ).validators;
+
+    // Non-strict: validator skips. The skip is a validatorOutcome, NOT a finding
+    // (findings are code-only). The body never runs and findings count excludes it.
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+    assert.equal(ran, false, "the validator body must not run when its producer is unmet");
+    assert.equal(result.findings.length, 0, "a producer skip must NOT appear as a finding");
+    assert.equal(result.findingCount, 0, "findings count excludes outcomes");
+    const skip = result.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts");
+    assert.ok(skip, "a producer-skip outcome is emitted");
+    assert.equal(skip!.status, "skipped");
+    assert.equal(skip!.producer?.language, "typescript");
+    assert.match(skip!.reason ?? "", /typescript producer/);
+
+    // Strict only changes the exit-code semantics (the outcome itself is still a
+    // skip); confirm the outcome is present and producer-anchored.
+    ran = false;
+    const strict = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], strictProducers: true });
+    assert.equal(ran, false);
+    const strictSkip = strict.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts");
+    assert.ok(strictSkip);
+    assert.equal(strictSkip!.status, "skipped");
+    assert.ok(strictSkip!.producer, "skip outcome carries the producer (language+generation)");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("H1: a producer that crashes DURING the run's resolveTypes records non-ready status, so requiresProducers validators skip loudly (no silent 0 findings)", async () => {
+  const core = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-h1-crash-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+
+    // Stub live provider mirroring the runtime contract: status() is `ready`
+    // until a query crashes, after which it reports `crashed` — the crash is set
+    // BEFORE resolveTypes resolves (the runtime sets lastCrash in its catch then
+    // returns []). resolveTypes succeeds-but-empty here to model the runtime's
+    // empty-facts plus crashed-status contract.
+    let crashed = false;
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return crashed
+          ? { language: "typescript" as const, kind: "crashed" as const, detail: "query failed" }
+          : { language: "typescript" as const, kind: "ready" as const };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        crashed = true; // crash recorded before this resolves, just like the runtime
+        return new Map();
+      },
+    }));
+
+    let ran = false;
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "needs-ts",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        requiresProducers: ["typescript"],
+        validate() {
+          ran = true;
+          return [];
+        },
+      }),
+    ).validators;
+
+    try {
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      assert.equal(ran, false, "the run-query crash must surface as non-ready so the validator skips (not silent 0 findings)");
+      assert.equal(result.findings.length, 0, "a producer skip is never a finding");
+      const skip = result.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts");
+      assert.ok(skip, "a producer-skip outcome is emitted for the crashed producer");
+      assert.equal(skip!.status, "skipped");
+      assert.match(skip!.reason ?? "", /typescript producer crashed/);
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("provider throw synthesizes crashed producer status so required validators skip", async () => {
+  const core = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-provider-throw-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "ready" as const };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        throw new Error("producer exploded");
+      },
+    }));
+
+    let ran = false;
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "needs-ts-throw",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        requiresProducers: ["typescript"],
+        validate() {
+          ran = true;
+          return [];
+        },
+      }),
+    ).validators;
+
+    try {
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      assert.equal(ran, false, "a thrown producer query must not let required validators run against empty facts");
+      const skip = result.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts-throw");
+      assert.ok(skip, "a producer-skip outcome is emitted for the thrown provider");
+      assert.equal(skip!.status, "skipped");
+      assert.match(skip!.reason ?? "", /typescript producer crashed/);
+      assert.match(skip!.reason ?? "", /producer exploded/);
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("H2: a validator that queries surroundingTypeName WITHOUT requiresProducers emits a validator-runtime diagnostic when the producer is non-ready (not silent)", async () => {
+  const core = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-h2-forgetful-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+
+    // Producer present but NOT ready (disabled) — and it returns no facts.
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "disabled" as const, detail: "OPENCANON_TYPED_PRODUCER=off" };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        return new Map();
+      },
+    }));
+
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "forgetful-rule",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        // NOTE: no requiresProducers — this is the forgetful author.
+        validate({ ctx }) {
+          ctx.typed.literal({ surroundingTypeName: "X" });
+          return [];
+        },
+      }),
+    ).validators;
+
+    try {
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      assert.equal(result.findings.length, 0, "forgetful-author usage is an outcome, never a finding");
+      const warn = result.validatorOutcomes.find(
+        (outcome) => outcome.validatorId === "forgetful-rule" && /forgetful-rule used typed facts for typescript/.test(outcome.reason ?? ""),
+      );
+      assert.ok(warn, "a forgetful-author outcome is emitted instead of a silent clean result");
+      assert.equal(warn!.status, "skipped");
+      assert.match(warn!.reason ?? "", /does not declare requiresProducers/);
+
+      // Strict escalates the same outcome to an error status.
+      const strict = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], strictProducers: true });
+      const strictWarn = strict.validatorOutcomes.find(
+        (outcome) => outcome.validatorId === "forgetful-rule" && /forgetful-rule used typed facts for typescript/.test(outcome.reason ?? ""),
+      );
+      assert.ok(strictWarn);
+      assert.equal(strictWarn!.status, "error");
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("CRITICAL1: reading literal.surroundingType records consumption even when the producer is non-ready (no silent zero); a validator that never reads it records nothing", async () => {
+  const core = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-c1-surrounding-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+
+    // (a) Producer present but STALE — the type map is empty, so surroundingType
+    // resolves to undefined. The validator reads it anyway (the vulnerable shape:
+    // ctx.typed.literal({ contexts, valueKind }) + literal.surroundingType), with
+    // NO requiresProducers and NO surroundingTypeName. The OLD guard saw no result
+    // carrying surroundingType -> recorded nothing -> silently returned 0 findings.
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "stale" as const, detail: "source-drift" };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        return new Map();
+      },
+    }));
+
+    const readingValidators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "reads-surrounding-rule",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        // NOTE: no requiresProducers, no surroundingTypeName filter.
+        validate({ ctx }) {
+          for (const literal of ctx.typed.literal({ contexts: ["comparison"], valueKind: "string" })) {
+            // Reading surroundingType (resolves undefined here) MUST record consumption.
+            void literal.surroundingType;
+          }
+          return [];
+        },
+      }),
+    ).validators;
+
+    try {
+      const result = await runValidation({ rootDir, paths, conventions: [], validators: readingValidators, files: [targetFile] });
+      assert.equal(result.findings.length, 0, "no findings — the producer-enriched data was empty");
+      const warn = result.validatorOutcomes.find(
+        (outcome) =>
+          outcome.validatorId === "reads-surrounding-rule" && /reads-surrounding-rule used typed facts for typescript/.test(outcome.reason ?? ""),
+      );
+      assert.ok(warn, "reading surroundingType under a non-ready producer must emit a validator-runtime outcome, not silently return 0");
+      assert.equal(warn!.status, "skipped");
+      assert.match(warn!.reason ?? "", /does not declare requiresProducers/);
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+
+    // (b) A validator that NEVER touches surroundingType (only value/line) records
+    // nothing — no false forgetful-author outcome, even with the same producer.
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "stale" as const, detail: "source-drift" };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        return new Map();
+      },
+    }));
+
+    const nonReadingValidators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "no-surrounding-rule",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        validate({ ctx }) {
+          for (const literal of ctx.typed.literal({ contexts: ["comparison"], valueKind: "string" })) {
+            // Reads only syntactic fields; never touches surroundingType.
+            void literal.value;
+            void literal.line;
+          }
+          return [];
+        },
+      }),
+    ).validators;
+
+    try {
+      const result = await runValidation({ rootDir, paths, conventions: [], validators: nonReadingValidators, files: [targetFile] });
+      const falseWarn = result.validatorOutcomes.find(
+        (outcome) => outcome.validatorId === "no-surrounding-rule" && /used typed facts/.test(outcome.reason ?? ""),
+      );
+      assert.equal(falseWarn, undefined, "a validator that never reads surroundingType must NOT record consumption (no false warning)");
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("--strict-producers exit code is driven by validatorOutcomes, not findings", async () => {
+  const validateUrl = new URL("../packages/cli/src/validate.ts", import.meta.url).href;
+  const { validationExitCode } = (await import(validateUrl)) as typeof import("../packages/cli/src/validate.ts");
+  const base = {
+    files: [],
+    validators: ["needs-ts"],
+    validatorGraphHash: "sha256:test",
+    findingCount: 0,
+    diagnostics: [],
+    findings: [],
+    commitGates: [],
+    producerSnapshot: { typescript: { kind: "warming" as const, generation: 0 } },
+  };
+  const skipResult = {
+    ...base,
+    validatorOutcomes: [
+      { validatorId: "needs-ts", status: "skipped" as const, reason: "typescript producer warming", producer: { language: "typescript", generation: 0 } },
+    ],
+  };
+  // Plain skip is advisory: exit 0 without --strict-producers.
+  assert.equal(validationExitCode(skipResult, { changed: false, strictWarnings: false, strictProducers: false }), 0);
+  // --strict-producers escalates a producer skip to nonzero.
+  assert.equal(validationExitCode(skipResult, { changed: false, strictWarnings: false, strictProducers: true }), 1);
+  // A validator-runtime error outcome is always nonzero, even without strict.
+  const errorResult = {
+    ...base,
+    validatorOutcomes: [{ validatorId: "bad-rule", status: "error" as const, reason: "needs a non-empty question" }],
+  };
+  assert.equal(validationExitCode(errorResult, { changed: false, strictWarnings: false, strictProducers: false }), 1);
+  // A clean run with only `ran` outcomes exits 0.
+  const ranResult = { ...base, validatorOutcomes: [{ validatorId: "needs-ts", status: "ran" as const }] };
+  assert.equal(validationExitCode(ranResult, { changed: false, strictWarnings: false, strictProducers: true }), 0);
+});
+
+test("single resolver: a ready live producer beats a stale sidecar candidate (precedence kills defect #2)", () => {
+  const liveReady = { language: "typescript" as const, kind: "ready" as const, generation: 7 };
+  const sidecarStale = { language: "typescript" as const, kind: "stale" as const, detail: "sidecar out of date" };
+  assert.equal(pickAuthoritativeStatus([sidecarStale, liveReady]).kind, "ready");
+  assert.equal(pickAuthoritativeStatus([liveReady, sidecarStale]).kind, "ready");
+  const liveWarming = { language: "typescript" as const, kind: "warming" as const, generation: 0 };
+  assert.equal(pickAuthoritativeStatus([sidecarStale, liveWarming]).kind, "warming");
+  assert.equal(pickAuthoritativeStatus([sidecarStale]).kind, "stale");
+});
+
+test("ValidationResult.producerSnapshot records the producer kind + generation actually used (codex #5)", async () => {
+  const core = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-prodsnap-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "ready" as const, generation: 42 };
+      },
+      factGeneration() {
+        // No facts resolved in this stub → snapshot falls back to status gen 42.
+        return undefined;
+      },
+      async resolveTypes() {
+        return new Map();
+      },
+    }));
+    const validators = resolveTestValidators(
+      testValidatorDefinition({ id: "noop", severity: "warning", scope: "file", applies: ["src/**"], validate: () => [] }),
+    ).validators;
+    try {
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      assert.deepEqual(result.producerSnapshot.typescript, { kind: "ready", generation: 42 });
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("audit C: producerSnapshot binds the generation the FACTS came from, not a newer status() that raced in (resolveTypes gen N, status N+1 -> snapshot N)", async () => {
+  const core = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-factgen-race-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+    // The race: the live producer resolved this batch from generation N (=7),
+    // carried in the resolveTypes response and recorded by factGeneration(). A
+    // rebuild then advanced the producer to N+1 (=8), so status() — sampled
+    // AFTER resolveTypes — reports generation 8. The snapshot must bind the
+    // FACTS' generation (7), never the racing status generation (8).
+    const factGen = 7;
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        // Availability sampled later: a newer program (gen 8) is now ready.
+        return { language: "typescript" as const, kind: "ready" as const, generation: factGen + 1 };
+      },
+      factGeneration() {
+        // Bound atomically with the facts this run actually used.
+        return factGen;
+      },
+      async resolveTypes() {
+        return new Map();
+      },
+    }));
+    const validators = resolveTestValidators(
+      testValidatorDefinition({ id: "noop", severity: "warning", scope: "file", applies: ["src/**"], validate: () => [] }),
+    ).validators;
+    try {
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      // kind from authoritative status; generation from the facts (N), not N+1.
+      assert.deepEqual(result.producerSnapshot.typescript, { kind: "ready", generation: factGen });
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("warming -> ready: a warming producer yields skipped(warming); re-running once ready flips the outcome to ran", async () => {
+  const core = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-warming-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const paths = createPaths(rootDir);
+    let warmed = false;
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return warmed
+          ? { language: "typescript" as const, kind: "ready" as const, generation: 1 }
+          : { language: "typescript" as const, kind: "warming" as const, generation: 0 };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        return new Map();
+      },
+    }));
+    let ran = false;
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "needs-ts",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        requiresProducers: ["typescript"],
+        validate() {
+          ran = true;
+          return [];
+        },
+      }),
+    ).validators;
+    try {
+      const warming = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      assert.equal(ran, false);
+      assert.equal(warming.findings.length, 0);
+      const skip = warming.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts");
+      assert.equal(skip?.status, "skipped");
+      assert.match(skip?.reason ?? "", /typescript producer warming/);
+      assert.deepEqual(warming.producerSnapshot.typescript, { kind: "warming", generation: 0 });
+
+      warmed = true;
+      const ready = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      assert.equal(ran, true, "the validator runs once its producer is ready");
+      const outcome = ready.validatorOutcomes.find((o) => o.validatorId === "needs-ts");
+      assert.equal(outcome?.status, "ran");
+      assert.deepEqual(ready.producerSnapshot.typescript, { kind: "ready", generation: 1 });
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("M1: invalid requiresProducers yields a validateContext diagnostic instead of silently disabling the gate", () => {
+  assert.deepEqual(
+    validateValidatorDefinitions({
+      id: "bad-requires",
+      topics: ["sample"],
+      severity: "error",
+      scope: "file",
+      requiresProducers: [123],
+      validate() {
+        return [];
+      },
+    }),
+    ["Validator bad-requires requiresProducers must be a non-empty string[] when present."],
+  );
+
+  assert.deepEqual(
+    validateValidatorDefinitions({
+      id: "empty-requires",
+      topics: ["sample"],
+      severity: "error",
+      scope: "file",
+      requiresProducers: [],
+      validate() {
+        return [];
+      },
+    }),
+    ["Validator empty-requires requiresProducers must be a non-empty string[] when present."],
+  );
+});

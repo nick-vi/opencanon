@@ -1,10 +1,12 @@
-import { createPaths, discoverProjectFiles, fail } from "@opencanon/core";
-import { openProjectStore, type DaemonStore } from "@opencanon/daemon";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { createPaths, discoverProjectFiles, engineSourceLanguage, fail, isCodeGraphIndexableFile } from "@opencanon/core";
+import { openProjectStore, type ProjectStore } from "@opencanon/runtime";
 
-const oxcExtensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
 
 export type CodeGraphSession = {
-  store: DaemonStore;
+  store: ProjectStore;
   sourceFiles: string[];
   close(): void;
 };
@@ -16,16 +18,26 @@ export function openCodeGraph(rootDir: string): CodeGraphSession {
 
   const store = openProjectStore({ rootDir, paths });
   try {
-    const sourceFiles = discovery.files.filter(isOxcSourceFile);
+    const sourceFiles = discovery.files.filter(isCodeGraphIndexableFile);
     const scan = store.scanAndDiff(discovery.files);
     const graphIsEmpty = store.project.searchSymbols({ limit: 1 }).symbols.length === 0;
-    const changedSource = (graphIsEmpty ? sourceFiles : scan.changedFiles).filter(isOxcSourceFile);
-    const deletedSource = scan.deletedFiles.filter(isOxcSourceFile);
+    const changedSource = (graphIsEmpty ? sourceFiles : scan.changedFiles).filter(isCodeGraphIndexableFile);
+    const deletedSource = scan.deletedFiles.filter(isCodeGraphIndexableFile);
     if (changedSource.length > 0 || deletedSource.length > 0) {
       store.project.indexCodeGraph({
+        // Read each changed source ONCE and pass content + its hash, so the graph
+        // is built from and labelled with the same bytes (no scan->index TOCTOU).
         files: scan.files
           .filter((file) => changedSource.includes(file.path))
-          .map((file) => ({ path: file.path, contentHash: file.contentHash, language: languageForFile(file.path) })),
+          .map((file) => {
+            try {
+              const content = readFileSync(path.join(rootDir, file.path), "utf8");
+              return { path: file.path, contentHash: createHash("sha256").update(content).digest("hex"), language: engineSourceLanguage(file.path), content };
+            } catch {
+              return undefined;
+            }
+          })
+          .filter((file): file is NonNullable<typeof file> => file !== undefined),
         deletedFiles: deletedSource,
       });
     }
@@ -40,15 +52,4 @@ export function openCodeGraph(rootDir: string): CodeGraphSession {
     store.close();
     throw error;
   }
-}
-
-function isOxcSourceFile(file: string): boolean {
-  return oxcExtensions.some((extension) => file.endsWith(extension));
-}
-
-function languageForFile(file: string): "typescript" | "tsx" | "javascript" | "jsx" {
-  if (file.endsWith(".tsx")) return "tsx";
-  if (file.endsWith(".jsx")) return "jsx";
-  if (file.endsWith(".mts") || file.endsWith(".cts") || file.endsWith(".ts")) return "typescript";
-  return "javascript";
 }

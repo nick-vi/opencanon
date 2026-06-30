@@ -1,11 +1,11 @@
-import type { ImpactSurface } from "./core.ts";
 import { unique } from "./core-utils.ts";
-import { ProjectFileLanguage } from "./project-files.ts";
+import { ProjectFileLanguage } from "./language-registry.ts";
 import type {
   ImportEdge,
   ProjectAnnotationFact,
   ProjectCallFact,
   ProjectComment,
+  ProjectDiagnosticFact,
   ProjectDuplicateFact,
   ProjectExportFact,
   ProjectFile,
@@ -13,6 +13,8 @@ import type {
   ProjectReferenceFact,
   ProjectSymbolFact,
 } from "./validator-types.ts";
+import { ImportEdgeKind } from "./validator-types.ts";
+import { LiteralValueKind } from "./typescript.ts";
 
 const FactKeySeparator = "\u0000";
 
@@ -27,14 +29,19 @@ export function buildSymbolFacts(files: ProjectFile[]): ProjectSymbolFact[] {
   const facts: ProjectSymbolFact[] = [];
   for (const file of files) {
     if (file.language === ProjectFileLanguage.TypeScript || file.language === ProjectFileLanguage.Svelte) {
-      const exportedNames = new Set(file.ts.exports().map((item) => item.name));
+      const exportedNames = new Set(
+        file
+          .ts.exports()
+          .filter((item) => !item.source && item.kind !== "star-reexport")
+          .map((item) => item.name),
+      );
       for (const fn of file.ts.functions()) {
         facts.push({
           file,
           language: file.language,
           line: fn.line,
           name: fn.name,
-          kind: "function",
+          kind: fn.kind ?? "function",
           exported: fn.exported || exportedNames.has(fn.name),
           params: fn.params,
         });
@@ -60,7 +67,7 @@ export function buildSymbolFacts(files: ProjectFile[]): ProjectSymbolFact[] {
           language: file.language,
           line: fn.line,
           name: fn.name,
-          kind: "function",
+          kind: fn.kind,
           exported: !fn.name.startsWith("_"),
           params: fn.params,
         });
@@ -82,21 +89,14 @@ export function buildSymbolFacts(files: ProjectFile[]): ProjectSymbolFact[] {
 
 export function buildCallFacts(files: ProjectFile[]): ProjectCallFact[] {
   const calls: ProjectCallFact[] = [];
-  const callPattern = /\b(?:(?<receiver>[A-Za-z_$][\w$]*)\s*\.\s*)?(?<name>[A-Za-z_$][\w$]*)\s*\(/g;
   for (const file of files) {
     if (file.language !== ProjectFileLanguage.TypeScript && file.language !== ProjectFileLanguage.Svelte && file.language !== ProjectFileLanguage.Python) continue;
-    for (const match of file.find(callPattern)) {
-      const receiver = match.groups[0] || undefined;
-      const name = match.groups[1] || match.text.replace(/\s*\($/, "");
-      if (["if", "for", "while", "switch", "catch", "function"].includes(name)) continue;
+    const fileCalls = file.language === ProjectFileLanguage.Python ? file.py.calls() : file.ts.calls();
+    for (const call of fileCalls) {
       calls.push({
         file,
         language: file.language,
-        line: match.line,
-        column: match.column,
-        name,
-        receiver,
-        callee: receiver ? `${receiver}.${name}` : name,
+        ...call,
       });
     }
   }
@@ -121,7 +121,7 @@ export function buildReferenceFacts(files: ProjectFile[], imports: ImportEdge[],
         language: edge.from.language,
         line: edge.line,
         name,
-        kind: edge.kind === "export" ? "export" : "import",
+        kind: edge.kind === ImportEdgeKind.Export ? "export" : "import",
         targetPath: edge.resolvedPath,
         targetName: name,
       });
@@ -139,21 +139,38 @@ export function buildReferenceFacts(files: ProjectFile[], imports: ImportEdge[],
     });
   }
 
-  const exportedSymbols = symbols.filter((symbol) => symbol.exported);
-  for (const file of files) {
-    for (const symbol of exportedSymbols) {
-      if (symbol.file.path === file.path) continue;
-      for (const match of file.find(new RegExp(`\\b${escapeRegex(symbol.name)}\\b`, "g"))) {
-        references.push({
-          file,
-          language: file.language,
-          line: match.line,
-          column: match.column,
-          name: symbol.name,
-          kind: "identifier",
-          targetPath: symbol.file.path,
-          targetName: symbol.name,
-        });
+  // Group exported symbols by name and scan each file ONCE with a single combined
+  // word-boundary regex, instead of one regex per (file × symbol) — the latter is
+  // quadratic and was the dominant cost of analysis on large repos. `\b…\b` anchoring
+  // makes alternation order irrelevant (the whole word that matches is the same either
+  // way), and emitting one reference per same-named symbol preserves the old semantics,
+  // including duplicate exported names.
+  const symbolsByName = new Map<string, ProjectSymbolFact[]>();
+  for (const symbol of symbols) {
+    if (!symbol.exported) continue;
+    const existing = symbolsByName.get(symbol.name);
+    if (existing) existing.push(symbol);
+    else symbolsByName.set(symbol.name, [symbol]);
+  }
+  if (symbolsByName.size > 0) {
+    const combined = new RegExp(`\\b(?:${[...symbolsByName.keys()].map((name) => RegExp.escape(name)).join("|")})\\b`, "g");
+    for (const file of files) {
+      for (const match of file.find(combined)) {
+        const named = symbolsByName.get(match.text);
+        if (!named) continue;
+        for (const symbol of named) {
+          if (symbol.file.path === file.path) continue;
+          references.push({
+            file,
+            language: file.language,
+            line: match.line,
+            column: match.column,
+            name: symbol.name,
+            kind: "identifier",
+            targetPath: symbol.file.path,
+            targetName: symbol.name,
+          });
+        }
       }
     }
   }
@@ -184,7 +201,7 @@ export function buildAnnotationFacts(comments: ProjectComment[], symbols: Projec
 export function buildDuplicateFacts(literals: ProjectLiteralFact[]): ProjectDuplicateFact[] {
   const groups = new Map<string, ProjectLiteralFact[]>();
   for (const literal of literals) {
-    if (literal.valueKind !== "string") continue;
+    if (literal.valueKind !== LiteralValueKind.String) continue;
     if (!/[A-Za-z0-9]/.test(literal.value)) continue;
     const key = `${literal.valueKind}:${literal.value}`;
     groups.set(key, [...(groups.get(key) ?? []), literal]);
@@ -272,6 +289,8 @@ export function normalizeAnnotationTag(tag: string): string {
   return normalized;
 }
 
-export function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Parse diagnostics across files — surfaces malformed source the extractor could
+ * not fully parse, so a broken file is never silently reported as clean. */
+export function buildDiagnosticFacts(files: ProjectFile[]): ProjectDiagnosticFact[] {
+  return files.flatMap((file) => file.diagnostics());
 }

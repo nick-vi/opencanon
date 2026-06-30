@@ -15,10 +15,10 @@
   import SystemDiagram from '$lib/components/SystemDiagram.svelte';
   import Specimen from '$lib/Specimen.svelte';
   import {
-    DAEMON_COMMAND,
-    INIT_COMMAND,
+    INSTALL_COMMAND,
+    SERVICE_COMMAND,
+    SETUP_COMMAND,
     SITE,
-    SKILLS_INSTALL_COMMAND
   } from '$lib/site.config.js';
 
   const heroSource = `import { db } from "../db/client";
@@ -58,31 +58,31 @@ export class CompanyService {
   const features = [
     {
       icon: BookOpen,
-      title: 'Context',
+      title: 'Project Canon',
       href: '/docs/quickstart',
-      text: 'Load the docs, decisions, and validators for a path before an agent edits it.',
+      text: 'Keep conventions, specs, changes, docs, and impact surfaces in typed source.',
       tip: 'canon'
     },
     {
       icon: ShieldCheck,
-      title: 'Validators',
+      title: 'Proof',
       href: '/docs/validators',
-      text: 'Run typed rules over repository facts. Fixtures pin the behavior.',
-      tip: 'facts'
+      text: 'Run validators, gates, doctor checks, fixtures, and declared task checks against the code.',
+      tip: 'validators'
     },
     {
       icon: Braces,
-      title: 'Findings',
+      title: 'Knowledge',
       href: '/docs/concepts',
-      text: 'Return severity, location, decision links, and fix metadata.',
-      tip: 'findings'
+      text: 'Search code, docs, symbols, chunks, related areas, and backlinks through one local index.',
+      tip: 'facts'
     },
     {
       icon: Zap,
       title: 'Hooks',
       href: '/docs/hooks',
-      text: 'Send concise validation output to Codex, Claude Code, and OpenCode after edits.',
-      tip: 'daemon'
+      text: 'Give Codex, Claude Code, and OpenCode the same scoped feedback humans can inspect.',
+      tip: 'runtime'
     }
   ];
 
@@ -90,15 +90,15 @@ export class CompanyService {
 opencanon validate --changed
 opencanon feedback --changed`;
 
-  const installSession = `${SKILLS_INSTALL_COMMAND}
+  const installSession = `${INSTALL_COMMAND}
 
-${INIT_COMMAND}
+${SETUP_COMMAND}
 
-${DAEMON_COMMAND}`;
+${SERVICE_COMMAND}`;
 </script>
 
 <svelte:head>
-  <title>{SITE.name}: executable repository conventions</title>
+  <title>{SITE.name}: Runtime-Enforced Project Canon</title>
   <meta name="description" content={SITE.description} />
 </svelte:head>
 
@@ -107,17 +107,18 @@ ${DAEMON_COMMAND}`;
     <div class="hero-copy">
       <p class="eyebrow">
         <GitBranch size={16} />
-        Local repo rules
+        Agent-ready, human-readable
       </p>
-      <h1>Executable repo conventions for agents.</h1>
+      <h1>Project Canon enforced by runtime.</h1>
       <p class="dek">
-        OpenCanon loads the rules for a repo, runs validators, and returns
-        findings agents can act on.
+        OpenCanon turns conventions, specs, active changes, and project
+        knowledge into local checks that humans can inspect and agents can
+        follow.
       </p>
       <div class="actions">
         <a class="button primary" href="/docs/install">
           <Terminal size={16} />
-          Install skill
+          Install runtime
         </a>
         <a class="button secondary" href={SITE.repoUrl} target="_blank" rel="noreferrer">
           <ExternalLink size={16} />
@@ -126,14 +127,14 @@ ${DAEMON_COMMAND}`;
       </div>
       <p class="status-line">
         <CircleCheck size={15} />
-        Runs locally. Open source. No analytics.
+        Runs locally. Open source. CLI, MCP, hooks, and browser diagnostics.
       </p>
     </div>
 
     <div class="hero-panel">
       <div class="panel-top">
         <span>validator output</span>
-        <span>local daemon</span>
+        <span>local runtime</span>
       </div>
       <Specimen
         caption="Finding record with code, margin signal, and action details."
@@ -147,9 +148,10 @@ ${DAEMON_COMMAND}`;
   <section class="section">
     <header class="section-head">
       <p class="smallcaps">Workflow</p>
-      <h2>Rules beside the code they govern.</h2>
+      <h2>Live project memory with proof attached.</h2>
       <p>
-        Keep docs, decisions, validators, and findings in one local loop.
+        Keep docs, conventions, specs, changes, checks, and search in one local
+        loop.
       </p>
     </header>
 
@@ -176,10 +178,10 @@ ${DAEMON_COMMAND}`;
   <section class="section runtime">
     <header class="section-head">
       <p class="smallcaps">Runtime</p>
-      <h2>One daemon, same result everywhere.</h2>
+      <h2>One local service, same result everywhere.</h2>
       <p>
-        The daemon watches changes, caches facts, and serves the CLI, hooks,
-        and UI.
+        The service starts project runtimes, caches derived state, and serves
+        the CLI, MCP, hooks, and browser diagnostics.
       </p>
     </header>
     <SystemDiagram />
@@ -188,9 +190,10 @@ ${DAEMON_COMMAND}`;
   <section class="section split">
     <div>
       <p class="smallcaps">Feedback</p>
-      <h2>Findings agents can act on.</h2>
+      <h2>Findings that change agent behavior.</h2>
       <p>
-        Each finding includes the rule, location, reason, and fix metadata.
+        Each finding includes the rule, location, reason, related Project Canon,
+        and optional fix metadata.
       </p>
       <ul class="command-list">
         <li>
@@ -218,10 +221,10 @@ ${DAEMON_COMMAND}`;
   <section class="section install">
     <header class="section-head">
       <p class="smallcaps">Install</p>
-      <h2>Install the skill.</h2>
+      <h2>Install OpenCanon.</h2>
       <p>
-        Clone OpenCanon into your agent host's skills directory. The skill
-        includes the CLI, daemon, UI assets, validators, and engine.
+        Install the runtime once, then run setup in a repository. Agent entry
+        files stay small and point back to the live CLI, MCP, and local API.
       </p>
     </header>
     <CodeBlock title={SITE.repoSlug} language="shell" code={installSession} />

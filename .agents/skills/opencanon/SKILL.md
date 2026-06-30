@@ -1,230 +1,54 @@
 ---
 name: opencanon
-description: Use when modifying repository code and needing local conventions, pattern decisions, style consistency, architecture rules, or OpenCanon context scoped by topic or file path.
+description: Use when building, reviewing, debugging, or explaining a project governed by OpenCanon Project Canon, Proof, Knowledge, Activity, or Health.
 ---
 
 # OpenCanon
 
-Before editing repository code, load only the relevant convention context.
+OpenCanon is installed as a runtime. This skill is a compact agent entrypoint: use the `opencanon` CLI or MCP for live project state, scoped context, validation, task progress, Search, and Health.
 
-## First-Run Setup
+## Operating Rules
 
-If OpenCanon is not initialized in the current repository, or if the local skill scaffold is missing, run setup before normal context work:
-
-```bash
-bun run opencanon setup --yes --hooks codex
-```
-
-Use the current host when known: `codex`, `claude`, or `opencode`. Omit `--hooks` when the host is unclear. Setup is deterministic: it scaffolds missing files, installs requested feedback hooks, validates context, runs doctor, runs project validation, starts the daemon, and writes generated setup state under `.opencanon/setup.json`.
-
-After setup, read the printed diagnostics and fix failed steps before editing code. Do not hand-edit generated runtime files when a setup or build command can update them.
+1. Start with `opencanon brief --format json` when no narrower command is obvious.
+2. Treat project source and TypeScript definitions under `opencanon/` as source truth.
+3. Do not hand-edit OpenCanon-owned generated docs, generated authoring files, runtime events, SQLite state, cache files, or this managed skill.
+4. For active Changes, update progress with `opencanon changes ...`; the Change definition owns the plan, not mutable task status.
+5. Run focused Proof before finishing and `opencanon doctor` when generated artifacts, init state, Health, or Knowledge may be stale.
 
 ## Workflow
 
-1. If intended files are known, run:
+1. Brief or scope: `opencanon brief --format json`, `opencanon context --files <paths...>`, or `opencanon context --changed`.
+2. Classify durable intent: Area for ownership, Spec for behavior, Convention for rules, Change for active implementation, Proof for checks, Knowledge for retrieval, Activity for events, Health for setup/runtime correctness.
+3. Track active work: `opencanon changes ready --format json`, `opencanon changes show <change-id> --format json`, then create a managed worktree or claim/start/check/review/close tasks explicitly.
+4. Search before guessing: use `opencanon search <query>`, `opencanon ask "<question>"`, `opencanon canon map --format json`, symbols, and graph commands.
+5. Implement and prove: edit source, render generated docs when definitions change, run scoped validation, then broaden checks based on risk.
 
-   ```bash
-   bun run opencanon context --files <paths...>
-   ```
+## Progressive References
 
-2. If the task is about current worktree edits, run:
+Read only the file that matches the current task.
 
-   ```bash
-   bun run opencanon context --changed
-   ```
+- [Greenfield App Workflow](references/greenfield-app.md): creating or reshaping an app under OpenCanon.
+- [Project Canon Authoring](references/canon-authoring.md): changing Areas, Specs, Changes, conventions, generated docs, or entry files.
+- [Implementation Workflow](references/implementation.md): implementing a feature, fix, refactor, or generated artifact change.
+- [Change And Task Planning](references/change-planning.md): decomposing work into tracked Changes and task graphs.
+- [Review Workflow](references/review.md): reviewing local edits, PRs, generated artifacts, or Proof coverage.
+- [Search And Knowledge](references/search-knowledge.md): navigating code, docs, chunks, symbols, backlinks, and relationships.
+- [Health And Runtime](references/health-runtime.md): diagnosing setup, service, project runtime, indexing, logs, or stale state.
+- [Release Readiness](references/release.md): checking packaging, update assets, install rehearsal, or release readiness without publishing.
 
-   Add `--git-history` when recent commits would help explain why touched files changed. Treat git output as evidence, not source of truth.
-
-3. If only the area is known, run:
-
-   ```bash
-   bun run opencanon context --topic <topic>
-   ```
-
-4. Treat returned context as the current source of truth.
-5. Use `bun run opencanon rules --validator <id>` or `bun run opencanon rules --topic <topic>` when you need a quick map of rule summaries, scopes, decisions, and fixture coverage. Use `bun run opencanon rules --tree --validator <id>` for tree-backed validators.
-6. If touched code uses a replaced pattern, refactor the touched flow to the current pattern.
-7. Do not add internal shims, aliases, compatibility wrappers, deprecated paths, or parallel APIs.
-8. When files are edited, run matching validators:
-
-   ```bash
-   bun run opencanon validate --files <paths...>
-   ```
-
-9. Finding resolution policy: any validation finding must be addressed before the agent completes the task. Fix code to match the current decision when the finding is valid. If the validator is wrong, fix the validator and add or update fixtures. If the convention itself should change, ask the user before editing decisions using the template printed by validation output. `error` findings make the CLI exit nonzero. `warning` findings are non-blocking by default; the CLI exits zero unless `--strict-warnings` is used. Audit documented exceptions with `bun run opencanon context --list-exceptions`.
-
-10. When host hooks are installed, respond to OpenCanon feedback after writes before continuing the task. Hook feedback is generated by:
-
-   ```bash
-   bun run opencanon hook <codex|claude|opencode>
-   ```
-
-## Extending
-
-Agents may extend conventions when repeated drift is found.
-
-Allowed extension points:
-
-- Add decisions to the configured `decisionsPath`.
-- Add normal Markdown convention docs and link decisions to headings through `docs` refs.
-- Add validators to the configured `validatorsPath`.
-- Add `valid.ts` and `invalid.ts` fixtures under the configured `fixturesDir/<validator-id>/`.
-
-The configured `validatorsPath` must export one validator definition or an array of definitions. Import validator authoring APIs from `@opencanon/core`, curated factories from `@opencanon/validators`, and generated package/import constants from `@opencanon/project`. Fixture definitions can import `defineFixture` from `@opencanon/core/testing`. Use nested `validators: []` to group rules and control order.
-
-Validator shape:
-
-```ts
-import { defineValidator } from "@opencanon/core";
-
-export default defineValidator({
-  id: "group-or-rule-id",
-  topics: ["topic"],
-  applies: ["src/path/**"],
-  severity: "error",
-  scope: "file",
-  facts: ["imports"],
-  summary: ({ applies, scope, facts }) =>
-    `Files matching ${applies.join(", ")} must follow ${scope} conventions using ${facts.join(", ")} facts.`,
-  validate({ ctx, runtime }) {
-    return [];
-  },
-  validators: [],
-});
-```
-
-Parent validators scope children. Topics, decision ids, facts, and `analysis` globs merge; `applies` are intersected; child severity and scope override parent values.
-
-`scope` is required on every real validator or inherited from a parent. Valid scopes are `file`, `folder`, `import-edge`, `package`, and `project`. Use `facts` to declare parsed facts the validator consumes: `imports`, `exports`, `symbols`, `calls`, `literals`, `comments`, `references`, `annotations`, `diagnostics`, or `duplicates`.
-
-`summary` is optional rule metadata for `opencanon rules`. It can be a string or a synchronous definition-time callback that receives resolved `id`, `topics`, `applies`, `severity`, `scope`, `facts`, and `decisionIds`. Do not use runtime context, file reads, or async work for summaries.
-
-Use `validate({ ctx, runtime })` as a single destructurable parameter. `ctx.files` exposes discovered project files, and `ctx.targetFiles` is the current validation scope matched by `applies` or CLI input. Use optional `analysis: [...]` on validators when parsed facts must include files outside the current targets, such as TypeScript files validated against `src-tauri/src/**/*.rs`; it is a fact-scope hint, not an access boundary. `ctx.projectFiles(patterns?)` returns discovered project files independent of target and analysis scope; `ctx.byGlob(patterns)` is the concise alias. `ctx.facts.*` is the canonical validator data API. It exposes `imports()`, `exports()`, `symbols()`, `calls()`, `literals()`, `comments()`, `references()`, `annotations()`, `diagnostics()`, and `duplicates()` over the current analysis scope, which defaults to target files in CLI validation, while resolving relative, TS path-alias, and workspace-package imports against discovered project files. Use generated constants from `@opencanon/project` for package, dependency, crate, Cargo, Python, and import-specifier names. `ctx.graph.*` exposes graph-shaped `symbols()`, `references()`, `callers()`, `callees()`, and `impact()` over the same fact scope. Import edges include resolution kind plus source/target package names when known. `ctx.impact.*` exposes configured impact surfaces, downstream domain edges, required checks, and proposed impact notes for touched files. `ctx.baseline.*` exposes known findings from the configured baseline file. `ctx.text(path)`, `ctx.json(path)`, and `ctx.jsonFiles(patterns)` load project/config files on demand. `ctx.workspace()` exposes monorepo packages/apps, dependency maps, file ownership, and import edges. `ctx.folders()` exposes discovered project folders. `ctx.tree({ ... })` validates nested project-tree rules for file naming, folders, import boundaries, and relative import depth; tree keys and `children` keys support globs, and named `nodes` plus `boundaries` define layer dependency rules. Invalid tree definitions emit validator findings. For tree examples, read `references/tree-validation.md` only when adding or changing structural validators. Individual files have text helpers. Parser-specific helpers still exist for framework internals and exceptional validators, but new validators should prefer `ctx.facts.*` so language adapters can expand without changing rule code. `runtime` exposes decisions, globs, and paths.
-
-The daemon keeps generated project authoring types fresh when it is running. Run `bun run opencanon project-types generate` manually during setup, CI, or recovery, or when the daemon reports that its project-type watcher failed. Generation writes a lightweight gitignored `.agents/skills/opencanon/generated/project.ts` with const objects such as `Packages.EXAMPLE_UI`, `PackageRoots.EXAMPLE_UI`, `ImportSpecifiers.REACT`, `Npm.ZOD.name`, `Npm.ZOD.version`, `Crates.EXAMPLE_CORE`, `CrateRoots.EXAMPLE_CORE`, `Cargo.SERDE.name`, `Cargo.SERDE.version`, `Cargo.SERDE.section`, `Python.REQUESTS.name`, `Python.REQUESTS.version`, `Python.REQUESTS.source`, and `Python.REQUESTS.group`; each object, type, and key carries JSDoc derived from package, Cargo, or Python dependency metadata. It intentionally does not emit file, literal, symbol, caller, or callee fact maps by default because those make TypeScript language servers sluggish in large repos. Generation also writes `.agents/skills/opencanon/generated/aliases.d.ts` with ambient module declarations for workspace packages, dependencies, and imports used inside fixture source files so fixtures can keep realistic imports without local `as any` stubs.
-
-When adding or editing a validator, add fixture coverage with the same change:
-
-- `.agents/skills/opencanon/fixtures/<validator-id>/valid.ts`
-- `.agents/skills/opencanon/fixtures/<validator-id>/invalid.ts`
-- optional `.agents/skills/opencanon/fixtures/<validator-id>/fixed.ts` when structured fixes are provided
-
-While iterating on one validator, run `bun run opencanon validate --check-fixtures --validator <validator-id>`. Before finishing validator work, run `bun run opencanon validate --check-fixtures`. Framework unit tests are only needed when changing OpenCanon runtime behavior; repository convention tests belong in validator fixtures.
-
-Fixture definitions are flat TypeScript modules named `valid.ts`, `invalid.ts`, and optional `fixed.ts`. Use `defineFixture({ directories, files: ({ file }) => [...] })` for virtual files and folders so invalid test projects do not create invalid source files on disk. Prefer `file.ts(path, text)`, `file.tsx(path, text)`, `file.py(path, text)`, `file.rs(path, text)`, `file.toml(path, text)`, `file.md(path, text)`, and `file.json(path, value)` for readable fixtures; language text helpers dedent multiline strings and add a trailing newline, while `file(path, text)` remains the raw primitive. The skill has two TypeScript programs: `tsconfig.json` keeps validators strict, while `fixtures/tsconfig.json` extends the looser fixture program with generated ambient aliases for realistic imports.
-
-`opencanon.config.json` is optional; built-in defaults use `docs/opencanon`, `docs/opencanon/impact-surfaces.json`, `docs/opencanon/proposed-impact-notes.json`, `.agents/skills/opencanon/validators/index.ts`, `.agents/skills/opencanon/fixtures`, `.opencanon/cache`, `.opencanon/baseline.json`, `.opencanon/commit-approvals.json`, root `src/**` and `tests/**`, common `apps/*` and `packages/*`, and roots from `package.json#workspaces`. Discovery is Git-backed inside Git repos and filesystem-backed outside Git repos. When `fileDiscovery: "git"` is effective or explicitly configured, it requires a Git repository, respects `.gitignore`, and never silently falls back to filesystem traversal. OpenCanon then applies `projectFilePatterns`, `ignore`, `maxFiles`, and `maxFileSizeKb`; default ignores exclude generated state and skill implementation paths from project validation while `validate --check-fixtures` still reads validator fixtures directly. `validate --changed` and `feedback --changed` use the same project scope before running validators. Parser results, daemon state, setup state, SQLite state, ephemeral commit approvals, and installed runtime artifacts are generated locally and ignored by Git; `doctor` verifies those ignore rules. Set `commitApprovalsPersistent: true` only when the configured `commitApprovalsPath` should be committed as audit state. Validator execution awaits sync or async validators and sorts findings deterministically; it is not worker-thread CPU parallelism. Use `--profile` when validation feels slow and `benchmark --sizes 1000,10000,50000` when changing performance-sensitive internals.
-
-Agent feedback hooks reuse the same validators but render concise feedback for the host to inject after edits. Use `feedback` manually, and use `hook` for host JSON payloads:
+## Common Commands
 
 ```bash
-bun run opencanon feedback --files src/services/company.service.ts
-bun run opencanon feedback --changed
-bun run opencanon feedback --changed --strict-warnings
-bun run opencanon hook config codex
-bun run opencanon hook config claude
-bun run opencanon hook config opencode
-bun run opencanon hook install --all --dry-run
-bun run opencanon update check --manifest <path-or-url>
-bun run opencanon update apply --manifest <path-or-url>
-bun run opencanon daemon check
-bun run opencanon daemon start
-bun run opencanon daemon status
-bun run opencanon daemon list
-bun run opencanon daemon stop
+opencanon status --format json
+opencanon setup --yes --format json
+opencanon brief --format json
+opencanon context --files <paths...>
+opencanon context --changed
+opencanon changes ready --format json
+opencanon changes show <change-id> --format json
+opencanon worktree create <change-id> --task <task-id>
+opencanon worktree list --format json
+opencanon validate --files <paths...>
+opencanon validate --changed
+opencanon doctor
 ```
-
-Codex uses `PostToolUse` with `Edit|Write|apply_patch` and requires `[features] codex_hooks = true`. Claude Code uses `PostToolUse` with `Write|Edit|MultiEdit`. OpenCode discovers this skill from `.agents/skills/opencanon`; its local plugin loader also needs `.opencode/plugins/opencanon.ts` to import the plugin from `.agents`. `opencanon hook install <host|--all>` writes these configs, and `doctor` verifies installed project hook configs. Hook validation scope is extracted from the write/edit payload; Codex and OpenCode `apply_patch` payloads are parsed from patch markers, and deleted paths are ignored. Repeated findings are suppressed within a host turn when the host provides a turn or call id. Feedback is grouped by file, capped by budget, and includes the exact validation command for the full report.
-
-Daemon-backed commands are fail-fast about prerequisites. `opencanon daemon start` requires Bun `1.3.13` and the engine binary under `runtime/engine/`; `opencanon daemon check` reports the current Bun version, engine version, and daemon/engine schema versions before start. When a release manifest is provided, use `opencanon update check --manifest <path-or-url>` or `opencanon setup --yes --manifest <path-or-url>` so the CLI detects the current platform, selects the matching engine asset, verifies SHA-256, and installs it atomically. Do not choose binary URLs manually. `opencanon update apply` refuses to write while this project's daemon is running. The supervised daemon is registered at `~/.opencanon/daemons.json` while repo state stays under `.opencanon/`. Non-health API routes require the generated daemon token, and non-loopback hosts require `--allow-remote`. Normal `context`, `rules`, `validate`, `feedback`, and hook commands reuse that supervised daemon when it is running, or start an isolated in-process ephemeral daemon with a scratch SQLite path for the single request. Use `opencanon daemon status` to inspect process health, watcher freshness, file/finding counts, stale files, and cache counters. Use `opencanon daemon list`, `open`, and `stop` for lifecycle control. Use `opencanon daemon serve` or `opencanon daemon start --foreground` only when a blocking foreground server is needed. Do not fall back to direct CLI validation when daemon prerequisites fail.
-
-Validator fixes are structured and safety-tagged:
-
-- `safe`: deterministic local edit.
-- `suggested`: plausible edit requiring explicit opt-in.
-- `manual`: diagnostic only.
-
-Use `fix: { safety, description, edits }` for automatic fixes. `--fix` only applies structured edits centrally; callback mutation is not part of the validator contract. Use `fix: { safety, description, command }` for advisory command fixes; OpenCanon prints command fixes but never executes them during `--fix`.
-
-Only add validators for mechanically checkable rules. Do not change the CLI output contract or validator runtime unless the task is to improve the framework itself.
-
-Validators may emit commit gates for changes that need user intent before commit but should not appear as normal findings. Use `ctx.commitGate({ id, title, reason, question, file, line, evidence })` and return normal findings separately. `question` is required. `validate --changed` resolves gates against `.opencanon/commit-approvals.json`; unresolved gates exit nonzero, writes `.opencanon/cache/commit-gates.json`, and prints `bun run opencanon gate approve <gate-id> --summary "<user explicit answer to the gate question>" --via agent`. Gate approvals default to the exact staged diff for the gate file/evidence files; use `approvalScope: "file"` only when the full current file content is the intended approval boundary. Agents should run `bun run opencanon gate pending --format json`, inspect the staged diff and gate evidence, explain why the change is blocked and intent-sensitive, use a structured ask-user tool when available, or pause and ask in chat with explicit Approve/Reject choices if no structured tool is available. Agents must record approval only after explicit user approval, then retry the commit. The approval is also bound to the config hash and validator graph, so changing policy requires a new approval.
-
-Distributed skills import bundled framework APIs from `runtime/`. In the source checkout, the skill script can load the workspace CLI when the ignored generated runtime is absent. Framework behavior belongs in the development packages and generated runtime bundle, not in repo-local validator files. The skill root `index.ts` is the stable local authoring barrel for validators.
-
-Curated validator factories are opt-in helpers exposed through `@opencanon/validators`. Import them explicitly in the local validators file; do not enable hidden default policies. Available helpers include `fileNames`, `folderStructure`, `noImports`, `noForbiddenImports`, `noDeepRelativeImports`, `noFolderNames`, `noNativeEnums`, `noUnusedExports`, `similarFunctionNames`, `migrationReferences`, `noSecretLikeLiterals`, `noHardcodedConfigValues`, `repeatedLiterals`, `duplicateBoundaryLiterals`, `annotationRequiresTags`, `noCommentMatches`, `noHeaderComments`, `noBypassComments`, `noForbiddenCalls`, `noBareExcept`, `noLayerCall`, `noBarrelCrossBoundary`, `restrictedSymbols`, `externalCommand`, `externalDiagnostics`, `requiredFunctionParam`, `requiredFileSibling`, `requireExportPattern`, `noShimFiles`, `sensitiveChangePolicy`, and `tauriCommandParity`.
-
-```ts
-import { fileNames, noImports } from "@opencanon/validators";
-```
-
-Repo-specific factories may live under the local validators directory. Use `createValidatorFactory` from `@opencanon/core`; factories are inert until imported and called by the exported validator tree.
-
-## Commands
-
-```bash
-bun run opencanon setup --yes
-bun run opencanon setup --yes --hooks codex
-bun run opencanon setup --yes --manifest <path-or-url>
-bun run opencanon init
-bun run opencanon init --non-interactive
-bun run opencanon init --non-interactive --hooks codex,claude,opencode
-bun run opencanon rules
-bun run opencanon rules --validator <id>
-bun run opencanon rules --topic <topic>
-bun run opencanon rules --tree
-bun run opencanon rules --tree --ascii --no-color
-bun run opencanon search <query>
-bun run opencanon search <query> --kind symbol --format json
-bun run opencanon search <query> --kind symbol --symbol-kind function --scope "src/domain/**"
-bun run opencanon symbols <query> --kind function --scope "src/domain/**"
-bun run opencanon graph callers <symbol>
-bun run opencanon graph callees <symbol>
-bun run opencanon context --list-topics
-bun run opencanon context --list-exceptions
-bun run opencanon context --files <paths...>
-bun run opencanon context --changed
-bun run opencanon context --files <paths...> --git-history
-bun run opencanon context --explain <paths...>
-bun run opencanon context --topic <topic> --format json
-bun run opencanon context --check
-bun run opencanon doctor
-bun run opencanon doctor --fix --dry-run
-bun run opencanon feedback --files <paths...>
-bun run opencanon feedback --changed
-bun run opencanon feedback --changed --strict-warnings
-bun run opencanon hook config codex
-bun run opencanon hook config claude
-bun run opencanon hook config opencode
-bun run opencanon hook install codex
-bun run opencanon hook install claude
-bun run opencanon hook install opencode
-bun run opencanon hook install --all --dry-run
-bun run opencanon validate --files <paths...>
-bun run opencanon validate --files <paths...> --fix --dry-run
-bun run opencanon validate --files <paths...> --fix safe
-bun run opencanon validate --changed
-bun run opencanon validate --changed --strict-warnings
-bun run opencanon validate --project --profile
-bun run opencanon validate --check-fixtures --validator <id>
-bun run opencanon validate --check-fixtures
-bun run opencanon gate pending --format json
-bun run opencanon gate approve <gate-id> --summary "<what the user confirmed>"
-bun run opencanon bundle inspect <bundle.ts|bundle.json>
-bun run opencanon bundle list
-bun run opencanon bundle plan <bundle.ts|bundle.json> --option key=value
-bun run opencanon bundle install <bundle.ts|bundle.json> --option key=value
-bun run opencanon bundle inspect https://example.com/opencanon.bundle.json --sha256 <hash>
-bun run opencanon baseline check
-bun run opencanon baseline update
-bun run opencanon update check --manifest <path-or-url>
-bun run opencanon update apply --manifest <path-or-url>
-bun run opencanon benchmark --sizes 1000,10000,50000
-bun run opencanon daemon start
-bun run opencanon daemon status
-bun run opencanon daemon list
-bun run opencanon daemon open
-bun run opencanon daemon stop
-```
-
-Exceptions to clean-cut refactors: persisted data, database migrations, public API contracts, and external integration formats.

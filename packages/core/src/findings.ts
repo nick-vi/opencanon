@@ -1,11 +1,11 @@
 import { validateDocsReference } from "./core.ts";
-import type { Finding, FindingFix, FixSafety, Validator } from "./validator-types.ts";
+import type { Finding, FixSafety, Validator } from "./validator-types.ts";
 
 const FactKeySeparator = "\u0000";
 
 export type FindingValidationContext = {
   paths: Parameters<typeof validateDocsReference>[2]["paths"];
-  decisionIds: Set<string>;
+  conventionIds: Set<string>;
 };
 
 export function validateFindings(validator: Validator, findings: Finding[], context?: FindingValidationContext): string[] {
@@ -24,13 +24,13 @@ export function validateFindings(validator: Validator, findings: Finding[], cont
       }
     }
     if (
-      finding.decisionIds !== undefined &&
-      (!Array.isArray(finding.decisionIds) || finding.decisionIds.some((item) => typeof item !== "string" || item.length === 0))
+      finding.conventionIds !== undefined &&
+      (!Array.isArray(finding.conventionIds) || finding.conventionIds.some((item) => typeof item !== "string" || item.length === 0))
     ) {
-      diagnostics.push(`Finding from ${validator.id} decisionIds must be string[] when present.`);
-    } else if (context && Array.isArray(finding.decisionIds)) {
-      for (const decisionId of finding.decisionIds) {
-        if (!context.decisionIds.has(decisionId)) diagnostics.push(`Finding from ${validator.id} references missing decision: ${decisionId}.`);
+      diagnostics.push(`Finding from ${validator.id} conventionIds must be string[] when present.`);
+    } else if (context && Array.isArray(finding.conventionIds)) {
+      for (const conventionId of finding.conventionIds) {
+        if (!context.conventionIds.has(conventionId)) diagnostics.push(`Finding from ${validator.id} references missing convention: ${conventionId}.`);
       }
     }
     if (finding.fix) diagnostics.push(...validateFix(finding));

@@ -1,15 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { createValidatorFactory } from "@opencanon/core";
+import { createConventionFactory } from "@opencanon/core";
 import { externalInvocation, isMissingCommandError, manualFix, optionSummary, parseExternalDiagnostics, truncate } from "../shared.ts";
 import type { ExternalCommandOptions, ExternalDiagnosticsOptions } from "../shared.ts";
 
-export const externalCommand = createValidatorFactory<ExternalCommandOptions>((options) => ({
+export const externalCommand = createConventionFactory<ExternalCommandOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "project",
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `External command must pass: ${[options.command, ...(options.args ?? [])].join(" ")}`),
   validate({ ctx, runtime }) {
     const invocation = externalInvocation(options, ctx, runtime);
@@ -61,14 +61,14 @@ export const externalCommand = createValidatorFactory<ExternalCommandOptions>((o
   },
 }));
 
-export const externalDiagnostics = createValidatorFactory<ExternalDiagnosticsOptions>((options) => ({
+export const externalDiagnostics = createConventionFactory<ExternalDiagnosticsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "project",
   facts: ["diagnostics"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `External diagnostics must pass: ${[options.command, ...(options.args ?? [])].join(" ")}`),
   validate({ ctx, runtime }) {
     const invocation = externalInvocation(options, ctx, runtime);

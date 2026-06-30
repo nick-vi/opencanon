@@ -1,5 +1,4 @@
-import { fail } from "@opencanon/core";
-import type { Format } from "@opencanon/core";
+import { fail, Format } from "@opencanon/core";
 import type { FixMode } from "@opencanon/core";
 import { FixModeValue } from "@opencanon/core";
 
@@ -48,7 +47,7 @@ export function booleanOption(value: unknown): boolean {
 
 export function formatOption(value: unknown): Format {
   if (value === undefined) return "markdown";
-  if (value !== "markdown" && value !== "json") fail(`Unsupported --format: ${String(value)}`);
+  if (value !== Format.Markdown && value !== Format.Json) fail(`Unsupported --format: ${String(value)}`);
   return value;
 }
 

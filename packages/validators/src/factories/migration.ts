@@ -1,14 +1,14 @@
-import { createValidatorFactory } from "@opencanon/core";
+import { createConventionFactory } from "@opencanon/core";
 import { manualFix, optionSummary } from "../shared.ts";
 import type { MigrationReferencesOptions } from "../shared.ts";
 
-export const migrationReferences = createValidatorFactory<MigrationReferencesOptions>((options) => ({
+export const migrationReferences = createConventionFactory<MigrationReferencesOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.newSeverity ?? options.severity,
   scope: "file",
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${options.in.join(", ")} must not introduce the migrated reference pattern.`),
   validate({ ctx }) {
     const pattern = typeof options.pattern === "string" ? new RegExp(options.pattern, "g") : options.pattern;

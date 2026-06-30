@@ -1,7 +1,8 @@
 import type { FactKind, ValidatorScope } from "./contracts.ts";
 import { factKindValues, validatorScopeValues } from "./contracts.ts";
 import { matchesAny, unique } from "./core.ts";
-import type { Severity, Validator, ValidatorDefinition, ValidatorSummary, ValidatorSummaryInput, ValidatorVisual } from "./validator-types.ts";
+import { ValidatorDomain } from "./validator-types.ts";
+import type { Severity, Validator, ValidatorDefinition, ValidatorDomain as ValidatorDomainType, ValidatorSummary, ValidatorSummaryInput, ValidatorVisual } from "./validator-types.ts";
 
 const FactKeySeparator = "\u0000";
 
@@ -20,9 +21,10 @@ export function resolveValidators(input: unknown): { validators: Validator[]; di
       definition,
       inherited: {
         topics: [],
-        decisionIds: [],
+        conventionIds: [],
         severity: undefined,
         scope: undefined,
+        domain: ValidatorDomain.File,
         facts: [],
         appliesScopes: [],
         analysisGlobs: [],
@@ -46,14 +48,15 @@ export function validatorMatchesAnyFile(validator: Validator, files: string[]): 
 }
 
 export function formatValidatorApplies(validator: Validator): string[] {
-  return formatAppliesScopes(validator.appliesScopes);
+  return validator.appliesScopes.length === 0 ? [`<${validator.domain}>`] : formatAppliesScopes(validator.appliesScopes);
 }
 
 type InheritedValidatorMetadata = {
   topics: string[];
-  decisionIds: string[];
+  conventionIds: string[];
   severity: Severity | undefined;
   scope: ValidatorScope | undefined;
+  domain: ValidatorDomainType;
   facts: FactKind[];
   appliesScopes: string[][];
   analysisGlobs: string[];
@@ -82,7 +85,7 @@ function traverseValidatorDefinition(params: {
   const id = typeof value.id === "string" ? value.id : "<unknown>";
   const childDefinitions = Array.isArray(value.validators) ? value.validators : [];
   for (const key of Object.keys(value)) {
-    if (!["id", "topics", "applies", "analysis", "severity", "scope", "facts", "decisionIds", "docs", "summary", "visuals", "validate", "validators"].includes(key)) {
+    if (!["id", "topics", "applies", "domain", "analysis", "severity", "scope", "facts", "conventionIds", "docs", "summary", "visuals", "requiresProducers", "fixtures", "validate", "validators"].includes(key)) {
       diagnostics.push(`Validator ${id} has unknown key: ${key}.`);
     }
   }
@@ -104,11 +107,14 @@ function traverseValidatorDefinition(params: {
   if (value.scope !== undefined && !validScopes.has(value.scope as ValidatorScope)) {
     diagnostics.push(`Validator ${id} scope must be one of: ${validatorScopeValues.join(", ")}.`);
   }
+  if (value.domain !== undefined && !Object.values(ValidatorDomain).includes(value.domain as ValidatorDomainType)) {
+    diagnostics.push(`Validator ${id} domain must be one of: ${Object.values(ValidatorDomain).join(", ")}.`);
+  }
   if (value.facts !== undefined && (!Array.isArray(value.facts) || value.facts.some((item) => !validFacts.has(item as FactKind)))) {
     diagnostics.push(`Validator ${id} facts must be known fact kinds: ${factKindValues.join(", ")}.`);
   }
-  if (value.decisionIds !== undefined && (!Array.isArray(value.decisionIds) || value.decisionIds.some((item) => typeof item !== "string" || item.length === 0))) {
-    diagnostics.push(`Validator ${id} decisionIds must be string[] when present.`);
+  if (value.conventionIds !== undefined && (!Array.isArray(value.conventionIds) || value.conventionIds.some((item) => typeof item !== "string" || item.length === 0))) {
+    diagnostics.push(`Validator ${id} conventionIds must be string[] when present.`);
   }
   if (value.docs !== undefined && (!Array.isArray(value.docs) || value.docs.some((item) => typeof item !== "string" || item.length === 0))) {
     diagnostics.push(`Validator ${id} docs must be string[] when present.`);
@@ -117,15 +123,27 @@ function traverseValidatorDefinition(params: {
     diagnostics.push(`Validator ${id} summary must be a string or function when present.`);
   }
   if (value.visuals !== undefined) diagnostics.push(...validateValidatorVisuals(id, value.visuals));
+  if (value.fixtures !== undefined && value.fixtures !== "valid-and-invalid" && value.fixtures !== "valid-only") {
+    diagnostics.push(`Validator ${id} fixtures must be "valid-and-invalid" or "valid-only" when present.`);
+  }
+  if (
+    value.requiresProducers !== undefined &&
+    (!Array.isArray(value.requiresProducers) ||
+      value.requiresProducers.length === 0 ||
+      value.requiresProducers.some((item) => typeof item !== "string" || item.length === 0))
+  ) {
+    diagnostics.push(`Validator ${id} requiresProducers must be a non-empty string[] when present.`);
+  }
   if (value.validate !== undefined && typeof value.validate !== "function") diagnostics.push(`Validator ${id} validate must be a function when present.`);
   if (value.validators !== undefined && !Array.isArray(value.validators)) diagnostics.push(`Validator ${id} validators must be an array when present.`);
   if (!value.validate && childDefinitions.length === 0) diagnostics.push(`Validator ${id} needs validate() or validators[].`);
 
   const next: InheritedValidatorMetadata = {
     topics: unique([...inherited.topics, ...(value.topics ?? [])]),
-    decisionIds: unique([...inherited.decisionIds, ...(value.decisionIds ?? [])]),
+    conventionIds: unique([...inherited.conventionIds, ...(value.conventionIds ?? [])]),
     severity: (value.severity as Severity | undefined) ?? inherited.severity,
     scope: (value.scope as ValidatorScope | undefined) ?? inherited.scope,
+    domain: (value.domain as ValidatorDomainType | undefined) ?? inherited.domain,
     facts: unique([...inherited.facts, ...((value.facts as FactKind[] | undefined) ?? [])]),
     appliesScopes: value.applies ? appendAppliesScope(inherited.appliesScopes, value.applies) : inherited.appliesScopes,
     analysisGlobs: value.analysis ? unique([...inherited.analysisGlobs, ...value.analysis]) : inherited.analysisGlobs,
@@ -133,7 +151,6 @@ function traverseValidatorDefinition(params: {
   };
 
   if (value.validate && typeof value.id === "string") {
-    if (next.topics.length === 0) diagnostics.push(`Validator ${value.id} needs at least one topic from itself or a parent.`);
     if (!next.severity) diagnostics.push(`Validator ${value.id} needs severity from itself or a parent.`);
     if (!next.scope) diagnostics.push(`Validator ${value.id} needs scope from itself or a parent.`);
     const summary = resolveSummary(
@@ -142,10 +159,11 @@ function traverseValidatorDefinition(params: {
         id: value.id,
         topics: next.topics,
         applies: formatAppliesScopes(next.appliesScopes),
+        domain: next.domain,
         severity: next.severity ?? "error",
         scope: next.scope ?? "project",
         facts: next.facts,
-        decisionIds: next.decisionIds,
+        conventionIds: next.conventionIds,
         docs: next.docs,
       },
       diagnostics,
@@ -155,14 +173,17 @@ function traverseValidatorDefinition(params: {
       id: value.id,
       topics: next.topics,
       appliesScopes: next.appliesScopes,
+      domain: next.domain,
       analysisGlobs: next.analysisGlobs,
       severity: next.severity ?? "error",
       scope: next.scope ?? "project",
       facts: next.facts,
-      decisionIds: next.decisionIds,
+      conventionIds: next.conventionIds,
       docs: next.docs,
       summary,
       visuals: value.visuals ?? [],
+      requiresProducers: Array.isArray(value.requiresProducers) ? value.requiresProducers.filter((p): p is string => typeof p === "string") : [],
+      fixtures: value.fixtures === "valid-only" ? "valid-only" : "valid-and-invalid",
       validate: value.validate,
     });
   }
@@ -226,4 +247,3 @@ function appendAppliesScope(scopes: string[][], patterns: string[]): string[][] 
   if (scopes.some((scope) => scope.join(FactKeySeparator) === key)) return scopes;
   return [...scopes, patterns];
 }
-

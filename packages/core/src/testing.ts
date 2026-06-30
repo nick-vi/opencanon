@@ -1,9 +1,13 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { normalizePath, relative } from "./core.ts";
+import { buildWithEsbuildWasm as esbuild } from "./runtime-esbuild.ts";
+import { authoringImportPlugin, resolveOpenCanonAuthoringImportAliases } from "./authoring-imports.ts";
+import { writeAtomicTextFileSync } from "./atomic.ts";
+import { ProjectTypesFilePath } from "./project-types.ts";
 
 /** Text content for a virtual fixture file. */
 export type FixtureTextInput = string;
@@ -96,7 +100,7 @@ export async function materializeFixture(fixtureFile: string): Promise<Materiali
   for (const entry of entries) {
     const target = path.join(rootDir, normalizeFixturePath(entry.path));
     mkdirSync(path.dirname(target), { recursive: true });
-    writeFileSync(target, entry.text);
+    writeAtomicTextFileSync(target, entry.text);
   }
 
   const declaredTargetFiles = entries
@@ -136,59 +140,42 @@ async function loadFixtureDefinition(fixtureFile: string): Promise<FixtureDefini
 }
 
 async function bundleFixtureDefinition(fixtureFile: string): Promise<string> {
-  if (!("Bun" in globalThis) || typeof Bun.build !== "function") return fixtureFile;
-
   const outputDir = path.join(tmpdir(), "opencanon-fixture-definitions");
   mkdirSync(outputDir, { recursive: true });
   const aliases = authoringImportAliases(fixtureFile);
-  const build = await Bun.build({
-    entrypoints: [fixtureFile],
-    target: "bun",
+  const build = await esbuild({
+    entryPoints: [fixtureFile],
+    bundle: true,
+    platform: "node",
+    target: "node24",
     format: "esm",
     minify: false,
-    sourcemap: "none",
-    plugins: [
-      {
-        name: "opencanon-authoring-imports",
-        setup(builder) {
-          builder.onResolve({ filter: /^@opencanon\/core(?:\/testing)?$/ }, (args) => ({ path: aliases.core }));
-          builder.onResolve({ filter: /^@opencanon\/validators$/ }, (args) => ({ path: aliases.validators }));
-          builder.onResolve({ filter: /^@opencanon\/project$/ }, (args) => ({ path: aliases.project }));
-        },
-      },
-    ],
+    sourcemap: false,
+    write: false,
+    plugins: [authoringImportPlugin(aliases)],
+  }).catch((error: unknown) => {
+    throw new Error(`Could not bundle fixture definition ${relative(process.cwd(), fixtureFile)}:\n${formatBuildError(error)}`);
   });
-  if (!build.success) {
-    const diagnostics = build.logs.map((log) => log.message).filter(Boolean);
-    throw new Error(`Could not bundle fixture definition ${relative(process.cwd(), fixtureFile)}:\n${diagnostics.map((item) => `- ${item}`).join("\n")}`);
-  }
-  const output = build.outputs[0];
+  const output = build.outputFiles[0];
   if (!output) throw new Error(`Could not bundle fixture definition ${relative(process.cwd(), fixtureFile)}: no build output.`);
-  const source = await output.text();
+  const source = output.text;
   const hash = createHash("sha256").update(`${fixtureFile}\0${source}`).digest("hex");
-  const bundlePath = path.join(outputDir, `${hash}.mjs`);
-  writeFileSync(bundlePath, source);
+  const bundlePath = path.join(outputDir, `${hash}-${process.pid}-${randomUUID()}.mjs`);
+  writeAtomicTextFileSync(bundlePath, source);
   return bundlePath;
 }
 
 function authoringImportAliases(fromFile: string): { core: string; validators: string; project: string } {
-  const sourceRoot = sourceCheckoutRoot();
   const fixtureRoot = fixtureProjectRoot(fromFile);
-  const generatedProject = path.join(fixtureRoot, ".agents/skills/opencanon/generated/project.ts");
-  if (sourceRoot) {
-    return {
-      core: path.join(sourceRoot, "packages/core/src/index.ts"),
-      validators: path.join(sourceRoot, "packages/validators/src/index.ts"),
-      project: existsSync(generatedProject) ? generatedProject : path.join(sourceRoot, ".agents/skills/opencanon/generated/project.ts"),
-    };
-  }
-
-  const skillRoot = skillRootFor(fromFile);
-  return {
-    core: path.join(skillRoot, "index.ts"),
-    validators: path.join(skillRoot, "index.ts"),
-    project: existsSync(generatedProject) ? generatedProject : path.join(skillRoot, "generated/project.ts"),
-  };
+  const generatedProject = path.join(fixtureRoot, ProjectTypesFilePath);
+  return resolveOpenCanonAuthoringImportAliases({
+    rootDir: fixtureRoot,
+    generatedProject,
+    sourceRootCandidates: [
+      path.resolve("."),
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+    ],
+  });
 }
 
 function fixtureProjectRoot(fromFile: string): string {
@@ -198,24 +185,6 @@ function fixtureProjectRoot(fromFile: string): string {
     current = path.dirname(current);
   }
   return process.cwd();
-}
-
-function sourceCheckoutRoot(): string | undefined {
-  const current = path.resolve(".");
-  const candidate = path.join(current, "packages/core/src/index.ts");
-  return existsSync(candidate) ? current : undefined;
-}
-
-function skillRootFor(fromFile: string): string {
-  const envRoot = process.env.OPENCANON_SKILL_ROOT;
-  if (envRoot && existsSync(path.join(envRoot, "index.ts"))) return envRoot;
-
-  let current = path.dirname(fromFile);
-  while (current !== path.dirname(current)) {
-    if (path.basename(current) === "opencanon" && path.basename(path.dirname(current)) === "skills" && existsSync(path.join(current, "index.ts"))) return current;
-    current = path.dirname(current);
-  }
-  throw new Error(`Could not resolve OpenCanon skill root for fixture ${relative(process.cwd(), fromFile)}.`);
 }
 
 function fixtureFiles(definition: FixtureDefinition): FixtureFileEntry[] {
@@ -295,4 +264,26 @@ function isFixtureDefinition(value: unknown): value is FixtureDefinition {
     (candidate.targetFiles === undefined || Array.isArray(candidate.targetFiles)) &&
     (candidate.analysisFiles === undefined || Array.isArray(candidate.analysisFiles))
   );
+}
+
+function formatBuildError(error: unknown): string {
+  if (isRecord(error) && Array.isArray(error.errors)) {
+    const messages = error.errors.map(buildMessageText).filter((message): message is string => Boolean(message));
+    if (messages.length > 0) return messages.map((message) => `- ${message}`).join("\n");
+  }
+  return `- ${error instanceof Error ? error.message : String(error)}`;
+}
+
+function buildMessageText(message: unknown): string | undefined {
+  if (!isRecord(message)) return undefined;
+  const text = typeof message.text === "string" ? message.text : undefined;
+  const location = isRecord(message.location) && typeof message.location.file === "string"
+    ? `${message.location.file}${typeof message.location.line === "number" ? `:${message.location.line}` : ""}`
+    : "";
+  if (!text) return undefined;
+  return location ? `${location}: ${text}` : text;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

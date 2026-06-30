@@ -21,6 +21,26 @@ const MIGRATIONS: &[Migration] = &[
         name: "code_graph",
         sql: include_str!("migrations/002_code_graph.sql"),
     },
+    Migration {
+        version: 3,
+        name: "product_model",
+        sql: include_str!("migrations/003_product_model.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "observability",
+        sql: include_str!("migrations/004_observability.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "semantic_index",
+        sql: include_str!("migrations/005_semantic_index.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "semantic_hybrid",
+        sql: include_str!("migrations/006_semantic_hybrid.sql"),
+    },
 ];
 
 pub(crate) fn schema_version() -> u32 {
@@ -51,7 +71,7 @@ pub(crate) fn migrate_state(conn: &Connection) -> napi::Result<Vec<u32>> {
         return Err(napi_error(
             "sqlite-schema-mismatch",
             &format!(
-                "Project state schema {current_version} is newer than this engine supports ({supported_version}). Run opencanon db reset --confirm to clear generated state or switch to a matching OpenCanon runtime."
+                "Project state schema {current_version} is newer than this engine supports ({supported_version}). Run opencanon state reset --confirm to clear generated state or switch to a matching OpenCanon runtime."
             ),
         ));
     }
@@ -75,7 +95,130 @@ pub(crate) fn migrate_state(conn: &Connection) -> napi::Result<Vec<u32>> {
             .map_err(|error| sqlite_error("Could not commit migration", error))?;
         applied.push(migration.version);
     }
+    repair_product_model_projection_schema(conn)?;
+    repair_semantic_index_schema(conn)?;
     Ok(applied)
+}
+
+fn repair_product_model_projection_schema(conn: &Connection) -> napi::Result<()> {
+    if !table_exists(conn, "product_model_snapshots")? {
+        return Ok(());
+    }
+    let columns = table_columns(conn, "product_model_snapshots")?;
+    let has_current_shape = [
+        "root_dir",
+        "graph_hash",
+        "definitions_hash",
+        "area_count",
+        "spec_count",
+        "change_count",
+        "convention_count",
+        "impact_surface_count",
+        "validator_count",
+        "node_count",
+        "edge_count",
+        "diagnostic_count",
+        "payload",
+        "indexed_at",
+    ]
+    .iter()
+    .all(|column| columns.contains(*column));
+    if has_current_shape {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "drop table if exists product_model_diagnostics;
+         drop table if exists product_model_edges;
+         drop table if exists product_model_nodes;
+         drop table if exists product_model_snapshots;",
+    )
+    .map_err(|error| {
+        sqlite_error(
+            "Could not reset stale product model projection schema",
+            error,
+        )
+    })?;
+    conn.execute_batch(include_str!("migrations/003_product_model.sql"))
+        .map_err(|error| {
+            sqlite_error("Could not recreate product model projection schema", error)
+        })?;
+    Ok(())
+}
+
+fn repair_semantic_index_schema(conn: &Connection) -> napi::Result<()> {
+    if !table_exists(conn, "semantic_index_snapshots")? {
+        return Ok(());
+    }
+    let snapshot_columns = table_columns(conn, "semantic_index_snapshots")?;
+    let chunk_columns = if table_exists(conn, "semantic_chunks")? {
+        table_columns(conn, "semantic_chunks")?
+    } else {
+        std::collections::HashSet::new()
+    };
+    let has_current_shape = snapshot_columns.contains("chunk_tree_hash")
+        && chunk_columns.contains("text")
+        && table_exists(conn, "semantic_chunks_fts")?;
+    if !has_current_shape {
+        conn.execute_batch(
+            "drop table if exists semantic_chunks_fts;
+             drop table if exists semantic_chunks;
+             drop table if exists semantic_index_snapshots;",
+        )
+        .map_err(|error| sqlite_error("Could not reset stale semantic index schema", error))?;
+        conn.execute_batch(include_str!("migrations/005_semantic_index.sql"))
+            .map_err(|error| sqlite_error("Could not recreate semantic index schema", error))?;
+        conn.execute_batch(include_str!("migrations/006_semantic_hybrid.sql"))
+            .map_err(|error| sqlite_error("Could not recreate semantic hybrid schema", error))?;
+        return Ok(());
+    }
+
+    let stale_payloads: i64 = conn
+        .query_row(
+            "select count(*) from semantic_index_snapshots where json_extract(payload, '$.chunkTreeHash') is null",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| sqlite_error("Could not inspect semantic index payloads", error))?;
+    if stale_payloads > 0 {
+        conn.execute_batch(
+            "delete from semantic_chunks_fts;
+             delete from semantic_chunks;
+             delete from semantic_index_snapshots;",
+        )
+        .map_err(|error| sqlite_error("Could not clear stale semantic index state", error))?;
+    }
+    Ok(())
+}
+
+fn table_exists(conn: &Connection, table: &str) -> napi::Result<bool> {
+    conn.query_row(
+        "select 1 from sqlite_master where type = 'table' and name = ?1",
+        params![table],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|row| row.is_some())
+    .map_err(|error| sqlite_error("Could not inspect project state schema", error))
+}
+
+fn table_columns(
+    conn: &Connection,
+    table: &str,
+) -> napi::Result<std::collections::HashSet<String>> {
+    let mut statement = conn
+        .prepare(&format!("pragma table_info({table})"))
+        .map_err(|error| sqlite_error("Could not inspect project state columns", error))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| sqlite_error("Could not inspect project state columns", error))?;
+    let mut columns = std::collections::HashSet::new();
+    for row in rows {
+        columns.insert(
+            row.map_err(|error| sqlite_error("Could not decode project state column", error))?,
+        );
+    }
+    Ok(columns)
 }
 
 pub(crate) fn read_existing_file_hashes(
@@ -102,6 +245,9 @@ pub(crate) fn mark_watch_state_stale(state_path: &str, root_dir: &str, reason: O
     let Ok(conn) = Connection::open(state_path) else {
         return;
     };
+    // Wait on a contended lock rather than failing immediately with SQLITE_BUSY (this
+    // runs on the watcher thread alongside the main connection).
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
     let existing_hash = conn
         .query_row(
             "select inventory_hash from watch_state where root_dir = ?1",

@@ -1,34 +1,38 @@
 import { cac } from "cac";
-import type { RelatedCanon } from "@opencanon/daemon";
+import type { RelatedCanon } from "@opencanon/runtime";
 import { booleanOption, formatOption, positiveIntegerOption, rejectUnknownOptions, stringValues } from "./options.ts";
-import { loadValidators } from "./project.ts";
+import { loadProjectContext } from "./project.ts";
 import {
+  ConventionRenderKind,
   createPaths,
+  conventionDocsReference,
+  definitionTargetSummary,
   explainGlobMatches,
   fail,
   getChangedFiles,
   getGitFileHistory,
-  intersects,
-  loadContextFiles,
-  loadImpactSurfaces,
   matchesAny,
-  matchesAnyFile,
-  relative,
   resolveRootDir,
   splitList,
   toRepoRelativePath,
   unique,
   validateConfig,
-  validateContext,
 } from "@opencanon/core";
-import type { Decision, Format } from "@opencanon/core";
+import type { Convention } from "@opencanon/core";
+import { Format } from "@opencanon/core";
 import type { Validator } from "@opencanon/core";
-import { DaemonApiRoute, withDaemonClient } from "./daemon-client.ts";
+import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import type {
+  ListSemanticChunksResult,
+  ProjectContextAskResult,
+  ProjectContextBacklinksResult,
+  ProjectContextCoverageResult,
+} from "@opencanon/core";
 
 type Query = {
   files: string[];
   topics: string[];
-  decisionIds: string[];
+  conventionIds: string[];
   explainFiles: string[];
   format: Format;
   check: boolean;
@@ -41,14 +45,37 @@ type Query = {
   help: boolean;
 };
 
-type ContextValidator = Pick<Validator, "id" | "topics" | "appliesScopes" | "severity" | "scope" | "facts" | "decisionIds" | "docs" | "summary">;
+type ContextValidator = Pick<Validator, "id" | "topics" | "appliesScopes" | "severity" | "scope" | "facts" | "conventionIds" | "docs" | "summary">;
+type RelatedCanonRequest = {
+  path: string;
+  body?: {
+    files: string[];
+    topics: string[];
+    conventionIds: string[];
+  };
+};
+type ProjectContextQueryArgs = { help: true } | { help?: false; params: URLSearchParams; format: Format };
 
 let rootDir = "";
 let paths: ReturnType<typeof createPaths>;
+const maxRelatedContextGetPathLength = 6000;
+const projectContextSubcommands = new Set(["chunks", "coverage", "backlinks"]);
+const removedProjectContextSubcommands: ReadonlyMap<string, string> = new Map([
+  ["index", "opencanon project index"],
+  ["status", "opencanon project status"],
+  ["search", "opencanon search <query>"],
+  ["ask", "opencanon ask <question>"],
+] as const);
 
-export async function runContextCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runContextCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   rootDir = resolveRootDir(cwd);
   paths = createPaths(rootDir);
+  const removed = args[0] ? removedProjectContextSubcommands.get(args[0]) : undefined;
+  if (removed) fail(`opencanon context ${args[0]} is no longer a command. Use ${removed}.`);
+  if (args[0] && projectContextSubcommands.has(args[0])) {
+    await runProjectContextSubcommand(args, cwd);
+    return;
+  }
   const query = parseArgs(args);
   if (query.help) {
     printHelp();
@@ -59,20 +86,19 @@ export async function runContextCommand(args = Bun.argv.slice(2), cwd = process.
   resolveChangedFiles(query);
 
   if (query.check) {
-    const { decisions } = loadContextFiles(paths);
-    const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
-    const validators = await loadValidators(rootDir, paths);
-    const diagnostics = [...impactDiagnostics, ...validateContext({ decisions, validators, impactSurfaces, paths })];
-    if (diagnostics.length > 0) {
+    try {
+      await loadProjectContext(rootDir);
+    } catch (error) {
       console.error("OpenCanon check failed:\n");
-      for (const diagnostic of diagnostics) console.error(`- ${diagnostic}`);
+      console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
     console.log("OpenCanon check passed.");
     return;
   }
 
-  const { decisions } = loadContextFiles(paths);
+  const project = await loadProjectContext(rootDir);
+  const conventions = project.conventions;
 
   if (query.listExceptions && query.changed && query.files.length === 0) {
     console.log("No changed files.");
@@ -80,8 +106,8 @@ export async function runContextCommand(args = Bun.argv.slice(2), cwd = process.
   }
 
   if (query.listTopics) {
-    const topics = listTopics(decisions);
-    if (query.format === "json") {
+    const topics = listTopics(conventions);
+    if (query.format === Format.Json) {
       writeJson({ topics });
       return;
     }
@@ -90,8 +116,8 @@ export async function runContextCommand(args = Bun.argv.slice(2), cwd = process.
   }
 
   if (query.listExceptions) {
-    const exceptions = selectExceptions(decisions, query);
-    if (query.format === "json") {
+    const exceptions: unknown[] = [];
+    if (query.format === Format.Json) {
       writeJson({ exceptions });
       return;
     }
@@ -100,35 +126,203 @@ export async function runContextCommand(args = Bun.argv.slice(2), cwd = process.
   }
 
   if (query.explain) {
-    const validators = await loadValidators(rootDir, paths);
     const files = query.explainFiles.length > 0 ? query.explainFiles : query.files;
     if (files.length === 0) fail("--explain requires files, --files, or --changed.");
-    const result = explainContext(decisions, validators, files);
-    if (query.format === "json") writeJson(result);
+    const result = explainContext(conventions, project.validators, files);
+    if (query.format === Format.Json) writeJson(result);
     else console.log(renderExplainMarkdown(result));
     return;
   }
 
-  if (query.changed && query.files.length === 0 && query.topics.length === 0 && query.decisionIds.length === 0) {
+  if (query.changed && query.files.length === 0 && query.topics.length === 0 && query.conventionIds.length === 0) {
     console.log("No changed files.");
     return;
   }
 
-  if (query.files.length === 0 && query.topics.length === 0 && query.decisionIds.length === 0) {
+  if (query.files.length === 0 && query.topics.length === 0 && query.conventionIds.length === 0) {
     printHelp();
     process.exit(1);
   }
 
-  const related = await withDaemonClient(cwd, (client) => client.get<RelatedCanon>(contextRoute(query)));
+  const relatedRequest = contextRequest(query);
+  const related = await withRuntimeClient(cwd, (client) =>
+    relatedRequest.body ? client.post<RelatedCanon>(relatedRequest.path, relatedRequest.body) : client.get<RelatedCanon>(relatedRequest.path),
+  );
   const result = {
     ...related,
     gitHistory: query.gitHistory && query.files.length > 0 ? getGitFileHistory(rootDir, query.files, query.gitLimit) : undefined,
   };
-  if (query.format === "json") {
+  if (query.format === Format.Json) {
     writeJson(result);
     return;
   }
   console.log(renderMarkdown(result));
+}
+
+export async function runAskCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
+  rootDir = resolveRootDir(cwd);
+  paths = createPaths(rootDir);
+  await runProjectContextAsk(args, cwd, "opencanon ask");
+}
+
+async function runProjectContextSubcommand(args: string[], cwd: string): Promise<void> {
+  const [subcommand, ...rest] = args;
+  switch (subcommand) {
+    case "chunks":
+      await runProjectContextChunks(rest, cwd);
+      return;
+    case "coverage":
+      await runProjectContextCoverage(rest, cwd);
+      return;
+    case "backlinks":
+      await runProjectContextBacklinks(rest, cwd);
+      return;
+    default:
+      fail(`Unknown context subcommand: ${subcommand}`);
+  }
+}
+
+async function runProjectContextChunks(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon context chunks");
+  cli.option("--file <path>", "Repository-relative file path.");
+  cli.option("--path <path>", "Alias for --file.");
+  cli.option("--definition <id>", "Definition id whose covered files should provide chunks.");
+  cli.option("--limit <n>", "Maximum chunks.");
+  cli.option("--offset <n>", "Chunk offset.");
+  cli.option("--format <format>", "Output format.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["file", "path", "definition", "limit", "offset", "format"]);
+  const params = new URLSearchParams();
+  for (const file of [...stringValues(options.file), ...stringValues(options.path)]) params.append("path", toRepoRelativePath(rootDir, file));
+  for (const definition of stringValues(options.definition)) params.append("definition", definition);
+  params.set("limit", String(positiveIntegerOption(options.limit, "--limit", 50)));
+  params.set("offset", String(nonNegativeIntegerOption(options.offset, "--offset", 0)));
+  const format = formatOption(options.format);
+  const result = await withRuntimeClient<ListSemanticChunksResult>(cwd, (client) => client.get(`${RuntimeApiRoute.ContextChunks}?${params.toString()}`));
+  if (format === Format.Json) {
+    writeJson(result);
+    return;
+  }
+  console.log("# Project Context Chunks\n");
+  if (result.chunks.length === 0) {
+    console.log("No chunks found.");
+    return;
+  }
+  for (const chunk of result.chunks) {
+    console.log(`- ${chunk.path}:${chunk.range.start.line} ${chunk.kind}${chunk.symbol ? ` ${chunk.symbol}` : ""}`);
+    if (chunk.preview) console.log(`  ${chunk.preview}`);
+  }
+}
+
+async function runProjectContextAsk(args: string[], cwd: string, command: string): Promise<void> {
+  const parsed = parseProjectContextQueryArgs(command, args);
+  if (parsed.help) {
+    printProjectContextQueryHelp(command);
+    return;
+  }
+  const result = await withRuntimeClient<ProjectContextAskResult>(cwd, (client) => client.get(`${RuntimeApiRoute.ContextAsk}?${parsed.params.toString()}`));
+  if (parsed.format === Format.Json) {
+    writeJson(result);
+    return;
+  }
+  console.log(`# Project Context Ask\n\nQuestion: ${result.question}\n`);
+  if (result.warnings.length > 0) {
+    console.log(result.warnings.map((warning) => `Warning: ${warning}`).join("\n"));
+    console.log("");
+  }
+  console.log(result.answer);
+  if (result.evidence.length > 0) {
+    console.log("\nEvidence:");
+    for (const [index, item] of result.evidence.entries()) console.log(`- [${index + 1}] ${item.file}:${item.line} ${item.preview}`);
+  }
+  if (result.suggestions.length > 0) {
+    console.log("\nSuggestions:");
+    for (const suggestion of result.suggestions) console.log(`- ${suggestion}`);
+  }
+}
+
+async function runProjectContextCoverage(args: string[], cwd: string): Promise<void> {
+  const format = formatFromArgs(args);
+  const result = await withRuntimeClient<ProjectContextCoverageResult>(cwd, (client) => client.get(RuntimeApiRoute.ContextCoverage));
+  if (format === Format.Json) {
+    writeJson(result);
+    return;
+  }
+  console.log("# Project Context Coverage\n");
+  console.log(`Files: ${result.totals.files}`);
+  console.log(`Governed: ${result.totals.governedFiles}`);
+  console.log(`Ungoverned: ${result.totals.ungovernedFiles}`);
+  console.log(`Indexed: ${result.totals.indexedFiles}`);
+  console.log(`Chunks: ${result.totals.chunks}`);
+  if (result.gaps.length > 0) {
+    console.log("\nGaps:");
+    for (const gap of result.gaps.slice(0, 25)) console.log(`- ${gap.message}`);
+    if (result.gaps.length > 25) console.log(`- ... ${result.gaps.length - 25} more`);
+  }
+}
+
+async function runProjectContextBacklinks(args: string[], cwd: string): Promise<void> {
+  const parsed = parseProjectContextQueryArgs("opencanon context backlinks", args);
+  if (parsed.help) {
+    printProjectContextQueryHelp("opencanon context backlinks");
+    return;
+  }
+  const result = await withRuntimeClient<ProjectContextBacklinksResult>(cwd, (client) => client.get(`${RuntimeApiRoute.ContextBacklinks}?${parsed.params.toString()}`));
+  if (parsed.format === Format.Json) {
+    writeJson(result);
+    return;
+  }
+  console.log(`# Project Context Backlinks\n\nQuery: ${result.query}`);
+  if (result.links.length > 0) {
+    console.log("\nDefinitions:");
+    for (const link of result.links) console.log(`- ${link.kind}:${link.id}${link.title ? ` ${link.title}` : ""}`);
+  }
+  if (result.files.length > 0) {
+    console.log("\nFiles:");
+    for (const file of result.files) {
+      const links = [...file.areas, ...file.specs, ...file.changes, ...file.conventions, ...file.surfaces].map((link) => `${link.kind}:${link.id}`);
+      console.log(`- ${file.file}${links.length > 0 ? ` -> ${links.join(", ")}` : ""}`);
+    }
+  }
+  if (result.links.length === 0 && result.files.length === 0) console.log("\nNo backlinks found.");
+}
+
+function parseProjectContextQueryArgs(command: string, args: string[]): ProjectContextQueryArgs {
+  const cli = cac(command);
+  cli.option("-h, --help", "Show help.");
+  cli.option("--limit <n>", "Maximum results.");
+  cli.option("--path <path>", "Repository-relative path filter.");
+  cli.option("--file <path>", "Alias for --path.");
+  cli.option("--format <format>", "Output format.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["help", "h", "limit", "path", "file", "format"]);
+  if (booleanOption(options.help) || booleanOption(options.h)) return { help: true };
+  const query = parsed.args.map(String).join(" ").trim();
+  if (!query) fail(`${command} requires a query.`);
+  const params = new URLSearchParams();
+  params.set("query", query);
+  params.set("limit", String(positiveIntegerOption(options.limit, "--limit", 20)));
+  for (const file of [...stringValues(options.path), ...stringValues(options.file)]) params.append("path", toRepoRelativePath(rootDir, file));
+  return { params, format: formatOption(options.format) };
+}
+
+function formatFromArgs(args: string[]): Format {
+  const cli = cac("opencanon context");
+  cli.option("--format <format>", "Output format.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["format"]);
+  if (parsed.args.length > 0) fail(`Unexpected arguments: ${parsed.args.join(", ")}`);
+  return formatOption(options.format);
+}
+
+function nonNegativeIntegerOption(value: unknown, name: string, fallback: number): number {
+  if (value === undefined || value === false) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) fail(`${name} must be a non-negative integer.`);
+  return parsed;
 }
 
 function assertValidConfig(paths: ReturnType<typeof createPaths>): void {
@@ -142,9 +336,9 @@ function assertValidConfig(paths: ReturnType<typeof createPaths>): void {
 function parseArgs(args: string[]): Query {
   const cli = cac("opencanon");
   cli.option("-h, --help", "Show help.");
-  cli.option("--check", "Validate context docs and decisions.");
+  cli.option("--check", "Validate context docs and conventions.");
   cli.option("--list-topics", "List available topics.");
-  cli.option("--list-exceptions", "List documented decision exceptions.");
+  cli.option("--list-exceptions", "List documented convention exceptions.");
   cli.option("--changed", "Use changed Git files.");
   cli.option("--git-history", "Include recent commits for selected files.");
   cli.option("--git-limit <n>", "Number of commits per file.");
@@ -152,7 +346,7 @@ function parseArgs(args: string[]): Query {
   cli.option("--format <format>", "Output format.");
   cli.option("--topic <topic>", "Load context for one topic.");
   cli.option("--topics <topics>", "Load context for topics.");
-  cli.option("--decision <id>", "Include a specific decision by id.");
+  cli.option("--convention <id>", "Include a specific convention by id.");
   cli.option("--files <path>", "Resolve topics from a file path.");
 
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
@@ -170,18 +364,18 @@ function parseArgs(args: string[]): Query {
     "format",
     "topic",
     "topics",
-    "decision",
+    "convention",
     "files",
   ]);
 
   const files = unique([...stringValues(options.files), ...parsed.args.map(String)].map((file) => toRepoRelativePath(rootDir, file)));
   const topics = unique([...stringValues(options.topic), ...stringValues(options.topics)].flatMap(splitList));
-  const decisionIds = unique(stringValues(options.decision).flatMap(splitList));
+  const conventionIds = unique(stringValues(options.convention).flatMap(splitList));
 
   const query: Query = {
     files,
     topics,
-    decisionIds,
+    conventionIds,
     explainFiles: booleanOption(options.explain) ? files : [],
     format: formatOption(options.format),
     check: booleanOption(options.check),
@@ -196,26 +390,6 @@ function parseArgs(args: string[]): Query {
   return query;
 }
 
-function selectExceptions(decisions: Decision[], query: Query) {
-  const filtered = decisions.filter((decision) => {
-    const hasFilters = query.files.length > 0 || query.topics.length > 0 || query.decisionIds.length > 0;
-    if (!hasFilters) return true;
-    return query.decisionIds.includes(decision.id) || intersects(decision.topics, query.topics) || matchesAnyFile(query.files, decision.applies);
-  });
-
-  return filtered
-    .filter((decision) => decision.exceptions && decision.exceptions.length > 0)
-    .map((decision) => ({
-      id: decision.id,
-      title: decision.title,
-      status: decision.status,
-      topics: decision.topics,
-      applies: decision.applies,
-      exceptions: decision.exceptions ?? [],
-      source: `${relative(rootDir, paths.decisionsPath)}#${decision.id}`,
-    }));
-}
-
 function resolveChangedFiles(query: Query): void {
   if (!query.changed) return;
   const result = getChangedFiles(rootDir);
@@ -223,30 +397,38 @@ function resolveChangedFiles(query: Query): void {
   query.files = unique([...query.files, ...result.files]);
 }
 
-function contextRoute(query: Query): string {
+function contextRequest(query: Query): RelatedCanonRequest {
   const params = new URLSearchParams();
   for (const file of query.files) params.append("file", file);
   for (const topic of query.topics) params.append("topic", topic);
-  for (const decisionId of query.decisionIds) params.append("decisionId", decisionId);
+  for (const conventionId of query.conventionIds) params.append("conventionId", conventionId);
   const search = params.toString();
-  return search ? `${DaemonApiRoute.CanonRelated}?${search}` : DaemonApiRoute.CanonRelated;
+  const path = search ? `${RuntimeApiRoute.CanonRelated}?${search}` : RuntimeApiRoute.CanonRelated;
+  if (path.length <= maxRelatedContextGetPathLength) return { path };
+  return {
+    path: RuntimeApiRoute.CanonRelated,
+    body: {
+      files: query.files,
+      topics: query.topics,
+      conventionIds: query.conventionIds,
+    },
+  };
 }
 
-function explainContext(decisions: Decision[], validators: ContextValidator[], files: string[]) {
+function explainContext(conventions: Convention[], validators: ContextValidator[], files: string[]) {
   return {
     root: rootDir,
     files: files.map((file) => ({
       file,
-      decisions: decisions
-        .filter((decision) => matchesAny(file, decision.applies))
-        .map((decision) => ({
-          id: decision.id,
-          title: decision.title,
-          topics: decision.topics,
-          docs: decision.docs ?? [],
-          source: `${relative(rootDir, paths.decisionsPath)}#${decision.id}`,
-          matchedPatterns: matchedPatterns(file, decision.applies),
-          allPatterns: explainGlobMatches(file, decision.applies),
+      conventions: conventions
+        .filter((convention) => matchesAny(file, conventionApplies(convention)))
+        .map((convention) => ({
+          id: convention.id,
+          title: convention.title,
+          topics: convention.topics ?? [],
+          docs: convention.render.kind === ConventionRenderKind.None ? [] : [conventionDocsReference(convention)!],
+          matchedPatterns: matchedPatterns(file, conventionApplies(convention)),
+          allPatterns: explainGlobMatches(file, conventionApplies(convention)),
         })),
       validators: validators
         .filter((validator) => validatorMatchesFileMetadata(validator, file))
@@ -273,7 +455,7 @@ function renderExplainMarkdown(result: ReturnType<typeof explainContext>): strin
   for (const file of result.files) {
     lines.push(`## ${file.file}`);
     lines.push("");
-    pushExplainGroup(lines, "Decisions", file.decisions);
+    pushExplainGroup(lines, "Conventions", file.conventions);
     pushExplainGroup(lines, "Validators", file.validators);
   }
 
@@ -338,7 +520,7 @@ function renderMarkdown(result: RelatedCanon & { gitHistory?: ReturnType<typeof 
   lines.push("");
 
   lines.push("Standing agent policy:");
-  lines.push("- Treat returned docs and decisions as source of truth.");
+  lines.push("- Treat returned docs and conventions as source of truth.");
   lines.push("- If touched code uses a replaced pattern, refactor the touched flow to the current pattern.");
   lines.push("- Do not add internal shims, aliases, compatibility wrappers, deprecated paths, or parallel APIs.");
   lines.push("");
@@ -354,27 +536,66 @@ function renderMarkdown(result: RelatedCanon & { gitHistory?: ReturnType<typeof 
     }
   }
 
-  if (result.decisions.length > 0) {
-    lines.push("## Pattern Decisions");
+  if (result.areas.length > 0) {
+    lines.push("## Areas");
     lines.push("");
-    for (const decision of result.decisions) {
-      lines.push(`### ${decision.date}: ${decision.title}`);
+    for (const area of result.areas) {
+      lines.push(`### ${area.title}`);
       lines.push("");
-      lines.push(`Source: ${decision.source}`);
-      lines.push(`Status: ${decision.status}`);
-      lines.push(`Topics: ${decision.topics.join(", ")}`);
-      lines.push(`Applies: ${decision.applies.join(", ")}`);
-      if (decision.validatorIds && decision.validatorIds.length > 0) lines.push(`Validators: ${decision.validatorIds.join(", ")}`);
-      if (decision.docs && decision.docs.length > 0) lines.push(`Docs: ${decision.docs.join(", ")}`);
+      lines.push(`Id: ${area.id}`);
+      lines.push(`Summary: ${area.summary}`);
+      lines.push(`Render: ${area.render}`);
+      if (area.surfaces.length > 0) lines.push(`Impact surfaces: ${area.surfaces.join(", ")}`);
+      if (area.docs.length > 0) lines.push(`Docs: ${area.docs.join(", ")}`);
+      if (area.checks.length > 0) lines.push(`Checks: ${area.checks.map((check) => `${check.id} (${check.kind})`).join(", ")}`);
+      lines.push(`Source: ${area.source}`);
       lines.push("");
-      lines.push(decision.summary);
+    }
+  }
+
+  if (result.changes.length > 0) {
+    lines.push("## Active Changes");
+    lines.push("");
+    for (const change of result.changes) {
+      lines.push(`### ${change.title}`);
       lines.push("");
-      pushList(lines, "Rationale", decision.rationale);
-      pushList(lines, "Required", decision.required);
-      pushList(lines, "Replaced", decision.replaced);
-      pushList(lines, "Agent Policy", decision.agentPolicy);
-      pushList(lines, "Exceptions", decision.exceptions);
-      pushList(lines, "Examples", decision.examples);
+      lines.push(`Id: ${change.id}`);
+      lines.push(`Kind: ${change.kind}`);
+      lines.push(`Board: ${change.boardColumn}`);
+      lines.push(`Summary: ${change.summary}`);
+      lines.push(`Problem: ${change.intent.problem}`);
+      lines.push(`Outcome: ${change.intent.outcome}`);
+      if (change.lastEvent) lines.push(`Last event: ${change.lastEvent.type} - ${change.lastEvent.summary}`);
+      pushList(lines, "Updates", [
+        ...change.updates.areas.map((id) => `area: ${id}`),
+        ...change.updates.conventions.map((id) => `convention: ${id}`),
+        ...change.updates.surfaces.map((id) => `surface: ${id}`),
+      ]);
+      pushList(lines, "Scope", [
+        ...change.scope.map((target) => `${target.kind}: ${definitionTargetSummary(target)}`),
+      ]);
+      if (change.docs.length > 0) lines.push(`Docs: ${change.docs.join(", ")}`);
+      if (change.checks.length > 0) lines.push(`Checks: ${change.checks.map((check) => `${check.id} (${check.kind})`).join(", ")}`);
+      lines.push(`Source: ${change.source}`);
+      lines.push("");
+    }
+  }
+
+  if (result.conventions.length > 0) {
+    lines.push("## Conventions");
+    lines.push("");
+    for (const convention of result.conventions) {
+      lines.push(`### ${convention.title}`);
+      lines.push("");
+      lines.push(`Id: ${convention.id}`);
+      lines.push(`Topics: ${(convention.topics ?? []).join(", ")}`);
+      lines.push(`Applies: ${convention.applies.join(", ")}`);
+      if (convention.related && convention.related.length > 0) lines.push(`Related: ${convention.related.join(", ")}`);
+      if (convention.docs && convention.docs.length > 0) lines.push(`Docs: ${convention.docs.join(", ")}`);
+      lines.push("");
+      lines.push(convention.rule);
+      lines.push("");
+      pushList(lines, "Why", convention.why ? [convention.why] : []);
     }
   }
 
@@ -406,21 +627,21 @@ function renderMarkdown(result: RelatedCanon & { gitHistory?: ReturnType<typeof 
       lines.push(`  Facts: ${validator.facts.join(", ") || "<none>"}`);
       lines.push(`  Topics: ${validator.topics.join(", ")}`);
       lines.push(`  Applies: ${validator.applies.join(", ")}`);
-      if (validator.decisionIds.length > 0) lines.push(`  Decisions: ${validator.decisionIds.join(", ")}`);
+      if (validator.conventionIds.length > 0) lines.push(`  Conventions: ${validator.conventionIds.join(", ")}`);
       if (validator.docs.length > 0) lines.push(`  Docs: ${validator.docs.join(", ")}`);
     }
     lines.push("");
     lines.push("Run:");
     lines.push("");
     lines.push("```bash");
-    lines.push("bun run opencanon validate --files <paths...>");
+    lines.push("opencanon validate --files <paths...>");
     lines.push("```");
   }
 
   return lines.join("\n").trimEnd();
 }
 
-function renderExceptionsMarkdown(exceptions: ReturnType<typeof selectExceptions>): string {
+function renderExceptionsMarkdown(exceptions: unknown[]): string {
   const lines: string[] = [];
   lines.push("# OpenCanon Exceptions");
   lines.push("");
@@ -428,18 +649,6 @@ function renderExceptionsMarkdown(exceptions: ReturnType<typeof selectExceptions
   if (exceptions.length === 0) {
     lines.push("No documented exceptions matched.");
     return lines.join("\n");
-  }
-
-  for (const decision of exceptions) {
-    lines.push(`## ${decision.id}: ${decision.title}`);
-    lines.push("");
-    lines.push(`Source: ${decision.source}`);
-    lines.push(`Status: ${decision.status}`);
-    lines.push(`Topics: ${decision.topics.join(", ")}`);
-    lines.push(`Applies: ${decision.applies.join(", ")}`);
-    lines.push("");
-    for (const exception of decision.exceptions) lines.push(`- ${exception}`);
-    lines.push("");
   }
 
   return lines.join("\n").trimEnd();
@@ -452,8 +661,26 @@ function pushList(lines: string[], title: string, items: string[] | undefined): 
   lines.push("");
 }
 
-function listTopics(decisions: Decision[]): string[] {
-  return unique(decisions.flatMap((decision) => decision.topics)).sort();
+function listTopics(conventions: Convention[]): string[] {
+  return unique(conventions.flatMap((convention) => convention.topics ?? [])).sort();
+}
+
+function conventionApplies(convention: Convention): string[] {
+  switch (convention.applies.kind) {
+    case "files":
+    case "symbols":
+      return convention.applies.globs;
+    case "imports":
+      return [...(convention.applies.from ?? []), ...(convention.applies.to ?? [])];
+    case "impact-surface":
+      return convention.applies.surfaceIds;
+    case "definitions":
+      return convention.applies.definitions.flatMap((target) => (target.ids ?? ["*"]).map((id) => `${target.kind}:${id}`));
+    case "project":
+      return [convention.applies.describe ?? "project"];
+    case "custom":
+      return [convention.applies.describe];
+  }
 }
 
 function matchedPatterns(file: string, patterns: string[]): string[] {
@@ -477,26 +704,44 @@ function writeJson(value: unknown): void {
 
 function printHelp(): void {
   console.log(`Usage:
-  bun run opencanon context --files <paths...>
-  bun run opencanon context --topic <topic>
-  bun run opencanon context --decision <id>
-  bun run opencanon context --changed
-  bun run opencanon context --explain <paths...>
-  bun run opencanon context --explain --changed
-  bun run opencanon context --list-topics
-  bun run opencanon context --list-exceptions
-  bun run opencanon context --check
+  opencanon context --files <paths...>
+  opencanon context --topic <topic>
+  opencanon context --convention <id>
+  opencanon context --changed
+  opencanon context --explain <paths...>
+  opencanon context --explain --changed
+  opencanon context --list-topics
+  opencanon context --list-exceptions
+  opencanon context --check
+  opencanon context chunks --file src/auth.ts
+  opencanon context chunks --definition project-context-index
+  opencanon context coverage
+  opencanon context backlinks project-context-index
 
 Options:
   --format markdown|json   Output format. Default: markdown.
   --files <paths...>       Resolve topics from file globs.
   --changed                Use changed Git files.
   --list-topics            List available topics.
-  --list-exceptions        List documented decision exceptions.
-  --explain <paths...>     Explain why files match decisions and validators.
+  --list-exceptions        List documented convention exceptions.
+  --explain <paths...>     Explain why files match conventions and validators.
   --git-history            Include recent commits for selected files.
   --git-limit <n>          Number of commits per file. Default: 5.
   --topic <topic>          Load context for one topic. Repeat or comma-separate.
-  --decision <id>          Include a specific decision by id.
+  --convention <id>        Include a specific convention by id.
+`);
+}
+
+function printProjectContextQueryHelp(command: string): void {
+  console.log(`Usage:
+  ${command} <query>
+  ${command} <query> --path src/auth.ts
+  ${command} <query> --limit 20 --format json
+
+Options:
+  --limit <n>          Maximum results. Default: 20.
+  --path <path>        Repository-relative path filter. Repeatable.
+  --file <path>        Alias for --path.
+  --format markdown|json   Output format. Default: markdown.
 `);
 }

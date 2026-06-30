@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "**/*.ts",
+    "../../.opencanon/generated/authoring/aliases.d.ts",
+    "../../.opencanon/generated/authoring/core.d.ts",
+    "../../.opencanon/generated/authoring/testing.d.ts"
+  ]
+}

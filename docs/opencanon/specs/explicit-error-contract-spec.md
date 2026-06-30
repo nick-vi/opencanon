@@ -1,0 +1,75 @@
+# Explicit Error Contract Spec
+
+Spec id: `explicit-error-contract-spec`.
+Render style: `reference`.
+
+## Summary
+
+Summary: Failed OpenCanon API envelopes expose a single error payload while diagnostics remain valid domain data inside successful responses.
+
+## Scope
+
+- Files: `packages/core/src/errors.ts`
+- Files: `packages/core/src/contracts.ts`
+- Files: `packages/runtime/src/routes.ts`
+- Files: `packages/runtime/src/server.ts`
+- Files: `packages/runtime/src/service.ts`
+- Files: `packages/runtime/src/local-protocol.ts`
+- Files: `opencanon/conventions/explicit-error-contracts.ts`
+- Docs: `docs/opencanon/specs/explicit-error-contract-spec.md`
+
+## Impact surfaces
+
+- [local-service-control](opencanon://impact-surfaces/local-service-control)
+- [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+
+## Areas
+
+- [explicit-error-contracts](opencanon://areas/explicit-error-contracts)
+- [local-service-and-runtimes](opencanon://areas/local-service-and-runtimes)
+
+## Checks
+
+- `contracts-tests` test `tests/contracts.test.ts`
+- `runtime-client-tests` test `packages/runtime/test/client.test.ts`
+- `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
+- `project-validation` command `npm run opencanon -- validate --project`
+
+## Rules
+
+Rule `failed-envelope-uses-error`: Every transport failure is represented as `{ ok: false, error }`.
+- runtime HTTP failures use `error`
+- service HTTP failures use `error`
+- local protocol clients parse `error`
+Checks: `contracts-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+
+Rule `problem-or-diagnostics`: The error payload is discriminated as either `problem` for structured recovery or `diagnostics` for diagnostic lists.
+- project-open failures use a problem payload
+- diagnostic failures use a diagnostics payload
+- clients branch on the error discriminant
+Checks: `service-lifecycle-tests`, `runtime-client-tests`
+
+Rule `diagnostics-domain-data-remains-allowed`: Successful response bodies and internal parser results may still expose diagnostics as domain data.
+- Git/history/settings diagnostics remain successful payload fields
+- internal parse functions can return diagnostics before route wrapping
+Checks: `runtime-client-tests`, `project-validation`
+
+## Scenarios
+
+Scenario `client-opens-uninitialized-project`
+- Given a folder exists but is not an initialized OpenCanon project
+- When a CLI, MCP, or browser diagnostics client asks the service to ensure that project
+- Then the service returns `error.kind = problem`
+- Then the problem includes the folder path and setup action
+- Then the client can display a predictable recovery flow
+Checks: `service-lifecycle-tests`, `runtime-client-tests`
+
+## Dependencies
+
+No spec dependencies are recorded.
+
+## Governance
+
+- infer governing conventions from spec scope
+- convention [explicit-error-contracts](opencanon://conventions/explicit-error-contracts)
+- convention [tests-follow-risk](opencanon://conventions/tests-follow-risk)

@@ -25,32 +25,37 @@ export class CompanyService {
     }
   ];
 
-  const b = `// validators/index.ts
-export {
-  serviceNoDbClient,
+  const b = `// opencanon/conventions/index.ts
+export default [
+  serviceDbBoundary,
   repeatedDomainLiterals,
   noDumpsterFolders,
-} from "./registry";`;
+];`;
   const bF = [
     {
       line: 2,
       severity: 'warn',
-      rule: 'validators-entrypoint-shape',
-      message: 'expected default export removed',
-      detail: 'Validator entrypoint exports named factories only.'
+      rule: 'generated-doc-drift',
+      message: 'generated docs are stale',
+      detail: 'Run opencanon canon render conventions, then review the Markdown diff.'
     }
   ];
 
-  const c = `// .agents/skills/opencanon/index.ts
-import { defineValidator } from "@opencanon/core"; // ← not allowed
-import { defineValidator } from "../runtime/core.js"; // ← fixed`;
+  const c = `{
+  "ok": false,
+  "error": {
+    "kind": "problem",
+    "message": "Project runtime is not initialized",
+    "action": "Run opencanon setup --yes"
+  }
+}`;
   const cF = [
     {
-      line: 2,
+      line: 3,
       severity: 'error',
-      rule: 'skill-no-workspace-imports',
-      message: 'workspace package import in skill barrel',
-      detail: 'The skill imports from runtime/.'
+      rule: 'explicit-error-contracts',
+      message: 'runtime failure is explicit',
+      detail: 'Clients receive one error payload with a predictable recovery action.'
     }
   ];
 </script>
@@ -77,8 +82,8 @@ import { defineValidator } from "../runtime/core.js"; // ← fixed`;
   <div class="gap"></div>
 
   <Specimen
-    caption="Validator registry shape check."
-    path="validators/index.ts"
+    caption="Generated docs drift check."
+    path="opencanon/conventions/index.ts"
     source={b}
     findings={bF}
   />
@@ -86,8 +91,8 @@ import { defineValidator } from "../runtime/core.js"; // ← fixed`;
   <div class="gap"></div>
 
   <Specimen
-    caption="Skill self-containment check."
-    path=".agents/skills/opencanon/index.ts"
+    caption="Explicit runtime error contract."
+    path="runtime-response.json"
     source={c}
     findings={cF}
   />

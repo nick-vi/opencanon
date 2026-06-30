@@ -1,9 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "strict": false,
-    "noImplicitAny": false,
-    "skipLibCheck": true
-  },
-  "include": ["fixtures/**/*.ts", "generated/**/*.d.ts"]
-}

@@ -1,12 +1,26 @@
 import type { FactKind, ValidatorScope } from "./contracts.ts";
-import type { Baseline, ContextPaths, Decision, ImpactSurface, ProposedImpactNote } from "./core.ts";
+import type { Baseline, ContextPaths, ImpactSurface, ProposedImpactNote } from "./core.ts";
+import type { RuntimeConvention } from "./context.ts";
 import type { PatternExplanation } from "./globs.ts";
 import type { TreeDefinition } from "./tree.ts";
-import type { ExportInfo, FunctionInfo, ImportInfo, LiteralInfo, TypeScriptDeclaration } from "./typescript.ts";
+import type { ExportInfo, FunctionInfo, ImportInfo, LiteralContext, LiteralInfo, TypeScriptDeclaration } from "./typescript.ts";
 import type { PythonClassInfo, PythonFunctionInfo, PythonImportInfo } from "./python.ts";
+import type { ProducerStatus, TypeResolution } from "./type-facts-provider.ts";
 
 export type Severity = "error" | "warning";
-export type FixSafety = "safe" | "suggested" | "manual";
+// Single source of truth for fix safety levels; reference members instead of inlining the strings.
+export const FixSafety = { Safe: "safe", Suggested: "suggested", Manual: "manual" } as const;
+export type FixSafety = (typeof FixSafety)[keyof typeof FixSafety];
+
+export const ValidatorDomain = {
+  File: "file",
+  ImportEdge: "import-edge",
+  ImpactSurface: "impact-surface",
+  Definition: "definition",
+  Project: "project",
+  Custom: "custom",
+} as const;
+export type ValidatorDomain = (typeof ValidatorDomain)[keyof typeof ValidatorDomain];
 
 export type TextEdit = {
   file: string;
@@ -47,8 +61,8 @@ export type Finding = {
   fix?: FindingFix;
   /** Documentation references such as `docs/opencanon/canon/api.md#route-boundaries`. */
   docs?: string[];
-  /** Decision ids this finding enforces. Usually inherited from the validator. */
-  decisionIds?: string[];
+  /** Convention ids this finding enforces. Usually inherited from the validator. */
+  conventionIds?: string[];
 };
 
 export type CommitGateEvidence = {
@@ -56,7 +70,7 @@ export type CommitGateEvidence = {
   line?: number;
   column?: number;
   message?: string;
-  decisionIds?: string[];
+  conventionIds?: string[];
   impactSurfaceIds?: string[];
 };
 
@@ -71,11 +85,13 @@ export type CommitGateInput = {
   file?: string;
   line?: number;
   evidence?: CommitGateEvidence[];
-  decisionIds?: string[];
+  conventionIds?: string[];
   impactSurfaceIds?: string[];
 };
 
-export type CommitGateApprovalScope = "staged-diff" | "file";
+// Single source of truth for commit-gate approval scopes; reference members instead of inlining the strings.
+export const CommitGateApprovalScope = { StagedDiff: "staged-diff", File: "file" } as const;
+export type CommitGateApprovalScope = (typeof CommitGateApprovalScope)[keyof typeof CommitGateApprovalScope];
 
 export type CommitGate = CommitGateInput & {
   validatorId: string;
@@ -90,7 +106,7 @@ export type ReportInput = {
   message: string;
   fix?: FindingFix;
   docs?: string[];
-  decisionIds?: string[];
+  conventionIds?: string[];
 };
 
 export type FileReportInput = Omit<ReportInput, "file">;
@@ -102,13 +118,17 @@ export type TextMatch = {
   groups: string[];
 };
 
+// Single source of truth for import-edge kinds; reference members instead of inlining the strings.
+export const ImportEdgeKind = { Import: "import", Export: "export" } as const;
+export type ImportEdgeKind = (typeof ImportEdgeKind)[keyof typeof ImportEdgeKind];
+
 export type ImportEdge = {
   from: ProjectFile;
   to?: ProjectFile;
   source: string;
   line: number;
   specifiers: string[];
-  kind: "import" | "export";
+  kind: ImportEdgeKind;
   relativeDepth: number;
   resolution: "relative" | "alias" | "workspace" | "external" | "unresolved";
   resolvedPath?: string;
@@ -139,6 +159,20 @@ export type ProjectExportFact = ExportInfo & {
   language: ProjectFile["language"];
 };
 
+// Single source of truth for project symbol kinds; reference members instead of inlining the strings.
+export const ProjectSymbolKind = {
+  Function: "function",
+  Class: "class",
+  Method: "method",
+  Variable: "variable",
+  Type: "type",
+  Interface: "interface",
+  Enum: "enum",
+  Property: "property",
+  Unknown: "unknown",
+} as const;
+export type ProjectSymbolKind = (typeof ProjectSymbolKind)[keyof typeof ProjectSymbolKind];
+
 export type ProjectSymbolFact = {
   file: ProjectFile;
   language: ProjectFile["language"];
@@ -146,19 +180,24 @@ export type ProjectSymbolFact = {
   column?: number;
   endLine?: number;
   name: string;
-  kind: "function" | "class" | "method" | "variable" | "type" | "interface" | "enum" | "property" | "unknown";
+  kind: ProjectSymbolKind;
   exported: boolean;
   params?: string[];
 };
 
-export type ProjectCallFact = {
-  file: ProjectFile;
-  language: ProjectFile["language"];
+export type CallInfo = {
   line: number;
   column?: number;
   name: string;
   receiver?: string;
   callee: string;
+  tryDepth?: number;
+  argumentCalls?: Array<{ callee: string; name: string; awaited: boolean }>;
+};
+
+export type ProjectCallFact = CallInfo & {
+  file: ProjectFile;
+  language: ProjectFile["language"];
 };
 
 export type ProjectLiteralFact = LiteralInfo & {
@@ -228,7 +267,7 @@ export type ImpactRequiredChecks = {
   files: ProjectFile[];
   requiresTests: string[];
   requiresDocs: string[];
-  requiresDecision: boolean;
+  requiresApproval: boolean;
   reviewers: string[];
 };
 
@@ -274,7 +313,7 @@ export type OpenCanonProjectIndexFile = {
 /**
  * Project-specific generated type index.
  *
- * `opencanon project-types generate` augments this interface from
+ * Generated project authoring support augments this interface from
  * `@opencanon/project`, allowing `ctx.typed.*` helpers to narrow to the files,
  * imports, exports, symbols, literals, and caller/callee lookups discovered in the local repo.
  */
@@ -331,6 +370,12 @@ export type TypedFunctionFact<F extends string = ProjectIndexFilePath> = Omit<Pr
 export type TypedStringLiteralFact<F extends string = ProjectIndexFilePath> = Omit<ProjectLiteralFact, "file" | "value"> & {
   file: ProjectFile & { path: F };
   value: ProjectStringLiteralIn<F>;
+  /**
+   * Resolved surrounding type, present when the query resolved a type. The
+   * shape is a hidden detail — consume it through the capability accessors
+   * (`asFiniteLiteralSet`, `finiteLiteralIncludes`), never by switching on `kind`.
+   */
+  surroundingType?: TypeResolution;
 };
 
 export type TypedSymbolFact<F extends string = ProjectIndexFilePath> = Omit<ProjectSymbolFact, "file" | "name"> & {
@@ -371,6 +416,22 @@ export type TypedFactsApi = {
   callees<S extends ProjectSymbolId>(symbol: S): TypedCallEdge<S>[];
   /** Caller edges for one generated symbol id. */
   callers<S extends ProjectSymbolId>(symbol: S): TypedCallerEdge<S>[];
+  /**
+   * Literal facts filtered by type information. Combines `declarationSourceId`
+   * facts (syntactic, always available) with surrounding-type resolution read
+   * from the pre-warmed type map (see `prewarmTypeFacts`). `surroundingType` is
+   * present ONLY for sites a `ready` producer resolved — binary, never a guess.
+   */
+  literal(opts?: {
+    declarationSourceId?: string | string[];
+    surroundingTypeName?: string | string[];
+    contexts?: LiteralContext[];
+    valueKind?: "string" | "number" | "boolean";
+  }): TypedStringLiteralFact[];
+  /** Status of one language's type producer (`{kind:"not-implemented"}` when none is registered). */
+  producerStatus(language: string): ProducerStatus;
+  /** Status of every known language producer for this run. */
+  producerStatuses(): ProducerStatus[];
 };
 
 export type GraphApi = {
@@ -403,7 +464,9 @@ export type JsonRead<T = unknown> = {
   diagnostics: string[];
 };
 
-export type WorkspaceKind = "root" | "app" | "package" | "workspace";
+// Single source of truth for workspace package kinds; reference members instead of inlining the strings.
+export const WorkspaceKind = { Root: "root", App: "app", Package: "package", Workspace: "workspace" } as const;
+export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
 
 export type WorkspacePackage = {
   name: string;
@@ -444,12 +507,15 @@ export type ProjectFile = {
   matches(glob: string): boolean;
   /** Parsed comments from supported source files. */
   comments(): CommentInfo[];
+  /** Parse diagnostics from the AST extractor (empty when the file parsed cleanly). */
+  diagnostics(): ProjectDiagnosticFact[];
   /** Build a finding attached to this file. */
   report(input: FileReportInput): Finding;
   ts: {
     imports(): ImportInfo[];
     exports(): ExportInfo[];
     functions(): FunctionInfo[];
+    calls(): CallInfo[];
     declarations(): TypeScriptDeclaration[];
     literals(): LiteralInfo[];
   };
@@ -457,6 +523,7 @@ export type ProjectFile = {
     imports(): PythonImportInfo[];
     functions(): PythonFunctionInfo[];
     classes(): PythonClassInfo[];
+    calls(): CallInfo[];
   };
 };
 
@@ -508,10 +575,40 @@ export type ValidationContext = {
 export type ValidatorRuntime = {
   rootDir: string;
   paths: ContextPaths;
-  decisions: {
-    all: Decision[];
-    byId(id: string): Decision | undefined;
-    byTopic(topic: string): Decision[];
+  conventions: {
+    all: RuntimeConvention[];
+    byId(id: string): RuntimeConvention | undefined;
+    byTopic(topic: string): RuntimeConvention[];
+  };
+  definitions: {
+    specs: RuntimeDefinition[];
+    areas: RuntimeDefinition[];
+    changes: RuntimeDefinition[];
+    conventions: RuntimeDefinition[];
+    all(): RuntimeDefinition[];
+    byId(kind: RuntimeDefinition["kind"], id: string): RuntimeDefinition | undefined;
+  };
+  context: {
+    /** Deterministic definitions whose declared target files include this repo-relative file. */
+    definitionsForFile(file: string): RuntimeDefinition[];
+    /** Deterministic conventions whose applies globs include this repo-relative file. */
+    governingConventionsForFile(file: string): RuntimeConvention[];
+    /** Impact surfaces whose deterministic applies globs include this repo-relative file. */
+    surfacesForFile(file: string): ImpactSurface[];
+    /** Declared and inferred Project Map coverage for a repo-relative file. */
+    coverageForFile(file: string): RuntimeContextCoverage;
+    /** Declared target files for a definition. */
+    filesForDefinition(kind: RuntimeDefinition["kind"], id: string): string[];
+    /** Declared check ids for a definition. */
+    checksForDefinition(kind: RuntimeDefinition["kind"], id: string): string[];
+    /** Source files that match an impact surface. */
+    filesForSurface(surfaceId: string): string[];
+    /** Definitions linked to an impact surface by explicit ids or matching target files. */
+    definitionsForSurface(surfaceId: string): RuntimeDefinition[];
+    /** Conventions linked to an impact surface by explicit ids or matching governed files. */
+    conventionsForSurface(surfaceId: string): RuntimeConvention[];
+    /** Declared check ids and surface-required checks for an impact surface. */
+    checksForSurface(surfaceId: string): string[];
   };
   matches(file: string, globs: string[]): boolean;
   globs: {
@@ -527,10 +624,32 @@ export type ValidatorRuntime = {
   };
 };
 
+export type RuntimeDefinition = {
+  kind: "spec" | "area" | "change" | "convention";
+  id: string;
+  title: string;
+  summary: string;
+  docs: string[];
+  source?: string;
+  surfaces: string[];
+  conventionIds: string[];
+  checkIds: string[];
+  targetFiles: string[];
+};
+
+export type RuntimeContextCoverage = {
+  file: string;
+  definitions: RuntimeDefinition[];
+  conventions: RuntimeConvention[];
+  surfaces: ImpactSurface[];
+  checks: string[];
+  governed: boolean;
+};
+
 export type ValidatorArgs = {
   /** Project data and helper APIs for the current validation run. */
   ctx: ValidationContext;
-  /** Stable runtime utilities, loaded decisions, paths, glob helpers, and naming helpers. */
+  /** Stable runtime utilities, loaded conventions, paths, glob helpers, and naming helpers. */
   runtime: ValidatorRuntime;
 };
 
@@ -538,10 +657,11 @@ export type ValidatorSummaryInput = {
   id: string;
   topics: string[];
   applies: string[];
+  domain: ValidatorDomain;
   severity: Severity;
   scope: ValidatorScope;
   facts: FactKind[];
-  decisionIds: string[];
+  conventionIds: string[];
   docs: string[];
 };
 
@@ -559,46 +679,58 @@ export type ValidatorDefinition = {
   topics?: string[];
   /** Glob scopes where this validator applies. */
   applies?: string[];
+  /** The thing this validator governs. Empty applies are only human-clear when this is explicit. */
+  domain?: ValidatorDomain;
   /** Extra fact-analysis globs when a validator needs context outside target files. */
   analysis?: string[];
   severity?: Severity;
   scope?: ValidatorScope;
   /** Declared fact kinds used by this validator. */
   facts?: FactKind[];
-  decisionIds?: string[];
+  conventionIds?: string[];
   docs?: string[];
   summary?: ValidatorSummary;
   visuals?: ValidatorVisual[];
+  /**
+   * Per-language type producers this validator requires (e.g. `["typescript"]`).
+   * When any required producer is not `ready`, the validator SKIPS and the run
+   * emits one diagnostic (or an error under `--strict-producers`). Rules that
+   * consume typed facts (`ctx.typed.literal(...).surroundingType`) must declare it.
+   */
+  requiresProducers?: string[];
+  /**
+   * Fixture coverage contract checked by `validate --check-fixtures`.
+   * - "valid-and-invalid" (default): requires both `valid.ts` and a flagging
+   *   `invalid.ts` fixture — the normal contract for every validator.
+   * - "valid-only": requires only `valid.ts`. For TYPED rules (those with
+   *   `requiresProducers`) whose findings depend on producer-checked resolutions
+   *   the ephemeral fixture harness cannot produce; such rules are proven by a
+   *   unit test that injects a `ready` `TypeFactsProvider`, while the `valid.ts`
+   *   fixture proves no false positive without a ready producer.
+   */
+  fixtures?: "valid-and-invalid" | "valid-only";
   /** Validator body. Return findings; use `ctx.report()` or `file.report()` to preserve typing. */
   validate?(args: ValidatorArgs): Finding[] | Promise<Finding[]>;
   /** Nested validators inherit parent metadata and scope restrictions. */
   validators?: ValidatorDefinition[];
 };
 
-export type ValidatorFactoryBaseOptions = {
-  id: string;
-  topics: string[];
-  severity: Severity;
-  decisionIds?: string[];
-  docs?: string[];
-  summary?: ValidatorSummary;
-};
-
-export type ValidatorFactory<TOptions extends Record<string, unknown> = Record<string, never>> = (
-  options: ValidatorFactoryBaseOptions & TOptions,
-) => ValidatorDefinition;
-
 export type Validator = {
   id: string;
   topics: string[];
   appliesScopes: string[][];
+  domain: ValidatorDomain;
   analysisGlobs: string[];
   severity: Severity;
   scope: ValidatorScope;
   facts: FactKind[];
-  decisionIds: string[];
+  conventionIds: string[];
   docs: string[];
   summary?: string;
   visuals: ValidatorVisual[];
+  /** Per-language type producers this validator requires; see `ValidatorDefinition.requiresProducers`. */
+  requiresProducers: string[];
+  /** Fixture coverage contract; see `ValidatorDefinition.fixtures`. Defaults to "valid-and-invalid". */
+  fixtures: "valid-and-invalid" | "valid-only";
   validate(args: ValidatorArgs): Finding[] | Promise<Finding[]>;
 };

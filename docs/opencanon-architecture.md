@@ -4,23 +4,24 @@ Scope: OpenCanon framework standalone
 
 ## Product Definition
 
-OpenCanon stores and enforces repository conventions for agent-assisted code changes.
+OpenCanon turns a repository into Project Canon for agent-assisted software development.
 
 It provides:
 
-- loading scoped convention context
-- reading current decisions and docs
-- enforcing rules with validators
+- loading scoped Project Canon definitions, generated docs, and project knowledge
+- reading current conventions, areas, specs, changes, surfaces, and Project Map links
+- enforcing convention runtime checks, gates, tests, and declared change checks
 - recording findings
-- exposing daemon-backed CLI, hook, and UI surfaces
+- exposing service-backed CLI, hook, MCP, and browser diagnostics surfaces
+- indexing project knowledge for search, related-code discovery, and definition backlinks
 
-It is not a task tracker, chat memory system, or code search product.
+It is not a general task tracker, chat memory system, or standalone code search product. Changes, search, and knowledge exist to serve Project Canon and runtime proof.
 
 Model:
 
 ```text
-docs -> decisions -> validators -> findings
-daemon -> CLI/hooks/UI
+typed Project Canon definitions -> generated docs -> project knowledge index -> runtime proof -> findings/gates
+OpenCanon service -> project runtime -> CLI/hooks/MCP/browser diagnostics
 ```
 
 ## Runtime Architecture
@@ -28,34 +29,33 @@ daemon -> CLI/hooks/UI
 OpenCanon has one execution path and no silent fallbacks.
 
 ```text
-Rust watcher -> daemon -> Rust engine/state -> fact graph/cache -> TypeScript validators -> findings -> CLI/UI/hooks
+Rust watcher -> project runtime -> Rust engine/state -> fact graph/cache -> TypeScript convention runtime -> findings/gates -> CLI/MCP/hooks
 ```
 
 Required choices:
 
-- Runtime: Bun.
-- Package installs: exact dependency versions plus committed `bun.lock`.
+- Runtime: Node.js (>=24.12.0, native TypeScript execution).
+- Package installs: exact dependency versions plus committed `package-lock.json`.
 - Engine bridge: napi-rs.
 - Watch backend: Rust `notify` plus debouncing inside the engine.
 - State storage: repo-local SQLite owned by Rust with embedded migrations.
-- Daemon: TypeScript on Bun, using the engine for hot-path work and durable state operations.
+- Service/runtimes: TypeScript on Node, using the engine for hot-path work and durable state operations.
 - Rust engine: watcher, file inventory, hashing, diffing, migrations, glob matching, fact extraction, graph updates, affected calculation.
-- Validator authoring: TypeScript.
-- UI: React plus Vite, served by the daemon.
-- Hooks: adapters call daemon APIs after daemon unification.
+- Convention authoring: TypeScript.
+- Hooks: adapters call runtime APIs after runtime unification.
 
 If a required component is missing or stale, OpenCanon fails with a diagnostic.
 
 ## Version Policy
 
-OpenCanon pins exact runtime package versions instead of ranges. `bun add --exact` is the default rule for npm dependencies, and `Cargo.lock` is committed for Rust crates.
+OpenCanon pins exact runtime package versions instead of ranges. `npm install --save-exact` is the default rule for npm dependencies, and `Cargo.lock` is committed for Rust crates.
 
 Refresh procedure:
 
 ```bash
 npm view <package> version
 curl -s https://crates.io/api/v1/crates/<crate> | jq -r '.crate.max_stable_version'
-curl -s https://api.github.com/repos/oven-sh/bun/releases/latest | jq -r '.tag_name'
+node --version  # must satisfy the >=24.12.0 floor
 curl -s https://api.github.com/repos/rust-lang/rust/releases/latest | jq -r '.tag_name'
 ```
 
@@ -63,24 +63,24 @@ Updating a pin requires updating package manifests, lockfiles, and the doctor ve
 
 ### Runtime Release Manifest
 
-Engine runtime distribution is manifest-driven. The CLI detects the current target from `process.platform` and `process.arch`; agents do not choose bundle URLs manually.
+OpenCanon runtime distribution is manifest-driven. The CLI detects the current target from `process.platform` and `process.arch`; agents do not choose bundle URLs manually.
 
 Manifest contract:
 
 - `version: 1`
-- skill version
-- required Bun version
+- runtime version
+- required Node version
 - one atomic bundle per supported target (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, `win32-x64`), each with a `url` and SHA-256
 
-Every bundle is a single `tar.gz` whose contents drop directly into `.agents/skills/opencanon/runtime/`: `cli.js`, `validators.js`, and `engine/<target>/opencanon.<target>.node`. Engine binary and JS runtime ship together to make schema drift impossible.
+Every bundle is a single `tar.gz` whose contents drop directly into the installed OpenCanon runtime: `cli.js`, `validators.js`, and `engine/<target>/opencanon.<target>.node`. Engine binary and JS runtime ship together to make schema drift impossible.
 
-`opencanon update check --manifest <path-or-url>` reads the manifest, selects the current target, validates the pinned Bun version, and reports `current`, `missing`, or `update-available` against the `.bundle.json` marker. `opencanon update apply --manifest <path-or-url>` refuses to write while the project daemon is running, downloads the target bundle over HTTPS, `file:`, or a local path, verifies SHA-256, extracts to a staging directory, and swaps it into place atomically (renaming the previous `runtime/` aside before removing it).
+`opencanon update check --manifest <path-or-url>` reads the manifest, selects the current target, validates the pinned Node version, and reports `current`, `missing`, or `update-available` against the `.bundle.json` marker. `opencanon update apply --manifest <path-or-url>` refuses to write while the service or current project runtime is registered as running, downloads the target runtime bundle over HTTPS, `file:`, or a local path, verifies SHA-256, extracts to a staging directory, and swaps it into place atomically.
 
 ### Toolchain
 
 | Component | Pin | Use |
 | --- | ---: | --- |
-| Bun | `1.3.13` | Runtime, package manager, CLI execution, daemon HTTP/SSE |
+| Node.js | `>=24.12.0` | Runtime, native TS execution, runtime HTTP/SSE |
 | Rust | `1.95.0` | Engine toolchain via `rust-toolchain.toml` |
 
 ### NPM Packages
@@ -88,25 +88,14 @@ Every bundle is a single `tar.gz` whose contents drop directly into `.agents/ski
 | Package | Pin | Use |
 | --- | ---: | --- |
 | `@napi-rs/cli` | `3.6.2` | Engine build command |
-| `@types/bun` | `1.3.14` | Bun type support |
+| `esbuild` | `0.28.1` | Build-time bundling of the OpenCanon runtime |
+| `esbuild-wasm` | `0.28.0` | Runtime validator-graph bundling (self-contained) |
 | `@types/node` | `25.7.0` | Node-compatible type support |
 | `cac` | `7.0.0` | CLI command parsing |
-| `zod` | `4.4.3` | Runtime schemas for config, daemon API, persisted records |
-| `vite` | `8.0.12` | UI build/dev server |
-| `@vitejs/plugin-react` | `6.0.1` | React plugin |
-| `react` | `19.2.6` | UI |
-| `react-dom` | `19.2.6` | UI |
-| `@types/react` | `19.2.14` | UI types |
-| `@types/react-dom` | `19.2.3` | UI types |
-| `@tanstack/react-query` | `5.100.10` | UI data fetching |
-| `@tanstack/react-router` | `1.169.2` | UI routing |
-| `lucide-react` | `1.14.0` | UI icons |
+| `zod` | `4.4.3` | Runtime schemas for config, runtime API, persisted records |
 | `vitest` | `4.1.6` | Tests |
-| `playwright` | `1.60.0` | UI verification |
 
-The Svelte documentation site is tracked separately from daemon/runtime checks. Site dependency changes should stay separate from runtime release changes.
-
-Do not add `better-sqlite3`, external filesystem watcher clients, or `ws`. Rust owns durable state and file watching; Bun already provides the selected HTTP and WebSocket APIs for this architecture.
+Do not add `better-sqlite3`, external filesystem watcher clients, or `ws`. Rust owns durable state and file watching; Node provides the selected HTTP and SSE APIs (node:http) for this architecture.
 
 ### Rust Crates
 
@@ -128,52 +117,74 @@ Do not add `better-sqlite3`, external filesystem watcher clients, or `ws`. Rust 
 | `oxc_semantic` | `0.128.0` | JS/TS semantic facts |
 | `oxc_span` | `0.128.0` | Source spans and line mapping |
 | `oxc_syntax` | `0.128.0` | Scope flags and syntax metadata |
-Initial JS/TS facts use Oxc. If a validator requests facts for a language without an adapter, validation fails with `unsupported-language-facts`.
+Initial JS/TS facts use Oxc. If a convention runtime requests facts for a language without an adapter, validation fails with `unsupported-language-facts`.
 
 ## Package Layout
 
 ```text
 packages/core
-  TS public types, validator API, schemas, finding types, docs/decision types
+  TS public types, convention API, schemas, finding types, docs and impact types
 
 packages/validators
   curated validator factories
 
 packages/cli
-  opencanon command parser, daemon lifecycle commands, bootstrap checks, and daemon-backed command clients
+  opencanon command parser, service/runtime lifecycle commands, bootstrap checks, and runtime-backed command clients
 
 packages/engine
   napi-rs loader and typed TS wrapper around Rust engine
 
-packages/daemon
-  Bun daemon, global supervisor registry, Rust engine orchestration, job runner, HTTP/WebSocket API
-
-packages/ui
-  React/Vite dashboard
+packages/runtime
+  Node service and project-runtime implementation, Rust engine orchestration, job runner, HTTP/SSE API
 
 crates/opencanon-engine
   watcher, SQLite migrations/state, file inventory, hashing, glob matching, fact extraction, graph construction, affected calculation
+
+crates/opencanon-vector
+  mmap-backed vector storage and HNSW search for the project context index
+
+crates/opencanon-inference
+  native GGUF embedding and generation runtime for project-local context indexing
 ```
 
-Daemon unification removes duplicate runtime-validation paths from the CLI. One-shot commands and CI start an isolated ephemeral daemon and use the same API path as a supervised daemon.
+Runtime unification removes duplicate validation paths from the CLI. Normal commands use a project runtime managed by the OpenCanon service; tests and explicit one-shot callers can force an isolated in-process runtime.
+
+## Context Index Boundary
+
+OpenCanon absorbs project-knowledge-engine search and retrieval internals as substrate, not as a parallel product or second runtime.
+
+Source-of-truth rules:
+
+- Authored truth stays in TypeScript definitions, generated docs, fixtures, tests, and project source files.
+- Chunks, embeddings, BM25 rows, vector files, lineage summaries, and search rankings are generated runtime state under `.opencanon/`.
+- Semantic and LLM-derived output is advisory until a deterministic convention runtime, gate, check, or test enforces it.
+- Project knowledge search must backlink to definitions where possible: conventions, specs, areas, changes, checks, impact surfaces, files, symbols, docs, and findings.
+- Product copy says Knowledge, Search, Project Map, and related code. Architecture/source code may say Semantic Index, chunk, embedding, HNSW, vector store, and lineage.
+
+This keeps OpenCanon definition-first. Search helps agents and humans find evidence, but it does not become the system of record.
+
+The full Project Context implementation contract is tracked in
+`docs/project-context-implementation-plan.md`. It covers chunking, embeddings,
+vector storage, deterministic validator APIs, CLI/MCP surfaces, Search
+and Ask, Project Map coverage, doctor, observability, security, and dogfooding.
 
 ## Runtime Modes
 
 ### Local Development
 
 ```bash
-opencanon dev
+opencanon project start --foreground
 ```
 
 Starts:
 
-- supervised per-project daemon
+- foreground project runtime
 - Rust watcher
 - repo-local SQLite database
-- UI server
-- server-sent event state stream
+- browser diagnostics harness
+- server-sent event state stream for browser diagnostics clients
 
-The global supervisor is a registry and lifecycle controller, not a shared daemon. It stores project daemon metadata in `~/.opencanon/daemons.json`; each project daemon still owns exactly one repo root, one `.opencanon` state directory, one auth token, and one watcher root.
+The OpenCanon service is a registry and lifecycle controller, not a shared project runtime. It stores runtime metadata in `~/.opencanon/service.json`; each project runtime still owns exactly one repo root, one `.opencanon` state directory, one auth token, and one watcher root. Registry entries advertise both a pipe endpoint for local app/CLI traffic and a loopback URL for browser diagnostics.
 
 ### CLI Use
 
@@ -183,41 +194,39 @@ opencanon context --files src/api/routes/company.ts
 opencanon feedback --changed
 ```
 
-These commands first reuse a healthy supervised daemon for the project. If none is running, they start an in-process ephemeral daemon with an isolated scratch SQLite path, execute the request through HTTP, then stop it. This is still daemon-backed execution; it is not a direct validation fallback.
+These commands first reuse a healthy project runtime. If none is running, they ask the service to lazily start the runtime, then execute the same local request protocol over the advertised pipe endpoint. The loopback URL remains a debug/browser transport. One-shot runtime servers are only used by explicit runtime-server tests and foreground runtime debugging, not as a CLI fallback.
 
 ### CI And One-Shot Commands
 
-CI is not a fallback. It is an explicit one-shot daemon mode:
+CI is not a fallback. It runs the same service-backed command path as local use, with tests using private service registries when persistent user service state would be noisy:
 
-1. start ephemeral daemon
-2. initialize Rust watcher
-3. open an isolated scratch SQLite state path
-4. build or refresh state
-5. run validation through the daemon HTTP API
-6. stop daemon and remove scratch state
+1. build the runtime artifacts
+2. build the runtime bundle
+3. run release, Rust, TypeScript, and Vitest checks
+4. run context, fixture, doctor, manifest, and install-rehearsal checks through OpenCanon commands
 
 ## Fail-Fast Policy
 
 | Condition | Result |
 | --- | --- |
-| Bun version does not match configured pin | hard fail |
+| Node version below the >=24.12.0 floor | hard fail |
 | Rust watcher cannot start | hard fail or mark state stale in explicit no-watch mode |
 | Engine binary missing | hard fail |
 | Engine binary version differs from package version | hard fail |
-| SQLite state schema is newer than daemon schema | hard fail |
-| SQLite state schema is older than daemon schema | run embedded migrations at daemon startup |
-| Validator definition is invalid | hard fail at daemon load |
-| Validator requests unsupported facts | hard fail for that validation run |
-| Docs/decision schema invalid | hard fail for context/rules/docs commands |
-| Hook called without a supervised daemon | start isolated ephemeral daemon; hard fail only if daemon prerequisites fail |
+| SQLite state schema is newer than runtime schema | hard fail |
+| SQLite state schema is older than runtime schema | run embedded migrations at runtime startup |
+| Convention definition is invalid | hard fail at runtime load |
+| Convention runtime requests unsupported facts | hard fail for that validation run |
+| Convention/docs schema invalid | hard fail for context/rules/docs commands |
+| Hook called without a supervised runtime | start isolated ephemeral runtime; hard fail only if runtime prerequisites fail |
 
 Predictability is more important than continuing in a weaker mode.
 
 ## Rust Watcher Contract
 
-The engine is the only filesystem event source. OpenCanon does not require a user-installed filesystem daemon.
+The engine is the only filesystem event source. OpenCanon does not require a user-installed filesystem watcher.
 
-Daemon startup must:
+Project runtime startup must:
 
 1. open the repo-local state database
 2. run embedded Rust migrations
@@ -232,11 +241,11 @@ Watcher events are hints, not the source of truth. The source of truth is the ne
 
 Required behavior:
 
-- initial daemon start performs a full inventory scan
+- initial project runtime start performs a full inventory scan
 - save noise is debounced before snapshot rebuild work starts
 - deletes and renames are reconciled by comparing current inventory against persisted `files`
 - watcher errors, event overflow, or unreadable paths mark state stale
-- stale state schedules a full scan before the daemon reports ready
+- stale state schedules a full scan before the runtime reports ready
 - `.git`, `.opencanon`, `node_modules`, build outputs, and configured ignores are excluded before hashing
 - no timestamp-only freshness checks are allowed
 - no per-file NAPI call loop is allowed for watcher or hash work
@@ -265,7 +274,7 @@ export type ProjectHandle = {
 };
 ```
 
-The daemon does not expose raw SQLite tables through NAPI. NAPI methods are domain operations: open project state, scan and diff inventory, extract facts, build graph data, watch files, and persist canon events. Low-level table CRUD stays inside Rust.
+The project runtime does not expose raw SQLite tables through NAPI. NAPI methods are domain operations: open project state, scan and diff inventory, extract facts, build graph data, watch files, and persist canon events. Low-level table CRUD stays inside Rust.
 
 ### Requests
 
@@ -286,12 +295,13 @@ export type ExternalTool = {
 
 export type ResolvedProjectSettings = {
   docsDir: string;
-  decisionsPath: string;
-  validatorsPath: string;
+  conventionsPath: string;
   fixturesDir: string;
   impactSurfacesPath: string;
   proposedImpactNotesPath: string;
   baselinePath: string;
+  commitApprovalsPath: string;
+  commitApprovalsPersistent: boolean;
   projectFilePatterns: string[];
   ignore: string[];
   entrypoints: string[];
@@ -371,11 +381,11 @@ export type FileFacts = {
 
 Fact extraction diagnostics are data, but malformed bridge payloads are errors. Engine panics are process-fatal and treated as engine bugs.
 
-## Daemon API
+## Runtime API
 
-The daemon exposes HTTP for request/response operations and server-sent events for live state. Health is public; other API routes require the daemon bearer token or daemon session cookie. Remote UI bootstrap accepts the token on the index route, then serves static assets only to authorized requests.
+The project runtime exposes HTTP for request/response operations and server-sent events for live state. Health is public; other API routes require the runtime bearer token or runtime session cookie. Remote UI bootstrap accepts the token on the index route, then serves static assets only to authorized requests.
 
-Base URL is stored in `.opencanon/daemon.json`:
+Base URL is stored in `.opencanon/runtime.json`:
 
 ```json
 {
@@ -385,7 +395,7 @@ Base URL is stored in `.opencanon/daemon.json`:
   "port": 43187,
   "url": "http://127.0.0.1:43187",
   "startedAt": "<ISO-8601 timestamp>",
-  "logPath": ".opencanon/daemon.log",
+  "logPath": ".opencanon/runtime.log",
   "authToken": "<generated-token>"
 }
 ```
@@ -396,12 +406,20 @@ Endpoints:
 GET  /api/health
 GET  /api/state
 GET  /api/snapshot
+GET  /api/context/status
+GET  /api/context/search
+GET  /api/context/ask
+GET  /api/context/chunks
+GET  /api/context/coverage
+GET  /api/context/backlinks
+GET  /api/doctor
 GET  /api/events
 GET  /api/events/stream
 GET  /api/git/history
 GET  /api/git/diff
+POST /api/validate
 POST /api/index
-GET  /api/supervisor/projects
+GET  /api/service/projects
 GET  /api/fs/tree
 GET  /api/fs/file
 GET  /api/findings
@@ -420,22 +438,19 @@ Database path:
 Required tables:
 
 ```text
-migrations
 meta
 files
 facts
 repo_graphs
-validators
-validator_shards
 findings
-recommendations
-docs
-doc_snippets
-decisions
-decision_events
 canon_events
 jobs
 watch_state
+observability_traces
+observability_spans
+observability_events
+semantic_index_snapshots
+semantic_chunks
 ```
 
 Rules:
@@ -444,15 +459,15 @@ Rules:
 - Cache/state files are generated and gitignored.
 - Rust owns schema creation and migrations.
 - Migrations are embedded into the engine with `include_str!`.
-- Daemon startup applies older pending migrations before serving API requests.
-- A database newer than the running daemon is a hard failure.
+- Project runtime startup applies older pending migrations before serving API requests.
+- A database newer than the running project runtime is a hard failure.
 - Each migration is wrapped in a Rust transaction; migration SQL files do not include `BEGIN` or `COMMIT`.
-- The daemon uses WAL mode and normal synchronous mode for routine writes.
+- The project runtime uses WAL mode and normal synchronous mode for routine writes.
 - Facts, findings, graph snapshots, watch state, and event records do not live in JSON files.
 
 ```bash
-opencanon db status
-opencanon db reset --confirm
+opencanon state status
+opencanon state reset --confirm
 ```
 
 Initial table shape:
@@ -467,6 +482,11 @@ findings(id, payload, status, indexed_at, resolved_at)
 canon_events(id, type, timestamp, payload)
 watch_state(root_dir, inventory_hash, stale, reason, updated_at)
 jobs(id, type, status, payload, created_at, updated_at)
+observability_traces(root_dir, id, name, status, recording, sampled, started_at, ended_at, payload)
+observability_spans(root_dir, id, trace_id, parent_span_id, name, kind, status, started_at, ended_at, payload)
+observability_events(root_dir, id, trace_id, span_id, name, occurred_at, payload)
+semantic_index_snapshots(root_dir, id, status, identity_hash, payload, indexed_at)
+semantic_chunks(root_dir, index_id, id, path, content_hash, chunk_hash, payload, indexed_at)
 ```
 
 ## JSON State
@@ -476,8 +496,8 @@ JSON is for human-readable configuration and small generated pointers only.
 Store these as JSON:
 
 - `opencanon.config.json`: optional repo-authored configuration overrides.
-- `.opencanon/daemon.json`: generated daemon pointer with `rootDir`, `host`, `pid`, `port`, `url`, `startedAt`, `logPath`, and `authToken`.
-- `~/.opencanon/daemons.json`: generated supervisor registry for running project daemons.
+- `.opencanon/runtime.json`: generated runtime pointer with `rootDir`, `host`, `pid`, `port`, `url`, `startedAt`, `logPath`, and `authToken`.
+- `~/.opencanon/service.json`: generated service registry for running project runtimes.
 - Optional local UI preferences if they are not important to validation correctness.
 
 Do not store these as JSON:
@@ -500,11 +520,12 @@ OpenCanon uses a dependency graph, not full rescans.
 
 ```text
 File -> FileFacts -> RepoGraph -> ValidatorShard -> Finding
-Decision -> MarkdownHeadingRef -> DocSnippet -> ContextIndex
-Decision -> DecisionEvent -> ValidatorLink -> FindingLink
+File -> SemanticChunk -> Embedding -> SemanticIndex
+Convention -> MarkdownHeadingRef -> ContextIndex
+Convention -> CanonEvent -> RuntimeLink -> FindingLink
 ```
 
-Shard keys derive from runtime version, engine version, config hash, schema version, parser version, validator source hash, file hashes, fact hashes, decision hashes, and linked doc heading hashes. Key derivation stays inside the daemon/state layer.
+Shard keys derive from runtime version, engine version, config hash, schema version, parser version, convention source hash, file hashes, fact hashes, convention hashes, and linked doc heading hashes. Key derivation stays inside the runtime/state layer.
 
 Invalidation rules:
 
@@ -513,46 +534,45 @@ Invalidation rules:
 | source file content | facts for that file |
 | import facts | import graph and import-edge validators |
 | package manifest | package graph and package validators |
-| validator source | that validator's shards |
-| validator fixture | fixture check for that validator |
-| config | discovery, graph, all affected validators |
+| convention source | that convention's runtime shards |
+| convention fixture | fixture check for that convention |
+| config | discovery, graph, all affected convention runtimes |
 | docs | docs index and context results |
-| decisions | decision index, links, affected context |
+| generated convention docs | doctor drift check and context results |
 | engine version | all facts and graphs |
 | schema version | block until migration |
 
-## Validator Model
+## Convention Model
 
-Validators remain TypeScript because agents must be able to write and modify them.
+Conventions remain TypeScript because humans and agents must be able to write and modify them in the same source-of-truth file.
 
-Every validator declares:
+Every convention declares identity plus three independent axes:
 
 ```ts
-export type ValidatorDefinition = {
+export type Convention = {
   id: string;
-  topics: string[];
-  severity: "error" | "warning";
-  scope: "file" | "folder" | "import-edge" | "package" | "project";
-  applies?: string[];
-  facts?: FactKind[];
-  decisionIds?: string[];
-  docs?: string[];
-  summary?: string | ((definition: ValidatorSummaryInput) => string);
-  validate(input: ValidatorInput): ValidatorResult | Promise<ValidatorResult>;
+  title: string;
+  topics?: string[];
+  why?: string;
+  rule: string;
+  examples?: { good?: string; bad?: string; note?: string }[];
+  related?: string[];
+  impactSurfaces?: string[];
+  applies: Applies;
+  render: Render;
+  runtime: Runtime;
 };
 ```
 
-Scope behavior:
+Axis behavior:
 
-| Scope | Unit | Typical rules |
+| Axis | Purpose | Variants |
 | --- | --- | --- |
-| `file` | one file | comments, literals, file-local patterns |
-| `folder` | one folder | naming, folder shape |
-| `import-edge` | one resolved import edge | boundaries, deep imports |
-| `package` | one workspace package | dependency direction, package ownership |
-| `project` | whole repo | duplicate literals, global structure, docs coverage |
+| `applies` | where the convention is relevant | files, symbols, imports, impact surface, custom |
+| `render` | how docs are produced | generated, none |
+| `runtime` | how enforcement runs | none, validator, gate, test |
 
-Project validators are allowed but visible. They are not the default.
+OpenCanon-owned Markdown is always `render(definition)`. Definition docs have no hand-edited Markdown opt-out; use `render.kind === "none"` when a definition should not produce docs. No persisted proposed/active status exists: committing the convention definition is ratification.
 
 ## Findings And Recommendations
 
@@ -572,7 +592,7 @@ export type Finding = {
   line?: number;
   column?: number;
   docs?: string[];
-  decisionIds?: string[];
+  conventionIds?: string[];
   introducedBy?: string;
   resolvedBy?: string;
   fix?: {
@@ -592,33 +612,21 @@ Policy:
 - Safe fixes are explicit.
 - Unsafe/manual fixes are never auto-applied.
 
-## Docs And Decisions
+## Docs And Conventions
 
-Docs and decisions are first-class state.
+Docs and conventions are first-class state.
 
 ```text
-Decision = what we chose and why
-Markdown docs = how to apply it
-Validator = executable enforcement
+Convention = what we chose, why, where it applies, and how it is enforced
+Markdown docs = generated human-facing rendering
+Runtime = executable validator/gate/test behavior
 Finding = current repo state
 ```
 
-Decision record:
+Generated convention docs are deterministic:
 
 ```ts
-export type Decision = {
-  id: string;
-  date: string;
-  title: string;
-  status: "current" | "proposed" | "replaced";
-  topics: string[];
-  applies: string[];
-  summary: string;
-  rationale: string[];
-  docs: string[];
-  validatorIds: string[];
-  replaced?: string[];
-};
+renderConvention(convention, convention.render.style) === readFile(convention.render.docs)
 ```
 
 Resolved doc snippet:
@@ -633,25 +641,33 @@ export type DocSnippet = {
   startLine: number;
   endLine: number;
   body: string;
-  decisionIds: string[];
+  conventionIds: string[];
   contentHash: string;
 };
 ```
 
-Decision and docs context is surfaced through `context`, `rules`, validation output, and daemon/UI snapshot APIs.
+Convention and docs context is surfaced through `context`, `rules`, validation output, history helpers, and runtime/UI snapshot APIs.
 
 ## CLI Surface
 
-Daemon lifecycle:
+Service and project lifecycle:
 
 ```bash
-opencanon daemon start
-opencanon daemon stop
-opencanon daemon status
-opencanon daemon list
-opencanon daemon open
-opencanon daemon serve
-opencanon dev
+opencanon status
+opencanon status --format json
+opencanon service start
+opencanon service stop
+opencanon service status
+opencanon service status --format json
+opencanon project start
+opencanon project stop
+opencanon project status
+opencanon project status --format json
+opencanon project list
+opencanon project index
+opencanon project logs --tail 200
+opencanon project open
+opencanon project start --foreground
 ```
 
 Validation:
@@ -664,7 +680,7 @@ opencanon validate --changed --strict-warnings
 opencanon validate --check-fixtures
 ```
 
-Context:
+Knowledge:
 
 ```bash
 opencanon context --changed
@@ -681,8 +697,18 @@ Rules:
 opencanon rules
 opencanon rules --tree
 opencanon rules --validator <id>
+opencanon rules --convention <id>
 opencanon rules --topic <topic>
-opencanon rules --decision <id>
+```
+
+Project Canon:
+
+```bash
+opencanon canon list
+opencanon canon render conventions --dry-run
+opencanon canon history convention <id>
+opencanon canon related-commits convention <id>
+opencanon canon map
 ```
 
 Feedback, hooks, and baselines:
@@ -703,101 +729,81 @@ opencanon doctor --format json
 opencanon doctor --run-external-tools
 ```
 
-## UI
+## Browser Diagnostics
 
-The UI is a local dashboard over daemon state. It does not have separate state or interpretation.
+The service and each project runtime can expose a local browser diagnostics harness for inspection and agent debugging. Browser diagnostics are not the product source of truth: they call the same authenticated service/runtime APIs as the CLI, and all durable behavior remains in Project Canon definitions, runtime state, checks, and Doctor.
 
-The distributed skill ships the UI as built static runtime assets. Source stays in `packages/ui`; installed skills serve optimized files under `.agents/skills/opencanon/runtime/ui/`. Installed skills do not require Vite, React source files, or package installation to open the dashboard.
+Runtime diagnostics rules:
 
-Runtime UI rules:
+- the CLI and MCP remain the primary programmable interfaces
+- browser diagnostics are served by the service or project runtime
+- runtime events flow through service/runtime SSE
+- no installed skill path imports browser source from workspace packages
 
-- `packages/ui` is development source only.
-- the skill runtime includes built HTML, CSS, JS, fonts, and other static assets
-- the daemon serves runtime UI files directly
-- UI builds are produced during skill runtime build
-- runtime UI files are versioned with the skill
-- no installed skill path imports UI source from workspace packages
-- UI API calls go through the daemon HTTP/SSE endpoints
-- generated runtime assets are verified by smoke tests before release
+Dashboard:
 
-Views:
+- selected project summary
+- indexing, service, and project runtime status
+- Project Canon coverage
+- recent activity and health signals
 
-```text
-Tree View
-File View
-Git View
-Rules View
-Docs View
-Decision View
-Findings Inbox
-Daemon Health
-```
+Activity:
 
-Tree View:
+- canonical events
+- indexing progress
+- check results
+- agent-facing progress signals
 
-- repo structure
-- packages/apps/modules
-- finding counts per subtree
-- boundary violations
-- affected subtrees
-- folder convention status
-
-File View:
-
-- imports, exports, symbols, calls, literals, comments
-- validators that apply
-- inline findings
-- linked docs and decisions
-- related files from import graph and git co-change
-
-Git View:
+Review:
 
 - changed files
 - introduced/resolved findings
-- affected validators
-- affected packages
-- co-changed files
-- commits related to touched decisions
+- affected convention runtimes
+- affected areas, surfaces, specs, and changes
+- unresolved gates and recovery context
 
-Rules View:
+Changes:
 
-- validators
-- scopes
-- fixtures
-- linked docs/decisions
-- recent finding history
-- rule tree visualization
+- readonly implementation board
+- change plans, tasks, checks, events, and backlinks
+- drilldown into linked canon definitions and files
 
-Docs View:
+Canon:
 
-- heading snippets
-- linked decisions
-- source anchors
-- linked validators/decisions
-- stale or missing enforcement
+- conventions, areas, specs, changes, and impact surfaces
+- generated docs links
+- governing checks and backlinks
 
-Decision View:
+Project Map:
 
-- current decision
-- rationale
-- history
-- linked validators
-- linked docs
-- affected files/packages
-- findings caused by this decision
+- graph of Project Canon, proof, knowledge, files, and surfaces
+- overview, neighborhood, and detail exploration
 
-Findings Inbox:
+Search:
 
-- blocking violations
-- warnings
-- recommendations
-- insights
-- safe fixes
-- manual guidance
+- chunks, symbols, docs, and related-code retrieval
+- evidence snippets with backlinks
+
+Files:
+
+- project file tree
+- file icons, open/reveal actions, and linked definitions
+
+Health:
+
+- doctor results
+- runtime/service state
+- project setup, generated docs, and index freshness
+
+Settings:
+
+- app-level preferences
+- project registration and recent project state
+- runtime and indexing controls
 
 ## Indexing
 
-OpenCanon keeps indexing inside the daemon state layer.
+OpenCanon keeps indexing inside the project-runtime state layer.
 
 Primitives:
 
@@ -808,8 +814,8 @@ Primitives:
 - persisted per-file facts
 - Git-visible inventory and ignore handling
 
-## Daemon-Only Execution Rule
+## Runtime-Backed Execution Rule
 
 Do not keep duplicate execution paths.
 
-Direct CLI validation uses the daemon-backed path. Do not keep parallel validation paths.
+Direct CLI validation uses the runtime-backed path. Do not keep parallel validation paths.

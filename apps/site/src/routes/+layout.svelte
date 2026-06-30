@@ -20,12 +20,15 @@
 <header class="masthead">
   <div class="masthead-inner">
     <div class="brand-cluster">
-      <a class="wordmark" href="/" aria-label="OpenCanon home">
-        <span class="wordmark-mark" aria-hidden="true">
-          <OpenCanonMark size={23} />
-        </span>
-        <span class="wordmark-text">{SITE.name}</span>
-      </a>
+      <div class="brand-copy">
+        <a class="wordmark" href="/" aria-label="OpenCanon home">
+          <span class="wordmark-mark" aria-hidden="true">
+            <OpenCanonMark size={23} />
+          </span>
+          <span class="wordmark-text">{SITE.name}</span>
+        </a>
+        <p>Agent-ready. Human-readable. Runtime-enforced.</p>
+      </div>
     </div>
     <nav class="topnav" aria-label="Primary">
       {#each SITE.nav as item}
@@ -48,13 +51,6 @@
   {@render children()}
 </main>
 
-<footer class="site-footer">
-  <div class="site-footer-inner">
-    <p>Local repo rules for agents.</p>
-    <p class="muted">Open source. Local-first. No analytics.</p>
-  </div>
-</footer>
-
 <style>
   .masthead {
     border-bottom: 1px solid var(--c-rule);
@@ -74,6 +70,21 @@
     align-items: center;
     gap: var(--space-4);
     min-width: 0;
+  }
+  .brand-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    min-width: 0;
+  }
+  .brand-copy p {
+    margin: 0;
+    color: var(--c-ink-muted);
+    font-family: var(--font-sans);
+    font-size: 0.78rem;
+    line-height: 1.2;
+    letter-spacing: 0;
+    white-space: nowrap;
   }
   .wordmark {
     display: inline-flex;
@@ -123,18 +134,6 @@
 
   main { display: block; }
 
-  .site-footer {
-    margin-top: var(--space-9);
-    border-top: 1px solid var(--c-rule);
-    background: var(--c-paper);
-  }
-  .site-footer-inner {
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-6) var(--space-7);
-    max-width: 60rem;
-  }
-  .site-footer p { margin: 0 0 var(--space-3) 0; max-width: var(--measure); }
-
   @media (max-width: 640px) {
     .masthead-inner {
       flex-direction: column;
@@ -147,7 +146,7 @@
       align-items: flex-start;
       gap: var(--space-1);
     }
+    .brand-copy p { white-space: normal; }
     .topnav { gap: var(--space-2); flex-wrap: wrap; }
-    .site-footer-inner { padding: var(--space-5) var(--space-4); }
   }
 </style>

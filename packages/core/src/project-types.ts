@@ -6,11 +6,20 @@ import { listFiles, normalizePath, relative } from "./core.ts";
 import { loadProjectFiles } from "./project-files.ts";
 import { buildWorkspaceGraph } from "./workspace.ts";
 import type { WorkspacePackage } from "./validator-types.ts";
+import { WorkspaceKind } from "./validator-types.ts";
 
+/** Repo-relative directory for generated convention authoring support. */
+export const ProjectAuthoringGeneratedDirPath = ".opencanon/generated/authoring";
 /** Repo-relative path for the generated `@opencanon/project` authoring module. */
-export const ProjectTypesFilePath = ".agents/skills/opencanon/generated/project.ts";
+export const ProjectTypesFilePath = `${ProjectAuthoringGeneratedDirPath}/project.ts`;
 /** Repo-relative path for generated ambient module declarations used by fixture authoring. */
-export const ProjectAliasesFilePath = ".agents/skills/opencanon/generated/aliases.d.ts";
+export const ProjectAliasesFilePath = `${ProjectAuthoringGeneratedDirPath}/aliases.d.ts`;
+/** Repo-relative path for generated `@opencanon/core` authoring declarations. */
+export const ProjectCoreAuthoringFilePath = `${ProjectAuthoringGeneratedDirPath}/core.d.ts`;
+/** Repo-relative path for generated `@opencanon/core/testing` authoring declarations. */
+export const ProjectTestingAuthoringFilePath = `${ProjectAuthoringGeneratedDirPath}/testing.d.ts`;
+/** Repo-relative path for generated `@opencanon/validators` authoring declarations. */
+export const ProjectValidatorsAuthoringFilePath = `${ProjectAuthoringGeneratedDirPath}/validators.d.ts`;
 /** Result returned after writing the generated `@opencanon/project` module. */
 export type ProjectTypesGenerationResult = {
   /** Repo-relative path to the generated module. */
@@ -27,8 +36,22 @@ export type ProjectTypesGenerationResult = {
   cargoDependencyCount: number;
   /** Number of Python dependency records exported through `Python`. */
   pythonDependencyCount: number;
-  /** Number of ambient module declarations generated for fixture and validator authoring. */
+  /** Number of ambient module declarations generated for fixture and convention authoring. */
   aliasModuleCount: number;
+  /** Number of OpenCanon authoring declaration files generated for editor support. */
+  authoringDeclarationCount: number;
+};
+
+export type ProjectTypesGeneratedFile = {
+  /** Repo-relative generated file path. */
+  path: string;
+  /** Deterministic generated file content. */
+  content: string;
+};
+
+export type ProjectTypesGenerationPlan = ProjectTypesGenerationResult & {
+  /** Deterministic files that should exist on disk. */
+  files: ProjectTypesGeneratedFile[];
 };
 
 type GeneratedEntry = {
@@ -77,12 +100,12 @@ type AmbientModuleDeclaration = {
 };
 
 /**
- * Generate the gitignored `@opencanon/project` authoring module.
+ * Build the gitignored `@opencanon/project` authoring module without writing it.
  *
  * The generated module exports const objects with SCREAMING_SNAKE_CASE keys:
  * `Packages`, `PackageRoots`, `ImportSpecifiers`, `Npm`, `Crates`, `CrateRoots`, `Cargo`, and `Python`.
  */
-export function generateProjectTypes(rootDir: string, paths: ContextPaths): ProjectTypesGenerationResult {
+export function buildProjectTypesGeneration(rootDir: string, paths: ContextPaths): ProjectTypesGenerationPlan {
   const sourceFiles = listFiles(
     rootDir,
     (file) => {
@@ -120,11 +143,6 @@ export function generateProjectTypes(rootDir: string, paths: ContextPaths): Proj
     pythonDependencies: pythonDependencyEntriesForOutput,
   });
   const aliasesSource = renderAmbientAliases(ambientModules);
-  const outputPath = path.join(rootDir, ProjectTypesFilePath);
-  const aliasesOutputPath = path.join(rootDir, ProjectAliasesFilePath);
-  mkdirSync(path.dirname(outputPath), { recursive: true });
-  writeTextFileIfChanged(outputPath, source);
-  writeTextFileIfChanged(aliasesOutputPath, aliasesSource);
   return {
     path: ProjectTypesFilePath,
     packageCount: packageEntries.length,
@@ -134,7 +152,32 @@ export function generateProjectTypes(rootDir: string, paths: ContextPaths): Proj
     cargoDependencyCount: cargoDependencyEntriesForOutput.length,
     pythonDependencyCount: pythonDependencyEntriesForOutput.length,
     aliasModuleCount: ambientModules.length,
+    authoringDeclarationCount: 3,
+    files: [
+      { path: ProjectTypesFilePath, content: source },
+      { path: ProjectAliasesFilePath, content: aliasesSource },
+      { path: ProjectCoreAuthoringFilePath, content: renderCoreAuthoringDeclarations() },
+      { path: ProjectTestingAuthoringFilePath, content: renderTestingAuthoringDeclarations() },
+      { path: ProjectValidatorsAuthoringFilePath, content: renderValidatorsAuthoringDeclarations() },
+    ],
   };
+}
+
+/**
+ * Generate the gitignored `@opencanon/project` authoring module.
+ *
+ * The generated module exports const objects with SCREAMING_SNAKE_CASE keys:
+ * `Packages`, `PackageRoots`, `ImportSpecifiers`, `Npm`, `Crates`, `CrateRoots`, `Cargo`, and `Python`.
+ */
+export function generateProjectTypes(rootDir: string, paths: ContextPaths): ProjectTypesGenerationResult {
+  const plan = buildProjectTypesGeneration(rootDir, paths);
+  for (const file of plan.files) {
+    const outputPath = path.join(rootDir, file.path);
+    mkdirSync(path.dirname(outputPath), { recursive: true });
+    writeTextFileIfChanged(outputPath, file.content);
+  }
+  const { files: _files, ...result } = plan;
+  return result;
 }
 
 function writeTextFileIfChanged(filePath: string, content: string): void {
@@ -144,7 +187,7 @@ function writeTextFileIfChanged(filePath: string, content: string): void {
 
 function isProjectTypesIndexInput(filePath: string): boolean {
   const normalized = normalizePath(filePath);
-  return !normalized.startsWith(".agents/skills/opencanon/generated/");
+  return !normalized.startsWith(".opencanon/generated/");
 }
 
 function isSkippedProjectTypesDirectory(directory: string): boolean {
@@ -207,7 +250,7 @@ function readDependencyPackageJson(rootDir: string, dependencyName: string): Pac
 }
 
 function packageKey(item: WorkspacePackage): string {
-  if (item.kind === "root" && item.name === "<root>") return "ROOT";
+  if (item.kind === WorkspaceKind.Root && item.name === "<root>") return "ROOT";
   return screamingSnakeKey(item.name === "<root>" ? "root" : item.name);
 }
 
@@ -230,15 +273,6 @@ function packageDocs(item: WorkspacePackage): string[] {
     `Kind: ${item.kind}`,
     ...(booleanValue(item.packageJson.private) !== undefined ? [`Private: ${String(booleanValue(item.packageJson.private))}`] : []),
     `Source: ${normalizePath(path.posix.join(item.root, "package.json"))}`,
-  ];
-}
-
-function importDocs(item: PackageLike): string[] {
-  return [
-    ...(item.description ? [item.description] : []),
-    `Import specifier: ${item.name}`,
-    ...(item.version ? [`Version: ${item.version}`] : []),
-    ...(item.source ? [`Source: ${item.source}`] : []),
   ];
 }
 
@@ -896,16 +930,6 @@ function renderProjectIndexType(): string {
   return lines.join("\n");
 }
 
-function renderRecordType(record: Record<string, unknown>): string {
-  return `{ ${Object.entries(record)
-    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-    .join("; ")} }`;
-}
-
-function renderStringUnion(values: string[]): string {
-  return values.length === 0 ? "never" : values.map((value) => JSON.stringify(value)).join(" | ");
-}
-
 function renderConstObject(name: string, entries: GeneratedEntry[]): string {
   const lines = [`export const ${name} = {`];
   for (const entry of entries) {
@@ -919,7 +943,7 @@ function renderConstObject(name: string, entries: GeneratedEntry[]): string {
 function renderAmbientAliases(modules: AmbientModuleDeclaration[]): string {
   const lines = [
     "// Generated by OpenCanon. Do not edit by hand.",
-    "// Ambient declarations for fixture and validator authoring imports.",
+    "// Ambient declarations for fixture and convention authoring imports.",
     "",
   ];
   for (const item of modules) {
@@ -934,6 +958,189 @@ function renderAmbientAliases(modules: AmbientModuleDeclaration[]): string {
     lines.push("");
   }
   return lines.join("\n");
+}
+
+function renderCoreAuthoringDeclarations(): string {
+  return [
+    "// Generated by OpenCanon. Do not edit by hand.",
+    "// Local editor declarations for convention authoring imports.",
+    "",
+    "export type Severity = \"error\" | \"warning\" | \"info\";",
+    "export type ValidatorScope = \"project\" | \"file\" | \"import-edge\";",
+    "export type ValidatorDomain = \"file\" | \"import-edge\" | \"impact-surface\" | \"definition\" | \"project\" | \"custom\";",
+    "export type FactKind = \"imports\" | \"exports\" | \"symbols\" | \"calls\" | \"literals\" | \"comments\" | \"references\" | \"annotations\" | \"diagnostics\" | \"duplicates\" | \"declarations\";",
+    "export type ConventionId = string;",
+    "export declare const ConventionDefinitionKind: { readonly Area: \"area\"; readonly Change: \"change\"; readonly Convention: \"convention\"; readonly Spec: \"spec\" };",
+    "export type ConventionDefinitionKind = \"area\" | \"change\" | \"convention\" | \"spec\";",
+    "export type Applies =",
+    "  | { kind: \"files\"; globs: string[] }",
+    "  | { kind: \"symbols\"; globs: string[]; symbolKinds?: Array<\"function\" | \"class\" | \"type\"> }",
+    "  | { kind: \"imports\"; from?: string[]; to?: string[] }",
+    "  | { kind: \"impact-surface\"; surfaceIds: string[] }",
+    "  | { kind: \"definitions\"; definitions: Array<{ kind: ConventionDefinitionKind; ids?: string[] }> }",
+    "  | { kind: \"project\"; describe?: string }",
+    "  | { kind: \"custom\"; describe: string };",
+    "export type RenderStyle = \"narrative\" | \"checklist\" | \"reference\" | \"architecture-note\" | \"decision-record\";",
+    "export type Render = { kind: \"generated\"; docs: string; style: RenderStyle } | { kind: \"none\" };",
+    "export type FindingFix = { safety?: \"safe\" | \"suggested\" | \"manual\"; description?: string; edits?: Array<{ file: string; range?: unknown; replacement: string }>; command?: string };",
+    "export type Finding = { file?: string; line?: number; column?: number; message: string; severity?: Severity; docs?: string[]; fix?: FindingFix; conventionIds?: string[] };",
+    "export type ReportInput = Omit<Finding, \"file\">;",
+    "export type ProjectFile = { path: string; language?: string; content?: string; lineAt(line: number): string; report(input: ReportInput): Finding; ts: any };",
+    "export type CommitGateInput = { id: string; title: string; reason: string; question: string; file?: string; line?: number; evidence?: unknown; conventionIds?: string[] };",
+    "export type ValidatorArgs = { ctx: any; runtime: any; file?: ProjectFile; edge?: any };",
+    "export type ValidatorVisual = any;",
+    "export type RuntimeBody = { scope: ValidatorScope; domain?: ValidatorDomain; facts: FactKind[]; visuals?: ValidatorVisual[]; requiresProducers?: string[]; fixtures?: \"valid-and-invalid\" | \"valid-only\"; validate(args: ValidatorArgs): Finding[] | Promise<Finding[]> };",
+    "export type Runtime = { kind: \"none\" } | ({ kind: \"validator\"; severity: Severity } & RuntimeBody) | ({ kind: \"gate\"; question: string } & RuntimeBody) | ({ kind: \"test\"; severity: Severity } & RuntimeBody);",
+    "export type Convention = { id: ConventionId; title: string; topics?: string[]; why?: string; rule: string; examples?: Array<{ good?: string; bad?: string; note?: string }>; related?: ConventionId[]; impactSurfaces?: string[]; applies: Applies; render: Render; runtime: Runtime };",
+    "export declare function defineConvention(convention: Convention): Convention;",
+    "export type AreaId = string;",
+    "export type AreaRenderStyle = \"narrative\" | \"checklist\" | \"reference\" | \"architecture-note\" | \"decision-record\";",
+    "export type AreaRender = { kind: \"generated\"; docs: string; style: AreaRenderStyle } | { kind: \"none\" };",
+    "export declare const DefinitionTargetKind: { readonly File: \"file\"; readonly Package: \"package\"; readonly Endpoint: \"endpoint\"; readonly Command: \"command\"; readonly Doc: \"doc\"; readonly Resource: \"resource\" };",
+    "export type DefinitionTargetKind = (typeof DefinitionTargetKind)[keyof typeof DefinitionTargetKind];",
+    "export type DefinitionTargetBase = { id?: string; label?: string; description?: string; adapter?: string };",
+    "export type DefinitionTarget =",
+    "  | (DefinitionTargetBase & { kind: \"file\"; path: string })",
+    "  | (DefinitionTargetBase & { kind: \"package\"; name: string })",
+    "  | (DefinitionTargetBase & { kind: \"endpoint\"; path: string; protocol?: string })",
+    "  | (DefinitionTargetBase & { kind: \"command\"; name: string })",
+    "  | (DefinitionTargetBase & { kind: \"doc\"; path: string })",
+    "  | (DefinitionTargetBase & { kind: \"resource\"; name: string; type?: string });",
+    "export type AreaOwnership = DefinitionTarget[];",
+    "export type AreaCheck =",
+    "  | { id: string; kind: \"command\"; command: string; description?: string }",
+    "  | { id: string; kind: \"doctor\"; description?: string }",
+    "  | { id: string; kind: \"validator\"; validatorId: string; description?: string }",
+    "  | { id: string; kind: \"test\"; target: string; description?: string };",
+    "export type AreaStory = { id: string; as: string; want: string; so: string; acceptance: string[]; checks?: string[] };",
+    "export type AreaBehavior = { id: string; actor: string; action: string; outcome: string; checks?: string[] };",
+    "export type AreaGovernance = { inferFromScope?: boolean; conventions?: string[] };",
+    "export type Area = { id: AreaId; title: string; summary: string; surfaces?: string[]; owns?: AreaOwnership; stories?: AreaStory[]; behaviors?: AreaBehavior[]; checks?: AreaCheck[]; dependsOn?: AreaId[]; governedBy?: AreaGovernance; render: AreaRender };",
+    "export declare function defineArea(area: Area): Area;",
+    "export type SpecId = string;",
+    "export type SpecRenderStyle = \"narrative\" | \"checklist\" | \"reference\" | \"architecture-note\" | \"decision-record\";",
+    "export type SpecRender = { kind: \"generated\"; docs: string; style: SpecRenderStyle } | { kind: \"none\" };",
+    "export type SpecScope = DefinitionTarget[];",
+    "export type SpecCheck =",
+    "  | { id: string; kind: \"command\"; command: string; description?: string }",
+    "  | { id: string; kind: \"doctor\"; description?: string }",
+    "  | { id: string; kind: \"validator\"; validatorId: string; description?: string }",
+    "  | { id: string; kind: \"test\"; target: string; description?: string };",
+    "export type SpecRule = { id: string; statement: string; acceptance?: string[]; checks?: string[] };",
+    "export type SpecScenario = { id: string; given: string[]; when: string; then: string[]; checks?: string[] };",
+    "export type SpecGovernance = { inferFromScope?: boolean; conventions?: ConventionId[] };",
+    "export type Spec = { id: SpecId; title: string; summary: string; scope?: SpecScope; surfaces?: string[]; areas?: AreaId[]; rules?: SpecRule[]; scenarios?: SpecScenario[]; checks?: SpecCheck[]; dependsOn?: SpecId[]; governedBy?: SpecGovernance; render: SpecRender };",
+    "export declare function defineSpec(spec: Spec): Spec;",
+    "export type ChangeId = string;",
+    "export type ChangeKind = \"feature\" | \"fix\" | \"refactor\" | \"docs\" | \"chore\" | \"research\";",
+    "export type ChangeRenderStyle = \"narrative\" | \"checklist\" | \"reference\" | \"architecture-note\" | \"decision-record\";",
+    "export type ChangeRender = { kind: \"generated\"; docs: string; style: ChangeRenderStyle } | { kind: \"none\" };",
+    "export type ChangeUpdates = { areas?: AreaId[]; specs?: SpecId[]; conventions?: ConventionId[]; surfaces?: string[]; docs?: string[] };",
+    "export type ChangeScope = DefinitionTarget[];",
+    "export type ChangeIntent = { problem: string; outcome: string; why?: string };",
+    "export type ChangeCheck =",
+    "  | { id: string; kind: \"command\"; command: string; description?: string }",
+    "  | { id: string; kind: \"doctor\"; description?: string }",
+    "  | { id: string; kind: \"validator\"; validatorId: string; description?: string }",
+    "  | { id: string; kind: \"test\"; target: string; description?: string };",
+    "export type ChangePlanItem = { id: string; title: string; detail?: string; checks?: string[] };",
+    "export type ChangeTask = { id: string; title: string; detail?: string; files?: string[]; checks?: string[]; dependsOn?: string[]; blockedBy?: string[]; updates?: ChangeUpdates };",
+    "export type ChangeLinks = { commits?: string[]; pullRequests?: string[]; issues?: string[] };",
+    "export type Change = { id: ChangeId; title: string; kind: ChangeKind; summary?: string; updates?: ChangeUpdates; scope?: ChangeScope; intent: ChangeIntent; plan?: ChangePlanItem[]; tasks?: ChangeTask[]; checks?: ChangeCheck[]; dependsOn?: ChangeId[]; blockedBy?: ChangeId[]; links?: ChangeLinks; render: ChangeRender };",
+    "export declare function defineChange(change: Change): Change;",
+    "export type ConventionFactoryBaseOptions = { id: string; topics: string[]; severity: Severity; related?: string[]; docs?: string[]; summary?: string; title?: string; rule?: string; render?: Render };",
+    "export type ValidatorDefinition = { id: string; topics?: string[]; applies?: string[]; severity?: Severity; scope?: ValidatorScope; domain?: ValidatorDomain; facts?: FactKind[]; conventionIds?: string[]; docs?: string[]; summary?: string; visuals?: ValidatorVisual[]; requiresProducers?: string[]; fixtures?: \"valid-and-invalid\" | \"valid-only\"; validate?: (args: ValidatorArgs) => Finding[] | Promise<Finding[]> };",
+    "export type ConventionFactory<TOptions extends Record<string, unknown> = Record<string, never>> = (options: ConventionFactoryBaseOptions & TOptions) => Convention;",
+    "export declare function createConventionFactory<TOptions extends Record<string, unknown> = Record<string, never>>(create: (options: ConventionFactoryBaseOptions & TOptions) => ValidatorDefinition, applies?: (definition: ValidatorDefinition, options: ConventionFactoryBaseOptions & TOptions) => Applies): ConventionFactory<TOptions>;",
+    "export declare const LiteralContext: { readonly Comparison: \"comparison\"; readonly Argument: \"argument\"; readonly ObjectProperty: \"object-property\"; readonly ArrayItem: \"array-item\"; readonly TypeUnion: \"type-union\"; readonly ConstObject: \"const-object\"; readonly ImportSource: \"import-source\"; readonly TestTitle: \"test-title\"; readonly Unknown: \"unknown\" };",
+    "export type LiteralContext = (typeof LiteralContext)[keyof typeof LiteralContext];",
+    "export declare const LiteralValueKind: { readonly String: \"string\"; readonly Number: \"number\"; readonly Boolean: \"boolean\" };",
+    "export type LiteralValueKind = (typeof LiteralValueKind)[keyof typeof LiteralValueKind];",
+    "export declare const TypeScriptDeclarationKind: { readonly Enum: \"enum\"; readonly Variable: \"variable\"; readonly Type: \"type\"; readonly Function: \"function\"; readonly Class: \"class\"; readonly Interface: \"interface\" };",
+    "export type TypeScriptDeclarationKind = (typeof TypeScriptDeclarationKind)[keyof typeof TypeScriptDeclarationKind];",
+    "export declare const ProjectSymbolKind: { readonly Function: \"function\"; readonly Class: \"class\"; readonly Method: \"method\"; readonly Variable: \"variable\"; readonly Type: \"type\"; readonly Interface: \"interface\"; readonly Enum: \"enum\"; readonly Property: \"property\"; readonly Unknown: \"unknown\" };",
+    "export type ProjectSymbolKind = (typeof ProjectSymbolKind)[keyof typeof ProjectSymbolKind];",
+    "export declare const ProjectFileLanguage: { readonly TypeScript: \"typescript\"; readonly JavaScript: \"javascript\"; readonly Svelte: \"svelte\"; readonly Python: \"python\"; readonly Rust: \"rust\"; readonly Markdown: \"markdown\"; readonly Json: \"json\"; readonly Unknown: \"unknown\" };",
+    "export type ProjectFileLanguage = (typeof ProjectFileLanguage)[keyof typeof ProjectFileLanguage];",
+    "export type LiteralContextInfo = any;",
+    "export type OpenCanonProjectIndexFile = { imports: string; exports: string; functions: string; stringLiterals: string; symbols: string; calls: string };",
+    "export interface OpenCanonProjectIndex {}",
+    "export declare function asFiniteLiteralSet(value: unknown): unknown;",
+    "export declare function finiteLiteralIncludes(set: unknown, value: unknown): boolean;",
+    "",
+  ].join("\n");
+}
+
+function renderTestingAuthoringDeclarations(): string {
+  return [
+    "// Generated by OpenCanon. Do not edit by hand.",
+    "// Local editor declarations for fixture authoring imports.",
+    "",
+    "export type FixtureTextInput = string;",
+    "export type FixtureFileOptions = { target?: boolean; analysis?: boolean };",
+    "export type FixtureTextFileInput = FixtureTextInput | { text: FixtureTextInput; target?: boolean; analysis?: boolean };",
+    "export type FixtureFileEntry = { path: string; text: string; target?: boolean; analysis?: boolean };",
+    "export type FixtureFileBuilder = {",
+    "  (path: string, input: FixtureTextFileInput): FixtureFileEntry;",
+    "  ts(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  tsx(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  js(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  jsx(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  py(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  rs(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  toml(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  md(path: string, input: FixtureTextInput, options?: FixtureFileOptions): FixtureFileEntry;",
+    "  json(path: string, value: unknown, options?: FixtureFileOptions): FixtureFileEntry;",
+    "};",
+    "export type FixtureFileApi = { file: FixtureFileBuilder };",
+    "export type FixtureDefinition = { directories?: string[]; files?: (api: FixtureFileApi) => FixtureFileEntry[]; targetFiles?: string[]; analysisFiles?: string[] };",
+    "export declare function defineFixture(input: FixtureDefinition): FixtureDefinition;",
+    "",
+  ].join("\n");
+}
+
+function renderValidatorsAuthoringDeclarations(): string {
+  const factories = [
+    "fileNames",
+    "requiredFileSibling",
+    "requiredFunctionParam",
+    "requireExportPattern",
+    "noUnusedExports",
+    "similarFunctionNames",
+    "noNativeEnums",
+    "noHardcodedConfigValues",
+    "noSecretLikeLiterals",
+    "repeatedLiterals",
+    "restrictedSymbols",
+    "noImports",
+    "noForbiddenImports",
+    "noDeepRelativeImports",
+    "noBarrelCrossBoundary",
+    "noLayerCall",
+    "noFolderNames",
+    "folderStructure",
+    "noCommentMatches",
+    "noHeaderComments",
+    "noBypassComments",
+    "noForbiddenCalls",
+    "noShimFiles",
+    "annotationRequiresTags",
+    "externalCommand",
+    "externalDiagnostics",
+    "noBareExcept",
+    "duplicateBoundaryLiterals",
+    "sensitiveChangePolicy",
+    "migrationReferences",
+  ];
+  return [
+    "// Generated by OpenCanon. Do not edit by hand.",
+    "// Local editor declarations for curated convention factories.",
+    "import type { Convention, ConventionFactoryBaseOptions } from \"@opencanon/core\";",
+    "",
+    "export type CuratedConventionFactory<TOptions extends Record<string, unknown> = Record<string, unknown>> = (options: ConventionFactoryBaseOptions & TOptions) => Convention;",
+    ...factories.map((name) => `export declare const ${name}: CuratedConventionFactory;`),
+    "",
+  ].join("\n");
 }
 
 function renderJsDoc(lines: string[], indent: string): string[] {

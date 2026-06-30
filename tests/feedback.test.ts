@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { appendOpenCodeFeedback, extractFilesFromPatchText, installHook, inspectHookInstallations, normalizeHookPayload, renderFeedbackMarkdown, renderHookResponse } from "@opencanon/core";
+import { DefinitionTargetKind, appendOpenCodeFeedback, claudeHookConfig, codexHookConfig, extractFilesFromPatchText, HookFileAction, installHook, inspectHookInstallations, normalizeHookPayload, renderFeedbackMarkdown, renderHookResponse, runFeedback } from "@opencanon/core";
 import type { HookFeedback } from "@opencanon/core";
 
 test("extracts apply_patch target files without validating deleted paths", () => {
@@ -131,17 +131,17 @@ test("installs project hook configs idempotently", () => {
     for (const host of ["codex", "claude", "opencode"] as const) {
       const result = installHook({ rootDir, host, scope: "project", dryRun: false });
       assert.equal(result.diagnostics.length, 0);
-      assert(result.files.every((file) => file.action === "create"));
+      assert(result.files.every((file) => file.action === HookFileAction.Create));
 
       const second = installHook({ rootDir, host, scope: "project", dryRun: false });
       assert.equal(second.diagnostics.length, 0);
-      assert(second.files.every((file) => file.action === "unchanged"));
+      assert(second.files.every((file) => file.action === HookFileAction.Unchanged));
     }
 
     assert(readFileSync(path.join(rootDir, ".codex/config.toml"), "utf8").includes("codex_hooks = true"));
     assert(readFileSync(path.join(rootDir, ".codex/hooks.json"), "utf8").includes("hook codex"));
     assert(readFileSync(path.join(rootDir, ".claude/settings.json"), "utf8").includes("hook claude"));
-    assert(readFileSync(path.join(rootDir, ".opencode/plugins/opencanon.ts"), "utf8").includes(".agents/skills/opencanon/scripts/opencode-plugin.ts"));
+    assert(readFileSync(path.join(rootDir, ".opencode/plugins/opencanon.ts"), "utf8").includes('"opencanon", ["hook", "opencode"]'));
     assert.deepEqual(
       inspectHookInstallations(rootDir).map((inspection) => inspection.valid),
       [true, true, true],
@@ -168,7 +168,7 @@ test("feedback markdown groups findings and respects output budget", () => {
     { maxFindings: 2, maxChars: 1000 },
   );
 
-  assert(output.includes("Run: bun run opencanon validate --files src/a.ts src/b.ts"));
+  assert(output.includes("Run: opencanon validate --files src/a.ts src/b.ts"));
   assert(output.includes("## src/a.ts"));
   assert(output.includes("1 more finding(s)"));
   assert(output.includes("Finding Resolution Policy"));
@@ -185,4 +185,165 @@ test("feedback markdown groups findings and respects output budget", () => {
     { maxChars: 400 },
   );
   assert(truncated.includes("Output truncated."));
+});
+
+test("feedback auto-loads governing conventions and renders advisory-only missing convention prompts", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-feedback-conventions-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "conventions"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify({
+        fileDiscovery: "filesystem",
+        projectFilePatterns: ["src/**/*.ts"],
+        ignore: [],
+        conventionsPath: "conventions/index.ts",
+        impactSurfacesPath: "impact-surfaces.json",
+      }),
+    );
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
+    writeFileSync(path.join(rootDir, "src/unknown.ts"), "export const unknown = true;\n");
+    writeFileSync(
+      path.join(rootDir, "conventions/index.ts"),
+      `
+        import { defineConvention } from "@opencanon/core";
+
+        export default defineConvention({
+          id: "company-shape",
+          title: "Company Shape",
+          rule: "Company code keeps the approved shape.",
+          applies: { kind: "files", globs: ["src/company.ts"] },
+          render: { kind: "none" },
+          runtime: { kind: "none" },
+        });
+      `,
+    );
+
+    const loaded = await runFeedback({ cwd: rootDir, files: ["src/company.ts"], host: "manual", dedupeScope: "off" });
+    assert.equal(loaded.governingConventions?.conventions[0]?.id, "company-shape");
+    assert.equal(loaded.advisories?.length, 0);
+    const loadedMarkdown = renderFeedbackMarkdown(loaded, { emptyMessage: true });
+    assert(loadedMarkdown.includes("Relevant Conventions:"));
+    assert(loadedMarkdown.includes("company-shape: Company Shape"));
+
+    const advisory = await runFeedback({ cwd: rootDir, files: ["src/unknown.ts"], host: "manual", dedupeScope: "off" });
+    assert.equal(advisory.findingCount, 0);
+    assert.equal(advisory.advisories?.[0]?.title, "Missing convention?");
+    assert.equal(advisory.diagnostics.length, 0);
+    assert(renderFeedbackMarkdown(advisory, { emptyMessage: true }).includes("This is advisory only; it does not block commits or CI."));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("feedback includes related change context and scope drift", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-feedback-change-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "conventions"), { recursive: true });
+    mkdirSync(path.join(rootDir, "areas"), { recursive: true });
+    mkdirSync(path.join(rootDir, "changes"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify({
+        fileDiscovery: "filesystem",
+        projectFilePatterns: ["src/**/*.ts"],
+        ignore: [],
+        conventionsPath: "conventions/index.ts",
+        areasPath: "areas/index.ts",
+        changesPath: "changes/index.ts",
+        impactSurfacesPath: "impact-surfaces.json",
+      }),
+    );
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
+    writeFileSync(path.join(rootDir, "src/outside.ts"), "export const outside = true;\n");
+    writeFileSync(
+      path.join(rootDir, "impact-surfaces.json"),
+      JSON.stringify([
+        {
+          id: "company-surface",
+          title: "Company Surface",
+          applies: ["src/company.ts"],
+          risks: ["customer-visible-data"],
+          proposed: true,
+        },
+      ]),
+    );
+    writeFileSync(
+      path.join(rootDir, "conventions/index.ts"),
+      `
+        import { defineConvention } from "@opencanon/core";
+
+        export default defineConvention({
+          id: "company-shape",
+          title: "Company Shape",
+          rule: "Company code keeps the approved shape.",
+          applies: { kind: "files", globs: ["src/company.ts"] },
+          render: { kind: "none" },
+          runtime: { kind: "none" },
+        });
+      `,
+    );
+    writeFileSync(
+      path.join(rootDir, "areas/index.ts"),
+      `
+        import { defineArea } from "@opencanon/core";
+
+        export default defineArea({
+          id: "company-profile",
+          title: "Company Profile",
+          summary: "Company profile data is available to product surfaces.",
+          surfaces: ["company-surface"],
+          owns: [{ kind: "${DefinitionTargetKind.File}", path: "src/company.ts" }],
+          render: { kind: "none" },
+        });
+      `,
+    );
+    writeFileSync(
+      path.join(rootDir, "changes/index.ts"),
+      `
+        import { defineChange } from "@opencanon/core";
+
+        export default defineChange({
+          id: "add-company-profile",
+          title: "Add Company Profile",
+          kind: "feature",
+          summary: "Add the company profile behavior.",
+          updates: { areas: ["company-profile"], surfaces: ["company-surface"] },
+          scope: [{ kind: "${DefinitionTargetKind.File}", path: "src/company.ts" }],
+          intent: { problem: "No company profile.", outcome: "Company profile exists." },
+          render: { kind: "none" },
+        });
+      `,
+    );
+
+    const covered = await runFeedback({ cwd: rootDir, files: ["src/company.ts"], host: "manual", dedupeScope: "off" });
+    assert.deepEqual(covered.change?.impactedSurfaces.map((surface) => surface.id), ["company-surface"]);
+    assert.deepEqual(covered.change?.areas.map((area) => area.id), ["company-profile"]);
+    assert.deepEqual(covered.change?.changes.map((change) => change.id), ["add-company-profile"]);
+    assert.equal(covered.change?.scopeDrift, undefined);
+    const coveredMarkdown = renderFeedbackMarkdown(covered, { emptyMessage: true });
+    assert(coveredMarkdown.includes("Change Context:"));
+    assert(coveredMarkdown.includes("Related Changes:"));
+    assert(coveredMarkdown.includes("Affected Areas:"));
+
+    const drift = await runFeedback({ cwd: rootDir, files: ["src/outside.ts"], host: "manual", dedupeScope: "off" });
+    assert.deepEqual(drift.change?.scopeDrift?.files, ["src/outside.ts"]);
+    const driftMarkdown = renderFeedbackMarkdown(drift, { emptyMessage: true });
+    assert(driftMarkdown.includes("Scope Drift:"));
+    assert(driftMarkdown.includes("outside the scope of every committed change definition"));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("generated hook commands invoke installed opencanon, not project runtime", () => {
+  for (const config of [codexHookConfig(), claudeHookConfig()]) {
+    assert(config.hook.command.startsWith("opencanon hook "), `hook command must call installed opencanon: ${config.hook.command}`);
+    assert(!config.hook.command.includes("bun "), `hook command must not invoke bun: ${config.hook.command}`);
+    assert(!config.hook.command.includes("opencanon.mjs"));
+  }
 });

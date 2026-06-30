@@ -1,7 +1,9 @@
-import { fail, resolveRootDir, type CodeGraphEdge, type Format } from "@opencanon/core";
+import { fail, Format, resolveRootDir, type CodeGraphEdge } from "@opencanon/core";
 import { openCodeGraph } from "./code-graph.ts";
 
-type GraphCommand = "callers" | "callees" | "impact";
+// Single source of truth for graph commands; reference members instead of inlining the strings.
+const GraphCommand = { Callers: "callers", Callees: "callees", Impact: "impact" } as const;
+type GraphCommand = (typeof GraphCommand)[keyof typeof GraphCommand];
 
 type GraphQuery = {
   command: GraphCommand;
@@ -11,7 +13,7 @@ type GraphQuery = {
   help: boolean;
 };
 
-export async function runGraphCommand(args = Bun.argv.slice(2), cwd = process.cwd()): Promise<void> {
+export async function runGraphCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
     printHelp();
@@ -27,7 +29,7 @@ export async function runGraphCommand(args = Bun.argv.slice(2), cwd = process.cw
       direction: directionForCommand(query.command),
       limit: query.limit,
     });
-    if (query.format === "json") console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, command: query.command, query: query.query, edges: result.edges }, null, 2));
+    if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, command: query.command, query: query.query, edges: result.edges }, null, 2));
     else printEdges(query.command, result.edges, graph.sourceFiles.length, query.query);
   } finally {
     graph.close();
@@ -54,7 +56,7 @@ function parseArgs(args: string[]): GraphQuery {
     }
     if (arg === "--format") {
       const value = args[index + 1];
-      if (value !== "markdown" && value !== "json") fail(`Invalid --format: ${value}`);
+      if (value !== Format.Markdown && value !== Format.Json) fail(`Invalid --format: ${value}`);
       format = value;
       index += 1;
       continue;
@@ -62,6 +64,7 @@ function parseArgs(args: string[]): GraphQuery {
     if (arg.startsWith("--")) fail(`Unknown graph option: ${arg}`);
     positional.push(arg);
   }
+  if (help && positional.length === 0) return { command: GraphCommand.Impact, query: "", limit, format, help };
   const command = positional[0] as GraphCommand | undefined;
   if (!command || !["callers", "callees", "impact"].includes(command)) fail(`Expected graph command: callers, callees, or impact.`);
   const query = positional[1];
@@ -71,8 +74,8 @@ function parseArgs(args: string[]): GraphQuery {
 }
 
 function directionForCommand(command: GraphCommand): "incoming" | "outgoing" | "both" {
-  if (command === "callers") return "incoming";
-  if (command === "callees") return "outgoing";
+  if (command === GraphCommand.Callers) return "incoming";
+  if (command === GraphCommand.Callees) return "outgoing";
   return "both";
 }
 
@@ -82,9 +85,9 @@ function printEdges(command: GraphCommand, edges: CodeGraphEdge[], sourceCount: 
     return;
   }
   for (const edge of edges) {
-    if (command === "callers") {
+    if (command === GraphCommand.Callers) {
       console.log(`${edge.source.kind} ${edge.source.name} -> ${edge.target.name} ${edge.path}:${edge.range.start.line}:${edge.range.start.column}`);
-    } else if (command === "callees") {
+    } else if (command === GraphCommand.Callees) {
       console.log(`${edge.source.name} -> ${edge.target.kind} ${edge.target.name} ${edge.path}:${edge.range.start.line}:${edge.range.start.column}`);
     } else {
       console.log(`${edge.source.name} -> ${edge.target.name} ${edge.path}:${edge.range.start.line}:${edge.range.start.column}`);

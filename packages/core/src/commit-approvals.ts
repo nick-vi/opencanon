@@ -4,9 +4,11 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { writeAtomicJsonFileSync } from "./atomic.ts";
 import type { ContextPaths } from "./context.ts";
+import type { GoverningConventionsResult } from "./convention-scope.ts";
 import { relative } from "./core-utils.ts";
 import { getGitRoot } from "./git.ts";
-import type { CommitGate, CommitGateApprovalScope } from "./validator-types.ts";
+import type { CommitGate } from "./validator-types.ts";
+import { CommitGateApprovalScope } from "./validator-types.ts";
 
 const TextEncoding = {
   Utf8: "utf8",
@@ -35,7 +37,7 @@ export type CommitApprovalRecord = {
   approvedVia: "cli" | "agent" | "manual";
   configHash: string;
   validatorGraphHash: string;
-  decisionIds: string[];
+  conventionIds: string[];
   impactSurfaceIds: string[];
   evidence: CommitGate["evidence"];
 };
@@ -74,6 +76,7 @@ export type PendingCommitGatesFile = {
   pending: PendingCommitGate[];
   approved: ResolvedCommitGate[];
   diagnostics: string[];
+  governingConventions?: GoverningConventionsResult;
 };
 
 export type CommitApprovalContext = {
@@ -157,7 +160,7 @@ export function createCommitApprovalRecord(params: {
     approvedVia: params.approvedVia ?? "cli",
     configHash: params.context.configHash,
     validatorGraphHash: params.context.validatorGraphHash,
-    decisionIds: params.gate.decisionIds ?? [],
+    conventionIds: params.gate.conventionIds ?? [],
     impactSurfaceIds: params.gate.impactSurfaceIds ?? [],
     evidence: params.gate.evidence ?? [],
   };
@@ -176,7 +179,7 @@ export function toPendingCommitGates(gates: ResolvedCommitGate[]): PendingCommit
       plainChatFallbackAllowed: true,
       fallbackProtocol: commitGateFallbackProtocol(),
       choices: commitGateApprovalChoices(),
-      approveCommand: `bun run opencanon gate approve ${shellArg(gate.id)} --summary "<user explicit answer to the gate question>" --via agent`,
+      approveCommand: `opencanon gate approve ${shellArg(gate.id)} --summary "<user explicit answer to the gate question>" --via agent`,
     }));
 }
 
@@ -213,7 +216,7 @@ export function commitGateApprovalChoices(): CommitGateApprovalChoice[] {
   ];
 }
 
-export function savePendingCommitGates(paths: ContextPaths, params: { context: CommitApprovalContext; gates: ResolvedCommitGate[]; diagnostics?: string[] }): PendingCommitGatesFile {
+export function savePendingCommitGates(paths: ContextPaths, params: { context: CommitApprovalContext; gates: ResolvedCommitGate[]; diagnostics?: string[]; governingConventions?: GoverningConventionsResult }): PendingCommitGatesFile {
   const pending = toPendingCommitGates(params.gates);
   const file: PendingCommitGatesFile = {
     version: 1,
@@ -222,6 +225,7 @@ export function savePendingCommitGates(paths: ContextPaths, params: { context: C
     pending,
     approved: params.gates.filter((gate) => gate.status === "approved"),
     diagnostics: params.diagnostics ?? [],
+    governingConventions: params.governingConventions,
   };
   mkdirSync(paths.cacheDir, { recursive: true });
   writeAtomicJsonFileSync(pendingCommitGatesPath(paths), file);
@@ -237,7 +241,8 @@ export function loadPendingCommitGates(paths: ContextPaths): PendingCommitGatesF
       context: emptyCommitApprovalContext(),
       pending: [],
       approved: [],
-      diagnostics: [`No pending commit gate cache found. Run bun run opencanon validate --changed first.`],
+      diagnostics: [`No pending commit gate cache found. Run opencanon validate --changed first.`],
+      governingConventions: undefined,
     };
   }
   try {
@@ -249,6 +254,7 @@ export function loadPendingCommitGates(paths: ContextPaths): PendingCommitGatesF
       pending: Array.isArray(value.pending) ? value.pending.filter(isPendingCommitGate) : [],
       approved: Array.isArray(value.approved) ? value.approved.filter(isResolvedCommitGate) : [],
       diagnostics: Array.isArray(value.diagnostics) ? value.diagnostics.filter((item): item is string => typeof item === "string") : [],
+      governingConventions: isGoverningConventionsResult(value.governingConventions) ? value.governingConventions : undefined,
     };
   } catch {
     return {
@@ -258,6 +264,7 @@ export function loadPendingCommitGates(paths: ContextPaths): PendingCommitGatesF
       pending: [],
       approved: [],
       diagnostics: [`Pending commit gate cache is not valid JSON: ${relative(process.cwd(), filePath)}.`],
+      governingConventions: undefined,
     };
   }
 }
@@ -330,7 +337,7 @@ function approvalScope(gate: CommitGate): CommitGateApprovalScope {
 function approvalFingerprint(gate: CommitGate, context: CommitApprovalContext): string {
   const files = getCommitGateFiles(gate);
   const identity = commitGateFingerprintIdentity(gate);
-  if (approvalScope(gate) === "file") {
+  if (approvalScope(gate) === CommitGateApprovalScope.File) {
     if (files.length === 0) return sha256(["opencanon-commit-gate-file-v1", identity, context.stagedDiffFingerprint]);
     return sha256(["opencanon-commit-gate-file-v1", identity, ...files.map((file) => `${file}\0${fileContent(context.rootDir, file)}`)]);
   }
@@ -555,6 +562,12 @@ function isPendingCommitGate(value: unknown): value is PendingCommitGate {
   if (!isResolvedCommitGate(value) || value.status !== "unresolved") return false;
   const record = value as Record<string, unknown>;
   return typeof record.question === "string" && typeof record.approveCommand === "string";
+}
+
+function isGoverningConventionsResult(value: unknown): value is GoverningConventionsResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return Array.isArray(record.conventions) && typeof record.totalConventions === "number";
 }
 
 function shellArg(value: string): string {

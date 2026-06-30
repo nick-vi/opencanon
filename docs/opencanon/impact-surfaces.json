@@ -1,0 +1,108 @@
+[
+  {
+    "id": "company-read-model",
+    "title": "Company read model",
+    "applies": ["src/db/dal/company.ts", "src/api/routes/companies.ts"],
+    "owns": ["db:companies", "api:GET /companies?id"],
+    "downstream": ["ui:company-profile", "report:account-health"],
+    "risks": ["customer-visible-data", "contract"],
+    "changePolicy": {
+      "requiresTests": ["tests/unit/company.test.ts"],
+      "requiresDocs": ["docs/opencanon/canon/impact.md#impact-surfaces"],
+      "requiresApproval": true
+    },
+    "docs": ["docs/opencanon/canon/impact.md#impact-surfaces"],
+    "conventionIds": ["impact-surfaces-current"]
+  },
+  {
+    "id": "local-service-control",
+    "title": "Local service control plane",
+    "applies": [
+      "packages/service-contracts/**",
+      "packages/runtime/src/service.ts",
+      "packages/runtime/src/local-protocol.ts",
+      "packages/cli/src/runtime-client.ts",
+      "packages/runtime/test/service.test.ts"
+    ],
+    "owns": ["process:opencanon-service", "process:project-runtime", "ipc:opencanon.local.v1"],
+    "downstream": ["cli:project", "cli:service", "agent:mcp", "browser:diagnostics"],
+    "risks": ["process-lifecycle", "transport-contract", "local-state"],
+    "changePolicy": {
+      "requiresTests": ["packages/runtime/test/service.test.ts"],
+      "requiresDocs": ["docs/opencanon/areas/local-service-and-runtimes.md#local-service-and-project-runtimes"],
+      "requiresApproval": false
+    },
+    "docs": ["docs/opencanon/areas/local-service-and-runtimes.md#local-service-and-project-runtimes"],
+    "conventionIds": ["explicit-error-contracts", "state-ownership-current", "service-events-current"]
+  },
+  {
+    "id": "project-context-index",
+    "title": "Project context index",
+    "applies": [
+      "packages/core/src/semantic-index.ts",
+      "packages/core/src/semantic-models.ts",
+      "packages/runtime/src/project-context.ts",
+      "packages/runtime/src/semantic-index.ts",
+      "packages/runtime/src/state.ts",
+      "crates/opencanon-engine/src/**",
+      "crates/opencanon-vector/**",
+      "crates/opencanon-inference/**"
+    ],
+    "owns": ["state:semantic-index", "state:semantic-chunks", "state:vector-store"],
+    "downstream": ["cli:search", "cli:ask", "agent:retrieval", "browser:diagnostics"],
+    "risks": ["stale-knowledge", "search-quality", "derived-state"],
+    "changePolicy": {
+      "requiresTests": ["packages/runtime/test/semantic-index.test.ts", "crates/opencanon-engine/src/tests.rs"],
+      "requiresDocs": ["docs/opencanon/areas/project-context-index.md#project-context-index"],
+      "requiresApproval": false
+    },
+    "docs": ["docs/opencanon/areas/project-context-index.md#project-context-index"],
+    "conventionIds": ["context-index-boundary-current", "state-ownership-current"]
+  },
+  {
+    "id": "project-canon-model",
+    "title": "Project Canon model",
+    "applies": [
+      "opencanon/**/*.ts",
+      "docs/opencanon/**/*.md",
+      "packages/core/src/area*.ts",
+      "packages/core/src/change*.ts",
+      "packages/core/src/spec*.ts",
+      "packages/core/src/convention*.ts",
+      "packages/core/src/definition-graph.ts"
+    ],
+    "owns": ["model:project-canon", "docs:generated-canon", "skill:managed-opencanon"],
+    "downstream": ["doctor:generated-drift", "cli:canon-map", "mcp:context", "agent:skill"],
+    "risks": ["source-of-truth", "generated-drift", "definition-backlinks"],
+    "changePolicy": {
+      "requiresTests": ["tests/definition-graph.test.ts", "tests/convention.test.ts"],
+      "requiresDocs": ["docs/opencanon/areas/project-map-governance.md#project-map-governance"],
+      "requiresApproval": false
+    },
+    "docs": ["docs/opencanon/areas/project-map-governance.md#project-map-governance"],
+    "conventionIds": ["product-language-current", "state-ownership-current", "spec-definitions-are-enforced"]
+  },
+  {
+    "id": "release-update",
+    "title": "Release and update path",
+    "applies": [
+      "packages/distribution/**",
+      "packages/cli/src/update.ts",
+      "packages/core/src/release-manifest.ts",
+      "scripts/**",
+      "package.json",
+      "package-lock.json",
+      "packages/*/package.json"
+    ],
+    "owns": ["installer:runtime", "manifest:signed-release"],
+    "downstream": ["runtime:installed-cli", "cli:update"],
+    "risks": ["supply-chain", "version-lockstep", "install-integrity"],
+    "changePolicy": {
+      "requiresTests": ["tests/release-update-e2e.test.ts", "npm run release:check"],
+      "requiresDocs": ["docs/opencanon/areas/runtime-release-update.md#runtime-updates"],
+      "requiresApproval": false
+    },
+    "docs": ["docs/opencanon/areas/runtime-release-update.md#runtime-updates"],
+    "conventionIds": ["hardcoded-secrets-and-config"]
+  }
+]

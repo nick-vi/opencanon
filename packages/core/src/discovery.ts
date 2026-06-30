@@ -17,7 +17,14 @@ export type ProjectFileDiscovery = {
   failed: boolean;
 };
 
-const sourceExtensions = "{ts,tsx,js,jsx,py,rs,svelte,css,scss,sass,less,json,md,markdown}";
+// The single list of file extensions OpenCanon surfaces to validators: every
+// language-registry source language (incl. .mts/.cts/.mjs/.cjs) plus a text bucket
+// (.rs/.css/...) with no descriptor that is still worth reporting on. Both the
+// discovery glob and the isSupportedSourceFile predicate derive from THIS, so they
+// can never drift.
+const sourceFileExtensions = ["ts", "tsx", "mts", "cts", "mjs", "cjs", "js", "jsx", "py", "rs", "svelte", "css", "scss", "sass", "less", "json", "md", "markdown"] as const;
+const sourceExtensions = `{${sourceFileExtensions.join(",")}}`;
+const sourceExtensionPattern = new RegExp(`\\.(${sourceFileExtensions.join("|")})$`);
 const ProjectFileName = {
   PackageJson: "package.json",
 } as const;
@@ -29,6 +36,8 @@ export function defaultProjectFilePatterns(rootDir: string): string[] {
   const rootPatterns = [
     `src/**/*.${sourceExtensions}`,
     `tests/**/*.${sourceExtensions}`,
+    "docs/**/*.{md,markdown}",
+    "*.{md,markdown}",
     ProjectFileName.PackageJson,
     "tsconfig*.json",
   ];
@@ -176,8 +185,10 @@ function matchesAny(file: string, globs: string[]): boolean {
   return matchesPath(file, globs);
 }
 
-function isSupportedSourceFile(file: string): boolean {
-  return /\.(ts|tsx|js|jsx|py|rs|svelte|css|scss|sass|less|json|md|markdown)$/.test(file);
+/** The project files OpenCanon surfaces to validators (see sourceFileExtensions).
+ * Single source; imported by project-files rather than redefined. */
+export function isSupportedSourceFile(file: string): boolean {
+  return sourceExtensionPattern.test(file);
 }
 
 function normalizePath(value: string): string {

@@ -1,17 +1,17 @@
-import { createValidatorFactory } from "@opencanon/core";
-import type { Finding } from "@opencanon/core";
+import { createConventionFactory } from "@opencanon/core";
+import type { ConventionFactoryBaseOptions, Finding } from "@opencanon/core";
 import { edgeMatches, isBarrelFile, joinPatterns, manualFix, optionSummary } from "../shared.ts";
 import type { NoImportsOptions, NoForbiddenImportsOptions, NoDeepRelativeImportsOptions, NoBarrelCrossBoundaryOptions, NoLayerCallOptions } from "../shared.ts";
 import { noForbiddenCalls } from "./comments.ts";
 
-export const noImports = createValidatorFactory<NoImportsOptions>((options) => ({
+export const noImports = createConventionFactory<NoImportsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.from,
   severity: options.severity,
   scope: "import-edge",
   facts: ["imports"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${joinPatterns(options.from)} must not import ${joinPatterns(options.to)}.`),
   visuals: [
     {
@@ -53,22 +53,21 @@ export const noImports = createValidatorFactory<NoImportsOptions>((options) => (
   },
 }));
 
-export const noForbiddenImports = createValidatorFactory<NoForbiddenImportsOptions>((options) =>
+export const noForbiddenImports = (options: NoForbiddenImportsOptions & ConventionFactoryBaseOptions) =>
   noImports({
     ...options,
     from: options.in,
     to: options.imports,
-  }),
-);
+  });
 
-export const noDeepRelativeImports = createValidatorFactory<NoDeepRelativeImportsOptions>((options) => ({
+export const noDeepRelativeImports = createConventionFactory<NoDeepRelativeImportsOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "import-edge",
   facts: ["imports"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Files matching ${joinPatterns(options.in)} may use relative imports up to depth ${options.maxDepth}.`),
   validate({ ctx }) {
     const targetPaths = new Set(ctx.targetFiles.map((file) => file.path));
@@ -91,14 +90,14 @@ export const noDeepRelativeImports = createValidatorFactory<NoDeepRelativeImport
   },
 }));
 
-export const noBarrelCrossBoundary = createValidatorFactory<NoBarrelCrossBoundaryOptions>((options) => ({
+export const noBarrelCrossBoundary = createConventionFactory<NoBarrelCrossBoundaryOptions>((options) => ({
   id: options.id,
   topics: options.topics,
   applies: options.in,
   severity: options.severity,
   scope: "import-edge",
   facts: ["imports"],
-  decisionIds: options.decisionIds,
+  conventionIds: options.related,
   summary: optionSummary(options, `Barrel files matching ${joinPatterns(options.in)} must stay inside the approved boundary.`),
   validate({ ctx, runtime }) {
     const targetFiles = new Set(ctx.targetFiles.map((file) => file.path));
@@ -125,8 +124,7 @@ export const noBarrelCrossBoundary = createValidatorFactory<NoBarrelCrossBoundar
   },
 }));
 
-export const noLayerCall = createValidatorFactory<NoLayerCallOptions>((options) =>
+export const noLayerCall = (options: NoLayerCallOptions & ConventionFactoryBaseOptions) =>
   noForbiddenCalls({
     ...options,
-  }),
-);
+  });

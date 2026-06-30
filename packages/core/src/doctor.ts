@@ -1,16 +1,42 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ContextPaths, Decision } from "./core.ts";
-import { discoverProjectFiles, getGitRoot, listFiles, loadImpactSurfaces, relative, validateConfig, validateContext } from "./core.ts";
+import type { ContextPaths } from "./core.ts";
+import { OpenCanonAgentEntryFiles, patchOpenCanonAgentEntryBlock, validateOpenCanonAgentEntryContent } from "./agent-entry.ts";
+import { AreaRenderKind, type Area } from "./area.ts";
+import { renderArea, resolveAreaGeneratedDocsPath } from "./area-render.ts";
+import { ChangeRenderKind, type Change } from "./change.ts";
+import { renderChange, resolveChangeGeneratedDocsPath } from "./change-render.ts";
+import { ConventionRenderKind, type Convention } from "./convention.ts";
+import { SpecRenderKind, type Spec } from "./spec.ts";
+import { renderSpec, resolveSpecGeneratedDocsPath } from "./spec-render.ts";
+import { buildDefinitionGraph, DefinitionGraphDiagnosticSeverity, discoverProjectFiles, getGitRoot, loadImpactSurfaces, relative, validateConfig, validateContext } from "./core.ts";
+import { renderConvention, resolveConventionGeneratedDocsPath } from "./convention-render.ts";
+import { satisfiesMinimumVersion } from "./core-utils.ts";
 import { resolveExternalTool } from "./external-tools.ts";
 import { isFixAllowed } from "./fixes.ts";
 import type { FixMode } from "./fixes.ts";
 import { FixModeValue } from "./fixes.ts";
+import { GeneratedStateIgnoreEntries, GeneratedStateIgnoreProbePaths } from "./generated-state.ts";
 import { validatePatterns } from "./globs.ts";
 import { inspectHookInstallations } from "./hook-install.ts";
+import { validateOpenCanonSkillArtifacts, writeOpenCanonSkillArtifacts } from "./opencanon-skill.ts";
+import {
+  buildProjectTypesGeneration,
+  generateProjectTypes,
+  ProjectAliasesFilePath,
+  ProjectCoreAuthoringFilePath,
+  ProjectTestingAuthoringFilePath,
+  ProjectTypesFilePath,
+  ProjectValidatorsAuthoringFilePath,
+} from "./project-types.ts";
 import type { Validator } from "./validator.ts";
-import { factKindValues, validatorScopeValues } from "./contracts.ts";
+import { normalizeProducerStatusesForProject } from "./validator.ts";
+import { ValidatorDomain } from "./validator-types.ts";
+import type { ProducerStatus } from "./type-facts-provider.ts";
+import { ProducerStatusKind } from "./type-facts-provider.ts";
+import { ExternalToolMissingSeverity, factKindValues, validatorScopeValues } from "./contracts.ts";
+import type { SemanticIndexSnapshot } from "./contracts.ts";
 
 export const DoctorStatus = {
   Pass: "pass",
@@ -19,33 +45,32 @@ export const DoctorStatus = {
 } as const;
 export type DoctorStatus = (typeof DoctorStatus)[keyof typeof DoctorStatus];
 
+export const DoctorCheckGroup = {
+  App: "app",
+  GeneratedState: "generated-state",
+  Install: "install",
+  Project: "project",
+  ProjectMap: "project-map",
+} as const;
+export type DoctorCheckGroup = (typeof DoctorCheckGroup)[keyof typeof DoctorCheckGroup];
+
+const SemanticIndexDoctorStatus = {
+  Failed: "failed",
+  Stale: "stale",
+} as const;
+
 const GitArg = {
   Directory: "-C",
 } as const;
 
 const doctorTextEncoding = "utf8";
 const missingVersion = "missing";
-const requiredDaemonBunVersion = "1.3.13";
-const engineBindingSuffixes: Record<string, string> = {
-  "darwin-arm64": "darwin-arm64",
-  "darwin-x64": "darwin-x64",
-  "linux-arm64": "linux-arm64-gnu",
-  "linux-x64": "linux-x64-gnu",
-  "win32-x64": "win32-x64-msvc",
-};
-const generatedIgnoreEntries = [
-  ".opencanon/daemon.json",
-  ".opencanon/daemon.log",
-  ".opencanon/setup.json",
-  ".opencanon/commit-approvals.json",
-  ".opencanon/*.sqlite",
-  ".opencanon/*.sqlite-shm",
-  ".opencanon/*.sqlite-wal",
-];
-const skillGeneratedIgnoreEntries = ["runtime/", "generated/"];
+const requiredRuntimeNodeVersion = "24.12.0";
+const requiredPackageManager = "npm@11.12.1";
 
 export type DoctorCheck = {
   id: string;
+  group: DoctorCheckGroup;
   status: DoctorStatus;
   message: string;
   details?: string[];
@@ -54,6 +79,20 @@ export type DoctorCheck = {
 export type DoctorReport = {
   status: DoctorStatus;
   checks: DoctorCheck[];
+};
+
+export type DoctorRuntimeHealth = {
+  service?: {
+    status: string;
+    message?: string;
+    registered: boolean;
+  };
+  project?: {
+    status: string;
+    message?: string;
+    registered: boolean;
+    lifecycleStatus?: string;
+  };
 };
 
 export type DoctorFixResult = {
@@ -65,19 +104,21 @@ export type DoctorFixResult = {
   skipped: string[];
 };
 
-export function buildDoctorReport(params: { paths: ContextPaths; decisions: Decision[]; validators: Validator[]; runExternalTools?: boolean }): DoctorReport {
+export function buildDoctorReport(params: { paths: ContextPaths; conventions: Convention[]; validators: Validator[]; areas?: Area[]; specs?: Spec[]; changes?: Change[]; runExternalTools?: boolean; producerStatuses?: ProducerStatus[]; semanticIndex?: SemanticIndexSnapshot | null; runtimeHealth?: DoctorRuntimeHealth }): DoctorReport {
   const checks: DoctorCheck[] = [];
-  const { paths, decisions, validators } = params;
+  const pushCheck = (group: DoctorCheckGroup, check: Omit<DoctorCheck, "group">): void => {
+    checks.push({ group, ...check });
+  };
+  const { paths, conventions, validators, areas = [], specs = [], changes = [] } = params;
   const packageJsonPath = path.join(paths.rootDir, "package.json");
   const packageJson = readPackageJson(packageJsonPath);
   const corePackageJson = readPackageJson(path.join(paths.rootDir, "packages/core/package.json"));
   const cliPackageJson = readPackageJson(path.join(paths.rootDir, "packages/cli/package.json"));
-  const daemonPackageJson = readPackageJson(path.join(paths.rootDir, "packages/daemon/package.json"));
+  const runtimePackageJson = readPackageJson(path.join(paths.rootDir, "packages/runtime/package.json"));
   const enginePackageJson = readPackageJson(path.join(paths.rootDir, "packages/engine/package.json"));
-  const uiPackageJson = readPackageJson(path.join(paths.rootDir, "packages/ui/package.json"));
   const openCanonWorkspace = isOpenCanonFrameworkWorkspace(corePackageJson);
 
-  checks.push({
+  pushCheck(DoctorCheckGroup.Project, {
     id: "config",
     status: DoctorStatus.Pass,
     message: paths.configPath
@@ -86,7 +127,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   });
 
   const discoveryDiagnostics = validateProjectDiscovery(paths);
-  checks.push({
+  pushCheck(DoctorCheckGroup.Project, {
     id: "project-discovery",
     status: discoveryDiagnostics.failures.length > 0 ? DoctorStatus.Fail : discoveryDiagnostics.warnings.length > 0 ? DoctorStatus.Warn : DoctorStatus.Pass,
     message:
@@ -97,7 +138,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   });
 
   const cacheIgnore = validateCacheIgnore(paths);
-  checks.push({
+  pushCheck(DoctorCheckGroup.GeneratedState, {
     id: "cache-ignore",
     status: cacheIgnore.status,
     message:
@@ -111,19 +152,19 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
 
   const generatedIgnore = validateGeneratedIgnore(paths);
   const commitApprovalsIgnore = validateCommitApprovalsIgnore(paths);
-  checks.push({
+  pushCheck(DoctorCheckGroup.GeneratedState, {
     id: "generated-ignore",
     status: generatedIgnore.status,
     message:
       generatedIgnore.status === DoctorStatus.Pass
-        ? "Generated daemon state and runtime artifacts are ignored by Git."
+        ? "Generated OpenCanon state and authoring artifacts are ignored by Git."
         : generatedIgnore.status === DoctorStatus.Fail
-          ? "Generated daemon state or runtime artifacts are not ignored by Git."
+          ? "Generated OpenCanon state or authoring artifacts are not ignored by Git."
           : "Generated artifact ignore rules could not be fully verified.",
     details: generatedIgnore.diagnostics,
   });
 
-  checks.push({
+  pushCheck(DoctorCheckGroup.GeneratedState, {
     id: "commit-approvals-ignore",
     status: commitApprovalsIgnore.status,
     message:
@@ -137,17 +178,124 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
     details: commitApprovalsIgnore.diagnostics,
   });
 
+  const projectAuthoringDiagnostics = validateProjectAuthoringSupport(paths);
+  pushCheck(DoctorCheckGroup.GeneratedState, {
+    id: "project-authoring",
+    status: projectAuthoringDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
+    message:
+      projectAuthoringDiagnostics.length === 0
+        ? "Generated project authoring support is current."
+        : "Generated project authoring support is missing or stale.",
+    details: projectAuthoringDiagnostics,
+  });
+
+  const semanticIndexDiagnostics = validateSemanticIndex(params.semanticIndex);
+  pushCheck(DoctorCheckGroup.GeneratedState, {
+    id: "semantic-index",
+    status: semanticIndexDiagnostics.status,
+    message: semanticIndexDiagnostics.message,
+    details: semanticIndexDiagnostics.details,
+  });
+
   const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
-  const contextDiagnostics = [...impactDiagnostics, ...validateContext({ decisions, validators, impactSurfaces, paths })];
-  checks.push({
+  const contextDiagnostics = [
+    ...impactDiagnostics,
+    ...validateContext({
+      conventions,
+      areas,
+      specs,
+      changes,
+      validators: validators.map((validator) => ({ id: validator.id, conventionIds: validator.conventionIds, docs: validator.docs })),
+      impactSurfaces,
+      paths,
+    }),
+  ];
+  pushCheck(DoctorCheckGroup.Project, {
     id: "context-files",
     status: contextDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
-    message: contextDiagnostics.length === 0 ? "Context docs and decisions are structurally valid." : "Context docs or decisions are invalid.",
+    message: contextDiagnostics.length === 0 ? "Context docs and conventions are structurally valid." : "Context docs or conventions are invalid.",
     details: contextDiagnostics,
   });
 
+  const definitionGraph = buildDefinitionGraph({
+    areas,
+    specs,
+    changes,
+    conventions,
+    impactSurfaces,
+    validators: validators.map((validator) => ({ id: validator.id, conventionIds: validator.conventionIds })),
+  });
+  const definitionGraphErrors = definitionGraph.diagnostics.filter((diagnostic) => diagnostic.severity === DefinitionGraphDiagnosticSeverity.Error);
+  pushCheck(DoctorCheckGroup.ProjectMap, {
+    id: "definition-graph",
+    status: definitionGraphErrors.length > 0 ? DoctorStatus.Fail : definitionGraph.diagnostics.length > 0 ? DoctorStatus.Warn : DoctorStatus.Pass,
+    message:
+      definitionGraph.diagnostics.length === 0
+        ? `Definition graph is consistent (${definitionGraph.nodes.length} nodes, ${definitionGraph.edges.length} edges).`
+        : "Definition graph has coverage or relationship issues.",
+    details: definitionGraph.diagnostics.map((diagnostic) => `${diagnostic.severity} [${diagnostic.code}]: ${diagnostic.message}`),
+  });
+
+  const conventionDocsDiagnostics = validateConventionDocsInvariant(paths, conventions);
+  pushCheck(DoctorCheckGroup.GeneratedState, {
+    id: "convention-docs",
+    status: conventionDocsDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
+    message: conventionDocsDiagnostics.length === 0 ? "Convention docs satisfy their render ownership invariant." : "Convention docs do not match their render ownership invariant.",
+    details: conventionDocsDiagnostics,
+  });
+
+  const areaDocsDiagnostics = validateAreaDocsInvariant(paths, areas);
+  pushCheck(DoctorCheckGroup.ProjectMap, {
+    id: "areas",
+    status: areaDocsDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
+    message:
+      areas.length === 0
+        ? "No area definitions found."
+        : areaDocsDiagnostics.length === 0
+          ? "Area definitions and generated docs are valid."
+          : "Area definitions or generated docs need attention.",
+    details: areaDocsDiagnostics,
+  });
+
+  const specDocsDiagnostics = validateSpecDocsInvariant(paths, specs);
+  pushCheck(DoctorCheckGroup.ProjectMap, {
+    id: "specs",
+    status: specDocsDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
+    message:
+      specs.length === 0
+        ? "No spec definitions found."
+        : specDocsDiagnostics.length === 0
+          ? "Spec definitions and generated docs are valid."
+          : "Spec definitions or generated docs need attention.",
+    details: specDocsDiagnostics,
+  });
+
+  const changeDocsDiagnostics = validateChangeDocsInvariant(paths, changes);
+  pushCheck(DoctorCheckGroup.ProjectMap, {
+    id: "changes",
+    status: changeDocsDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
+    message:
+      changes.length === 0
+        ? "No change definitions found."
+        : changeDocsDiagnostics.length === 0
+          ? "Change definitions and generated docs are valid."
+          : "Change definitions or generated docs need attention.",
+    details: changeDocsDiagnostics,
+  });
+
+  const openCanonSkillDiagnostics = validateOpenCanonSkillArtifacts(paths.rootDir);
+  pushCheck(DoctorCheckGroup.Install, {
+    id: "opencanon-skill",
+    status: openCanonSkillDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
+    message:
+      openCanonSkillDiagnostics.length === 0
+        ? "Managed OpenCanon skill files are installed."
+        : "Managed OpenCanon skill files are missing or stale.",
+    details: openCanonSkillDiagnostics,
+  });
+
   const validatorDiagnostics = validateValidators(validators);
-  checks.push({
+  pushCheck(DoctorCheckGroup.Project, {
     id: "validators",
     status: validatorDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
     message: validatorDiagnostics.length === 0 ? "Validators are structurally valid." : "Validators have structural issues.",
@@ -155,23 +303,23 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   });
 
   const fixtureDiagnostics = validateFixturePresence(paths, validators);
-  checks.push({
+  pushCheck(DoctorCheckGroup.Project, {
     id: "validator-fixtures",
     status: fixtureDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Warn,
-    message: fixtureDiagnostics.length === 0 ? "Each validator has valid and invalid fixtures." : "Some validators are missing fixture coverage.",
+    message: fixtureDiagnostics.length === 0 ? "Each validator has the fixtures required by its coverage contract." : "Some validators are missing fixture coverage.",
     details: fixtureDiagnostics,
   });
 
   const scriptDiagnostics = validatePackageScripts(packageJson, paths.requiredPackageScripts);
-  checks.push({
+  pushCheck(DoctorCheckGroup.Install, {
     id: "package-scripts",
     status: scriptDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
     message: scriptDiagnostics.length === 0 ? "Package scripts expose the OpenCanon shortcut." : "Package scripts are missing required shortcuts.",
     details: scriptDiagnostics,
   });
 
-  const dependencyDiagnostics = validateDependencyPin(packageJson, corePackageJson, cliPackageJson, daemonPackageJson, enginePackageJson, uiPackageJson);
-  checks.push({
+  const dependencyDiagnostics = validateDependencyPin(packageJson, corePackageJson, cliPackageJson, runtimePackageJson, enginePackageJson);
+  pushCheck(DoctorCheckGroup.Install, {
     id: "dependencies",
     status: dependencyDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
     message: openCanonWorkspace
@@ -183,7 +331,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   });
 
   const externalTools = validateExternalTools(paths, { runCommands: params.runExternalTools === true });
-  checks.push({
+  pushCheck(DoctorCheckGroup.Install, {
     id: "external-tools",
     status: externalTools.status,
     message: externalTools.message,
@@ -191,14 +339,14 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   });
 
   const gitRoot = getGitRoot(paths.rootDir);
-  checks.push({
+  pushCheck(DoctorCheckGroup.Project, {
     id: "git",
     status: gitRoot ? DoctorStatus.Pass : DoctorStatus.Warn,
     message: gitRoot ? `Git repository detected at ${gitRoot}.` : "No Git repository detected; --changed and git history context will not work here.",
   });
 
   const precommit = hasPrecommit(paths.rootDir, gitRoot);
-  checks.push({
+  pushCheck(DoctorCheckGroup.Install, {
     id: "precommit",
     status: precommit ? DoctorStatus.Pass : DoctorStatus.Warn,
     message: precommit
@@ -207,19 +355,65 @@ export function buildDoctorReport(params: { paths: ContextPaths; decisions: Deci
   });
 
   const feedbackHooks = validateFeedbackHooks(paths.rootDir);
-  checks.push({
+  pushCheck(DoctorCheckGroup.Install, {
     id: "feedback-hooks",
     status: feedbackHooks.status,
     message: feedbackHooks.message,
     details: feedbackHooks.details,
   });
 
-  const daemonRuntime = validateDaemonRuntime(paths.rootDir);
-  checks.push({
-    id: "daemon-runtime",
-    status: daemonRuntime.status,
-    message: daemonRuntime.message,
-    details: daemonRuntime.details,
+  const agentEntryDiagnostics = validateAgentEntryFiles(paths.rootDir);
+  pushCheck(DoctorCheckGroup.Install, {
+    id: "agent-entry",
+    status: agentEntryDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
+    message:
+      agentEntryDiagnostics.length === 0
+        ? "Agent entry files contain the managed OpenCanon bootstrap block."
+        : "Agent entry files need the managed OpenCanon bootstrap block.",
+    details: agentEntryDiagnostics,
+  });
+
+  const runtimePrerequisites = validateRuntimePrerequisites(paths.rootDir);
+  pushCheck(DoctorCheckGroup.App, {
+    id: "runtime-prerequisites",
+    status: runtimePrerequisites.status,
+    message: runtimePrerequisites.message,
+    details: runtimePrerequisites.details,
+  });
+
+  const runtimeHealth = validateRuntimeHealth(params.runtimeHealth);
+  if (runtimeHealth) {
+    pushCheck(DoctorCheckGroup.App, {
+      id: "runtime-health",
+      status: runtimeHealth.status,
+      message: runtimeHealth.message,
+      details: runtimeHealth.details,
+    });
+  }
+
+  // Producer-status section: each known type producer's language + kind + detail
+  // + warnings. The AUTHORITATIVE status lives in the running runtime (it owns the
+  // live producer); the CLI passes it in via `producerStatuses`. Only when no
+  // runtime is running do we fall back to a headless resolve (sidecar-only) — which
+  // is correct, because then there is no live producer. `not-implemented` is
+  // expected (silent zero); `stale`/`crashed`/`missing-*` are loud (warn); `ready`
+  // passes. Never inspect the sidecar fs directly here.
+  const producers = normalizeProducerStatusesForProject({
+    paths,
+    validators,
+    producers: params.producerStatuses,
+  });
+  const producerDetails = producers.map((status) => {
+    const detail = status.detail ? ` — ${status.detail}` : "";
+    const warnings = (status.warnings ?? []).map((warning) => `  warning [${warning.code}]: ${warning.message}`);
+    return [`${status.language}: ${status.kind}${detail}`, ...warnings].join("\n");
+  });
+  const producerProblem = producers.some((status) => status.kind !== ProducerStatusKind.Ready && status.kind !== ProducerStatusKind.NotImplemented);
+  pushCheck(DoctorCheckGroup.App, {
+    id: "type-producers",
+    status: producerProblem ? DoctorStatus.Warn : DoctorStatus.Pass,
+    message: producerProblem ? "One or more type producers are not ready." : "Required type producers are ready.",
+    details: producerDetails,
   });
 
   const status = checks.some((check) => check.status === DoctorStatus.Fail)
@@ -237,15 +431,39 @@ export function renderDoctorMarkdown(report: DoctorReport): string {
   lines.push(`Status: ${report.status}`);
   lines.push("");
 
-  for (const check of report.checks) {
+  for (const group of doctorCheckGroups(report.checks)) {
+    lines.push(`## ${doctorCheckGroupLabel(group)}`);
+    lines.push("");
+    for (const check of report.checks.filter((item) => item.group === group)) {
     lines.push(`- [${check.status}] ${check.id}: ${check.message}`);
     for (const detail of check.details ?? []) lines.push(`  - ${detail}`);
+    }
+    lines.push("");
   }
 
-  return lines.join("\n");
+  return lines.join("\n").trimEnd();
 }
 
-export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorReport; mode: FixMode; dryRun: boolean; decisions?: Decision[]; validators?: Validator[] }): DoctorFixResult {
+function doctorCheckGroups(checks: DoctorCheck[]): DoctorCheckGroup[] {
+  const present = new Set(checks.map((check) => check.group));
+  return [
+    DoctorCheckGroup.App,
+    DoctorCheckGroup.Project,
+    DoctorCheckGroup.ProjectMap,
+    DoctorCheckGroup.GeneratedState,
+    DoctorCheckGroup.Install,
+  ].filter((group) => present.has(group));
+}
+
+function doctorCheckGroupLabel(group: DoctorCheckGroup): string {
+  if (group === DoctorCheckGroup.App) return "App";
+  if (group === DoctorCheckGroup.Project) return "Project";
+  if (group === DoctorCheckGroup.ProjectMap) return "Project Map";
+  if (group === DoctorCheckGroup.GeneratedState) return "Generated State";
+  return "Install";
+}
+
+export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorReport; mode: FixMode; dryRun: boolean; conventions?: Convention[]; validators?: Validator[] }): DoctorFixResult {
   const result: DoctorFixResult = {
     mode: params.mode,
     dryRun: params.dryRun,
@@ -258,20 +476,9 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
   const cacheIgnore = params.report.checks.find((check) => check.id === "cache-ignore");
   const generatedIgnore = params.report.checks.find((check) => check.id === "generated-ignore");
   const commitApprovalsIgnore = params.report.checks.find((check) => check.id === "commit-approvals-ignore");
-  const missingDecisionRefs = missingDecisionValidatorRefs(params.decisions ?? [], params.validators ?? []);
-
-  if (missingDecisionRefs.size > 0) {
-    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
-      result.skipped.push("decision-validator-refs: safe fix outside requested mode.");
-    } else {
-      result.selectedFixes += 1;
-      if (!params.dryRun) {
-        addMissingDecisionValidatorRefs(params.paths, missingDecisionRefs);
-        result.appliedFixes += 1;
-      }
-    }
-  }
-
+  const projectAuthoring = params.report.checks.find((check) => check.id === "project-authoring");
+  const agentEntry = params.report.checks.find((check) => check.id === "agent-entry");
+  const openCanonSkill = params.report.checks.find((check) => check.id === "opencanon-skill");
   if (cacheIgnore?.status === DoctorStatus.Fail) {
     if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
       result.skipped.push("cache-ignore: safe fix outside requested mode.");
@@ -290,8 +497,7 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
     } else {
       result.selectedFixes += 1;
       if (!params.dryRun) {
-        ensureGitignoreEntries(params.paths.rootDir, generatedIgnoreEntries);
-        ensureGitignoreEntries(path.join(params.paths.rootDir, ".agents/skills/opencanon"), skillGeneratedIgnoreEntries);
+        ensureGitignoreEntries(params.paths.rootDir, GeneratedStateIgnoreEntries);
         result.appliedFixes += 1;
       }
     }
@@ -309,6 +515,54 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
     }
   }
 
+  if (projectAuthoring?.status === DoctorStatus.Fail) {
+    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
+      result.skipped.push("project-authoring: safe fix outside requested mode.");
+    } else {
+      result.selectedFixes += 1;
+      if (!params.dryRun) {
+        try {
+          generateProjectTypes(params.paths.rootDir, params.paths);
+          result.appliedFixes += 1;
+        } catch (error) {
+          result.diagnostics.push(`project-authoring: ${errorMessage(error)}`);
+        }
+      }
+    }
+  }
+
+  if (agentEntry?.status === DoctorStatus.Fail) {
+    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
+      result.skipped.push("agent-entry: safe fix outside requested mode.");
+    } else {
+      result.selectedFixes += 1;
+      if (!params.dryRun) {
+        try {
+          ensureAgentEntryFiles(params.paths.rootDir);
+          result.appliedFixes += 1;
+        } catch (error) {
+          result.diagnostics.push(`agent-entry: ${errorMessage(error)}`);
+        }
+      }
+    }
+  }
+
+  if (openCanonSkill?.status === DoctorStatus.Fail) {
+    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
+      result.skipped.push("opencanon-skill: safe fix outside requested mode.");
+    } else {
+      result.selectedFixes += 1;
+      if (!params.dryRun) {
+        try {
+          writeOpenCanonSkillArtifacts(params.paths.rootDir);
+          result.appliedFixes += 1;
+        } catch (error) {
+          result.diagnostics.push(`opencanon-skill: ${errorMessage(error)}`);
+        }
+      }
+    }
+  }
+
   if (precommit?.status !== DoctorStatus.Pass) {
     if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
       result.skipped.push("precommit: safe fix outside requested mode.");
@@ -320,7 +574,7 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
         mkdirSync(hookDir, { recursive: true });
         writeFileSync(
           hookPath,
-          "#!/bin/sh\nset -e\n\nbun run opencanon context --check\nbun run opencanon validate --check-fixtures\nbun run opencanon validate --changed\n",
+          "#!/bin/sh\nset -e\n\nopencanon context --check\nopencanon validate --check-fixtures\nopencanon validate --changed\n",
         );
         chmodSync(hookPath, 0o755);
         result.appliedFixes += 1;
@@ -329,29 +583,6 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
   }
 
   return result;
-}
-
-function missingDecisionValidatorRefs(decisions: Decision[], validators: Validator[]): Map<string, string[]> {
-  const byDecision = new Map(decisions.map((decision) => [decision.id, decision]));
-  const missing = new Map<string, string[]>();
-  for (const validator of validators) {
-    for (const decisionId of validator.decisionIds ?? []) {
-      const decision = byDecision.get(decisionId);
-      if (!decision || (decision.validatorIds ?? []).includes(validator.id)) continue;
-      missing.set(decisionId, [...(missing.get(decisionId) ?? []), validator.id]);
-    }
-  }
-  return missing;
-}
-
-function addMissingDecisionValidatorRefs(paths: ContextPaths, missing: Map<string, string[]>): void {
-  const decisions = JSON.parse(readFileSync(paths.decisionsPath, doctorTextEncoding)) as Decision[];
-  for (const decision of decisions) {
-    const validatorIds = missing.get(decision.id);
-    if (!validatorIds) continue;
-    decision.validatorIds = [...new Set([...(decision.validatorIds ?? []), ...validatorIds])].sort();
-  }
-  writeFileSync(paths.decisionsPath, `${JSON.stringify(decisions, null, 2)}\n`);
 }
 
 export function renderDoctorFixMarkdown(result: DoctorFixResult): string {
@@ -367,7 +598,14 @@ export function renderDoctorFixMarkdown(result: DoctorFixResult): string {
 
 function readPackageJson(packageJsonPath: string): Record<string, any> | null {
   if (!existsSync(packageJsonPath)) return null;
-  return JSON.parse(readFileSync(packageJsonPath, doctorTextEncoding)) as Record<string, any>;
+  // Degrade, never crash: doctor is the command users run WHEN their repo is
+  // broken, so a malformed package.json must become a `null` (handled downstream
+  // as "missing"), not an uncaught SyntaxError that aborts the whole report.
+  try {
+    return JSON.parse(readFileSync(packageJsonPath, doctorTextEncoding)) as Record<string, any>;
+  } catch {
+    return null;
+  }
 }
 
 function validateProjectDiscovery(paths: ContextPaths): {
@@ -394,6 +632,131 @@ function validateProjectDiscovery(paths: ContextPaths): {
   else warnings.push(...discovery.diagnostics);
 
   return { source, fileCount: discovery.files.length, failures, warnings };
+}
+
+function validateConventionDocsInvariant(paths: ContextPaths, conventions: Convention[]): string[] {
+  const diagnostics: string[] = [];
+  for (const convention of conventions) {
+    if (convention.render.kind !== ConventionRenderKind.Generated) continue;
+
+    const resolved = resolveConventionGeneratedDocsPath(paths, convention);
+    if (!resolved.ok) {
+      diagnostics.push(...resolved.diagnostics);
+      continue;
+    }
+
+    const docsPath = relative(paths.rootDir, resolved.absolutePath);
+    if (!existsSync(resolved.absolutePath)) {
+      diagnostics.push(`Convention ${convention.id} generated docs file is missing: ${docsPath}. Run opencanon canon render conventions.`);
+      continue;
+    }
+
+    const expected = renderConvention(convention, convention.render.style);
+    const actual = readFileSync(resolved.absolutePath, doctorTextEncoding);
+    if (actual !== expected) {
+      diagnostics.push(`Convention ${convention.id} generated docs drifted: ${docsPath}. Run opencanon canon render conventions. ${firstDiffLine(expected, actual)}`);
+    }
+  }
+  return diagnostics;
+}
+
+function validateAreaDocsInvariant(paths: ContextPaths, areas: Area[]): string[] {
+  const diagnostics: string[] = [];
+  for (const area of areas) {
+    if (area.render.kind !== AreaRenderKind.Generated) continue;
+
+    const resolved = resolveAreaGeneratedDocsPath(paths, area);
+    if (!resolved.ok) {
+      diagnostics.push(...resolved.diagnostics);
+      continue;
+    }
+
+    const docsPath = relative(paths.rootDir, resolved.absolutePath);
+    if (!existsSync(resolved.absolutePath)) {
+      diagnostics.push(`Area ${area.id} generated docs file is missing: ${docsPath}. Run opencanon canon render areas.`);
+      continue;
+    }
+
+    const expected = renderArea(area, area.render.style);
+    const actual = readFileSync(resolved.absolutePath, doctorTextEncoding);
+    if (actual !== expected) {
+      diagnostics.push(`Area ${area.id} generated docs drifted: ${docsPath}. Run opencanon canon render areas. ${firstDiffLine(expected, actual)}`);
+    }
+  }
+  return diagnostics;
+}
+
+function validateSpecDocsInvariant(paths: ContextPaths, specs: Spec[]): string[] {
+  const diagnostics: string[] = [];
+  for (const spec of specs) {
+    if (spec.render.kind !== SpecRenderKind.Generated) continue;
+
+    const resolved = resolveSpecGeneratedDocsPath(paths, spec);
+    if (!resolved.ok) {
+      diagnostics.push(...resolved.diagnostics);
+      continue;
+    }
+
+    const docsPath = relative(paths.rootDir, resolved.absolutePath);
+    if (!existsSync(resolved.absolutePath)) {
+      diagnostics.push(`Spec ${spec.id} generated docs file is missing: ${docsPath}. Run opencanon canon render specs.`);
+      continue;
+    }
+
+    const expected = renderSpec(spec, spec.render.style);
+    const actual = readFileSync(resolved.absolutePath, doctorTextEncoding);
+    if (actual !== expected) {
+      diagnostics.push(`Spec ${spec.id} generated docs drifted: ${docsPath}. Run opencanon canon render specs. ${firstDiffLine(expected, actual)}`);
+    }
+  }
+  return diagnostics;
+}
+
+function validateChangeDocsInvariant(paths: ContextPaths, changes: Change[]): string[] {
+  const diagnostics: string[] = [];
+  for (const change of changes) {
+    if (change.render.kind !== ChangeRenderKind.Generated) continue;
+
+    const resolved = resolveChangeGeneratedDocsPath(paths, change);
+    if (!resolved.ok) {
+      diagnostics.push(...resolved.diagnostics);
+      continue;
+    }
+
+    const docsPath = relative(paths.rootDir, resolved.absolutePath);
+    if (!existsSync(resolved.absolutePath)) {
+      diagnostics.push(`Change ${change.id} generated docs file is missing: ${docsPath}. Run opencanon canon render changes.`);
+      continue;
+    }
+
+    const expected = renderChange(change, change.render.style);
+    const actual = readFileSync(resolved.absolutePath, doctorTextEncoding);
+    if (actual !== expected) {
+      diagnostics.push(`Change ${change.id} generated docs drifted: ${docsPath}. Run opencanon canon render changes. ${firstDiffLine(expected, actual)}`);
+    }
+  }
+  return diagnostics;
+}
+
+function firstDiffLine(expected: string, actual: string): string {
+  const expectedLines = expected.split("\n");
+  const actualLines = actual.split("\n");
+  const maxLength = Math.max(expectedLines.length, actualLines.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    if (expectedLines[index] === actualLines[index]) continue;
+    return `First diff at line ${index + 1}: expected ${previewLine(expectedLines[index])}, actual ${previewLine(actualLines[index])}.`;
+  }
+  return "Content differs.";
+}
+
+function previewLine(line: string | undefined): string {
+  if (line === undefined) return "<missing>";
+  const trimmed = line.length > 120 ? `${line.slice(0, 117)}...` : line;
+  return JSON.stringify(trimmed);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function validateCacheIgnore(paths: ContextPaths): {
@@ -432,23 +795,127 @@ function validateGeneratedIgnore(paths: ContextPaths): {
     };
   }
   const probes = [
-    ".opencanon/daemon.json",
-    ".opencanon/daemon.log",
-    ".opencanon/setup.json",
-    ".opencanon/commit-approvals.json",
-    ".opencanon/state.sqlite",
-    ".opencanon/state.sqlite-shm",
-    ".opencanon/state.sqlite-wal",
-    ".agents/skills/opencanon/runtime/cli.js",
-    ".agents/skills/opencanon/generated/project.ts",
+    ...GeneratedStateIgnoreProbePaths,
+    ProjectAliasesFilePath,
+    ProjectCoreAuthoringFilePath,
+    ProjectTestingAuthoringFilePath,
+    ProjectTypesFilePath,
+    ProjectValidatorsAuthoringFilePath,
   ];
   const missing = probes.filter((probe) => spawnSync("git", [GitArg.Directory, paths.rootDir, "check-ignore", "--quiet", "--", probe]).status !== 0);
   if (missing.length === 0) return { status: DoctorStatus.Pass, diagnostics: [] };
   return {
     status: DoctorStatus.Fail,
     diagnostics: [
-      `Add generated OpenCanon entries to .gitignore: ${generatedIgnoreEntries.join(", ")}; add ${skillGeneratedIgnoreEntries.join(", ")} to .agents/skills/opencanon/.gitignore. Unignored probes: ${missing.join(", ")}.`,
+      `Add generated OpenCanon entries to .gitignore: ${GeneratedStateIgnoreEntries.join(", ")}. Unignored probes: ${missing.join(", ")}.`,
     ],
+  };
+}
+
+function validateProjectAuthoringSupport(paths: ContextPaths): string[] {
+  try {
+    const plan = buildProjectTypesGeneration(paths.rootDir, paths);
+    return plan.files.flatMap((file) => {
+      const filePath = path.join(paths.rootDir, file.path);
+      if (!existsSync(filePath)) return [`Generated project authoring file is missing: ${file.path}. Run opencanon doctor --fix.`];
+      const actual = readFileSync(filePath, doctorTextEncoding);
+      if (actual === file.content) return [];
+      return [`Generated project authoring file drifted: ${file.path}. Run opencanon doctor --fix. ${firstDiffLine(file.content, actual)}`];
+    });
+  } catch (error) {
+    return [`Project authoring support could not be checked: ${errorMessage(error)}`];
+  }
+}
+
+function validateAgentEntryFiles(rootDir: string): string[] {
+  const diagnostics: string[] = [];
+  for (const relativePath of OpenCanonAgentEntryFiles) {
+    const filePath = path.join(rootDir, relativePath);
+    if (!existsSync(filePath)) {
+      diagnostics.push(`${relativePath} is missing. Run opencanon doctor --fix.`);
+      continue;
+    }
+    diagnostics.push(...validateOpenCanonAgentEntryContent(readFileSync(filePath, doctorTextEncoding), relativePath));
+  }
+  return diagnostics;
+}
+
+function ensureAgentEntryFiles(rootDir: string): void {
+  for (const relativePath of OpenCanonAgentEntryFiles) {
+    const filePath = path.join(rootDir, relativePath);
+    const current = existsSync(filePath) ? readFileSync(filePath, doctorTextEncoding) : "";
+    const patched = patchOpenCanonAgentEntryBlock(current);
+    if (patched.diagnostics.length > 0) throw new Error(`${relativePath}: ${patched.diagnostics.join("; ")}`);
+    if (!patched.changed) continue;
+    writeFileSync(filePath, patched.content);
+  }
+}
+
+function validateSemanticIndex(index: SemanticIndexSnapshot | null | undefined): { status: DoctorStatus; message: string; details: string[] } {
+  if (index === undefined) {
+    return {
+      status: DoctorStatus.Pass,
+      message: "Context index status is verified by the project runtime when available.",
+      details: [],
+    };
+  }
+  if (index === null) {
+    return {
+      status: DoctorStatus.Warn,
+      message: "No context index snapshot has been written yet.",
+      details: ["Run a project reindex from the app or `opencanon project index` to build generated search state."],
+    };
+  }
+
+  const details: string[] = [];
+  if (!index.version.trim()) details.push("Context index version is missing.");
+  if (!index.chunkerVersion.trim()) details.push("Context index chunker version is missing.");
+  if (!index.producerVersion.trim()) details.push("Context index producer version is missing.");
+  if (!index.sourceInventoryHash.trim()) details.push("Context index source inventory hash is missing.");
+  if (!index.chunkTreeHash.trim()) details.push("Context index chunk tree hash is missing.");
+  if (!index.identityHash.trim()) details.push("Context index identity hash is missing.");
+  if (!index.provider.id.trim()) details.push("Context index provider id is missing.");
+  if (!index.provider.modelId.trim()) details.push("Context index model id is missing.");
+  if (!index.provider.configHash.trim()) details.push("Context index provider config hash is missing.");
+  if (index.provider.dimensions < 1) details.push("Context index provider dimensions must be positive.");
+  if (index.chunkCount !== index.vectorCount) details.push(`Context index chunk/vector counts differ (${index.chunkCount} chunks, ${index.vectorCount} vectors).`);
+  if (index.status === SemanticIndexDoctorStatus.Failed) details.push(...index.diagnostics.map((diagnostic) => diagnostic.message));
+
+  return {
+    status: details.length > 0 ? DoctorStatus.Fail : index.status === SemanticIndexDoctorStatus.Stale ? DoctorStatus.Warn : DoctorStatus.Pass,
+    message: details.length > 0
+      ? "Context index identity or freshness metadata is invalid."
+      : index.status === SemanticIndexDoctorStatus.Stale
+        ? "Context index exists but is stale."
+        : `Context index is ${index.status} (${index.chunkCount} chunks).`,
+    details,
+  };
+}
+
+function validateRuntimeHealth(runtimeHealth: DoctorRuntimeHealth | undefined): { status: DoctorStatus; message: string; details: string[] } | undefined {
+  if (!runtimeHealth) return undefined;
+  const details: string[] = [];
+  const service = runtimeHealth.service;
+  if (service?.registered && service.status !== "running") {
+    details.push(`Service is ${service.status}${service.message ? `: ${service.message}` : ""}`);
+  }
+  const project = runtimeHealth.project;
+  if (project?.registered && project.status !== "running") {
+    const lifecycle = project.lifecycleStatus ? `, lifecycle ${project.lifecycleStatus}` : "";
+    details.push(`Project runtime is ${project.status}${lifecycle}${project.message ? `: ${project.message}` : ""}`);
+  }
+  const registered = Boolean(service?.registered || project?.registered);
+  if (!registered) {
+    return {
+      status: DoctorStatus.Pass,
+      message: "No OpenCanon service or project runtime is registered.",
+      details,
+    };
+  }
+  return {
+    status: details.length > 0 ? DoctorStatus.Fail : DoctorStatus.Pass,
+    message: details.length > 0 ? "Registered OpenCanon runtime state is unhealthy." : "Registered OpenCanon runtime state is healthy.",
+    details,
   };
 }
 
@@ -513,6 +980,7 @@ function validateValidators(validators: Validator[]): string[] {
       if (!factKindValues.includes(fact)) diagnostics.push(`Validator ${validator.id} has invalid fact kind: ${fact}`);
     }
     for (const patterns of validator.appliesScopes) {
+      if (patterns.length === 0 && !validatorTargetsFilePatterns(validator)) continue;
       for (const issue of validatePatterns(patterns)) diagnostics.push(`Validator ${validator.id}: ${issue}`);
     }
     if (validator.analysisGlobs.length > 0) {
@@ -524,13 +992,17 @@ function validateValidators(validators: Validator[]): string[] {
   return diagnostics;
 }
 
+function validatorTargetsFilePatterns(validator: Validator): boolean {
+  return validator.domain === ValidatorDomain.File || validator.domain === ValidatorDomain.ImportEdge;
+}
+
 function validateFixturePresence(paths: ContextPaths, validators: Validator[]): string[] {
   const missingValid: string[] = [];
   const missingInvalid: string[] = [];
 
   for (const validator of validators) {
     if (!existsSync(path.join(paths.fixturesDir, validator.id, "valid.ts"))) missingValid.push(validator.id);
-    if (!existsSync(path.join(paths.fixturesDir, validator.id, "invalid.ts"))) missingInvalid.push(validator.id);
+    if (validator.fixtures !== "valid-only" && !existsSync(path.join(paths.fixturesDir, validator.id, "invalid.ts"))) missingInvalid.push(validator.id);
   }
 
   const diagnostics: string[] = [];
@@ -555,88 +1027,16 @@ function validateDependencyPin(
   packageJson: Record<string, any> | null,
   corePackageJson: Record<string, any> | null,
   cliPackageJson: Record<string, any> | null,
-  daemonPackageJson: Record<string, any> | null,
+  _runtimePackageJson: Record<string, any> | null,
   enginePackageJson: Record<string, any> | null,
-  uiPackageJson: Record<string, any> | null,
 ): string[] {
   if (!isOpenCanonFrameworkWorkspace(corePackageJson)) return [];
   const dependencies = [
-    {
-      name: "@codemirror/lang-css",
-      version: "6.3.1",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/lang-html",
-      version: "6.4.11",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/lang-javascript",
-      version: "6.2.5",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/lang-json",
-      version: "6.0.2",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/lang-markdown",
-      version: "6.5.0",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/lang-python",
-      version: "6.2.1",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/lang-rust",
-      version: "6.0.2",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/lang-yaml",
-      version: "6.1.3",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@codemirror/language",
-      version: "6.12.3",
-      packageJson: uiPackageJson,
-    },
-    { name: "@codemirror/state", version: "6.6.0", packageJson: uiPackageJson },
-    { name: "@codemirror/view", version: "6.42.1", packageJson: uiPackageJson },
-    { name: "@lezer/highlight", version: "1.2.3", packageJson: uiPackageJson },
     { name: "@napi-rs/cli", version: "3.6.2", packageJson: enginePackageJson },
-    { name: "@types/bun", version: "1.3.14", packageJson },
     { name: "@types/node", version: "25.7.0", packageJson },
-    {
-      name: "@vitejs/plugin-react",
-      version: "6.0.1",
-      packageJson: uiPackageJson,
-    },
-    { name: "@types/react", version: "19.2.14", packageJson: uiPackageJson },
-    { name: "@types/react-dom", version: "19.2.3", packageJson: uiPackageJson },
-    {
-      name: "@tanstack/react-query",
-      version: "5.100.10",
-      packageJson: uiPackageJson,
-    },
-    {
-      name: "@tanstack/react-router",
-      version: "1.169.2",
-      packageJson: uiPackageJson,
-    },
-    { name: "lucide-react", version: "1.14.0", packageJson: uiPackageJson },
-    { name: "playwright", version: "1.60.0", packageJson },
+    { name: "esbuild", version: "0.28.1", packageJson },
+    { name: "esbuild-wasm", version: "0.28.0", packageJson: corePackageJson },
     { name: "picomatch", version: "4.0.4", packageJson: corePackageJson },
-    { name: "react", version: "19.2.6", packageJson: uiPackageJson },
-    { name: "react-dom", version: "19.2.6", packageJson: uiPackageJson },
-    { name: "react-markdown", version: "10.1.0", packageJson: uiPackageJson },
-    { name: "remark-gfm", version: "4.0.1", packageJson: uiPackageJson },
-    { name: "vite", version: "8.0.12", packageJson: uiPackageJson },
     { name: "zod", version: "4.4.3", packageJson: corePackageJson },
     { name: "cac", version: "7.0.0", packageJson: cliPackageJson },
     { name: "vitest", version: "4.1.6", packageJson },
@@ -702,8 +1102,8 @@ function validateExternalTools(
 
     if (result.error && isMissingCommandError(result.error)) {
       const message = `${name}: missing command ${tool.command}.`;
-      if (tool.missingSeverity === "error") failures.push(message);
-      else if (tool.missingSeverity === "warning") warnings.push(message);
+      if (tool.missingSeverity === ExternalToolMissingSeverity.Error) failures.push(message);
+      else if (tool.missingSeverity === ExternalToolMissingSeverity.Warning) warnings.push(message);
       else details.push(message);
       continue;
     }
@@ -747,57 +1147,34 @@ function isOpenCanonFrameworkWorkspace(corePackageJson: Record<string, any> | nu
 
 function validateRootDependencyOwnership(packageJson: Record<string, any> | null): string[] {
   if (!packageJson) return [];
-  const allowedRootDependencies = new Set(["@opencanon/cli", "@opencanon/core", "@opencanon/daemon", "@opencanon/engine", "@opencanon/validators"]);
+  const allowedRootDependencies = new Set(["@opencanon/service-contracts", "@opencanon/cli", "@opencanon/core", "@opencanon/distribution", "@opencanon/runtime", "@opencanon/engine", "@opencanon/validators"]);
   const misplacedDependencies = Object.keys(packageJson.dependencies ?? {}).filter((dependency) => !allowedRootDependencies.has(dependency));
   return misplacedDependencies.map((dependency) => `${dependency} should be owned by the package that imports it, not the root package.json.`);
 }
 
 function validateWorkspacePackageManager(packageJson: Record<string, any> | null): string[] {
   const packageManager = packageJson?.packageManager;
-  const expected = `bun@${requiredDaemonBunVersion}`;
-  return packageManager === expected ? [] : [`packageManager should be ${expected}, found ${packageManager ?? missingVersion}.`];
+  return packageManager === requiredPackageManager ? [] : [`packageManager should be ${requiredPackageManager}, found ${packageManager ?? missingVersion}.`];
 }
 
-function validateDaemonRuntime(rootDir: string): {
+function validateRuntimePrerequisites(_rootDir: string): {
   status: DoctorStatus;
   message: string;
   details: string[];
 } {
   const details: string[] = [];
-  const bun = spawnSync("bun", ["--version"], { encoding: doctorTextEncoding });
-  const bunVersion = bun.status === 0 ? bun.stdout.trim() : missingVersion;
-  if (bunVersion !== requiredDaemonBunVersion) {
+  const nodeVersion = process.versions.node ?? missingVersion;
+  if (!satisfiesMinimumVersion(nodeVersion, requiredRuntimeNodeVersion)) {
     details.push(
-      `Bun runtime mismatch: required ${requiredDaemonBunVersion}; found ${bunVersion}. Run bun --version, install the pinned runtime with your runtime manager, then rerun opencanon daemon check.`,
+      `Node runtime mismatch: required >=${requiredRuntimeNodeVersion}; found ${nodeVersion}. Run node --version, install a supported Node runtime with your runtime manager, then rerun opencanon project check.`,
     );
   }
 
-  details.push(...validateBundledRuntime(rootDir));
-
   return {
     status: details.length === 0 ? DoctorStatus.Pass : DoctorStatus.Warn,
-    message: details.length === 0 ? `Bundled daemon runtime is present for ${process.platform}-${process.arch}.` : "Bundled daemon runtime is not ready on this machine.",
+    message: details.length === 0 ? `OpenCanon local runtime prerequisites are ready for ${process.platform}-${process.arch}.` : "OpenCanon local runtime prerequisites are not ready on this machine.",
     details,
   };
-}
-
-function validateBundledRuntime(rootDir: string): string[] {
-  const details: string[] = [];
-  const skillRoot = path.join(rootDir, ".agents/skills/opencanon");
-  for (const runtimeFile of ["runtime/cli.js", "runtime/core.js", "runtime/validators.js", "runtime/daemon.js", "runtime/ui/index.html"]) {
-    if (!existsSync(path.join(skillRoot, runtimeFile))) details.push(`Runtime file is missing: ${runtimeFile}.`);
-  }
-
-  const engineTarget = `${process.platform}-${process.arch}`;
-  const engineSuffix = engineBindingSuffixes[engineTarget];
-  if (!engineSuffix) {
-    details.push(`Engine runtime is missing for ${engineTarget}.`);
-  } else {
-    const enginePath = path.join(skillRoot, "runtime/engine", engineTarget, `opencanon.${engineSuffix}.node`);
-    if (!existsSync(enginePath)) details.push(`Engine runtime file is missing: ${path.relative(skillRoot, enginePath)}.`);
-  }
-
-  return details;
 }
 
 function hasPrecommit(rootDir: string, gitRoot: string | null): boolean {

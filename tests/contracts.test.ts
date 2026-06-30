@@ -2,17 +2,23 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   ContextRequestSchema,
-  DaemonResponseSchema,
+  RuntimeHealthSchema,
+  RuntimeResponseSchema,
+  RuntimeWorkerJobKindValue,
+  RuntimeWorkerJobStatusValue,
   ExtractFactsRequestSchema,
   ExtractFactsResultSchema,
   FileFactsSchema,
-  CanonBundleSchema,
   EngineVersionSchema,
   EngineProjectStatusSchema,
   OpenCanonError,
+  OpenCanonErrorPayloadKind,
+  OpenCanonProblemCode,
+  OpenCanonProblemSource,
   OpenProjectRequestSchema,
   SearchGraphEdgesRequestSchema,
   SearchGraphEdgesResultSchema,
+  SearchSemanticIndexRequestSchema,
   SearchReferencesRequestSchema,
   SearchReferencesResultSchema,
   ScanAndDiffResultSchema,
@@ -20,10 +26,27 @@ import {
   ValidatorContractSchema,
   WatcherEventBatchSchema,
   WatcherStartRequestSchema,
+  WriteSemanticIndexRequestSchema,
   createOpenCanonDiagnostic,
+  createOpenCanonProblem,
   createOpenCanonFailure,
+  formatOpenCanonErrorPayload,
   formatOpenCanonDiagnostics,
+  parseJson,
+  parseOpenCanonProblem,
+  resultAll,
+  serializeOpenCanonProblem,
+  stringifyJson,
+  branch,
+  err,
+  isErr,
+  isOk,
+  ok,
   matchesProjectFileScope,
+  DefaultSemanticEmbeddingConfig,
+  semanticEmbeddingModel,
+  SemanticEmbeddingModelId,
+  semanticEmbeddingModelIds,
   type ContextPaths,
 } from "@opencanon/core";
 
@@ -39,6 +62,7 @@ test("file facts schema defaults optional fact arrays", () => {
   assert.deepEqual(facts.imports, []);
   assert.deepEqual(facts.exports, []);
   assert.deepEqual(facts.symbols, []);
+  assert.deepEqual(facts.declarations, []);
   assert.deepEqual(facts.calls, []);
   assert.deepEqual(facts.literals, []);
   assert.deepEqual(facts.comments, []);
@@ -63,58 +87,13 @@ test("validator contract requires explicit scope", () => {
     scope: "import-edge",
     facts: ["imports"],
     applies: ["src/services/**/*.ts"],
-    decisionIds: ["service-db-boundary"],
-    docs: ["docs/opencanon/decisions.json#service-db-boundary"],
+    conventionIds: ["service-db-boundary"],
+    docs: ["docs/opencanon/canon/architecture.md#services"],
   });
 
   assert.equal(validator.scope, "import-edge");
   assert.deepEqual(validator.facts, ["imports"]);
-  assert.deepEqual(validator.docs, ["docs/opencanon/decisions.json#service-db-boundary"]);
-});
-
-test("canon bundle contract supports typed options", () => {
-  const bundle = CanonBundleSchema.parse({
-    id: "project-rules",
-    topics: ["project"],
-    options: {
-      sourceRoot: {
-        type: "string",
-        default: "src",
-      },
-      strictness: {
-        type: "enum",
-        values: ["advisory", "strict"],
-        default: "advisory",
-      },
-    },
-  });
-
-  assert.equal(bundle.options.sourceRoot.default, "src");
-  assert.equal(bundle.options.strictness.values?.includes("strict"), true);
-  assert.deepEqual(bundle.docs, []);
-  assert.deepEqual(bundle.externalTools, {});
-
-  assert.equal(
-    CanonBundleSchema.safeParse({
-      id: "bad-bundle",
-      topics: ["project"],
-      options: {
-        strictness: { type: "enum", default: "strict" },
-      },
-    }).success,
-    false,
-  );
-
-  assert.equal(
-    CanonBundleSchema.safeParse({
-      id: "bad-default",
-      topics: ["project"],
-      options: {
-        enabled: { type: "boolean", default: "yes" },
-      },
-    }).success,
-    false,
-  );
+  assert.deepEqual(validator.docs, ["docs/opencanon/canon/architecture.md#services"]);
 });
 
 test("engine project contract parses fact requests and results", () => {
@@ -129,11 +108,12 @@ test("engine project contract parses fact requests and results", () => {
   );
 
   const request = ExtractFactsRequestSchema.parse({
-    files: [{ path: "src/company.ts", contentHash: "hash", language: "typescript" }],
+    files: [{ path: "src/company.ts", contentHash: "hash", language: "typescript", content: "export const value = true;\n" }],
     facts: ["imports", "symbols"],
     parserVersion: "0.128.0",
   });
   assert.deepEqual(request.facts, ["imports", "symbols"]);
+  assert.equal(request.files[0]?.content, "export const value = true;\n");
 
   const result = ExtractFactsResultSchema.parse({
     files: [
@@ -216,7 +196,7 @@ test("code graph edge contracts parse resolved edges", () => {
   assert.equal(result.edges[0].target.name, "logger");
 });
 
-test("daemon request and response contracts have deterministic defaults", () => {
+test("runtime request and response contracts have deterministic defaults", () => {
   assert.deepEqual(ValidateRequestSchema.parse({ changed: true }), {
     files: [],
     changed: true,
@@ -233,18 +213,51 @@ test("daemon request and response contracts have deterministic defaults", () => 
     topics: [],
   });
 
-  const failure = DaemonResponseSchema.parse({
+  const failure = RuntimeResponseSchema.parse({
     ok: false,
-    diagnostics: [
+    error: {
+      kind: "diagnostics",
+      diagnostics: [
+        {
+          code: "runtime-not-running",
+          message: "OpenCanon runtime is not running.",
+          action: "Run opencanon project start.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(failure.ok, false);
+  if (!failure.ok) assert.equal(failure.error.kind, OpenCanonErrorPayloadKind.Diagnostics);
+});
+
+test("runtime health contract exposes explicit worker jobs", () => {
+  const health = RuntimeHealthSchema.parse({
+    status: "indexing",
+    engine: {
+      packageVersion: "0.4.0-test",
+      engineVersion: "0.4.0-test",
+      napiVersion: "test",
+      schemaVersion: 6,
+    },
+    refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+    startedAt: "2026-06-27T00:00:00.000Z",
+    jobs: [
       {
-        code: "daemon-not-running",
-        message: "OpenCanon daemon is not running.",
-        action: "Run opencanon daemon start.",
+        id: "semantic-index:test",
+        kind: RuntimeWorkerJobKindValue.SemanticIndex,
+        status: RuntimeWorkerJobStatusValue.Running,
+        label: "Refreshing Project Context",
+        current: 2,
+        total: 5,
+        unit: "files",
       },
     ],
   });
 
-  assert.equal(failure.ok, false);
+  assert.equal(health.jobs?.[0]?.kind, RuntimeWorkerJobKindValue.SemanticIndex);
+  assert.equal(health.jobs?.[0]?.status, RuntimeWorkerJobStatusValue.Running);
+  assert.equal(RuntimeHealthSchema.safeParse({ ...health, jobs: [{ ...health.jobs?.[0], status: "unknown" }] }).success, false);
 });
 
 test("project scope filtering applies project patterns and ignores", () => {
@@ -252,16 +265,18 @@ test("project scope filtering applies project patterns and ignores", () => {
     rootDir: "/repo",
     configPath: "/repo/opencanon.config.json",
     docsDir: "docs/opencanon",
-    decisionsPath: "docs/opencanon/decisions.json",
-    validatorsPath: ".agents/skills/opencanon/validators/index.ts",
-    fixturesDir: ".agents/skills/opencanon/fixtures",
+    conventionsPath: "opencanon/conventions/index.ts",
+    areasPath: "opencanon/areas/index.ts",
+    specsPath: "opencanon/specs/index.ts",
+    changesPath: "opencanon/changes/index.ts",
+    fixturesDir: "opencanon/fixtures",
     impactSurfacesPath: "docs/opencanon/impact-surfaces.json",
     proposedImpactNotesPath: "docs/opencanon/proposed-impact-notes.json",
     baselinePath: ".opencanon/baseline.json",
     commitApprovalsPath: ".opencanon/commit-approvals.json",
     commitApprovalsPersistent: false,
     cacheDir: ".opencanon/cache",
-    projectFilePatterns: ["src/**/*.ts", "tests/**/*.ts"],
+    projectFilePatterns: ["src/**/*.ts", "tests/**/*.ts", "docs/**/*.{md,markdown}", "*.{md,markdown}"],
     ignore: ["packages/**", ".agents/**"],
     entrypoints: [],
     publicSurfaces: [],
@@ -271,12 +286,14 @@ test("project scope filtering applies project patterns and ignores", () => {
     fileDiscovery: "git",
     maxFiles: 20_000,
     maxFileSizeKb: 512,
+    semanticEmbedding: DefaultSemanticEmbeddingConfig,
   };
 
   assert.equal(matchesProjectFileScope(paths, "src/company.ts"), true);
+  assert.equal(matchesProjectFileScope(paths, "docs/opencanon/canon/architecture.md"), true);
+  assert.equal(matchesProjectFileScope(paths, "README.md"), true);
   assert.equal(matchesProjectFileScope(paths, "packages/cli/src/index.ts"), false);
   assert.equal(matchesProjectFileScope(paths, ".agents/skills/opencanon/SKILL.md"), false);
-  assert.equal(matchesProjectFileScope(paths, "README.md"), false);
 });
 
 test("engine project state contracts parse project handles and scan results", () => {
@@ -285,9 +302,8 @@ test("engine project state contracts parse project handles and scan results", ()
     statePath: "/repo/.opencanon/state.sqlite",
     settings: {
       docsDir: "docs/opencanon",
-      decisionsPath: "docs/opencanon/decisions.json",
-      validatorsPath: ".agents/skills/opencanon/validators/index.ts",
-      fixturesDir: ".agents/skills/opencanon/fixtures",
+      conventionsPath: "opencanon/conventions/index.ts",
+      fixturesDir: "opencanon/fixtures",
       projectFilePatterns: ["src/**/*.ts"],
       ignore: [".opencanon/**"],
       maxFiles: 20_000,
@@ -301,7 +317,7 @@ test("engine project state contracts parse project handles and scan results", ()
     statePath: request.statePath,
     schemaVersion: 1,
     migrationsApplied: [1],
-    watcher: { running: true, bufferedEvents: 0, stale: false },
+    refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
   });
   const scan = ScanAndDiffResultSchema.parse({
     statePath: request.statePath,
@@ -315,7 +331,7 @@ test("engine project state contracts parse project handles and scan results", ()
   });
 
   assert.equal(status.schemaVersion, 1);
-  assert.equal(status.watcher.running, true);
+  assert.equal(status.refresh.status, "live");
   assert.equal(scan.changedFiles[0], "src/company.ts");
 });
 
@@ -335,17 +351,123 @@ test("engine watcher contracts default options and parse event batches", () => {
   assert.equal(batch.paths[0], "src/company.ts");
 });
 
+test("semantic index contracts require provider identity and chunk metadata", () => {
+  const request = WriteSemanticIndexRequestSchema.parse({
+    index: {
+      id: "project",
+      version: "semantic-index-v1",
+      status: "ready",
+      provider: {
+        id: "opencanon-local-hash",
+        kind: "local",
+        modelId: "opencanon-local-hash-128",
+        dimensions: 128,
+        distance: "cosine",
+        configHash: "config-hash",
+      },
+      chunkerVersion: "chunker",
+      producerVersion: "producer",
+      sourceInventoryHash: "inventory",
+      chunkTreeHash: "chunk-tree",
+      identityHash: "identity",
+      chunkCount: 1,
+      vectorCount: 1,
+      staleChunkCount: 0,
+      indexedAt: "2026-06-06T00:00:00.000Z",
+      diagnostics: [],
+    },
+    chunks: [
+      {
+        metadata: {
+          id: "chunk:one",
+          path: "src/company.ts",
+          contentHash: "content",
+          chunkHash: "chunk",
+          embeddingHash: "embedding",
+          kind: "file",
+          language: "typescript",
+          ordinal: 0,
+          range: { start: { line: 1, column: 1, byte: 0 }, end: { line: 2, column: 1, byte: 20 } },
+          tokenEstimate: 5,
+          preview: "company loader",
+        },
+        text: "company loader",
+        vector: [1, 0],
+      },
+    ],
+  });
+  const search = SearchSemanticIndexRequestSchema.parse({ vector: [1, 0] });
+
+  assert.equal(request.index.provider.modelId, "opencanon-local-hash-128");
+  assert.equal(request.chunks[0].metadata.embeddingHash, "embedding");
+  assert.equal(search.indexId, "project");
+  assert.equal(search.limit, 20);
+});
+
+test("semantic embedding model registry exposes local and native embedding models", () => {
+  const local = semanticEmbeddingModel(SemanticEmbeddingModelId.LocalHash128);
+  const native = semanticEmbeddingModel(SemanticEmbeddingModelId.JinaCodeV2);
+
+  assert.equal(local.providerKind, "local");
+  assert.equal(local.dimensions, 128);
+  assert.equal(native.providerKind, "native");
+  assert.equal(native.dimensions, 896);
+  assert(semanticEmbeddingModelIds().includes(SemanticEmbeddingModelId.Qwen3Embed));
+});
+
 test("open canon diagnostics are structured and formatted", () => {
+  const problem = createOpenCanonProblem({
+    code: OpenCanonProblemCode.ProjectNotFound,
+    title: "OpenCanon project not found",
+    detail: "No OpenCanon project was discovered for the requested root.",
+    source: OpenCanonProblemSource.Service,
+    path: "/tmp/missing",
+    action: "Run opencanon init --yes.",
+    retryable: false,
+    status: 400,
+  });
   const diagnostic = createOpenCanonDiagnostic({
     code: "engine-binary-missing",
     message: "Engine binary is missing.",
     details: ["Expected packages/engine/binaries/opencanon.darwin-arm64.node."],
-    action: "Run bun run build:engine.",
+    action: "Run npm run build:engine.",
+    problem,
   });
   const failure = createOpenCanonFailure([diagnostic]);
   const error = new OpenCanonError([diagnostic]);
 
   assert.equal(failure.ok, false);
+  assert.equal(failure.error.kind, OpenCanonErrorPayloadKind.Diagnostics);
+  if (failure.error.kind === OpenCanonErrorPayloadKind.Diagnostics) {
+    assert.equal(failure.error.diagnostics[0]?.problem?.code, OpenCanonProblemCode.ProjectNotFound);
+  }
+  assert.equal(parseOpenCanonProblem(serializeOpenCanonProblem(problem))?.path, "/tmp/missing");
+  assert.equal(parseOpenCanonProblem(failure)?.code, OpenCanonProblemCode.ProjectNotFound);
   assert(error.message.includes("[engine-binary-missing]"));
-  assert(formatOpenCanonDiagnostics([diagnostic]).includes("Run bun run build:engine."));
+  assert(formatOpenCanonErrorPayload(failure.error).includes("[engine-binary-missing]"));
+  assert(formatOpenCanonDiagnostics([diagnostic]).includes("Run npm run build:engine."));
+});
+
+test("core result and utility helpers are JSON-native", () => {
+  const success = ok({ id: "project" });
+  const failure = err({ code: "missing" });
+
+  assert.equal(isOk(success), true);
+  assert.equal(isErr(failure), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(success)), { ok: true, data: { id: "project" } });
+  const combined = resultAll([ok("a"), ok(1)]);
+  assert.equal(combined.ok, true);
+  if (combined.ok) assert.deepEqual(combined.data, ["a", 1]);
+
+  const parsed = parseJson<{ ok: boolean }>(`{"ok":true}`);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.data.ok, true);
+  assert.equal(parseJson("{").ok, false);
+  assert.equal(stringifyJson({ a: 1 }).ok, true);
+
+  const value = branch<string>()
+    .when(false, "wrong")
+    .present(0, (number) => `zero:${number}`)
+    .else("fallback");
+  assert.equal(value, "zero:0");
 });

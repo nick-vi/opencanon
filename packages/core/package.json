@@ -1,15 +1,38 @@
 {
   "name": "@opencanon/core",
-  "version": "0.3.14",
+  "version": "0.4.0",
   "license": "MIT",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./safe-extract": "./src/safe-extract.ts",
+    "./branch": "./src/branch.ts",
+    "./concurrency": "./src/concurrency.ts",
+    "./problem": "./src/problem.ts",
+    "./result": "./src/result.ts",
+    "./retry": "./src/retry.ts",
+    "./safe-json": "./src/safe-json.ts",
+    "./singleflight": "./src/singleflight.ts",
+    "./release-manifest": "./src/release-manifest.ts",
+    "./agent-entry": "./src/agent-entry.ts",
+    "./opencanon-skill": "./src/opencanon-skill.ts",
+    "./area": "./src/area.ts",
+    "./area-render": "./src/area-render.ts",
+    "./spec": "./src/spec.ts",
+    "./spec-render": "./src/spec-render.ts",
+    "./change": "./src/change.ts",
+    "./change-render": "./src/change-render.ts",
+    "./convention": "./src/convention.ts",
+    "./convention-scope": "./src/convention-scope.ts",
+    "./convention-render": "./src/convention-render.ts",
+    "./definition-graph": "./src/definition-graph.ts"
   },
   "dependencies": {
+    "esbuild-wasm": "0.28.0",
     "picomatch": "4.0.4",
+    "tar": "7.5.16",
     "zod": "4.4.3"
   }
 }
