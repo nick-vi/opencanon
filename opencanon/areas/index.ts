@@ -455,6 +455,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/update.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/package.json" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/release-manifest.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/src/release-keys.ts" },
       { kind: DefinitionTargetKind.File, path: "scripts/**" },
       { kind: DefinitionTargetKind.File, path: "packages/distribution/test/update.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/update-guard.test.ts" },

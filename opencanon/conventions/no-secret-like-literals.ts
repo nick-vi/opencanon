@@ -9,6 +9,12 @@ const validator = noSecretLikeLiterals({
   related: ["hardcoded-secrets-and-config"],
   minLength: 80,
   allow: ["<generated-token>", "test-token", "secret"],
+  allowNamedLiterals: [
+    {
+      in: ["packages/core/src/release-keys.ts"],
+      names: ["keyId", "publicKeySpkiBase64"],
+    },
+  ],
   allowFiles: ["tests/**", "examples/**"],
   message: "Secret-like literals must not be committed.",
   fix: {

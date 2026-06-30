@@ -1452,6 +1452,7 @@ test("security literal validators flag secrets and environment config", async ()
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-security-literals-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    mkdirSync(path.join(rootDir, "packages/core/src"), { recursive: true });
     writeFileSync(
       path.join(rootDir, "src/config.ts"),
       [
@@ -1464,13 +1465,31 @@ test("security literal validators flag secrets and environment config", async ()
         "export const generatedAccessToken = \"N8f7a2b9C4d6e8f0A1b3c5d7E9f1a2b4C6d8e0f2A4b6c8d0\";",
       ].join("\n"),
     );
+    writeFileSync(
+      path.join(rootDir, "packages/core/src/release-keys.ts"),
+      [
+        "export const trustedReleaseKeys = [",
+        "  {",
+        "    keyId: \"35c13edde67e0599c6107376a48b2cd8ee09e4570d8afc8c329e7b4a75d852ce\",",
+        "    publicKeySpkiBase64: \"MCowBQYDK2VwAyEAe71w6rTamrI19nnyavUjeEEN2YLJj/h9rljD35sRLPE=\",",
+        "  },",
+        "];",
+        "export const privateKey = \"-----BEGIN PRIVATE KEY-----\";",
+      ].join("\n"),
+    );
 
     const secretValidator = resolveTestValidators(
       noSecretLikeLiterals({
         id: "no-secret-like-literals",
         topics: ["security"],
         severity: "error",
-        in: ["src/**/*.ts"],
+        in: ["src/**/*.ts", "packages/*/src/**/*.ts"],
+        allowNamedLiterals: [
+          {
+            in: ["packages/core/src/release-keys.ts"],
+            names: ["keyId", "publicKeySpkiBase64"],
+          },
+        ],
         message: "Secret-like literals must not be committed.",
       }),
     ).validators[0];
@@ -1486,18 +1505,24 @@ test("security literal validators flag secrets and environment config", async ()
     ).validators[0];
     const ctx = createValidationContext({
       rootDir,
-      files: ["src/config.ts"],
-      targetFiles: ["src/config.ts"],
-      analysisFiles: ["src/config.ts"],
+      files: ["src/config.ts", "packages/core/src/release-keys.ts"],
+      targetFiles: ["src/config.ts", "packages/core/src/release-keys.ts"],
+      analysisFiles: ["src/config.ts", "packages/core/src/release-keys.ts"],
       validator: secretValidator,
     });
 
     const runtime = createRuntime(createPaths(rootDir), []);
     const secretFindings = await secretValidator.validate({ ctx, runtime });
-    assert.equal(secretFindings.length, 2);
-    assert.equal(secretFindings[0].severity, "error");
-    assert.equal(secretFindings[0].line, 1);
-    assert.equal(secretFindings[1].line, 7);
+    assert.deepEqual(
+      secretFindings.map((finding) => [finding.file, finding.line]),
+      [
+        ["src/config.ts", 1],
+        ["src/config.ts", 7],
+        ["packages/core/src/release-keys.ts", 7],
+      ],
+    );
+    assert.equal(secretFindings[0].severity, secretValidator.severity);
+    assert(secretFindings.every((finding) => finding.severity === secretFindings[0].severity));
 
     const configCtx = createValidationContext({
       rootDir,

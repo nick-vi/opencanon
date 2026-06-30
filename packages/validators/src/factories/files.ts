@@ -1,5 +1,5 @@
 import { createConventionFactory, LiteralValueKind, ProjectSymbolKind, TypeScriptDeclarationKind } from "@opencanon/core";
-import type { Finding, LiteralContext } from "@opencanon/core";
+import type { Finding, LiteralContext, ValidatorRuntime } from "@opencanon/core";
 import { edgeMatches, importedSymbolName, list, literalIgnored, manualFix, optionSummary, joinPatterns, matchesAny, paramsContain, safeEnumReplacement, valueMatches, interpolateSibling } from "../shared.ts";
 import type { FileNameOptions, RequiredFunctionParamOptions, RequiredFileSiblingOptions, RequireExportPatternOptions, NoUnusedExportsOptions, SimilarFunctionNamesOptions, NoNativeEnumsOptions, RepeatedLiteralsOptions, RestrictedSymbolsOptions, NoSecretLikeLiteralsOptions, NoHardcodedConfigValuesOptions } from "../shared.ts";
 import path from "node:path";
@@ -376,6 +376,7 @@ export const noSecretLikeLiterals = createConventionFactory<NoSecretLikeLiterals
   validate({ ctx, runtime }) {
     const allow = options.allow ?? [];
     const allowFiles = options.allowFiles ?? [];
+    const allowNamedLiterals = options.allowNamedLiterals ?? [];
     const minLength = options.minLength ?? 32;
     const minEntropy = options.minEntropy ?? 3.5;
     const patterns = [...DefaultSecretLiteralPatterns, ...list(options.patterns)];
@@ -386,9 +387,10 @@ export const noSecretLikeLiterals = createConventionFactory<NoSecretLikeLiterals
       if (!ctx.targetFiles.some((file) => file.path === literal.file.path)) continue;
       if (allowFiles.length > 0 && runtime.globs.matches(literal.file.path, allowFiles)) continue;
       if (literalIgnored(literal.value, allow)) continue;
+      const line = literal.file.lineAt(literal.line);
+      if (allowNamedSecretLiteral(runtime, literal.file.path, line, literal.column, allowNamedLiterals)) continue;
       if (PlaceholderPattern.test(literal.value)) continue;
 
-      const line = literal.file.lineAt(literal.line);
       const secretNamedAssignment = lineHasSecretAssignmentName(line, literal.column) && literal.value.length >= 8 && !isLocalhostLiteral(literal.value);
       const secretPattern = patterns.some((pattern) => pattern.test(literal.value));
       const highEntropy =
@@ -534,9 +536,43 @@ function isSecretTokenCandidate(value: string): boolean {
 }
 
 function lineHasSecretAssignmentName(line: string, literalColumn: number): boolean {
+  const name = literalAssignmentName(line, literalColumn);
+  return name ? SecretNamePattern.test(splitIdentifierWords(name)) : false;
+}
+
+function allowNamedSecretLiteral(
+  runtime: ValidatorRuntime,
+  filePath: string,
+  line: string,
+  literalColumn: number | undefined,
+  allowNamedLiterals: NonNullable<NoSecretLikeLiteralsOptions["allowNamedLiterals"]>,
+): boolean {
+  if (literalColumn === undefined) return false;
+  const name = literalAssignmentName(line, literalColumn);
+  if (!name) return false;
+
+  return allowNamedLiterals.some((rule) => {
+    if (rule.in && !runtime.globs.matches(filePath, rule.in)) return false;
+    return rule.names.some((pattern) => identifierNameMatches(name, pattern));
+  });
+}
+
+function literalAssignmentName(line: string, literalColumn: number): string | null {
   const beforeLiteral = line.slice(0, literalColumn - 1);
   const assignmentMatch = beforeLiteral.match(/(?:const|let|var)?\s*([A-Za-z_$][\w$]*)\s*[:=][^:=]*$/u) ?? beforeLiteral.match(/([A-Za-z_$][\w$]*)\s*:\s*$/u);
-  return assignmentMatch ? SecretNamePattern.test(splitIdentifierWords(assignmentMatch[1])) : false;
+  return assignmentMatch?.[1] ?? null;
+}
+
+function identifierNameMatches(name: string, pattern: string | RegExp): boolean {
+  const splitName = splitIdentifierWords(name);
+  if (typeof pattern === "string") return name === pattern || splitName === pattern;
+
+  pattern.lastIndex = 0;
+  const matchesName = pattern.test(name);
+  pattern.lastIndex = 0;
+  const matchesSplitName = pattern.test(splitName);
+  pattern.lastIndex = 0;
+  return matchesName || matchesSplitName;
 }
 
 function splitIdentifierWords(value: string): string {

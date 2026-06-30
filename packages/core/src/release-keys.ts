@@ -29,4 +29,13 @@ export type TrustedReleaseKey = {
   revoked?: boolean;
 };
 
-export const trustedReleaseKeys: TrustedReleaseKey[] = [];
+export const trustedReleaseKeys: TrustedReleaseKey[] = [
+  {
+    keyId: "35c13edde67e0599c6107376a48b2cd8ee09e4570d8afc8c329e7b4a75d852ce",
+    publicKeySpkiBase64: "MCowBQYDK2VwAyEAe71w6rTamrI19nnyavUjeEEN2YLJj/h9rljD35sRLPE=",
+  },
+  {
+    keyId: "3233f3e584686557aa223d5f8f31fb253b956755a953b97dbe522794e3d695f0",
+    publicKeySpkiBase64: "MCowBQYDK2VwAyEA/vfmCppkYNCxN/GxZsfMI/WH5o+2mK1HvoU7iMsVGH0=",
+  },
+];

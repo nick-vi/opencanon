@@ -9,7 +9,7 @@ Summary: Runtime updates are selected from signed manifests with target-specific
 
 ## Ownership
 
-Files: package.json, package-lock.json, packages/*/package.json, packages/distribution/src/update.ts, packages/distribution/src/node.ts, packages/distribution/package.json, packages/cli/src/update.ts, packages/cli/package.json, packages/core/src/release-manifest.ts, scripts/**, packages/distribution/test/update.test.ts, tests/update-guard.test.ts
+Files: package.json, package-lock.json, packages/*/package.json, packages/distribution/src/update.ts, packages/distribution/src/node.ts, packages/distribution/package.json, packages/cli/src/update.ts, packages/cli/package.json, packages/core/src/release-manifest.ts, packages/core/src/release-keys.ts, scripts/**, packages/distribution/test/update.test.ts, tests/update-guard.test.ts
 Commands: opencanon update (cli)
 
 ## Impact surfaces

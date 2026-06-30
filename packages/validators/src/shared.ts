@@ -131,6 +131,10 @@ export type NoSecretLikeLiteralsOptions = FindingOptions & {
   in: string[];
   allow?: Array<string | RegExp>;
   allowFiles?: string[];
+  allowNamedLiterals?: Array<{
+    names: Array<string | RegExp>;
+    in?: string[];
+  }>;
   minEntropy?: number;
   minLength?: number;
   patterns?: RegExp | RegExp[];

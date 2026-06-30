@@ -74,6 +74,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/core/src/feedback.ts`
 - Files: `packages/core/src/index.ts`
 - Files: `packages/core/src/project-types.ts`
+- Files: `packages/core/src/release-keys.ts`
 - Files: `packages/core/src/testing.ts`
 - Files: `packages/core/src/validator.ts`
 - Files: `packages/core/src/validator-graph.ts`
@@ -108,6 +109,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `opencanon/specs/index.ts`
 - Files: `opencanon/changes/index.ts`
 - Files: `opencanon/conventions/docs-only-conventions.ts`
+- Files: `opencanon/conventions/no-secret-like-literals.ts`
 - Files: `opencanon/conventions/spec-definitions-are-enforced.ts`
 - Files: `opencanon/fixtures/**`
 - Files: `tests/**`
