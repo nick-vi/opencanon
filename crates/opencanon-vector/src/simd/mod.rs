@@ -24,7 +24,9 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-            return unsafe { avx2::cosine_avx2(a, b) };
+            unsafe { avx2::cosine_avx2(a, b) }
+        } else {
+            scalar::cosine_scalar(a, b)
         }
     }
 
@@ -35,7 +37,9 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    scalar::cosine_scalar(a, b)
+    {
+        scalar::cosine_scalar(a, b)
+    }
 }
 
 /// Compute dot product between two vectors.
@@ -46,7 +50,9 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-            return unsafe { avx2::dot_avx2(a, b) };
+            unsafe { avx2::dot_avx2(a, b) }
+        } else {
+            scalar::dot_scalar(a, b)
         }
     }
 
@@ -56,7 +62,9 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     }
 
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    scalar::dot_scalar(a, b)
+    {
+        scalar::dot_scalar(a, b)
+    }
 }
 
 /// Compute L2 (Euclidean) distance between two vectors.
@@ -67,7 +75,9 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-            return unsafe { avx2::l2_avx2(a, b) };
+            unsafe { avx2::l2_avx2(a, b) }
+        } else {
+            scalar::l2_scalar(a, b)
         }
     }
 
@@ -77,7 +87,9 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
     }
 
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    scalar::l2_scalar(a, b)
+    {
+        scalar::l2_scalar(a, b)
+    }
 }
 
 /// Compute dot product between two int8 vectors.
@@ -91,7 +103,9 @@ pub fn dot_int8(a: &[i8], b: &[i8]) -> i32 {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
-            return unsafe { avx2::dot_int8_avx2(a, b) };
+            unsafe { avx2::dot_int8_avx2(a, b) }
+        } else {
+            scalar::dot_int8_scalar(a, b)
         }
     }
 
@@ -101,7 +115,9 @@ pub fn dot_int8(a: &[i8], b: &[i8]) -> i32 {
     }
 
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    scalar::dot_int8_scalar(a, b)
+    {
+        scalar::dot_int8_scalar(a, b)
+    }
 }
 
 #[cfg(test)]
