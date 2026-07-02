@@ -711,6 +711,37 @@ test("project and service stop commands support JSON format", () => {
   }
 });
 
+test("project start supports JSON format", { timeout: 60000 }, () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-start-json-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const cli = path.join(process.cwd(), "packages/cli/src/index.ts");
+  const env = { ...process.env, OPENCANON_SERVICE_REGISTRY_PATH: registryPath };
+
+  try {
+    createAuthoringProject(rootDir);
+
+    const start = spawnSync(process.execPath, [cli, "project", "start", "--format", "json"], {
+      cwd: rootDir,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(start.status, 0, start.stderr || start.stdout);
+    const payload = JSON.parse(start.stdout) as {
+      project: { status: string; entry: { rootDir: string; authToken?: string } };
+      service: { status: string; entry: { authToken?: string } };
+    };
+    assert(["started", "already-running"].includes(payload.project.status));
+    assert.equal(payload.project.entry.rootDir, realpathSync(rootDir));
+    assert.equal(payload.project.entry.authToken, undefined);
+    assert.equal(payload.service.status, "running");
+    assert.equal(payload.service.entry.authToken, undefined);
+  } finally {
+    spawnSync(process.execPath, [cli, "project", "stop", "--format", "json"], { cwd: rootDir, env, encoding: "utf8" });
+    spawnSync(process.execPath, [cli, "service", "stop", "--format", "json"], { cwd: rootDir, env, encoding: "utf8" });
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("top-level CLI exposes project runtime, status, ask, canon, and state surfaces", { timeout: 60000 }, () => {
   const cli = path.join(process.cwd(), "packages/cli/src/index.ts");
   const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
@@ -742,6 +773,7 @@ test("top-level CLI exposes project runtime, status, ask, canon, and state surfa
   assert.equal(projectHelp.status, 0, projectHelp.stderr);
   assert(projectHelp.stdout.includes("opencanon project index"));
   assert(projectHelp.stdout.includes("opencanon project index --format json"));
+  assert(projectHelp.stdout.includes("opencanon project start --format json"));
   assert(projectHelp.stdout.includes("opencanon project logs --tail 200"));
 
   const canonHelp = spawnSync(process.execPath, [cli, "canon", "--help"], { encoding: "utf8" });

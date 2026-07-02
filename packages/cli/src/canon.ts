@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import { buildDefinitionGraph, createPaths, fail, Format, loadImpactSurfaces, relative, resolveRootDir, splitList, validateImpactSurfaces, writeAtomicJsonFileSync } from "@opencanon/core";
+import { buildDefinitionGraph, createPaths, fail, Format, loadConventionGraph, loadImpactSurfaces, relative, resolveRootDir, splitList, validateImpactSurfaces, writeAtomicJsonFileSync } from "@opencanon/core";
 import type { ImpactSurface } from "@opencanon/core";
 import { runAreasCommand } from "./areas.ts";
 import { runChangesCommand } from "./changes.ts";
@@ -74,10 +74,34 @@ async function runCanonListCommand(args: string[], cwd: string): Promise<void> {
     await runKindCommand(kind, ["list", ...rest], cwd);
     return;
   }
-  if (maybeKind && maybeKind.startsWith("-")) fail(`Unknown canon list option: ${maybeKind}`);
-  if (maybeKind) fail(`Unknown canon definition kind: ${maybeKind}`);
+  const cli = cac("opencanon canon list");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--format <format>", "Output format.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["help", "h", "format"]);
+  if (booleanOption(options.help) || booleanOption(options.h)) {
+    printCanonHelp();
+    return;
+  }
+  if (parsed.args.length > 0) fail(`Unknown canon definition kind: ${String(parsed.args[0])}`);
 
   const project = await loadProjectContext(resolveRootDir(cwd));
+  if (formatOption(options.format) === Format.Json) {
+    console.log(
+      JSON.stringify(
+        {
+          conventions: project.conventions.map(definitionListItem),
+          areas: project.areas.map(definitionListItem),
+          specs: project.specs.map(definitionListItem),
+          changes: project.changes.map(definitionListItem),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   console.log("# Project Canon");
   console.log("");
   printDefinitionGroup("Conventions", project.conventions.map((item) => `${item.id} - ${item.title}`));
@@ -169,7 +193,7 @@ async function runImpactSurfaceDraftCommand(args: string[], cwd: string): Promis
   const paths = createPaths(rootDir);
   const existing = loadImpactSurfaces(paths);
   if (existing.diagnostics.length > 0) fail(existing.diagnostics.join("\n"));
-  const project = await loadProjectContext(rootDir);
+  const conventionGraph = await loadConventionGraph(rootDir, paths, paths.conventionsPath);
   const id = String(parsed.args[0]);
   if (existing.surfaces.some((surface) => surface.id === id)) fail(`Impact surface already exists: ${id}`);
 
@@ -197,7 +221,7 @@ async function runImpactSurfaceDraftCommand(args: string[], cwd: string): Promis
   if (conventionIds.length > 0) surface.conventionIds = conventionIds;
 
   const next = [...existing.surfaces, surface];
-  const diagnostics = validateImpactSurfaces(next, paths, new Set(project.conventions.map((convention) => convention.id)));
+  const diagnostics = validateImpactSurfaces(next, paths, new Set(conventionGraph.conventions.byId.keys()));
   if (diagnostics.length > 0) fail(diagnostics.join("\n"));
   mkdirSync(path.dirname(paths.impactSurfacesPath), { recursive: true });
   writeAtomicJsonFileSync(paths.impactSurfacesPath, next);
@@ -221,6 +245,10 @@ async function runImpactSurfaceDraftCommand(args: string[], cwd: string): Promis
 
 function listOption(value: unknown): string[] {
   return stringValues(value).flatMap((item) => splitList(item));
+}
+
+function definitionListItem(definition: { id: string; title: string }): { id: string; title: string } {
+  return { id: definition.id, title: definition.title };
 }
 
 function canonicalKind(value: string): CanonDefinitionKind | undefined {

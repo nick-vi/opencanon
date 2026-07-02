@@ -177,6 +177,42 @@ test("TypeProducerRuntime warm lazy-spawns and waits for a ready generation", { 
   }
 });
 
+test("TypeProducerRuntime warm records readiness from the resolveTypes response", { timeout: producerTestTimeoutMs }, async (ctx) => {
+  if (!typescriptAvailable()) return ctx.skip();
+  const { rootDir, cleanup } = makeFixture();
+  const producerPath = writeFakeProducer(
+    rootDir,
+    [
+      'import readline from "node:readline";',
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "rl.on('line', (line) => {",
+      "  const request = JSON.parse(line);",
+      "  if (request.method === 'resolveTypes') {",
+      "    process.stdout.write(JSON.stringify({ id: request.id, result: { resolutions: [], generation: 7 } }) + '\\n');",
+      "  }",
+      "});",
+      "",
+    ].join("\n"),
+  );
+  const runtime: TypeProducerRuntime = createTypeProducerRuntime({
+    rootDir,
+    tsconfigPath: path.join(rootDir, "tsconfig.json"),
+    idleTimeoutMs: 10_000,
+    requestTimeoutMs: producerRequestTimeoutMs,
+    warmTimeoutMs: producerRequestTimeoutMs,
+    producerMainPath: producerPath,
+  });
+  try {
+    const status = await runtime.warm();
+    assert.equal(status.kind, "ready", JSON.stringify(status));
+    assert.equal(status.generation, 7);
+    assert.deepEqual(runtime.status(), { language: "typescript", kind: "ready", generation: 7 });
+  } finally {
+    await runtime.stop();
+    cleanup();
+  }
+});
+
 test("TypeProducerRuntime idle reap is a controlled shutdown, not a query failure", { timeout: producerTestTimeoutMs }, async (ctx) => {
   if (!typescriptAvailable()) return ctx.skip();
   const { rootDir, cleanup } = makeFixture();

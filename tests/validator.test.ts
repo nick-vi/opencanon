@@ -2296,6 +2296,29 @@ export default defineConvention({
   }
 });
 
+test("validate --files ignores absolute paths outside the current OpenCanon project", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validate-external-root-"));
+  const outsideDir = mkdtempSync(path.join(tmpdir(), "opencanon-validate-external-file-"));
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(path.join(outsideDir, "external.ts"), "export const external = true;\n");
+    const script = path.join(process.cwd(), "packages/cli/src/index.ts");
+
+    const result = spawnSync(process.execPath, [script, "validate", "--files", path.join(outsideDir, "external.ts"), "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout) as { files: string[]; findings: Array<{ validatorId: string }> };
+    assert.deepEqual(payload.files, []);
+    assert.deepEqual(payload.findings, []);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
 test("validator graph resolves OpenCanon package-prefixed authoring imports", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-authoring-imports-"));
   try {

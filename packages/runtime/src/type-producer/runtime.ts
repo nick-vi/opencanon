@@ -398,83 +398,84 @@ export function createTypeProducerRuntime(input: {
     }
   }
 
+  async function resolveTypesRequest(
+    sites: TypeSite[],
+    options: { allowEmpty?: boolean; timeoutMs?: number } = {},
+  ): Promise<ProducerQueryResult> {
+    if (stopped || (!options.allowEmpty && sites.length === 0) || !canSpawn()) return { resolutions: [] };
+    if (!child) {
+      try {
+        spawnChild();
+      } catch (error) {
+        log(`spawn failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (child) detachChild(child);
+        return { resolutions: [] };
+      }
+    }
+    const id = nextId++;
+    const proc = child;
+    if (!proc?.stdin) return { resolutions: [] };
+    beginQuery();
+    const timeoutMs = options.timeoutMs ?? requestTimeoutMs;
+    const result = await new Promise<ProducerQueryResult>((resolve, reject) => {
+      // Reject (and respawn-on-next-query) if the producer never answers — a
+      // wedged child must never stall validation indefinitely.
+      const timer = setTimeout(() => {
+        if (!pending.has(id)) return;
+        pending.delete(id);
+        const message = `type-producer request ${id} timed out after ${timeoutMs}ms`;
+        recordProducerCrash(message);
+        // teardownChild removes the exit listener, so reject siblings here too —
+        // they share the now-dead child and would otherwise wait out their own timers.
+        const timedOutChild = child;
+        if (timedOutChild) {
+          expectedStops.set(timedOutChild, ProducerStopReason.RequestTimeout);
+          detachChild(timedOutChild);
+          killChild(timedOutChild);
+        }
+        clearPending(new Error("type-producer killed after request timeout"));
+        reject(new Error(message));
+      }, timeoutMs);
+      if (typeof timer === "object" && "unref" in timer) (timer as { unref: () => void }).unref();
+      pending.set(id, { resolve, reject, timer });
+      writeToChild(proc, `${JSON.stringify({ id, method: "resolveTypes", sites })}\n`).catch((error) => {
+        const waiter = pending.get(id);
+        if (waiter) {
+          clearTimeout(waiter.timer);
+          pending.delete(id);
+        }
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    })
+      .then((result) => {
+        lastCrash = undefined;
+        if (typeof result.generation === "number") handleStatusEvent(false, result.generation);
+        return result;
+      })
+      .catch((error) => {
+        if (error instanceof ControlledProducerStopError) return { resolutions: [] };
+        // Do not throw through validation: a crashed/unavailable producer yields
+        // no facts and status() reports `crashed` for loud validator outcomes.
+        const message = error instanceof Error ? error.message : String(error);
+        if (lastCrash !== message) {
+          lastCrash = message;
+          log(`query failed: ${lastCrash}`);
+        }
+        return { resolutions: [] };
+      });
+    endQuery();
+    return result;
+  }
+
   return {
     async query(sites) {
-      if (stopped || sites.length === 0 || !canSpawn()) return { resolutions: [] };
-      if (!child) {
-        try {
-          spawnChild();
-        } catch (error) {
-          log(`spawn failed: ${error instanceof Error ? error.message : String(error)}`);
-          if (child) detachChild(child);
-          return { resolutions: [] };
-        }
-      }
-      const id = nextId++;
-      const proc = child;
-      if (!proc?.stdin) return { resolutions: [] };
-      beginQuery();
-      const result = await new Promise<ProducerQueryResult>((resolve, reject) => {
-        // Reject (and respawn-on-next-query) if the producer never answers — a
-        // wedged child must never stall validation indefinitely.
-        const timer = setTimeout(() => {
-          if (!pending.has(id)) return;
-          pending.delete(id);
-          const message = `type-producer request ${id} timed out after ${requestTimeoutMs}ms`;
-          recordProducerCrash(message);
-          // teardownChild removes the exit listener, so reject siblings here too —
-          // they share the now-dead child and would otherwise wait out their own timers.
-          const timedOutChild = child;
-          if (timedOutChild) {
-            expectedStops.set(timedOutChild, ProducerStopReason.RequestTimeout);
-            detachChild(timedOutChild);
-            killChild(timedOutChild);
-          }
-          clearPending(new Error("type-producer killed after request timeout"));
-          reject(new Error(message));
-        }, requestTimeoutMs);
-        if (typeof timer === "object" && "unref" in timer) (timer as { unref: () => void }).unref();
-        pending.set(id, { resolve, reject, timer });
-        writeToChild(proc, `${JSON.stringify({ id, method: "resolveTypes", sites })}\n`).catch((error) => {
-          const waiter = pending.get(id);
-          if (waiter) {
-            clearTimeout(waiter.timer);
-            pending.delete(id);
-          }
-          reject(error instanceof Error ? error : new Error(String(error)));
-        });
-      })
-        .then((result) => {
-          lastCrash = undefined;
-          return result;
-        })
-        .catch((error) => {
-          if (error instanceof ControlledProducerStopError) return { resolutions: [] };
-          // Do not throw through validation: a crashed/unavailable producer yields
-          // no facts and status() reports `crashed` for loud validator outcomes.
-          const message = error instanceof Error ? error.message : String(error);
-          if (lastCrash !== message) {
-            lastCrash = message;
-            log(`query failed: ${lastCrash}`);
-          }
-          return { resolutions: [] };
-        });
-      endQuery();
-      return result;
+      return resolveTypesRequest(sites);
     },
     async warm() {
       if (stopped || !canSpawn()) return currentStatus();
       const status = currentStatus();
       if (status.kind !== "warming") return status;
-      if (!child) {
-        try {
-          spawnChild();
-        } catch (error) {
-          log(`spawn failed: ${error instanceof Error ? error.message : String(error)}`);
-          if (child) detachChild(child);
-          return currentStatus();
-        }
-      }
+      await resolveTypesRequest([], { allowEmpty: true, timeoutMs: warmTimeoutMs });
       const afterSpawnStatus = currentStatus();
       if (afterSpawnStatus.kind !== "warming") return afterSpawnStatus;
       return await new Promise<ProducerStatus>((resolve) => {

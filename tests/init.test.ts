@@ -62,6 +62,9 @@ test("init creates scaffold, package script, and requested hooks", () => {
     assert(conventionTsconfig.includes("@opencanon/core/testing"));
     assert(conventionTsconfig.includes("@opencanon/validators"));
     assert(conventionTsconfig.includes("@opencanon/project"));
+    const conventionTsconfigJson = JSON.parse(conventionTsconfig) as { compilerOptions: { ignoreDeprecations?: string; types?: unknown } };
+    assert.equal(conventionTsconfigJson.compilerOptions.ignoreDeprecations, "6.0");
+    assert.equal(conventionTsconfigJson.compilerOptions.types, undefined);
     assert(readFileSync(path.join(rootDir, "opencanon/fixtures/tsconfig.json"), "utf8").includes("../tsconfig.json"));
     assert.equal(existsSync(path.join(rootDir, ".agents/skills/opencanon/runtime/cli.js")), false);
     assert(readFileSync(path.join(rootDir, "opencanon/conventions/index.ts"), "utf8").includes("export default []"));

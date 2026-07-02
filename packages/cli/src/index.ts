@@ -254,7 +254,7 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
   // undefined when no runtime is running, in which case the headless sidecar resolve
   // is correct (no live producer exists).
   const runtimeHealth = await buildDoctorRuntimeHealth(rootDir);
-  const producerStatuses = await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir);
+  const producerStatuses = await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir, { warm: true });
   let report = buildDoctorReport({ paths, areas, specs, changes, conventions, validators, runExternalTools: query.runExternalTools, producerStatuses, runtimeHealth });
   const fixes = query.fixMode ? applyDoctorFixes({ paths, report, mode: query.fixMode, dryRun: query.dryRun, conventions, validators }) : undefined;
   if (fixes && !fixes.dryRun && fixes.diagnostics.length === 0 && fixes.appliedFixes > 0) {

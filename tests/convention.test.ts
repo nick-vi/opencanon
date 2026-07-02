@@ -1344,6 +1344,66 @@ test("canon draft impact-surface writes a validated proposed surface", () => {
   }
 });
 
+test("canon draft impact-surface can repair a project that already references the missing surface", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-impact-surface-repair-"));
+  const cli = path.join(process.cwd(), "packages/cli/src/index.ts");
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    execFileSync(process.execPath, [cli, "init", "--yes", "--no-runtime", "--file-discovery", "filesystem"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    writeFileSync(
+      path.join(rootDir, "opencanon/areas/index.ts"),
+      `import { defineArea } from "@opencanon/core";
+
+export default defineArea({
+  id: "todo-domain",
+  title: "Todo Domain",
+  summary: "Todo behavior lives here.",
+  surfaces: ["todo-domain"],
+  render: { kind: "none" },
+});
+`,
+    );
+
+    await assert.rejects(() => loadProjectContext(rootDir), /missing impact surface: todo-domain/);
+
+    const output = execFileSync(
+      process.execPath,
+      [
+        cli,
+        "canon",
+        "draft",
+        "impact-surface",
+        "todo-domain",
+        "--title",
+        "Todo Domain",
+        "--applies",
+        "src/**/*.ts",
+        "--format",
+        "json",
+      ],
+      { cwd: rootDir, encoding: "utf8" },
+    );
+    const payload = JSON.parse(output) as { id: string; surface: { id: string } };
+    assert.equal(payload.id, "todo-domain");
+    assert.equal(payload.surface.id, "todo-domain");
+
+    const project = await loadProjectContext(rootDir);
+    assert.equal(project.impactSurfaces[0]?.id, "todo-domain");
+
+    const listOutput = execFileSync(process.execPath, [cli, "canon", "list", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    const listPayload = JSON.parse(listOutput) as { areas: Array<{ id: string; title: string }> };
+    assert.deepEqual(listPayload.areas, [{ id: "todo-domain", title: "Todo Domain" }]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("specs draft command prints a TypeScript definition snippet", () => {
   const output = execFileSync(
     process.execPath,

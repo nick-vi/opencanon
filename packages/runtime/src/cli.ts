@@ -203,18 +203,20 @@ async function runStartCommand(args: string[], cwd: string, surface: ProjectRunt
   cli.option("--port <port>", "Port to bind.");
   cli.option("--foreground", "Run in the current process instead of the OpenCanon service.");
   cli.option("--idle-timeout-ms <ms>", "Stop after this many idle milliseconds when running in the foreground.");
+  cli.option("--format <format>", "Output format.");
   cli.option(`${HiddenRegistryArg} <path>`, "Registry path.");
   cli.option(RuntimeCliOptionFlag.AllowRemote, "Allow binding outside loopback addresses.");
   cli.option("-h, --help", "Show help.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnexpectedCommandInput(parsed.args, commandName, options, ["help", "h", "host", "port", "foreground", "idleTimeoutMs", "registry", "allowRemote"]);
+  rejectUnexpectedCommandInput(parsed.args, commandName, options, ["help", "h", "host", "port", "foreground", "idleTimeoutMs", "format", "registry", "allowRemote"]);
   if (options.help || options.h) {
     surface.help();
     return;
   }
 
   if (options.foreground) {
+    if (options.format !== undefined) throw new Error("--format is not supported with --foreground.");
     await runServeCommand(args.filter((arg) => arg !== "--foreground"), cwd, RuntimeCliSurface.Project);
     return;
   }
@@ -226,6 +228,20 @@ async function runStartCommand(args: string[], cwd: string, surface: ProjectRunt
     allowRemote: options.allowRemote === true,
   });
   const project = result.project;
+  if (formatOption(options.format) === Format.Json) {
+    writeJson({
+      project: {
+        status: project.status,
+        message: project.message,
+        entry: runtimeEntryJson(project.entry),
+      },
+      service: {
+        status: "running",
+        entry: serviceEntryJson(result.service),
+      },
+    });
+    return;
+  }
   console.log(`# OpenCanon ${surface.displayName}`);
   console.log("");
   console.log(`Status: ${project.status}`);
@@ -957,6 +973,7 @@ function printProjectHelp(): void {
   opencanon project status
   opencanon project status --format json
   opencanon project start --port 4767
+  opencanon project start --format json
   opencanon project start --foreground
   opencanon project index
   opencanon project index --format json
@@ -980,7 +997,7 @@ Commands:
   forget  Remove this project's stale runtime registry entry.
 
 Options:
-  --format markdown|json  Status output format. Default: markdown.
+  --format markdown|json  Output format for status, start, list, stop, and index. Default: markdown.
 `);
 }
 

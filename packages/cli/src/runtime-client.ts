@@ -48,6 +48,7 @@ const InProcessRuntimeState = {
 } as const;
 
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
+const RunningRuntimeProducerWarmTimeoutMs = 35_000;
 const SupervisedRuntimeStartupAttempts = 3;
 
 /**
@@ -56,7 +57,10 @@ const SupervisedRuntimeStartupAttempts = 3;
  * runtime's lazy producer would be cold, giving a misleading status. Callers
  * (e.g. `doctor`) fall back to a headless resolve when this returns undefined.
  */
-export async function fetchRunningRuntimeProducers<T = unknown>(cwd: string): Promise<T | undefined> {
+export async function fetchRunningRuntimeProducers<T = unknown>(
+  cwd: string,
+  options: { warm?: boolean; timeoutMs?: number } = {},
+): Promise<T | undefined> {
   const rootDir = resolveRootDir(cwd);
   const inspection = await inspectProjectRuntime(rootDir);
   if (inspection?.status !== "running") return undefined;
@@ -69,7 +73,11 @@ export async function fetchRunningRuntimeProducers<T = unknown>(cwd: string): Pr
   try {
     const payload = await requestLocalJson<{ producers: T }>(
       localProtocolEndpointFromEntry(inspection.entry),
-      { method: "GET", path: RuntimeApiRoute.Producers, timeoutMs: RunningRuntimeProducerProbeTimeoutMs },
+      {
+        method: "GET",
+        path: options.warm ? `${RuntimeApiRoute.Producers}?warm=1` : RuntimeApiRoute.Producers,
+        timeoutMs: options.timeoutMs ?? (options.warm ? RunningRuntimeProducerWarmTimeoutMs : RunningRuntimeProducerProbeTimeoutMs),
+      },
     );
     return payload.producers;
   } catch {

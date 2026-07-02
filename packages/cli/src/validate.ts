@@ -48,6 +48,7 @@ type FixtureCase = (typeof FixtureCase)[keyof typeof FixtureCase];
 
 type Query = {
   files: string[];
+  skippedFiles: string[];
   topics: string[];
   validatorIds: string[];
   format: Format;
@@ -70,7 +71,7 @@ let paths: ReturnType<typeof createPaths>;
 export async function runValidateCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   rootDir = resolveRootDir(cwd);
   paths = createPaths(rootDir);
-  const query = parseArgs(args);
+  const query = parseArgs(args, cwd);
   if (query.help) {
     printHelp();
     return;
@@ -116,6 +117,13 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
 
   if (query.changed && query.files.length === 0) {
     console.log("No changed files.");
+    return;
+  }
+
+  if (!query.project && query.files.length === 0 && query.skippedFiles.length > 0) {
+    const result = emptyValidationResult();
+    if (query.format === Format.Json) writeJson(result);
+    else console.log(renderFindings(result));
     return;
   }
 
@@ -182,7 +190,7 @@ async function assertProducersReady(cwd: string, required: string[]): Promise<vo
   // sees a fresh `opencanon analyze --typed` sidecar — the documented CI path.
   const rootDir = resolveRootDir(cwd);
   const producers =
-    (await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir)) ?? resolveProducerStatuses(rootDir);
+    (await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir, { warm: true })) ?? resolveProducerStatuses(rootDir);
   const byLanguage = new Map(producers.map((status) => [status.language, status]));
   const unmet = required
     .map((language) => byLanguage.get(language) ?? { language, kind: "not-implemented" as const })
@@ -199,7 +207,7 @@ async function assertProducersReady(cwd: string, required: string[]): Promise<vo
   process.exit(1);
 }
 
-function parseArgs(args: string[]): Query {
+function parseArgs(args: string[], cwd: string): Query {
   const cli = cac("opencanon validate");
   cli.option("-h, --help", "Show help.");
   cli.option("--check-fixtures", "Validate validator fixtures.");
@@ -240,8 +248,10 @@ function parseArgs(args: string[]): Query {
     "files",
   ]);
 
+  const fileTargets = normalizeValidationFileTargets(rootDir, cwd, [...stringValues(options.files), ...parsed.args.map(String)]);
   const query: Query = {
-    files: unique([...stringValues(options.files), ...parsed.args.map(String)].map((file) => toRepoRelativePath(rootDir, file))),
+    files: fileTargets.files,
+    skippedFiles: fileTargets.skippedFiles,
     topics: unique([...stringValues(options.topic), ...stringValues(options.topics)].flatMap(splitList)),
     validatorIds: unique(stringValues(options.validator).flatMap(splitList)),
     format: formatOption(options.format),
@@ -258,6 +268,43 @@ function parseArgs(args: string[]): Query {
     help: booleanOption(options.help) || booleanOption(options.h),
   };
   return query;
+}
+
+function normalizeValidationFileTargets(rootDir: string, cwd: string, values: string[]): { files: string[]; skippedFiles: string[] } {
+  const files: string[] = [];
+  const skippedFiles: string[] = [];
+  for (const value of values) {
+    const absolute = path.isAbsolute(value) ? path.resolve(value) : path.resolve(cwd, value);
+    const relativeToRoot = path.relative(rootDir, absolute);
+    if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
+      skippedFiles.push(value);
+      continue;
+    }
+    files.push(toRepoRelativePath(rootDir, value, cwd));
+  }
+  return {
+    files: unique(files),
+    skippedFiles: unique(skippedFiles),
+  };
+}
+
+function emptyValidationResult(): ValidationResult {
+  return {
+    files: [],
+    validators: [],
+    validatorGraphHash: validatorGraphHash([]),
+    findingCount: 0,
+    diagnostics: [],
+    findings: [],
+    validatorOutcomes: [],
+    producerSnapshot: {},
+    commitGates: [],
+    governingConventions: resolveGoverningConventionsForFiles({
+      files: [],
+      conventions: [],
+      impactSurfaces: [],
+    }),
+  };
 }
 
 function resolveChangedFiles(query: Query): void {

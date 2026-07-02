@@ -431,6 +431,7 @@ function conventionTsconfigTemplate(query: Pick<InitScaffoldQuery, "conventionsP
       compilerOptions: {
         allowImportingTsExtensions: true,
         baseUrl: ".",
+        ignoreDeprecations: "6.0",
         module: "ESNext",
         moduleResolution: "Bundler",
         noEmit: true,
@@ -438,7 +439,6 @@ function conventionTsconfigTemplate(query: Pick<InitScaffoldQuery, "conventionsP
         strict: true,
         target: "ES2022",
         lib: ["ES2023", "DOM", "DOM.Iterable"],
-        types: ["node"],
         paths: {
           "@opencanon/core": [relativeTsconfigPath(workspaceDir, ProjectCoreAuthoringFilePath)],
           "@opencanon/core/testing": [relativeTsconfigPath(workspaceDir, ProjectTestingAuthoringFilePath)],

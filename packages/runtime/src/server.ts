@@ -643,6 +643,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           // Live producer status (the runtime owns it). resolveProducerStatuses
           // consults the installed live factory; the response is the binary,
           // first-class producer-state surface for `project status` + CI gates.
+          if (url.searchParams.get("warm") === "1") await typeProducerRuntime?.warm();
           const producers = resolveProducerStatuses(rootDir);
           try {
             const project = await loadProjectContext(rootDir);
