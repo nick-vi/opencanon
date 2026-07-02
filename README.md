@@ -95,7 +95,7 @@ Minimal manifest shape:
 {
   "version": 1,
   "channel": "stable",
-  "runtimeVersion": "0.4.0",
+  "runtimeVersion": "0.4.1",
   "requiredNode": ">=24.12.0",
   "bundles": {
     "darwin-arm64": {

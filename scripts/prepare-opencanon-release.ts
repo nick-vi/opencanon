@@ -13,15 +13,20 @@ const releaseDate = new Date().toISOString().slice(0, 10);
 const tag = `v${version}`;
 const packagePaths = [
   "package.json",
+  "apps/site/package.json",
   "packages/cli/package.json",
   "packages/core/package.json",
   "packages/distribution/package.json",
   "packages/runtime/package.json",
   "packages/engine/package.json",
+  "packages/observability/package.json",
+  "packages/service-contracts/package.json",
   "packages/validators/package.json",
 ];
 const rustPackagePath = "crates/opencanon-engine/Cargo.toml";
 const rustLockPath = "crates/opencanon-engine/Cargo.lock";
+const inferencePackagePath = "crates/opencanon-inference/Cargo.toml";
+const inferenceLockPath = "crates/opencanon-inference/Cargo.lock";
 const engineConstantsPath = "crates/opencanon-engine/src/constants.rs";
 
 for (const packagePath of packagePaths) {
@@ -31,8 +36,11 @@ for (const packagePath of packagePaths) {
 }
 
 replaceInFile(rustPackagePath, /^version = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"$/m, `version = "${version}"`);
+replaceInFile(inferencePackagePath, /^version = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"$/m, `version = "${version}"`);
 replaceInFile(engineConstantsPath, /ENGINE_VERSION: &str = "\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"/, `ENGINE_VERSION: &str = "${version}"`);
 replaceRustLockPackageVersion(rustLockPath, "opencanon-engine", version);
+replaceRustLockPackageVersion(rustLockPath, "opencanon-inference", version);
+replaceRustLockPackageVersion(inferenceLockPath, "opencanon-inference", version);
 
 replaceInFile(
   "README.md",
@@ -54,7 +62,7 @@ function replaceInFile(relativePath: string, pattern: RegExp, replacement: strin
   const filePath = path.join(rootDir, relativePath);
   const before = readFileSync(filePath, "utf8");
   const after = before.replace(pattern, replacement);
-  if (after === before) throw new Error(`No release version reference updated in ${relativePath}.`);
+  if (after === before && !before.includes(replacement)) throw new Error(`No release version reference updated in ${relativePath}.`);
   writeFileSync(filePath, after);
 }
 
@@ -89,6 +97,10 @@ function replaceRustLockPackageVersion(relativePath: string, packageName: string
   const before = readFileSync(filePath, "utf8");
   const pattern = new RegExp(`(\\[\\[package\\]\\]\\nname = "${RegExp.escape(packageName)}"\\nversion = ")\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(")`);
   const after = before.replace(pattern, `$1${nextVersion}$2`);
-  if (after === before) throw new Error(`No Cargo.lock version entry updated for ${packageName}.`);
+  if (after === before) {
+    const alreadyUpdated = new RegExp(`\\[\\[package\\]\\]\\nname = "${RegExp.escape(packageName)}"\\nversion = "${RegExp.escape(nextVersion)}"`).test(before);
+    if (!alreadyUpdated) throw new Error(`No Cargo.lock version entry updated for ${packageName}.`);
+    return;
+  }
   writeFileSync(filePath, after);
 }

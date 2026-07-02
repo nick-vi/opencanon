@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.1 - 2026-07-02
+
+- Added scoped graph search and symbol-kind filtering for repository queries.
+- Added graph-backed migration and unused-export validation improvements.
+- Added refactor planning APIs and refreshed release/runtime documentation.
+
 ## v0.4.0 - 2026-06-02
 
 Type-aware validation (TypeScript-first). Validators can now ask the type checker
