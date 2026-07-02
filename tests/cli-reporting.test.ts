@@ -43,7 +43,7 @@ test("review command produces a deterministic local CI report", () => {
       timeout: 30_000,
     });
 
-    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.error, undefined, result.error ? result.error.message : "spawn failed");
     assert([0, 1].includes(result.status ?? -1), result.stderr || result.stdout);
     const payload = JSON.parse(result.stdout) as {
       rootDir: string;

@@ -23,6 +23,9 @@ An official remote install/update trusts a release only if **all** hold:
 4. **No downgrade** — `applyRuntimeUpdate` refuses an older `runtimeVersion` than the one
    already installed. First install has no prior marker, so there is nothing to
    downgrade from.
+5. **No live runtime swap** — `opencanon update apply` refuses while the global service
+   or any registered project runtime is running, so the runtime directory is not replaced
+   underneath active OpenCanon processes.
 
 Signature verification policy is shared by the distribution module and mirrored in the
 release-rendered standalone installer; `create-opencanon-release` injects the same
@@ -104,3 +107,6 @@ this makes remote installs fail (correctly, but they fail). Do all of it once:
 - `--require-signature` makes an unsigned release a hard CI failure.
 - GitHub build-provenance attestation (`actions/attest`) ties release assets to the
   workflow + commit; verify with `gh attestation verify`.
+- Release publishing resolves the pushed tag to its commit SHA and waits for the matching
+  GitHub Actions run before watching it, so the script does not mistake GitHub's workflow
+  visibility delay for a failed release.

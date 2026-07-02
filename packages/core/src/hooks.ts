@@ -1,7 +1,8 @@
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { FeedbackHost, renderFeedbackMarkdown, runFeedback } from "./feedback.ts";
 import type { FeedbackResult } from "./feedback.ts";
-import { unique } from "./core.ts";
+import { resolveRootDir, toRepoRelativePath, unique } from "./core.ts";
 
 export type HookFeedback = {
   host: FeedbackHost;
@@ -15,19 +16,28 @@ export type HookFeedback = {
 
 export async function createHookFeedback(host: FeedbackHost, payload: unknown, cwdFallback = process.cwd()): Promise<HookFeedback> {
   const event = normalizeHookPayload(host, payload, cwdFallback);
-  const result = await runFeedback({
-    cwd: event.cwd,
-    files: event.files,
-    host,
-    sessionId: event.sessionId,
-    turnId: event.turnId,
-    dedupeScope: "turn",
-  });
+  const groups = groupHookFilesByProject(event.cwd, event.files);
+  const feedbacks = await Promise.all(
+    groups.map(async (group) => ({
+      rootDir: group.rootDir,
+      result: await runFeedback({
+        cwd: group.rootDir,
+        files: group.files,
+        host,
+        sessionId: event.sessionId,
+        turnId: event.turnId,
+        dedupeScope: "turn",
+      }),
+    })),
+  );
+  const result = mergeHookFeedbackResults(host, feedbacks.map((feedback) => feedback.result));
+  const text = renderGroupedHookFeedback(feedbacks);
   return {
     ...event,
+    files: result.files,
     host,
     result,
-    text: renderFeedbackMarkdown(result, { maxFindings: 20, maxChars: 6000 }),
+    text,
   };
 }
 
@@ -120,6 +130,90 @@ function normalizeOpenCodePayload(
     sessionId: stringValue(payload.input.sessionID) ?? stringValue(payload.input.sessionId),
     turnId: stringValue(payload.input.callID),
   };
+}
+
+function groupHookFilesByProject(cwd: string, files: string[]): Array<{ rootDir: string; files: string[] }> {
+  const cwdRoot = findOpenCanonProjectRoot(cwd) ?? resolveRootDir(cwd);
+  const groups = new Map<string, string[]>();
+
+  for (const file of unique(files)) {
+    const absolute = path.isAbsolute(file) ? path.resolve(file) : path.resolve(cwd, file);
+    const rootDir = resolveHookFileRoot(absolute, cwdRoot);
+    if (!rootDir) continue;
+    const relativePath = toRepoRelativePath(rootDir, absolute, rootDir);
+    if (path.isAbsolute(relativePath) || relativePath.startsWith("../")) continue;
+    const group = groups.get(rootDir) ?? [];
+    group.push(relativePath);
+    groups.set(rootDir, unique(group));
+  }
+
+  return [...groups.entries()].map(([rootDir, groupFiles]) => ({ rootDir, files: groupFiles }));
+}
+
+function resolveHookFileRoot(absoluteFile: string, cwdRoot: string | undefined): string | undefined {
+  if (cwdRoot && isInsideOrEqual(cwdRoot, absoluteFile)) return cwdRoot;
+  return findOpenCanonProjectRoot(path.dirname(absoluteFile));
+}
+
+function findOpenCanonProjectRoot(start: string): string | undefined {
+  let current = path.resolve(start);
+  try {
+    if (existsSync(current) && statSync(current).isFile()) current = path.dirname(current);
+  } catch {
+    current = path.dirname(current);
+  }
+
+  while (true) {
+    if (isOpenCanonProjectRoot(current)) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function isOpenCanonProjectRoot(rootDir: string): boolean {
+  return existsSync(path.join(rootDir, "opencanon.config.json")) || existsSync(path.join(rootDir, "opencanon", "conventions", "index.ts"));
+}
+
+function isInsideOrEqual(rootDir: string, filePath: string): boolean {
+  const relativePath = path.relative(rootDir, filePath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+function mergeHookFeedbackResults(host: FeedbackHost, results: FeedbackResult[]): FeedbackResult {
+  if (results.length === 0) {
+    return {
+      host,
+      files: [],
+      diagnostics: [],
+      findingCount: 0,
+      suppressedCount: 0,
+      findings: [],
+    };
+  }
+  if (results.length === 1) return results[0];
+
+  return {
+    host,
+    files: unique(results.flatMap((result) => result.files)),
+    diagnostics: results.flatMap((result) => result.diagnostics),
+    findingCount: results.reduce((total, result) => total + result.findingCount, 0),
+    suppressedCount: results.reduce((total, result) => total + result.suppressedCount, 0),
+    findings: results.flatMap((result) => result.findings),
+    advisories: results.flatMap((result) => result.advisories ?? []),
+  };
+}
+
+function renderGroupedHookFeedback(feedbacks: Array<{ rootDir: string; result: FeedbackResult }>): string {
+  const rendered = feedbacks
+    .map((feedback) => {
+      const text = renderFeedbackMarkdown(feedback.result, { maxFindings: 20, maxChars: 6000 });
+      if (!text) return "";
+      if (feedbacks.length === 1) return text;
+      return [`Project: ${feedback.rootDir}`, "", text].join("\n");
+    })
+    .filter(Boolean);
+  return rendered.join("\n\n");
 }
 
 function extractKnownFileFields(value: Record<string, unknown>): string[] {

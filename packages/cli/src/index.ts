@@ -349,7 +349,7 @@ Agent and integration:
 
 Advanced and operations:
   opencanon project start --foreground
-  opencanon update check --manifest <path-or-url>
+  opencanon update check
   opencanon baseline check
   opencanon symbols <query>
   opencanon graph callers <symbol>

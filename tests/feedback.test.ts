@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { DefinitionTargetKind, appendOpenCodeFeedback, claudeHookConfig, codexHookConfig, extractFilesFromPatchText, HookFileAction, installHook, inspectHookInstallations, normalizeHookPayload, renderFeedbackMarkdown, renderHookResponse, runFeedback } from "@opencanon/core";
+import { DefinitionTargetKind, appendOpenCodeFeedback, claudeHookConfig, codexHookConfig, createHookFeedback, extractFilesFromPatchText, HookFileAction, installHook, inspectHookInstallations, normalizeHookPayload, renderFeedbackMarkdown, renderHookResponse, runFeedback } from "@opencanon/core";
 import type { HookFeedback } from "@opencanon/core";
 
 test("extracts apply_patch target files without validating deleted paths", () => {
@@ -125,6 +126,104 @@ test("renders host hook feedback in the expected response shape", () => {
   assert.equal(output.output, "write complete\n\nOpenCanon feedback");
 });
 
+test("hook feedback skips absolute files outside initialized OpenCanon projects", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-hook-root-"));
+  const externalRoot = mkdtempSync(path.join(tmpdir(), "opencanon-hook-external-"));
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    mkdirSync(path.join(externalRoot, "src"), { recursive: true });
+    writeFileSync(path.join(externalRoot, "src", "scratch.ts"), "export const scratch = true;\n");
+
+    const feedback = await createHookFeedback(
+      "codex",
+      {
+        cwd: rootDir,
+        tool_input: {
+          file_path: path.join(externalRoot, "src", "scratch.ts"),
+        },
+      },
+      rootDir,
+    );
+
+    assert.deepEqual(feedback.files, []);
+    assert.equal(feedback.text, "");
+    assert.equal(feedback.result.findingCount, 0);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    rmSync(externalRoot, { recursive: true, force: true });
+  }
+});
+
+test("hook feedback keeps current package-only project files scoped to cwd root", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-hook-package-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(path.join(rootDir, "src", "current.ts"), "export const current = true;\n");
+
+    const feedback = await createHookFeedback(
+      "codex",
+      {
+        cwd: rootDir,
+        tool_input: {
+          file_path: path.join(rootDir, "src", "current.ts"),
+        },
+      },
+      rootDir,
+    );
+
+    assert.deepEqual(feedback.files, ["src/current.ts"]);
+    assert.equal(feedback.result.files[0], "src/current.ts");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("hook feedback scopes absolute files to their owning OpenCanon project", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-hook-current-"));
+  const externalRoot = mkdtempSync(path.join(tmpdir(), "opencanon-hook-owned-"));
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    mkdirSync(path.join(externalRoot, "src"), { recursive: true });
+    mkdirSync(path.join(externalRoot, "conventions"), { recursive: true });
+    writeFileSync(path.join(externalRoot, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(
+      path.join(externalRoot, "opencanon.config.json"),
+      JSON.stringify({
+        fileDiscovery: "filesystem",
+        projectFilePatterns: ["src/**/*.ts"],
+        ignore: [],
+        conventionsPath: "conventions/index.ts",
+      }),
+    );
+    writeFileSync(path.join(externalRoot, "src", "owned.ts"), "export const owned = true;\n");
+    writeFileSync(
+      path.join(externalRoot, "conventions", "index.ts"),
+      `
+        export default [];
+      `,
+    );
+
+    const feedback = await createHookFeedback(
+      "codex",
+      {
+        cwd: rootDir,
+        tool_input: {
+          file_path: path.join(externalRoot, "src", "owned.ts"),
+        },
+      },
+      rootDir,
+    );
+
+    assert.deepEqual(feedback.files, ["src/owned.ts"]);
+    assert.equal(feedback.result.files[0], "src/owned.ts");
+    assert(!feedback.text.includes("File does not exist."));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    rmSync(externalRoot, { recursive: true, force: true });
+  }
+});
+
 test("installs project hook configs idempotently", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-hooks-"));
   try {
@@ -146,6 +245,26 @@ test("installs project hook configs idempotently", () => {
       inspectHookInstallations(rootDir).map((inspection) => inspection.valid),
       [true, true, true],
     );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("hook install supports machine-readable dry-run output", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-hooks-json-"));
+  try {
+    const cli = path.resolve("packages/cli/src/index.ts");
+    const result = spawnSync(process.execPath, [cli, "hook", "install", "codex", "--dry-run", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout) as Array<{ host: string; files: Array<{ path: string; action: string }>; diagnostics: string[] }>;
+    assert.equal(payload.length, 1);
+    assert.equal(payload[0].host, "codex");
+    assert(payload[0].files.some((file) => file.action === "create"));
+    assert.deepEqual(payload[0].diagnostics, []);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

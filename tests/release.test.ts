@@ -142,6 +142,17 @@ test("install rehearsal stops isolated processes before applying updates", () =>
   assert(!source.includes("OPENCANON_RUNTIME_TRANSPORT"));
 });
 
+test("release publish watches the tag workflow by commit with backoff", () => {
+  const source = readFileSync("scripts/publish-opencanon-release.ts", "utf8");
+
+  assert.match(source, /function waitForReleaseWorkflowRun/);
+  assert.match(source, /git", \["rev-list", "-n", "1", tagName\]/);
+  assert.match(source, /"--commit",\s*headSha/s);
+  assert.match(source, /ReleaseRunWaitMs/);
+  assert.match(source, /sleep\(ReleaseRunPollMs\)/);
+  assert(!source.includes('"--branch",\n    tagName'));
+});
+
 test("release manifest requires a generated OpenCanon runtime", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-release-runtime-"));
   const assetDir = path.join(rootDir, "assets");

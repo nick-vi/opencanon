@@ -18,9 +18,9 @@ export function publicKeySpkiBase64(publicKey: KeyObject): string {
 /** Produce the detached-signature sidecar for the EXACT manifest bytes. */
 export function signManifestText(manifestText: string, privateKeyPem: string): ManifestSignatureSidecar {
   const privateKey = createPrivateKey(privateKeyPem);
-  const publicKey = createPublicKey(privateKey);
+  const publicKey = createPublicKey({ key: privateKey.export({ type: "pkcs8", format: "pem" }), format: "pem" });
   // Ed25519: the algorithm argument MUST be null.
-  const signature = cryptoSign(null, Buffer.from(manifestText, "utf8"), privateKey);
+  const signature = cryptoSign(null, Buffer.from(manifestText, "utf8"), { key: privateKey });
   return { keyId: deriveKeyId(publicKey), algorithm: "ed25519", value: signature.toString("base64") };
 }
 

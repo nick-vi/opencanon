@@ -107,12 +107,14 @@ Minimal manifest shape:
 ```
 
 ```bash
+npm run opencanon -- update check
+npm run opencanon -- update apply
 npm run opencanon -- update check --manifest ./opencanon-runtime-manifest.json
 npm run opencanon -- update apply --manifest ./opencanon-runtime-manifest.json
 OPENCANON_UPDATE_MANIFEST=https://example.com/opencanon-runtime-manifest.json npm run opencanon -- update check
 ```
 
-`update apply` refuses to write while the OpenCanon service or this project's runtime is registered as running. Stop the service and project runtime first, apply the runtime update, then run `project check` and `doctor`; the service can start project runtimes lazily on the next command.
+When no manifest is passed, update commands use the latest signed stable manifest published on GitHub Releases. `update apply` refuses to write while the OpenCanon service or any registered project runtime is running. Stop the service first, confirm `opencanon project list` is clear, apply the runtime update, then run `opencanon doctor`; the service can start project runtimes lazily on the next command.
 
 Remote HTTPS manifests must carry a valid Ed25519 signature. Local `file:` or path manifests are operator-provided and exempt for development, tests, and install rehearsal. See [docs/runtime-update-security.md](docs/runtime-update-security.md) for the trust chain and rotation runbook.
 

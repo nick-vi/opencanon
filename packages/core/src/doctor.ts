@@ -1033,13 +1033,13 @@ function validateDependencyPin(
   if (!isOpenCanonFrameworkWorkspace(corePackageJson)) return [];
   const dependencies = [
     { name: "@napi-rs/cli", version: "3.6.2", packageJson: enginePackageJson },
-    { name: "@types/node", version: "25.7.0", packageJson },
+    { name: "@types/node", version: "26.1.0", packageJson },
     { name: "esbuild", version: "0.28.1", packageJson },
-    { name: "esbuild-wasm", version: "0.28.0", packageJson: corePackageJson },
+    { name: "esbuild-wasm", version: "0.28.1", packageJson: corePackageJson },
     { name: "picomatch", version: "4.0.4", packageJson: corePackageJson },
     { name: "zod", version: "4.4.3", packageJson: corePackageJson },
     { name: "cac", version: "7.0.0", packageJson: cliPackageJson },
-    { name: "vitest", version: "4.1.6", packageJson },
+    { name: "vitest", version: "4.1.9", packageJson },
   ];
 
   return [

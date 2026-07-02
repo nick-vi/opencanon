@@ -51,7 +51,7 @@ test("validate --files returns without starting runtime when no selected validat
       timeout: validateSpawnTimeoutMs,
     });
 
-    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.error, undefined, result.error ? result.error.message : "spawn failed");
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const payload = JSON.parse(result.stdout) as {
       files: string[];

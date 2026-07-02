@@ -3,24 +3,39 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cac } from "cac";
-import { fail, resolveRootDir, membershipHashOf, listMembershipFiles } from "@opencanon/core";
+import { fail, Format, resolveRootDir, membershipHashOf, listMembershipFiles } from "@opencanon/core";
 import type { SidecarEntry, SidecarPayload, SidecarSourceFile } from "@opencanon/core";
-import { CliOptionFlag, CliOptionName, booleanOption, rejectUnknownOptions } from "./options.ts";
+import { CliOptionFlag, CliOptionName, booleanOption, formatOption, rejectUnknownOptions } from "./options.ts";
+
+type AnalyzeTypedResult = {
+  outputPath: string;
+  tsconfigPath: string;
+  tsVersion: string;
+  coverage: {
+    programFiles: number;
+    comparisonSites: number;
+    checkedSites: number;
+    checkedRatio: number;
+  };
+  fingerprintedFiles: number;
+};
 
 export async function runAnalyzeCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const cli = cac("opencanon analyze");
   cli.option(CliOptionFlag.Help, "Show help.");
   cli.option("--typed", "Build the typed-comparisons sidecar via tsc.");
   cli.option("--tsconfig <path>", "Path to tsconfig.json (default: ./tsconfig.json).");
+  cli.option(CliOptionFlag.Format, "Output format.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, [CliOptionName.Help, CliOptionName.H, "typed", "tsconfig"]);
+  rejectUnknownOptions(options, [CliOptionName.Help, CliOptionName.H, "typed", "tsconfig", CliOptionName.Format]);
 
   if (booleanOption(options.help) || booleanOption(options.h)) {
-    console.log(`Usage:\n  opencanon analyze --typed [--tsconfig path]\n\nWrites .opencanon/cache/typed-comparisons.json (the headless/CI TypeScript type-producer sidecar).`);
+    console.log(`Usage:\n  opencanon analyze --typed [--tsconfig path] [--format markdown|json]\n\nWrites .opencanon/cache/typed-comparisons.json (the headless/CI TypeScript type-producer sidecar).`);
     return;
   }
   if (!booleanOption(options.typed)) fail("opencanon analyze currently supports only --typed.");
+  const format = formatOption(options.format);
 
   const rootDir = resolveRootDir(cwd);
   const tsconfigPath = typeof options.tsconfig === "string" ? path.resolve(cwd, options.tsconfig) : path.join(rootDir, "tsconfig.json");
@@ -71,13 +86,28 @@ export async function runAnalyzeCommand(args = process.argv.slice(2), cwd = proc
     throw error;
   }
   const ratio = coverage.comparisonSites === 0 ? 0 : Math.round((coverage.checkedSites / coverage.comparisonSites) * 100);
-  console.log(
-    `Wrote ${outPath}\n` +
-      `Program files: ${coverage.programFiles}\n` +
-      `Comparison sites: ${coverage.comparisonSites}\n` +
-      `Typed (checked): ${coverage.checkedSites} (${ratio}% of comparison sites)\n` +
-      `Fingerprinted files: ${sourceFiles.length}`,
-  );
+  const result: AnalyzeTypedResult = {
+    outputPath: outPath,
+    tsconfigPath: tsconfigRel,
+    tsVersion,
+    coverage: {
+      ...coverage,
+      checkedRatio: ratio,
+    },
+    fingerprintedFiles: sourceFiles.length,
+  };
+  if (format === Format.Json) console.log(JSON.stringify(result, null, 2));
+  else console.log(renderAnalyzeTypedMarkdown(result));
+}
+
+function renderAnalyzeTypedMarkdown(result: AnalyzeTypedResult): string {
+  return [
+    `Wrote ${result.outputPath}`,
+    `Program files: ${result.coverage.programFiles}`,
+    `Comparison sites: ${result.coverage.comparisonSites}`,
+    `Typed (checked): ${result.coverage.checkedSites} (${result.coverage.checkedRatio}% of comparison sites)`,
+    `Fingerprinted files: ${result.fingerprintedFiles}`,
+  ].join("\n");
 }
 
 async function collectTypedComparisonEntries(params: { rootDir: string; tsconfigPath: string }): Promise<{

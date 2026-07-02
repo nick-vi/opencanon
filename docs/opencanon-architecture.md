@@ -74,7 +74,7 @@ Manifest contract:
 
 Every bundle is a single `tar.gz` whose contents drop directly into the installed OpenCanon runtime: `cli.js`, `validators.js`, and `engine/<target>/opencanon.<target>.node`. Engine binary and JS runtime ship together to make schema drift impossible.
 
-`opencanon update check --manifest <path-or-url>` reads the manifest, selects the current target, validates the pinned Node version, and reports `current`, `missing`, or `update-available` against the `.bundle.json` marker. `opencanon update apply --manifest <path-or-url>` refuses to write while the service or current project runtime is registered as running, downloads the target runtime bundle over HTTPS, `file:`, or a local path, verifies SHA-256, extracts to a staging directory, and swaps it into place atomically.
+`opencanon update check` reads the default signed stable manifest unless `--manifest` or `OPENCANON_UPDATE_MANIFEST` overrides it, selects the current target, validates the pinned Node version, and reports `current`, `missing`, or `update-available` against the `.bundle.json` marker. `opencanon update apply` refuses to write while the service or any registered project runtime is running, downloads the target runtime bundle over HTTPS, `file:`, or a local path, verifies SHA-256, extracts to a staging directory, and swaps it into place atomically.
 
 ### Toolchain
 
@@ -89,11 +89,11 @@ Every bundle is a single `tar.gz` whose contents drop directly into the installe
 | --- | ---: | --- |
 | `@napi-rs/cli` | `3.6.2` | Engine build command |
 | `esbuild` | `0.28.1` | Build-time bundling of the OpenCanon runtime |
-| `esbuild-wasm` | `0.28.0` | Runtime validator-graph bundling (self-contained) |
-| `@types/node` | `25.7.0` | Node-compatible type support |
+| `esbuild-wasm` | `0.28.1` | Runtime validator-graph bundling (self-contained) |
+| `@types/node` | `26.1.0` | Node-compatible type support |
 | `cac` | `7.0.0` | CLI command parsing |
 | `zod` | `4.4.3` | Runtime schemas for config, runtime API, persisted records |
-| `vitest` | `4.1.6` | Tests |
+| `vitest` | `4.1.9` | Tests |
 
 Do not add `better-sqlite3`, external filesystem watcher clients, or `ws`. Rust owns durable state and file watching; Node provides the selected HTTP and SSE APIs (node:http) for this architecture.
 

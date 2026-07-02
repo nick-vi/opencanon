@@ -1,10 +1,17 @@
 import { cac } from "cac";
 import { applyRuntimeUpdate, checkRuntimeUpdate, type RuntimeUpdateApplyResult, type RuntimeUpdateCheck, type UpdateSafetyGuard } from "@opencanon/distribution";
-import { createOpenCanonDiagnostic, fail, Format, OpenCanonError, resolveRootDir } from "@opencanon/core";
-import { inspectProjectRuntime, inspectService, RuntimeStatus } from "@opencanon/runtime";
+import { createOpenCanonDiagnostic, fail, Format, OpenCanonError } from "@opencanon/core";
+import { inspectAllRuntimes, inspectService, RuntimeStatus } from "@opencanon/runtime";
 import { CliOptionDescription, CliOptionFlag, CliOptionName, booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
 const RuntimeManifestEnv = "OPENCANON_UPDATE_MANIFEST";
+const DefaultRuntimeManifest = {
+  protocol: "https:",
+  hostname: "github.com",
+  owner: "nick-vi",
+  repository: "opencanon",
+  assetPath: ["releases", "latest", "download", "opencanon-runtime-manifest.json"],
+} as const;
 const RuntimeUpdateDiagnosticCode = {
   Failed: "runtime-update-failed",
 } as const;
@@ -46,43 +53,42 @@ async function runUpdateCheckCommand(args: string[], cwd: string): Promise<void>
 async function runUpdateApplyCommand(args: string[], cwd: string): Promise<void> {
   const query = parseUpdateApplyArgs(args);
   if (!query) return;
-  const result = await applyRuntimeUpdate({ manifestSource: query.manifestSource, cwd, dryRun: query.dryRun, safety: createRuntimeUpdateSafetyGuard(cwd) });
+  const result = await applyRuntimeUpdate({ manifestSource: query.manifestSource, cwd, dryRun: query.dryRun, safety: createRuntimeUpdateSafetyGuard() });
   if (query.format === Format.Json) console.log(JSON.stringify(result, null, 2));
   else console.log(renderRuntimeUpdateApplyMarkdown(result));
 }
 
-export function createRuntimeUpdateSafetyGuard(cwd: string): UpdateSafetyGuard {
-  const rootDir = resolveRootDir(cwd);
+export function createRuntimeUpdateSafetyGuard(): UpdateSafetyGuard {
   return {
     async assertSafeToUpdate() {
-      await assertNoRunningRuntime(rootDir);
+      await assertNoRunningRuntimeProcesses();
     },
   };
 }
 
-async function assertNoRunningRuntime(rootDir: string): Promise<void> {
-  await assertNoRunningService();
-  const inspection = await inspectProjectRuntime(rootDir);
-  if (!inspection || inspection.status === RuntimeStatus.Stale) return;
-  throw new OpenCanonError([
-    createOpenCanonDiagnostic({
-      code: RuntimeUpdateDiagnosticCode.Failed,
-      message: "OpenCanon runtime update requires the project runtime to be stopped.",
-      details: [`Runtime status: ${inspection.status}.`, `Root: ${rootDir}`],
-      action: "Run opencanon service stop and opencanon project stop, then rerun the update.",
-    }),
-  ]);
-}
+async function assertNoRunningRuntimeProcesses(): Promise<void> {
+  const service = await inspectService();
+  const runtimes = await inspectAllRuntimes();
+  const blockingRuntimes = runtimes.filter((inspection) => inspection.status !== RuntimeStatus.Stale);
+  const details: string[] = [];
 
-async function assertNoRunningService(): Promise<void> {
-  const inspection = await inspectService();
-  if (!inspection || inspection.status === RuntimeStatus.Stale) return;
+  if (service && service.status !== RuntimeStatus.Stale) {
+    details.push(`Service status: ${service.status}.`);
+    details.push(`Service PID: ${service.entry.pid}.`);
+  }
+
+  for (const inspection of blockingRuntimes) {
+    details.push(`Project runtime status: ${inspection.status}; PID: ${inspection.entry.pid}; root: ${inspection.entry.rootDir}.`);
+  }
+
+  if (details.length === 0) return;
+
   throw new OpenCanonError([
     createOpenCanonDiagnostic({
       code: RuntimeUpdateDiagnosticCode.Failed,
-      message: "OpenCanon runtime update requires the service to be stopped.",
-      details: [`Service status: ${inspection.status}.`, `PID: ${inspection.entry.pid}`],
-      action: "Run opencanon service stop and opencanon project stop, then rerun the update.",
+      message: "OpenCanon runtime update requires all OpenCanon processes to be stopped.",
+      details,
+      action: "Run opencanon service stop, confirm opencanon project list is clear, then rerun the update.",
     }),
   ]);
 }
@@ -133,8 +139,15 @@ function manifestSourceOption(value: unknown): string {
   const values = stringValues(value);
   if (values.length > 1) fail("--manifest accepts one source.");
   const source = values[0] ?? process.env[RuntimeManifestEnv];
-  if (!source) fail(`Pass --manifest <path-or-url> or set ${RuntimeManifestEnv}.`);
-  return source;
+  return source ?? defaultRuntimeManifestSource();
+}
+
+function defaultRuntimeManifestSource(): string {
+  const url = new URL(
+    `/${DefaultRuntimeManifest.owner}/${DefaultRuntimeManifest.repository}/${DefaultRuntimeManifest.assetPath.join("/")}`,
+    `${DefaultRuntimeManifest.protocol}//${DefaultRuntimeManifest.hostname}`,
+  );
+  return url.href;
 }
 
 function renderRuntimeUpdateCheckMarkdown(check: RuntimeUpdateCheck): string {
@@ -163,8 +176,9 @@ function renderRuntimeUpdateApplyMarkdown(result: RuntimeUpdateApplyResult): str
 
 function printUpdateHelp(): void {
   console.log(`Usage:
+  opencanon update check
+  opencanon update apply
   opencanon update check --manifest <path-or-url>
-  opencanon update apply --manifest <path-or-url>
   opencanon update apply --manifest <path-or-url> --dry-run
 
 Options:
@@ -175,5 +189,8 @@ Options:
 Environment:
   ${RuntimeManifestEnv}      Default manifest source when --manifest is omitted.
   OPENCANON_RUNTIME_ROOT     Override runtime install root.
+
+Default manifest:
+  ${defaultRuntimeManifestSource()}
 `);
 }

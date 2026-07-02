@@ -1,5 +1,5 @@
 import { cac } from "cac";
-import { DiagnosticSeverity, formatFeedbackResult } from "@opencanon/core";
+import { DiagnosticSeverity, Format, formatFeedbackResult } from "@opencanon/core";
 import type { FeedbackDedupeScope, FeedbackHost, FeedbackResult } from "@opencanon/core";
 import {
   claudeHookConfig,
@@ -183,10 +183,11 @@ function runHookInstall(args: string[], cwd: string): void {
   cli.option("--local", "Install project-local hook config. Default.");
   cli.option("--global", "Install user-global hook config.");
   cli.option("--dry-run", "Show files that would change without writing.");
+  cli.option("--format <format>", "Output format.");
 
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["help", "h", "all", "local", "global", "dryRun"]);
+  rejectUnknownOptions(options, ["help", "h", "all", "local", "global", "dryRun", "format"]);
 
   if (booleanOption(options.help) || booleanOption(options.h)) {
     printHookInstallHelp();
@@ -204,7 +205,9 @@ function runHookInstall(args: string[], cwd: string): void {
     }),
   );
 
-  console.log(results.map(renderHookInstallResult).join("\n\n"));
+  const format = formatOption(options.format);
+  if (format === Format.Json) console.log(JSON.stringify(results, null, 2));
+  else console.log(results.map(renderHookInstallResult).join("\n\n"));
   if (results.some((result) => result.diagnostics.length > 0)) process.exit(1);
 }
 
@@ -294,5 +297,6 @@ Options:
   --local      Install project-local config. Default.
   --global     Install user-global config.
   --dry-run    Show files that would change without writing.
+  --format markdown|json
 `);
 }

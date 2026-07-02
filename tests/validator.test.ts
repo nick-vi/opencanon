@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -2722,6 +2722,17 @@ test("opencanon analyze --typed writes a sidecar with comparison-context entries
     await runAnalyzeCommand(["--typed"], rootDir);
     const sidecarPath = path.join(rootDir, ".opencanon", "cache", "typed-comparisons.json");
     assert(existsSync(sidecarPath), "sidecar should be written");
+    const cli = path.resolve("packages/cli/src/index.ts");
+    const jsonResult = spawnSync(process.execPath, [cli, "analyze", "--typed", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.equal(jsonResult.status, 0, jsonResult.stderr);
+    const analyzeSummary = JSON.parse(jsonResult.stdout) as { outputPath: string; coverage: { comparisonSites: number; checkedSites: number; checkedRatio: number } };
+    assert.equal(realpathSync(analyzeSummary.outputPath), realpathSync(sidecarPath));
+    assert.equal(analyzeSummary.coverage.comparisonSites, 1);
+    assert.equal(analyzeSummary.coverage.checkedSites, 1);
+    assert.equal(analyzeSummary.coverage.checkedRatio, 100);
     const payload = JSON.parse(readFileSync(sidecarPath, "utf8"));
     assert.equal(payload.version, 1);
     assert(Array.isArray(payload.entries));

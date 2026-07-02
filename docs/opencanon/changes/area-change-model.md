@@ -72,6 +72,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/core/src/definition-target.ts`
 - Files: `packages/core/src/doctor.ts`
 - Files: `packages/core/src/feedback.ts`
+- Files: `packages/core/src/hooks.ts`
 - Files: `packages/core/src/index.ts`
 - Files: `packages/core/src/project-types.ts`
 - Files: `packages/core/src/release-keys.ts`
@@ -83,7 +84,10 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/cli/src/changes.ts`
 - Files: `packages/cli/src/conventions.ts`
 - Files: `packages/cli/src/context.ts`
+- Files: `packages/cli/src/analyze.ts`
+- Files: `packages/cli/src/feedback.ts`
 - Files: `packages/cli/src/index.ts`
+- Files: `packages/cli/src/update.ts`
 - Files: `packages/runtime/src/project-types-runtime.ts`
 - Files: `packages/cli/src/runtime-client.ts`
 - Files: `packages/engine/src/index.ts`
@@ -122,6 +126,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Docs: `.agents/skills/opencanon/SKILL.md`
 - Docs: `.agents/skills/opencanon/**`
 - Docs: `docs/opencanon/canon/architecture.md`
+- Docs: `docs/runtime-update-security.md`
 - Docs: `docs/opencanon/canon/service-events-current.md`
 - Docs: `docs/opencanon/areas/company-read-model.md`
 - Docs: `docs/opencanon/areas/definition-authoring-flow.md`
@@ -210,6 +215,11 @@ Task `release-gate-proof`: Make the release test gate cover every committed test
 Files: `package.json`, `tests/release.test.ts`
 Impact surfaces: [release-update](opencanon://impact-surfaces/release-update)
 Checks: `release-tests`, `test-tree`
+
+Task `release-update-hardening`: Harden updater safety, release watching, hook scoping, and machine-readable CLI output
+Files: `packages/cli/src/update.ts`, `packages/cli/src/feedback.ts`, `packages/cli/src/analyze.ts`, `packages/core/src/hooks.ts`, `scripts/publish-opencanon-release.ts`, `docs/runtime-update-security.md`, `README.md`, `tests/update-guard.test.ts`, `tests/feedback.test.ts`, `tests/validator.test.ts`, `tests/release.test.ts`
+Impact surfaces: [release-update](opencanon://impact-surfaces/release-update), [local-service-control](opencanon://impact-surfaces/local-service-control), [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+Checks: `release-tests`, `typecheck`, `project-doctor`
 
 Task `runtime-repair-hardening`: Make supervised runtime repair deterministic across worktrees and stale pipes
 Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`

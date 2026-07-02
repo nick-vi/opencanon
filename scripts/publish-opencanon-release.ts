@@ -1,6 +1,20 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+const ReleaseRepo = "nick-vi/opencanon";
+const ReleaseWorkflow = "release.yml";
+const ReleaseRunWaitMs = 180_000;
+const ReleaseRunPollMs = 5_000;
+
+type WorkflowRun = {
+  databaseId: number;
+  event: string;
+  headBranch: string;
+  headSha: string;
+  status: string;
+  url: string;
+};
+
 type Options = {
   check: boolean;
   commit: boolean;
@@ -44,24 +58,9 @@ if (options.push) {
 }
 
 if (options.watch) {
-  const runId = output("gh", [
-    "run",
-    "list",
-    "--repo",
-    "nick-vi/opencanon",
-    "--workflow",
-    "release.yml",
-    "--branch",
-    tagName,
-    "--limit",
-    "1",
-    "--json",
-    "databaseId",
-    "--jq",
-    ".[0].databaseId",
-  ]);
-  if (!runId) throw new Error(`No release workflow run found for ${tagName}.`);
-  run("gh", ["run", "watch", runId, "--repo", "nick-vi/opencanon", "--exit-status", "--compact"]);
+  const headSha = output("git", ["rev-list", "-n", "1", tagName]);
+  const runId = waitForReleaseWorkflowRun(tagName, headSha);
+  run("gh", ["run", "watch", runId, "--repo", ReleaseRepo, "--exit-status", "--compact"]);
 }
 
 if (options.verify) {
@@ -125,4 +124,67 @@ function output(command: string, args: string[]): string {
     throw new Error(`${command} ${args.join(" ")} failed:\n${result.stderr}`);
   }
   return result.stdout.trim();
+}
+
+function waitForReleaseWorkflowRun(tagName: string, headSha: string): string {
+  const startedAt = Date.now();
+  let lastRuns: WorkflowRun[] = [];
+
+  while (Date.now() - startedAt < ReleaseRunWaitMs) {
+    const runs = listReleaseWorkflowRuns(headSha);
+    lastRuns = runs;
+    const match = runs.find((run) => run.event === "push" && run.headSha === headSha && (run.headBranch === tagName || run.headBranch === ""));
+    if (match) return String(match.databaseId);
+    sleep(ReleaseRunPollMs);
+  }
+
+  throw new Error(
+    [
+      `No release workflow run found for ${tagName} (${headSha}) within ${Math.round(ReleaseRunWaitMs / 1000)}s.`,
+      `Last runs: ${JSON.stringify(lastRuns, null, 2)}`,
+    ].join("\n"),
+  );
+}
+
+function listReleaseWorkflowRuns(headSha: string): WorkflowRun[] {
+  const raw = output("gh", [
+    "run",
+    "list",
+    "--repo",
+    ReleaseRepo,
+    "--workflow",
+    ReleaseWorkflow,
+    "--event",
+    "push",
+    "--commit",
+    headSha,
+    "--limit",
+    "20",
+    "--json",
+    "databaseId,event,headBranch,headSha,status,url",
+  ]);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter(isWorkflowRun) : [];
+  } catch (error) {
+    throw new Error(`Could not parse gh run list output: ${error instanceof Error ? error.message : String(error)}\n${raw}`);
+  }
+}
+
+function isWorkflowRun(value: unknown): value is WorkflowRun {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const run = value as Record<string, unknown>;
+  return (
+    typeof run.databaseId === "number" &&
+    typeof run.event === "string" &&
+    typeof run.headBranch === "string" &&
+    typeof run.headSha === "string" &&
+    typeof run.status === "string" &&
+    typeof run.url === "string"
+  );
+}
+
+function sleep(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
