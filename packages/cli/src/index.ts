@@ -3,7 +3,7 @@ import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
 import { inspectProjectRuntime, inspectService, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, RuntimeStatus, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
-import { ContextDiagnosticCode, fail, Format, loadImpactSurfaces, resolveRootDir, validateContextDiagnostics } from "@opencanon/core";
+import { fail, Format, resolveRootDir } from "@opencanon/core";
 import { applyDoctorFixes, buildDoctorReport, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
 import type { DoctorRuntimeHealth, ProducerStatus } from "@opencanon/core";
 import { fetchRunningRuntimeProducers } from "./runtime-client.ts";
@@ -17,7 +17,7 @@ import { runGateCommand } from "./gate.ts";
 import { runGraphCommand } from "./graph.ts";
 import { runLanguagesCommand } from "./languages.ts";
 import { runMcpCommand } from "./mcp.ts";
-import { loadProjectContext } from "./project.ts";
+import { loadProjectContextUnchecked } from "./project.ts";
 import { runBriefCommand } from "./brief.ts";
 import { runAskCommand, runContextCommand } from "./context.ts";
 import { runRefactorCommand } from "./refactor.ts";
@@ -232,23 +232,8 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
     runExternalTools: booleanOption(options.runExternalTools),
   };
   const rootDir = resolveRootDir(cwd);
-  const project = await loadProjectContext(rootDir);
-  const { paths, areas, specs, changes, conventions, validators, impactSurfaces } = project;
-  const { diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
-  const contextDiagnostics = validateContextDiagnostics({
-    conventions,
-    areas,
-    specs,
-    changes,
-    validators: validators.map((validator) => ({ id: validator.id, conventionIds: validator.conventionIds, docs: validator.docs })),
-    impactSurfaces,
-    paths,
-  });
-  const diagnostics = [...impactDiagnostics.map((message) => ({ code: ContextDiagnosticCode.InvalidContext, message })), ...contextDiagnostics];
-  if (diagnostics.length > 0) {
-    console.error("OpenCanon files are invalid. Run opencanon context --check for details.");
-    process.exit(1);
-  }
+  const project = await loadProjectContextUnchecked(rootDir);
+  const { paths, areas, specs, changes, conventions, validators } = project;
 
   // Authoritative producer status from a running runtime (it owns the live producer);
   // undefined when no runtime is running, in which case the headless sidecar resolve
@@ -258,7 +243,7 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
   let report = buildDoctorReport({ paths, areas, specs, changes, conventions, validators, runExternalTools: query.runExternalTools, producerStatuses, runtimeHealth });
   const fixes = query.fixMode ? applyDoctorFixes({ paths, report, mode: query.fixMode, dryRun: query.dryRun, conventions, validators }) : undefined;
   if (fixes && !fixes.dryRun && fixes.diagnostics.length === 0 && fixes.appliedFixes > 0) {
-    const nextProject = await loadProjectContext(rootDir);
+    const nextProject = await loadProjectContextUnchecked(rootDir);
     report = buildDoctorReport({
       paths: nextProject.paths,
       areas: nextProject.areas,

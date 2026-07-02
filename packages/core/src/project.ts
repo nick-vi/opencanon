@@ -29,7 +29,11 @@ export type ProjectContext = {
   impactSurfaces: ImpactSurface[];
 };
 
-export async function loadProjectContext(cwd = process.cwd()): Promise<ProjectContext> {
+export type UncheckedProjectContext = ProjectContext & {
+  diagnostics: string[];
+};
+
+export async function loadProjectContextUnchecked(cwd = process.cwd()): Promise<UncheckedProjectContext> {
   const rootDir = resolveRootDir(cwd);
   const paths = createPaths(rootDir);
   const { surfaces: impactSurfaces, diagnostics: impactDiagnostics } = loadImpactSurfaces(paths);
@@ -53,9 +57,6 @@ export async function loadProjectContext(cwd = process.cwd()): Promise<ProjectCo
       paths,
     }),
   ];
-  if (diagnostics.length > 0) {
-    throw new Error(`Invalid OpenCanon context:\n${diagnostics.map((item) => `- ${item}`).join("\n")}`);
-  }
   return {
     rootDir,
     paths,
@@ -69,7 +70,16 @@ export async function loadProjectContext(cwd = process.cwd()): Promise<ProjectCo
     validators,
     validatorGraph,
     impactSurfaces,
+    diagnostics,
   };
+}
+
+export async function loadProjectContext(cwd = process.cwd()): Promise<ProjectContext> {
+  const context = await loadProjectContextUnchecked(cwd);
+  if (context.diagnostics.length > 0) {
+    throw new Error(`Invalid OpenCanon context:\n${context.diagnostics.map((item) => `- ${item}`).join("\n")}`);
+  }
+  return context;
 }
 
 export { loadValidators };

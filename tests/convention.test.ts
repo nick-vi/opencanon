@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -938,6 +938,44 @@ export default defineArea({
     assert.equal(result.changed, 1);
     assert.deepEqual(result.files.map((file) => [file.id, file.action, file.path]), [["service-health", "written", "docs/service-health.md"]]);
     assert.match(readFileSync(path.join(rootDir, "docs/service-health.md"), "utf8"), /^# Service Health\n/);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports invalid Project Canon as JSON instead of crashing", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-invalid-canon-"));
+  try {
+    mkdirSync(path.join(rootDir, "opencanon/areas"), { recursive: true });
+    mkdirSync(path.join(rootDir, "opencanon/conventions"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ scripts: { opencanon: "opencanon" } }));
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ fileDiscovery: "filesystem", requiredPackageScripts: ["opencanon"] }));
+    writeFileSync(path.join(rootDir, "opencanon/conventions/index.ts"), "export default [];\n");
+    writeFileSync(
+      path.join(rootDir, "opencanon/areas/index.ts"),
+      `import { defineArea } from "@opencanon/core";
+
+export default defineArea({
+  id: "service-health",
+  title: "Service Health",
+  summary: "Health checks are visible in the local service.",
+  surfaces: ["missing-surface"],
+  render: { kind: "none" },
+});
+`,
+    );
+
+    const result = spawnSync(process.execPath, [path.join(process.cwd(), "packages/cli/src/index.ts"), "doctor", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.doesNotMatch(result.stderr, /Invalid OpenCanon context/);
+    const report = JSON.parse(result.stdout) as { status: string; checks: Array<{ id: string; status: string; details?: string[] }> };
+    assert.equal(report.status, "fail");
+    const contextCheck = report.checks.find((check) => check.id === "context-files");
+    assert.equal(contextCheck?.status, "fail");
+    assert.match(contextCheck?.details?.join("\n") ?? "", /missing impact surface: missing-surface/);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

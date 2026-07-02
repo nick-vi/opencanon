@@ -175,9 +175,16 @@ async function collectTypedComparisonEntries(params: { rootDir: string; tsconfig
     return real.split(path.sep).includes("node_modules");
   };
 
-  const fingerprint = (absPath: string): void => {
+  const relativeToRoot = (absPath: string): string | null => {
     const relativePath = path.relative(params.rootDir, absPath).replace(/\\/g, "/");
-    if (fingerprinted.has(relativePath)) return;
+    if (relativePath === "" || path.isAbsolute(relativePath) || relativePath.startsWith("../")) return null;
+    return relativePath;
+  };
+
+  const fingerprint = (absPath: string): boolean => {
+    const relativePath = relativeToRoot(absPath);
+    if (!relativePath) return false;
+    if (fingerprinted.has(relativePath)) return true;
     fingerprinted.add(relativePath);
     // Hash raw file bytes (NOT sourceFile.text, which TS may normalize) so the
     // reader's readFileSync-based hash matches exactly.
@@ -188,6 +195,7 @@ async function collectTypedComparisonEntries(params: { rootDir: string; tsconfig
       mtimeMs: stat.mtimeMs,
       size: stat.size,
     });
+    return true;
   };
 
   // Soundness: fingerprint everything that can change the type meaning of a
@@ -198,16 +206,24 @@ async function collectTypedComparisonEntries(params: { rootDir: string; tsconfig
   // serving a stale "checked" type.
   for (const sourceFile of program.getSourceFiles()) {
     if (isExternal(sourceFile.fileName)) continue;
+    if (!relativeToRoot(sourceFile.fileName)) {
+      if (sourceFile.isDeclarationFile) continue;
+      fail(`Refusing to write a sidecar referencing a path outside the project root: ${sourceFile.fileName}`);
+    }
     if (sourceFile.isDeclarationFile) fingerprint(sourceFile.fileName);
   }
   // Exact tsconfig graph TypeScript actually loaded (ground truth, not a guess).
-  for (const configPath of configFilesRead) fingerprint(configPath);
+  for (const configPath of configFilesRead) {
+    if (!fingerprint(configPath)) fail(`Refusing to write a sidecar referencing a path outside the project root: ${configPath}`);
+  }
   // Dependency manifests: a lockfile/root package.json change can swap @types or
   // resolution without touching any tracked source. Content-verified like the rest.
   for (const manifest of dependencyManifests(params.rootDir)) fingerprint(manifest);
   // Every (non-node_modules) .json tsc consulted during program build — workspace
   // package.json (types/exports redirects) + referenced-project tsconfigs.
-  for (const manifest of resolutionManifests) if (existsSync(manifest)) fingerprint(manifest);
+  for (const manifest of resolutionManifests) {
+    if (existsSync(manifest) && relativeToRoot(manifest)) fingerprint(manifest);
+  }
 
   // Soundness boundary: the reader detects ADDED type-relevant files via a
   // git-derived membership hash. Files TypeScript includes but git cannot see
@@ -218,7 +234,7 @@ async function collectTypedComparisonEntries(params: { rootDir: string; tsconfig
   const invisibleIncluded = program
     .getSourceFiles()
     .map((sf) => sf.fileName)
-    .filter((f) => !isExternal(f) && !gitVisible.has(path.resolve(f)) && MembershipExtensions.test(f));
+    .filter((f) => !isExternal(f) && relativeToRoot(f) && !gitVisible.has(path.resolve(f)) && MembershipExtensions.test(f));
   if (invisibleIncluded.length > 0) {
     console.warn(
       `[opencanon] ${invisibleIncluded.length} type-relevant file(s) are included by tsconfig but invisible to git ` +
@@ -237,14 +253,16 @@ async function collectTypedComparisonEntries(params: { rootDir: string; tsconfig
   for (const sourceFile of program.getSourceFiles()) {
     if (sourceFile.isDeclarationFile) continue;
     if (isExternal(sourceFile.fileName)) continue;
-    const relativePath = path.relative(params.rootDir, sourceFile.fileName).replace(/\\/g, "/");
+    const relativePath = relativeToRoot(sourceFile.fileName);
+    if (!relativePath) fail(`Refusing to write a sidecar referencing a path outside the project root: ${sourceFile.fileName}`);
+    const sourceRelativePath = relativePath;
     fingerprint(sourceFile.fileName);
     visit(sourceFile);
 
     function visit(node: import("typescript").Node): void {
       if (TS.isBinaryExpression(node) && comparisons.has(node.operatorToken.kind)) {
-        consider(node.left, node.right, relativePath, sourceFile);
-        consider(node.right, node.left, relativePath, sourceFile);
+        consider(node.left, node.right, sourceRelativePath, sourceFile);
+        consider(node.right, node.left, sourceRelativePath, sourceFile);
       }
       TS.forEachChild(node, visit);
     }
@@ -270,7 +288,7 @@ async function collectTypedComparisonEntries(params: { rootDir: string; tsconfig
     sourceFiles,
     tsVersion: TS.version,
     coverage: {
-      programFiles: program.getSourceFiles().filter((sf) => !sf.fileName.includes("node_modules") && !sf.isDeclarationFile).length,
+      programFiles: program.getSourceFiles().filter((sf) => !isExternal(sf.fileName) && relativeToRoot(sf.fileName) && !sf.isDeclarationFile).length,
       comparisonSites: comparisonSiteCount,
       checkedSites: entries.length,
     },

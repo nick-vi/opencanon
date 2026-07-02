@@ -655,8 +655,8 @@ export type { Resource, ResourceOptions, ResourceSignal } from "./resource.ts";
 export { resource } from "./resource.ts";
 export type { ProfileEntry, Profiler } from "./profiler.ts";
 export { createProfiler, renderProfileMarkdown } from "./profiler.ts";
-export type { ProjectContext } from "./project.ts";
-export { loadProjectContext, loadValidators } from "./project.ts";
+export type { ProjectContext, UncheckedProjectContext } from "./project.ts";
+export { loadProjectContext, loadProjectContextUnchecked, loadValidators } from "./project.ts";
 export type { ProjectTypesGeneratedFile, ProjectTypesGenerationPlan, ProjectTypesGenerationResult } from "./project-types.ts";
 export {
   buildProjectTypesGeneration,

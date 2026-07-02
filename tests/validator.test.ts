@@ -2744,6 +2744,54 @@ test("opencanon analyze --typed writes a sidecar with comparison-context entries
   }
 });
 
+test("opencanon analyze --typed ignores external declaration fingerprints", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-sidecar-external-"));
+  const externalRoot = mkdtempSync(path.join(tmpdir(), "opencanon-external-types-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(
+      path.join(rootDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          target: "es2022",
+          module: "esnext",
+          moduleResolution: "bundler",
+          baseUrl: ".",
+          paths: { "external-types": [path.join(externalRoot, "types.d.ts")] },
+          noEmit: true,
+          skipLibCheck: true,
+        },
+        include: ["src/**/*"],
+      }),
+    );
+    writeFileSync(path.join(externalRoot, "types.d.ts"), 'export type Mode = "fast" | "slow";\n');
+    writeFileSync(
+      path.join(rootDir, "src/mode.ts"),
+      [
+        'import type { Mode } from "external-types";',
+        "export function isFast(value: Mode) {",
+        '  return value === "fast";',
+        "}",
+      ].join("\n"),
+    );
+
+    const analyzeUrl = new URL("../packages/cli/src/analyze.ts", import.meta.url).href;
+    const { runAnalyzeCommand } = (await import(analyzeUrl)) as typeof import("../packages/cli/src/analyze.ts");
+    await runAnalyzeCommand(["--typed"], rootDir);
+    const sidecarPath = path.join(rootDir, ".opencanon", "cache", "typed-comparisons.json");
+    const payload = JSON.parse(readFileSync(sidecarPath, "utf8"));
+    assert(payload.entries.some((entry: { display: string }) => entry.display === "Mode"));
+    assert(
+      payload.sourceFiles.every((source: { path: string }) => !path.isAbsolute(source.path) && !source.path.startsWith("../")),
+      `sidecar must not persist external source paths: ${JSON.stringify(payload.sourceFiles)}`,
+    );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    rmSync(externalRoot, { recursive: true, force: true });
+  }
+});
+
 test("declarationSourceId does not tag non-literal type aliases or property keys", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-literal-source-"));
   try {
