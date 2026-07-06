@@ -3,7 +3,7 @@ name: First Run Smoke
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 8 * * 1"
+    - cron: "17 8 * * 1"
 
 permissions:
   contents: read
@@ -23,9 +23,33 @@ jobs:
           set -euo pipefail
           repo="$(mktemp -d)"
           cd "$repo"
-          git init
+          git init --initial-branch main
           npx -y skills add nick-vi/opencanon --skill opencanon -a codex -y
-          test -f .agents/skills/opencanon/SKILL.md
-          test ! -e .agents/skills/opencanon/scripts/opencanon.mjs
-          test ! -e .agents/skills/opencanon/runtime/cli.js
-          grep -q "text-only" .agents/skills/opencanon/SKILL.md
+          skill=".agents/skills/opencanon/SKILL.md"
+
+          require_file() {
+            test -f "$1" || {
+              echo "Missing expected file: $1" >&2
+              exit 1
+            }
+          }
+
+          reject_path() {
+            test ! -e "$1" || {
+              echo "Unexpected bundled runtime path: $1" >&2
+              exit 1
+            }
+          }
+
+          require_text() {
+            grep -q "$1" "$2" || {
+              echo "Missing expected text in $2: $1" >&2
+              exit 1
+            }
+          }
+
+          require_file "$skill"
+          reject_path .agents/skills/opencanon/scripts/opencanon.mjs
+          reject_path .agents/skills/opencanon/runtime/cli.js
+          require_text "OpenCanon is installed as a runtime" "$skill"
+          require_text "opencanon brief --format json" "$skill"
