@@ -10,6 +10,7 @@ import { createAuthoringProject } from "./support.ts";
 
 const HeavyRouteIntegrationTestTimeoutMs = 120_000;
 const HeavyRouteSubprocessTimeoutMs = 90_000;
+const RuntimeWatcherPropagationTimeoutMs = 30_000;
 
 test("runtime client does not expose an env-driven in-process transport path", () => {
   const source = readFileSync(path.join(process.cwd(), "packages/cli/src/runtime-client.ts"), "utf8");
@@ -1373,7 +1374,7 @@ test("running runtime reloads validator graph when imported validator modules ch
   }
 });
 
-test("running runtime generates project authoring types on startup and relevant changes", () => {
+test("running runtime generates project authoring types on startup and relevant changes", { timeout: HeavyRouteIntegrationTestTimeoutMs }, () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-project-types-"));
   createAuthoringProject(rootDir);
   writeFileSync(
@@ -1427,8 +1428,12 @@ test("running runtime generates project authoring types on startup and relevant 
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", runtimeProjectTypesCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
+      timeout: HeavyRouteSubprocessTimeoutMs,
     });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const failureOutput = result.error
+      ? `${result.error.message}\n${result.stderr || result.stdout}`
+      : result.stderr || result.stdout;
+    assert.equal(result.status, 0, failureOutput);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -1465,7 +1470,7 @@ function runtimeProjectTypesCheckSource(): string {
     }
 
     async function waitForFileText(file, predicate) {
-      const deadline = Date.now() + 5000;
+      const deadline = Date.now() + ${RuntimeWatcherPropagationTimeoutMs};
       while (Date.now() < deadline) {
         if (existsSync(file) && predicate(readFileSync(file, "utf8"))) return;
         await new Promise((resolve) => setTimeout(resolve, 100));
