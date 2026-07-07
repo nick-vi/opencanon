@@ -8,6 +8,9 @@ import { test } from "vitest";
 import { inspectProjectRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 
+const HeavyRouteIntegrationTestTimeoutMs = 120_000;
+const HeavyRouteSubprocessTimeoutMs = 90_000;
+
 test("runtime client does not expose an env-driven in-process transport path", () => {
   const source = readFileSync(path.join(process.cwd(), "packages/cli/src/runtime-client.ts"), "utf8");
 
@@ -234,7 +237,7 @@ test("change check route runs a declared check and records pass/fail events", ()
   }
 });
 
-test("change task graph routes expose ready work and persist task lifecycle state", () => {
+test("change task graph routes expose ready work and persist task lifecycle state", { timeout: HeavyRouteIntegrationTestTimeoutMs }, () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-change-task-routes-"));
   createAuthoringProject(rootDir);
   mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -281,8 +284,12 @@ test("change task graph routes expose ready work and persist task lifecycle stat
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", changeTaskRoutesCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
+      timeout: HeavyRouteSubprocessTimeoutMs,
     });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const failureOutput = result.error
+      ? `${result.error.message}\n${result.stderr || result.stdout}`
+      : result.stderr || result.stdout;
+    assert.equal(result.status, 0, failureOutput);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
