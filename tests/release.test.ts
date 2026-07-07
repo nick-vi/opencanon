@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
+import { OpenCanonSkillArtifacts } from "../packages/core/src/opencanon-skill.ts";
 import { createOpenCanonRelease } from "../scripts/create-opencanon-release.ts";
 
 const TestTreeCoverageRoots = ["tests", "packages/runtime/test", "packages/distribution/test", "packages/observability/test"] as const;
@@ -42,6 +43,14 @@ test("test:tree includes every repo test file", () => {
     .filter((filePath) => !isCoveredByTestTree(script, filePath));
 
   assert.deepEqual(missing, []);
+});
+
+test("repo tracks managed OpenCanon skill artifacts required by doctor", () => {
+  const untracked = OpenCanonSkillArtifacts.map((artifact) => artifact.path).filter(
+    (artifactPath) => spawnSync("git", ["ls-files", "--error-unmatch", "--", artifactPath], { encoding: "utf8" }).status !== 0,
+  );
+
+  assert.deepEqual(untracked, []);
 });
 
 test("release manifest emits one bundle per available engine target", () => {

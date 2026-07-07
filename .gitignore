@@ -13,7 +13,6 @@ tmp/
 .opencanon/*.sqlite-shm
 .opencanon/*.sqlite-wal
 .opencanon/*.sqlite-journal
-.agents/skills/**/scripts/opencanon-*.sh
 packages/ui/dist/
 packages/engine/binaries/
 crates/*/target/
