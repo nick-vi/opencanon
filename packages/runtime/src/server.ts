@@ -163,8 +163,6 @@ const DefinitionHistoryKindValue = {
 
 const execCommand = promisify(execShell);
 const CheckCommandTimeoutMs = 2 * 60 * 1000;
-const StoreWatcherQueueDrainIntervalMs = 500;
-const ProcessedWatcherBatchKeyLimit = 256;
 const CheckCommandMaxBuffer = 1024 * 1024;
 const CoordinationRefreshDebounceMs = 150;
 const MaxQueuedWatchRebuilds = 32;
@@ -317,9 +315,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let watchRebuildInFlight: Promise<void> | undefined;
   const queuedWatchSummaries: string[] = [];
   const queuedWatchSummarySet = new Set<string>();
-  let storeWatcherQueueDrainTimer: ReturnType<typeof setInterval> | undefined;
-  const processedWatcherBatchKeys: string[] = [];
-  const processedWatcherBatchKeySet = new Set<string>();
   let coordinationDirectoryWatcher: FSWatcher | undefined;
   let coordinationSignalWatcher: FSWatcher | undefined;
   let coordinationRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -882,10 +877,11 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   function startStoreWatcher(): void {
     try {
       store.project.startWatcher({ debounceMs: 250, bufferCapacity: 128 }, (batch) => {
-        drainStoreWatcherQueue();
-        processStoreWatcherBatch(batch);
+        if (stopped) return;
+        const summary = watcherBatchSummary(batch);
+        projectTypesRuntime.scheduleForFiles(batch.paths, "Project authoring types updated after indexed files changed.");
+        if (summary) scheduleWatchRebuild(summary);
       });
-      startStoreWatcherQueueDrain();
       snapshot = refreshSnapshotRefreshStatus(snapshot, store);
     } catch (error) {
       const reason = `File watching is unavailable; manual refresh is required: ${errorMessage(error)}`;
@@ -899,48 +895,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
 
   function stopStoreWatcher(): void {
-    if (storeWatcherQueueDrainTimer) clearInterval(storeWatcherQueueDrainTimer);
-    storeWatcherQueueDrainTimer = undefined;
     store.project.stopWatcher();
-  }
-
-  function startStoreWatcherQueueDrain(): void {
-    if (storeWatcherQueueDrainTimer) clearInterval(storeWatcherQueueDrainTimer);
-    storeWatcherQueueDrainTimer = setInterval(drainStoreWatcherQueue, StoreWatcherQueueDrainIntervalMs);
-    if (typeof storeWatcherQueueDrainTimer === "object" && "unref" in storeWatcherQueueDrainTimer) {
-      (storeWatcherQueueDrainTimer as { unref: () => void }).unref();
-    }
-  }
-
-  function drainStoreWatcherQueue(): void {
-    if (stopped) return;
-    let batches: WatcherEventBatch[];
-    try {
-      batches = store.project.drainWatcherEvents();
-    } catch (error) {
-      events.broadcast(streamErrorEvent(`Could not drain watcher events: ${errorMessage(error)}`));
-      return;
-    }
-    for (const batch of batches) processStoreWatcherBatch(batch);
-  }
-
-  function processStoreWatcherBatch(batch: WatcherEventBatch): void {
-    if (stopped || !markStoreWatcherBatchProcessed(batch)) return;
-    const summary = watcherBatchSummary(batch);
-    projectTypesRuntime.scheduleForFiles(batch.paths, "Project authoring types updated after indexed files changed.");
-    if (summary) scheduleWatchRebuild(summary);
-  }
-
-  function markStoreWatcherBatchProcessed(batch: WatcherEventBatch): boolean {
-    const key = watcherBatchKey(batch);
-    if (processedWatcherBatchKeySet.has(key)) return false;
-    processedWatcherBatchKeySet.add(key);
-    processedWatcherBatchKeys.push(key);
-    while (processedWatcherBatchKeys.length > ProcessedWatcherBatchKeyLimit) {
-      const removed = processedWatcherBatchKeys.shift();
-      if (removed) processedWatcherBatchKeySet.delete(removed);
-    }
-    return true;
   }
 
   function startCoordinationWatcher(): void {
@@ -1248,15 +1203,6 @@ function watcherBatchSummary(batch: WatcherEventBatch): string | undefined {
   if (batch.stale) return batch.reason ?? "Engine watcher requested a full reindex.";
   if (batch.paths.length === 0) return undefined;
   return batch.paths.length === 1 ? `Indexed changed file ${batch.paths[0]}.` : `Indexed ${batch.paths.length} changed files.`;
-}
-
-function watcherBatchKey(batch: WatcherEventBatch): string {
-  return JSON.stringify({
-    paths: [...batch.paths].sort(),
-    reason: batch.reason ?? null,
-    stale: batch.stale,
-    timestamp: batch.timestamp,
-  });
 }
 
 async function serveRuntime(input: { host: string; port: number; routeRequest(request: Request): Promise<Response> }): Promise<{ port: number; stop(force?: boolean): Promise<void> }> {
