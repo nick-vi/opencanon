@@ -89,6 +89,8 @@ export function finiteLiteralIncludes(r: TypeResolution | undefined, value: stri
  *   ts.Program / first incremental rebuild). Distinct from `stale`/`crashed`:
  *   it WILL become ready; queries against it must skip, not bake a stale result.
  * - "missing-tsconfig" / "missing-package": user-fixable setup gaps.
+ * - "unsupported-package": the producer's package is installed, but outside
+ *   OpenCanon's checked API range for that package.
  * - "crashed": the producer ran and failed.
  * - "stale": a content-addressed producer (sidecar) is out of date.
  * - "disabled": opt-out (e.g. OPENCANON_TYPED_PRODUCER=off).
@@ -104,6 +106,7 @@ export const ProducerStatusKind = {
   Warming: "warming",
   MissingTsconfig: "missing-tsconfig",
   MissingPackage: "missing-package",
+  UnsupportedPackage: "unsupported-package",
   Crashed: "crashed",
   Stale: "stale",
   Disabled: "disabled",
@@ -145,14 +148,15 @@ export type ProducerStatus = {
  * OR warming live producer beats any sidecar state.
  */
 const ProducerStatusPrecedence: ProducerStatusKind[] = [
-  "ready", // live-ready (strongest)
-  "warming", // live-warming — still beats any sidecar
-  "crashed", // live-crashed
-  "stale", // sidecar-stale (only reached when no live producer)
-  "missing-package",
-  "missing-tsconfig",
-  "disabled",
-  "not-implemented", // weakest
+  ProducerStatusKind.Ready, // live-ready (strongest)
+  ProducerStatusKind.Warming, // live-warming — still beats any sidecar
+  ProducerStatusKind.Crashed, // live-crashed
+  ProducerStatusKind.Stale, // sidecar-stale (only reached when no live producer)
+  ProducerStatusKind.UnsupportedPackage,
+  ProducerStatusKind.MissingPackage,
+  ProducerStatusKind.MissingTsconfig,
+  ProducerStatusKind.Disabled,
+  ProducerStatusKind.NotImplemented, // weakest
 ];
 
 function precedenceRank(kind: ProducerStatusKind): number {

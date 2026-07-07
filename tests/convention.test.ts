@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { DefinitionTargetKind, ValidatorDomain, buildDoctorReport, createPaths, DoctorCheckGroup, DoctorStatus, loadProjectContext, resolveGoverningConventionsForFiles, resolveImpactSurfaceConventionsForFiles, resolveValidators, runValidation, validateContext } from "@opencanon/core";
+import { BatchProducerPolicy, DefinitionTargetKind, ValidatorDomain, buildDoctorReport, createPaths, DoctorCheckGroup, DoctorStatus, loadProjectContext, resolveGoverningConventionsForFiles, resolveImpactSurfaceConventionsForFiles, resolveValidators, runValidation, validateContext } from "@opencanon/core";
 import { defineArea, resolveAreas, type Area, type AreaRenderStyle } from "@opencanon/core/area";
 import { renderArea } from "@opencanon/core/area-render";
 import { defineSpec, type Spec, type SpecRenderStyle } from "@opencanon/core/spec";
@@ -134,9 +134,9 @@ test("definition-domain validators run for project and definition source validat
       render: { kind: "none" },
     });
 
-    const projectResult = await runValidation({ rootDir, paths, conventions: [convention], validators: [validator], specs: [spec], project: true });
-    const sourceResult = await runValidation({ rootDir, paths, conventions: [convention], validators: [validator], specs: [spec], files: ["opencanon/specs/index.ts"] });
-    const unrelatedResult = await runValidation({ rootDir, paths, conventions: [convention], validators: [validator], specs: [spec], files: ["src/a.ts"] });
+    const projectResult = await runValidation({ rootDir, paths, conventions: [convention], validators: [validator], specs: [spec], project: true, producerPolicy: BatchProducerPolicy });
+    const sourceResult = await runValidation({ rootDir, paths, conventions: [convention], validators: [validator], specs: [spec], files: ["opencanon/specs/index.ts"], producerPolicy: BatchProducerPolicy });
+    const unrelatedResult = await runValidation({ rootDir, paths, conventions: [convention], validators: [validator], specs: [spec], files: ["src/a.ts"], producerPolicy: BatchProducerPolicy });
 
     assert.equal(projectResult.findings.length, 1);
     assert.equal(sourceResult.findings.length, 1);

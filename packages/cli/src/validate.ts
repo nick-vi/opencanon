@@ -41,10 +41,12 @@ import type { ResolvedCommitGate } from "@opencanon/core";
 import { selectValidators, validatorGraphHash, validatorMatchesFile } from "@opencanon/core";
 import { RuntimeApiRoute, fetchRunningRuntimeProducers, withRuntimeClient } from "./runtime-client.ts";
 import { DiagnosticSeverity, ProducerStatusKind, ValidatorDomain, ValidatorOutcomeStatus, resolveProducerStatuses } from "@opencanon/core";
+import { BatchProducerPolicy, InteractiveProducerPolicy } from "@opencanon/core";
 
 // Single source of truth for fixture case names; reference members instead of inlining the strings.
 const FixtureCase = { Valid: "valid", Invalid: "invalid", Fixed: "fixed" } as const;
 type FixtureCase = (typeof FixtureCase)[keyof typeof FixtureCase];
+const ProjectValidationRequestTimeoutMs = 5 * 60 * 1000;
 
 type Query = {
   files: string[];
@@ -151,7 +153,13 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
         dryRun: query.dryRun,
         profile: query.profile,
         strictProducers: query.strictProducers,
+        producerPolicy: query.project ? BatchProducerPolicy : InteractiveProducerPolicy,
       }),
+    query.project
+      ? {
+          requestTimeoutMs: ProjectValidationRequestTimeoutMs,
+        }
+      : {},
   );
   result = query.changed ? resolveValidationCommitGates(result, true) : { ...result, commitGates: [] };
 

@@ -34,13 +34,13 @@ Producer status separates them.
 Binary model makes the live producer the only path, so the runtime must stay up on a
 real large repo before anything else.
 
-- Run live runtime + repeated `validate` on large-dogfood-workspace (~2200 files).
+- Run live runtime + repeated `validate` on a large dogfood workspace.
 - Pass: runtime stays up across >=3 calls; 2nd query warm (<2s, not 15s); no service
   death; memory stable.
 - Fail: fix the crash(es) first — that becomes the real headline. Suspects beyond the
   fixed `flushed` TDZ: watch-program init cost/memory on 2200 files, monorepo tsconfig
   resolution, TS version, service restart loop.
-- No Phase 1+ until dogfood-workspace stays warm.
+- No Phase 1+ until the large dogfood workspace stays warm.
 
 ## Phase 1 — producer registry + status (core)
 
@@ -81,7 +81,7 @@ not a fallback).
 
 - `inline-soft-enum-literal.ts`: drop `requireChecked`, add `requiresProducers:["typescript"]`,
   drop the safety comment.
-- Re-run on dogfood-workspace: 38 findings when ready; stale sidecar -> loud skip + CI fail;
+- Re-run on a large dogfood workspace: findings when ready; stale sidecar -> loud skip + CI fail;
   crash -> `crashed` status not silent zero; warm-incremental works.
 - Codex audit + self audit.
 
@@ -168,9 +168,9 @@ zero changes to `ValidatorOutcome` / `ValidationResult.producerSnapshot`.
 
 ## Done criteria
 
-1. Phase 0 green on dogfood-workspace (runtime warm, no crash).
+1. Phase 0 green on a large dogfood workspace (runtime warm, no crash).
 2. Zero rule-reachable path returns non-producer-checked typed data.
 3. Every failure mode loud: stale/crashed/missing -> visible status + CI gate;
    unsupported-language -> silent zero.
-4. dogfood-workspace re-dogfood: 38 findings when ready; three original failure modes now loud.
+4. Large-workspace re-dogfood: findings when ready; three original failure modes now loud.
 5. Both audits clean.

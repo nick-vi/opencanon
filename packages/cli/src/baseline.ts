@@ -4,6 +4,7 @@ import { cac } from "cac";
 import {
   createPaths,
   createProfiler,
+  BatchProducerPolicy,
   fail,
   Format,
   loadBaseline,
@@ -76,6 +77,7 @@ async function runBaselineUpdateCommand(args: string[], cwd: string): Promise<vo
     validators,
     project: true,
     profiler: createProfiler(false),
+    producerPolicy: BatchProducerPolicy,
   });
   const baseline: Baseline = {
     version: 1,

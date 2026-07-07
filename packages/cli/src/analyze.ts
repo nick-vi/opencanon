@@ -2,8 +2,9 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, realpathS
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { cac } from "cac";
-import { fail, Format, resolveRootDir, membershipHashOf, listMembershipFiles } from "@opencanon/core";
+import { fail, Format, resolveRootDir, membershipHashOf, listMembershipFiles, isSupportedTypeScriptVersion, unsupportedTypeScriptVersionDetail } from "@opencanon/core";
 import type { SidecarEntry, SidecarPayload, SidecarSourceFile } from "@opencanon/core";
 import { CliOptionFlag, CliOptionName, booleanOption, formatOption, rejectUnknownOptions } from "./options.ts";
 
@@ -116,8 +117,9 @@ async function collectTypedComparisonEntries(params: { rootDir: string; tsconfig
   tsVersion: string;
   coverage: { programFiles: number; comparisonSites: number; checkedSites: number };
 }> {
-  const ts = await import("typescript").catch(() => null);
+  const ts = loadProjectTypeScript(params.rootDir);
   if (!ts) fail("`typescript` is not installed in this workspace; install it as a devDependency to use --typed.");
+  if (!isSupportedTypeScriptVersion(ts.version)) fail(unsupportedTypeScriptVersionDetail(ts.version));
 
   // Phase B AST walk: build the program once, walk every StringLiteral whose
   // parent is a BinaryExpression (===/!==/==/!=), call checker.getTypeAtLocation
@@ -427,6 +429,24 @@ function literalMemberOf(
     return { name, value, display: checker.typeToString(arm) };
   }
   return undefined;
+}
+
+export function resolveProjectTypeScriptModulePath(rootDir: string): string | null {
+  try {
+    return createRequire(path.join(rootDir, "package.json")).resolve("typescript");
+  } catch {
+    return null;
+  }
+}
+
+function loadProjectTypeScript(rootDir: string): typeof import("typescript") | null {
+  const modulePath = resolveProjectTypeScriptModulePath(rootDir);
+  if (!modulePath) return null;
+  try {
+    return createRequire(path.join(rootDir, "package.json"))(modulePath) as typeof import("typescript");
+  } catch {
+    return null;
+  }
 }
 
 /** Common lockfiles + root package.json — changes here can shift @types / resolution. */

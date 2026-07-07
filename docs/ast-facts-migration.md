@@ -226,7 +226,7 @@ layer becomes "AST for JS/TS, regex for the rest," documented honestly.
 
 0. **This doc** — semantic contracts (§5). ✅
 1. **Parity harness** — a script/test that runs BOTH the regex extractor and the
-   engine extractor over real repos (this repo + dogfood-workspace) AND every fixture, per
+   engine extractor over real workspaces and every fixture, per
    fact kind, and diffs. Classify each diff: `regex-bug | AST-bug | intentional`.
    Keep golden snapshots for nasties (regex literals, templates, generics,
    decorators, re-exports, multi-line decls).

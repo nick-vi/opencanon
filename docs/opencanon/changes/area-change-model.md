@@ -74,9 +74,13 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/core/src/feedback.ts`
 - Files: `packages/core/src/hooks.ts`
 - Files: `packages/core/src/index.ts`
+- Files: `packages/core/src/language-analyzer.ts`
+- Files: `packages/core/src/opencanon-skill.ts`
 - Files: `packages/core/src/project-types.ts`
+- Files: `packages/core/src/producer-registry.ts`
 - Files: `packages/core/src/release-keys.ts`
 - Files: `packages/core/src/testing.ts`
+- Files: `packages/core/src/type-facts-provider.ts`
 - Files: `packages/core/src/validator.ts`
 - Files: `packages/core/src/validator-graph.ts`
 - Files: `packages/cli/src/areas.ts`
@@ -85,9 +89,12 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/cli/src/conventions.ts`
 - Files: `packages/cli/src/context.ts`
 - Files: `packages/cli/src/analyze.ts`
+- Files: `packages/cli/src/baseline.ts`
 - Files: `packages/cli/src/feedback.ts`
 - Files: `packages/cli/src/index.ts`
+- Files: `packages/cli/src/init-flow.ts`
 - Files: `packages/cli/src/update.ts`
+- Files: `packages/cli/src/validate.ts`
 - Files: `packages/runtime/src/project-types-runtime.ts`
 - Files: `packages/cli/src/runtime-client.ts`
 - Files: `packages/engine/src/index.ts`
@@ -97,6 +104,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/runtime/src/service.ts`
 - Files: `packages/runtime/src/state.ts`
 - Files: `packages/runtime/src/semantic-index.ts`
+- Files: `packages/runtime/src/type-producer/producer-main.ts`
 - Files: `packages/runtime/src/type-producer/runtime.ts`
 - Files: `packages/runtime/src/routes.ts`
 - Files: `packages/runtime/src/server.ts`
@@ -207,7 +215,7 @@ Impact surfaces: [project-canon-model](opencanon://impact-surfaces/project-canon
 Checks: `project-doctor`
 
 Task `hook-and-export-cleanup`: Expose hook failures and remove stale package export paths
-Files: `.opencode/plugins/opencanon.ts`, `packages/core/package.json`, `packages/service-contracts/src/index.ts`
+Files: `.opencode/plugins/opencanon.ts`, `packages/core/package.json`, `packages/core/src/opencanon-skill.ts`, `packages/service-contracts/src/index.ts`
 Impact surfaces: [project-canon-model](opencanon://impact-surfaces/project-canon-model), [local-service-control](opencanon://impact-surfaces/local-service-control)
 Checks: `typecheck`
 
@@ -222,7 +230,7 @@ Impact surfaces: [release-update](opencanon://impact-surfaces/release-update), [
 Checks: `release-tests`, `typecheck`, `project-doctor`
 
 Task `runtime-repair-hardening`: Make supervised runtime repair deterministic across worktrees and stale pipes
-Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`
+Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/cli/src/validate.ts`, `packages/core/src/index.ts`, `packages/core/src/language-analyzer.ts`, `packages/core/src/producer-registry.ts`, `packages/core/src/type-facts-provider.ts`, `packages/core/src/validator.ts`, `packages/runtime/src/server.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/producer-main.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/type-producer.test.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`
 Impact surfaces: [local-service-control](opencanon://impact-surfaces/local-service-control)
 Checks: `runtime-tests`, `service-lifecycle-tests`, `worktree-tests`
 

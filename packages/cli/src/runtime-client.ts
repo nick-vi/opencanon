@@ -1,6 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import {
   ensureProjectRuntimeViaService,
   inspectProjectRuntime,
@@ -10,12 +7,10 @@ import {
   resolveRuntimeCliEntrypoint,
   runtimeIdentityForEntrypoint,
   serviceRegistryPath,
-  startOpenCanonRuntime,
   stopProjectRuntime,
   RuntimeStatus,
   waitForProjectRuntimeReady,
   type RuntimeRegistryEntry,
-  type RuntimeServer,
 } from "@opencanon/runtime";
 import { resolveRootDir } from "@opencanon/core";
 
@@ -40,11 +35,6 @@ export const RuntimeApiRoute = {
   Snapshot: "/api/snapshot",
   Validate: "/api/validate",
   Worktrees: "/api/worktrees",
-} as const;
-
-const InProcessRuntimeState = {
-  Prefix: "opencanon-in-process-",
-  StateFile: "state.sqlite",
 } as const;
 
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
@@ -107,7 +97,6 @@ export type RuntimeClientOptions = {
   localTransport?: LocalTransportKind;
   requestTimeoutMs?: number;
   startupTimeoutMs?: number;
-  transport?: "in-process" | "supervised";
 };
 
 export async function withRuntimeClient<T>(
@@ -117,82 +106,59 @@ export async function withRuntimeClient<T>(
 ): Promise<T> {
   const rootDir = resolveRootDir(cwd);
   const registryPath = serviceRegistryPath();
-  let server: RuntimeServer | undefined;
-  let inProcessStateDir: string | undefined;
   let supervisedRuntimeRepair: Promise<RuntimeRegistryEntry> | undefined;
 
-  try {
-    const entry = shouldUseInProcessRuntime(options)
-      ? undefined
-      : await ensureSupervisedRuntimeReady(rootDir, registryPath, options.startupTimeoutMs);
-    let endpoint = entry ? localProtocolEndpointFromEntry(entry, { prefer: options.localTransport }) : undefined;
-    if (!endpoint) {
-      inProcessStateDir = mkdtempSync(path.join(tmpdir(), InProcessRuntimeState.Prefix));
-      server = await startOpenCanonRuntime({
-        cwd: rootDir,
-        port: 0,
-        statePath: path.join(inProcessStateDir, InProcessRuntimeState.StateFile),
-      });
-      endpoint = localProtocolEndpointFromEntry(server, { prefer: options.localTransport });
-    }
+  const entry = await ensureSupervisedRuntimeReady(rootDir, registryPath, options.startupTimeoutMs);
+  let endpoint = localProtocolEndpointFromEntry(entry, { prefer: options.localTransport });
 
-    const requestWithRepair = async <T>(request: { method: "GET" | "POST"; path: string; body?: unknown }): Promise<T> => {
-      if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
-      let initialError: unknown;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          return await requestLocalJson<T>(endpoint, { ...request, timeoutMs: options.requestTimeoutMs });
-        } catch (error) {
-          if (attempt > 0 || server || !isLocalTransportFailure(error)) {
-            if (initialError) {
-              throw new Error(
-                `OpenCanon runtime request failed after repairing the project runtime: ${errorMessage(error)}. Initial failure: ${errorMessage(initialError)}`,
-              );
-            }
-            throw error;
-          }
-          initialError = error;
-          const repaired = await repairSupervisedRuntime();
-          endpoint = localProtocolEndpointFromEntry(repaired, { prefer: options.localTransport });
-        }
-      }
-      throw new Error("OpenCanon runtime request failed before it returned a response.");
-    };
-
-    const repairSupervisedRuntime = async (): Promise<RuntimeRegistryEntry> => {
-      if (!supervisedRuntimeRepair) {
-        supervisedRuntimeRepair = repairSupervisedRuntimeAfterTransportFailure(rootDir, registryPath, options.startupTimeoutMs);
-      }
+  const requestWithRepair = async <T>(request: { method: "GET" | "POST"; path: string; body?: unknown }): Promise<T> => {
+    if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
+    let initialError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        return await supervisedRuntimeRepair;
-      } catch (repairError) {
-        supervisedRuntimeRepair = undefined;
-        throw repairError;
+        return await requestLocalJson<T>(endpoint, { ...request, timeoutMs: options.requestTimeoutMs });
+      } catch (error) {
+        if (attempt > 0 || !isLocalTransportFailure(error)) {
+          if (initialError) {
+            throw new Error(
+              `OpenCanon runtime request failed after repairing the project runtime: ${errorMessage(error)}. Initial failure: ${errorMessage(initialError)}`,
+            );
+          }
+          throw error;
+        }
+        initialError = error;
+        const repaired = await repairSupervisedRuntime();
+        endpoint = localProtocolEndpointFromEntry(repaired, { prefer: options.localTransport });
       }
-    };
+    }
+    throw new Error("OpenCanon runtime request failed before it returned a response.");
+  };
 
-    return await callback({
-      async get<T>(path: string) {
-        return requestWithRepair<T>({ method: "GET", path });
-      },
-      async post<T>(path: string, body: unknown) {
-        return requestWithRepair<T>({ method: "POST", path, body });
-      },
-    });
-  } finally {
-    if (server) await server.stop();
-    if (inProcessStateDir) rmSync(inProcessStateDir, { recursive: true, force: true });
-  }
+  const repairSupervisedRuntime = async (): Promise<RuntimeRegistryEntry> => {
+    if (!supervisedRuntimeRepair) {
+      supervisedRuntimeRepair = repairSupervisedRuntimeAfterTransportFailure(rootDir, registryPath, options.startupTimeoutMs);
+    }
+    try {
+      return await supervisedRuntimeRepair;
+    } catch (repairError) {
+      supervisedRuntimeRepair = undefined;
+      throw repairError;
+    }
+  };
+
+  return await callback({
+    async get<T>(path: string) {
+      return requestWithRepair<T>({ method: "GET", path });
+    },
+    async post<T>(path: string, body: unknown) {
+      return requestWithRepair<T>({ method: "POST", path, body });
+    },
+  });
 }
 
 async function repairSupervisedRuntimeAfterTransportFailure(rootDir: string, registryPath: string, timeoutMs: number | undefined): Promise<RuntimeRegistryEntry> {
   await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
   return await ensureSupervisedRuntimeReady(rootDir, registryPath, timeoutMs);
-}
-
-function shouldUseInProcessRuntime(options: RuntimeClientOptions): boolean {
-  if (options.transport === "in-process") return true;
-  return false;
 }
 
 async function ensureSupervisedRuntimeReady(rootDir: string, registryPath: string, timeoutMs = 180_000): Promise<RuntimeRegistryEntry> {

@@ -29,10 +29,19 @@ import {
   createValidationContext,
   flushValidationContextCache,
   installContextTypeFacts,
+  resolveArtifactTypeFactsProvider,
+  resolveLiveTypeFactsProvider,
   resolveRunTypeFacts,
   validateFindings,
   validatorMatchesFile,
 } from "./validator.ts";
+import { ProjectFileLanguage } from "./language-registry.ts";
+import {
+  ProducerSourceKind,
+  producerSourceForLanguage,
+  type ProducerPolicy,
+  type ProducerSource,
+} from "./producer-registry.ts";
 
 export type ValidationInput = {
   rootDir: string;
@@ -51,6 +60,7 @@ export type ValidationInput = {
   profiler?: Profiler;
   /** Escalate every `requiresProducers` skip into an error finding (nonzero exit). */
   strictProducers?: boolean;
+  producerPolicy: ProducerPolicy;
 };
 
 /**
@@ -138,6 +148,7 @@ export async function runValidation(input: ValidationInput): Promise<ValidationR
     findingValidationContext,
     profiler,
     strictProducers: input.strictProducers ?? false,
+    producerPolicy: input.producerPolicy,
   });
   let findings = validation.findings;
   let outcomes = validation.outcomes;
@@ -164,6 +175,7 @@ export async function runValidation(input: ValidationInput): Promise<ValidationR
         findingValidationContext,
         profiler,
         strictProducers: input.strictProducers ?? false,
+        producerPolicy: input.producerPolicy,
       });
       findings = validation.findings;
       outcomes = validation.outcomes;
@@ -239,6 +251,43 @@ export function sortFindings(findings: Finding[]): Finding[] {
   );
 }
 
+function typeFactsProviderForPolicy(rootDir: string, policy: ProducerPolicy, language: string) {
+  const source = producerSourceForLanguage(policy, language);
+  if (source.kind === ProducerSourceKind.Artifact) return resolveArtifactTypeFactsProvider(rootDir, language, source.id);
+  if (source.kind === ProducerSourceKind.Live) return resolveLiveTypeFactsProvider(rootDir, language, source.worker);
+  return {
+    language,
+    status: () => ({
+      language,
+      kind: ProducerStatusKind.NotImplemented,
+      ...(source.detail ? { detail: source.detail } : {}),
+    }),
+    factGeneration: () => undefined,
+    resolveTypes: () => Promise.resolve(new Map()),
+  };
+}
+
+function nonQueryProducerStatuses(policy: ProducerPolicy, queriedLanguage: string): ProducerStatus[] {
+  return Object.entries(policy.sources)
+    .filter(([language]) => language !== queriedLanguage)
+    .map(([language, source]) => statusForNonQuerySource(language, source));
+}
+
+function statusForNonQuerySource(language: string, source: ProducerSource | undefined): ProducerStatus {
+  if (!source || source.kind === ProducerSourceKind.NotImplemented) {
+    return {
+      language,
+      kind: ProducerStatusKind.NotImplemented,
+      ...(source?.detail ? { detail: source.detail } : {}),
+    };
+  }
+  return {
+    language,
+    kind: ProducerStatusKind.NotImplemented,
+    detail: `${language} producer ${source.kind} is configured in this policy but was not queried by this validation run.`,
+  };
+}
+
 async function runValidators(params: {
   rootDir: string;
   paths: ContextPaths;
@@ -252,6 +301,7 @@ async function runValidators(params: {
   };
   profiler: Profiler;
   strictProducers: boolean;
+  producerPolicy: ProducerPolicy;
 }): Promise<ValidationRunResult> {
   const findings: Finding[] = [];
   const outcomes: ValidatorOutcome[] = [];
@@ -322,8 +372,10 @@ async function runValidators(params: {
   const activeContexts = jobs.map((job) => job.ctx).filter((ctx): ctx is NonNullable<typeof ctx> => ctx !== null);
   let sharedTypeFacts: Awaited<ReturnType<typeof resolveRunTypeFacts>>;
   try {
+    const typeFactsProvider = typeFactsProviderForPolicy(params.rootDir, params.producerPolicy, ProjectFileLanguage.TypeScript);
+    const policyStatuses = nonQueryProducerStatuses(params.producerPolicy, typeFactsProvider.language);
     sharedTypeFacts = await params.profiler.measureAsync("prewarm.typeFacts", () =>
-      resolveRunTypeFacts(activeContexts, params.rootDir),
+      resolveRunTypeFacts(activeContexts, typeFactsProvider, policyStatuses),
     );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

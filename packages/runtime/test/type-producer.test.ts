@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -9,6 +9,7 @@ import { test } from "vitest";
 import { createTypeProducerRuntime, typescriptResolvableFrom } from "../src/type-producer/runtime.ts";
 import { LiveTypeProducerProvider } from "../src/type-producer/live-provider.ts";
 import type { TypeProducerRuntime } from "../src/type-producer/runtime.ts";
+import { ProducerStatusKind } from "@opencanon/core";
 
 const producerMainPath = fileURLToPath(new URL("../src/type-producer/producer-main.ts", import.meta.url));
 const producerTestTimeoutMs = 120_000;
@@ -24,10 +25,22 @@ function typescriptAvailable(): boolean {
   }
 }
 
+function linkWorkspaceTypeScript(rootDir: string): void {
+  const source = path.resolve("node_modules/typescript");
+  const target = path.join(rootDir, "node_modules/typescript");
+  mkdirSync(path.dirname(target), { recursive: true });
+  try {
+    symlinkSync(source, target, "dir");
+  } catch {
+    cpSync(source, target, { recursive: true });
+  }
+}
+
 // A tiny fixture: a comparison `mode === "fast"` where `mode` is typed as a
 // string-literal union, so the producer should resolve a non-`string` type.
 function makeFixture(): { rootDir: string; cleanup: () => void } {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-type-producer-"));
+  linkWorkspaceTypeScript(rootDir);
   writeFileSync(
     path.join(rootDir, "tsconfig.json"),
     JSON.stringify({ compilerOptions: { strict: true, module: "esnext", target: "esnext", moduleResolution: "bundler" }, include: ["src"] }, null, 2),
@@ -40,9 +53,38 @@ function makeFixture(): { rootDir: string; cleanup: () => void } {
     "",
   ].join("\n");
   const srcDir = path.join(rootDir, "src");
-  require("node:fs").mkdirSync(srcDir, { recursive: true });
+  mkdirSync(srcDir, { recursive: true });
   writeFileSync(path.join(srcDir, "sample.ts"), source);
   return { rootDir, cleanup: () => rmSync(rootDir, { recursive: true, force: true }) };
+}
+
+function makeManySiteFixture(count: number): {
+  rootDir: string;
+  sites: Array<{ file: string; line: number; column: number }>;
+  cleanup: () => void;
+} {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-type-producer-many-"));
+  linkWorkspaceTypeScript(rootDir);
+  writeFileSync(
+    path.join(rootDir, "tsconfig.json"),
+    JSON.stringify({ compilerOptions: { strict: true, module: "esnext", target: "esnext", moduleResolution: "bundler" }, include: ["src"] }, null, 2),
+  );
+  const comparisonLine = '    status === "ready",';
+  const lines = [
+    'export type Status = "ready" | "blocked";',
+    "export function matches(status: Status): boolean {",
+    "  return [",
+    ...Array.from({ length: count }, () => comparisonLine),
+    "  ].every(Boolean);",
+    "}",
+    "",
+  ];
+  const srcDir = path.join(rootDir, "src");
+  mkdirSync(srcDir, { recursive: true });
+  writeFileSync(path.join(srcDir, "many.ts"), lines.join("\n"));
+  const column = comparisonLine.indexOf('"ready"') + 1;
+  const sites = Array.from({ length: count }, (_, index) => ({ file: "src/many.ts", line: index + 4, column }));
+  return { rootDir, sites, cleanup: () => rmSync(rootDir, { recursive: true, force: true }) };
 }
 
 function writeFakeProducer(rootDir: string, source: string): string {
@@ -108,6 +150,55 @@ test("producer-main resolves a comparison site's type", { timeout: producerTestT
     assert.equal(resolutions[0].kind, "literal-union", "string-literal union → literal-union");
     const values = (resolutions[0].members ?? []).map((m) => m.value?.value).sort();
     assert.deepEqual(values, ["fast", "slow"], "members enumerate the union arms");
+  } finally {
+    child.stdin!.write(`${JSON.stringify({ id: 2, method: "shutdown" })}\n`);
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => {
+        child.kill();
+        resolve();
+      }, 2000);
+      child.on("exit", () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+    cleanup();
+  }
+});
+
+test("producer-main batches many same-file sites into one source-file walk", { timeout: producerTestTimeoutMs }, async (ctx) => {
+  if (!typescriptAvailable()) return ctx.skip();
+  const count = 200;
+  const { rootDir, sites, cleanup } = makeManySiteFixture(count);
+  const child = spawn(process.execPath, [producerMainPath, "--tsconfig", path.join(rootDir, "tsconfig.json"), "--root", rootDir], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  try {
+    const rl = readline.createInterface({ input: child.stdout! });
+    const response = await new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("producer did not respond")), producerReadinessTimeoutMs);
+      rl.on("line", (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        try {
+          const message = JSON.parse(trimmed);
+          if (message.id === 1) {
+            clearTimeout(timer);
+            resolve(message);
+          }
+        } catch {
+          // ignore non-JSON
+        }
+      });
+      child.on("exit", () => reject(new Error("producer exited early")));
+      child.stdin!.write(`${JSON.stringify({ id: 1, method: "resolveTypes", sites })}\n`);
+    });
+    assert.ok(response.result, "expected a result");
+    assert.equal(response.result.resolutions.length, count, "expected every requested site to resolve");
+    assert.equal(response.result.stats?.sites, count, "stats should record every requested site");
+    assert.equal(response.result.stats?.sourceFiles, 1, "all requested sites live in one source file");
+    assert.equal(response.result.stats?.walkedSourceFiles, 1, "resolver must walk each source file once, not once per site");
+    assert.equal(response.result.stats?.resolutions, count, "stats should record every resolution");
   } finally {
     child.stdin!.write(`${JSON.stringify({ id: 2, method: "shutdown" })}\n`);
     await new Promise<void>((resolve) => {
@@ -329,7 +420,34 @@ test("TypeProducerRuntime handles early producer exit without uncaught pipe erro
 
 test("typescriptResolvableFrom resolves TypeScript from an ESM runtime module", (ctx) => {
   if (!typescriptAvailable()) return ctx.skip();
-  assert.equal(typescriptResolvableFrom(process.cwd()), true);
+  const { rootDir, cleanup } = makeFixture();
+  try {
+    assert.equal(typescriptResolvableFrom(rootDir), true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("TypeProducerRuntime reports unsupported project TypeScript without spawning", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-type-producer-unsupported-"));
+  try {
+    writeFileSync(path.join(rootDir, "tsconfig.json"), JSON.stringify({ compilerOptions: { noEmit: true }, include: [] }));
+    const packageRoot = path.join(rootDir, "node_modules/typescript");
+    mkdirSync(packageRoot, { recursive: true });
+    writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({ name: "typescript", version: "4.9.5" }));
+    const runtime = createTypeProducerRuntime({
+      rootDir,
+      tsconfigPath: path.join(rootDir, "tsconfig.json"),
+      requestTimeoutMs: 50,
+    });
+    assert.equal(typescriptResolvableFrom(rootDir), false);
+    const status = runtime.status();
+    assert.equal(status.kind, ProducerStatusKind.UnsupportedPackage);
+    assert.match(status.detail ?? "", />=5\.0\.0 <7\.0\.0/);
+    assert.equal(runtime.isRunning(), false);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
 });
 
 test("C1: producer spawned against this repo answers status ready:true", { timeout: producerTestTimeoutMs }, async (ctx) => {
@@ -345,9 +463,7 @@ test("C1: producer spawned against this repo answers status ready:true", { timeo
   }
   const child = spawn(process.execPath, [producerMainPath, "--tsconfig", tsconfig, "--root", repoRoot], {
     stdio: ["pipe", "pipe", "pipe"],
-    // Mirror the runtime: child cwd is the root, resolution cwd passed explicitly.
     cwd: repoRoot,
-    env: { ...process.env, OPENCANON_RESOLVE_CWD: process.cwd() },
   });
   try {
     const rl = readline.createInterface({ input: child.stdout! });
@@ -384,7 +500,6 @@ test("C2: producer exits shortly after its stdin closes (no orphan)", { timeout:
   const { rootDir, cleanup } = makeFixture();
   const child = spawn(process.execPath, [producerMainPath, "--tsconfig", path.join(rootDir, "tsconfig.json"), "--root", rootDir], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, OPENCANON_RESOLVE_CWD: process.cwd() },
   });
   try {
     const exited = await new Promise<boolean>((resolve) => {

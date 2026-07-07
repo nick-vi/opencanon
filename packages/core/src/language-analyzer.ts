@@ -385,22 +385,29 @@ export function comparisonSites(literals: ProjectLiteralFact[]): TypeSite[] {
  */
 export function sidecarStatusFromRead(
   read: SidecarReadResult,
-  setup: { hasTsconfig: boolean; hasTypeScript: boolean; currentMembershipHash?: string },
+  setup: { hasTsconfig: boolean; hasTypeScript: boolean; typeScriptSupport?: { supported: boolean; detail?: string }; currentMembershipHash?: string },
 ): ProducerStatus {
   if (read.payload) {
     const warnings: ProducerWarning[] = [];
-    return { language: "typescript", kind: "ready", ...(warnings.length ? { warnings } : {}) };
+    return { language: "typescript", kind: ProducerStatusKind.Ready, ...(warnings.length ? { warnings } : {}) };
   }
   if (!setup.hasTypeScript) {
-    return { language: "typescript", kind: "missing-package", detail: "`typescript` is not installed in this workspace." };
+    return { language: "typescript", kind: ProducerStatusKind.MissingPackage, detail: "`typescript` is not installed in this workspace." };
   }
   if (!setup.hasTsconfig) {
-    return { language: "typescript", kind: "missing-tsconfig", detail: "no tsconfig.json found at the project root." };
+    return { language: "typescript", kind: ProducerStatusKind.MissingTsconfig, detail: "no tsconfig.json found at the project root." };
+  }
+  if (setup.typeScriptSupport && !setup.typeScriptSupport.supported) {
+    return {
+      language: "typescript",
+      kind: ProducerStatusKind.UnsupportedPackage,
+      detail: setup.typeScriptSupport.detail,
+    };
   }
   if (read.staleReason === SidecarStaleReason.Missing) {
     return {
       language: "typescript",
-      kind: "stale",
+      kind: ProducerStatusKind.Stale,
       detail: "no typed-comparisons sidecar (run `opencanon analyze --typed`).",
     };
   }
@@ -410,7 +417,7 @@ export function sidecarStatusFromRead(
       : [];
   return {
     language: "typescript",
-    kind: "stale",
+    kind: ProducerStatusKind.Stale,
     detail: `typed-comparisons sidecar is stale (${read.staleReason}); re-run \`opencanon analyze --typed\`.`,
     ...(warnings.length ? { warnings } : {}),
   };

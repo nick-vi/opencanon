@@ -163,8 +163,8 @@ function renderRuntimeUpdateCheckMarkdown(check: RuntimeUpdateCheck): string {
     `Bundle: ${check.resolvedBundleSource}`,
     `Runtime root: ${check.runtimeRoot}`,
     `Engine file: ${check.runtimePath}`,
-    `Expected SHA-256: ${check.expectedSha256}`,
-    check.currentSha256 ? `Current SHA-256: ${check.currentSha256}` : "Current SHA-256: <missing>",
+    `Expected bundle SHA-256: ${check.expectedSha256}`,
+    check.currentSha256 ? `Installed bundle SHA-256: ${check.currentSha256}` : "Installed bundle SHA-256: <missing>",
   ]
     .filter(Boolean)
     .join("\n");

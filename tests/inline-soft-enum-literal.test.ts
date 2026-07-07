@@ -90,7 +90,7 @@ const SourceWithDeclaredEnum = [
 async function runWith(source: string, resolution: TypeResolution | undefined) {
   const { rootDir, ctx } = buildContext(source);
   try {
-    await prewarmContextTypeFacts(ctx, rootDir, providerFor(resolution));
+    await prewarmContextTypeFacts(ctx, providerFor(resolution));
     assert.ok(inlineSoftEnumLiteralValidator?.validate, "convention defines validator runtime");
     return await inlineSoftEnumLiteralValidator.validate({ ctx, runtime: createRuntime(createPaths(rootDir), []) });
   } finally {

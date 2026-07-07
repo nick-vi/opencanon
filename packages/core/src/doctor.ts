@@ -20,7 +20,7 @@ import { FixModeValue } from "./fixes.ts";
 import { GeneratedStateIgnoreEntries, GeneratedStateIgnoreProbePaths } from "./generated-state.ts";
 import { validatePatterns } from "./globs.ts";
 import { inspectHookInstallations } from "./hook-install.ts";
-import { validateOpenCanonSkillArtifacts, writeOpenCanonSkillArtifacts } from "./opencanon-skill.ts";
+import { removeRetiredOpenCanonSkillArtifacts, validateOpenCanonSkillArtifacts, writeOpenCanonSkillArtifacts } from "./opencanon-skill.ts";
 import {
   buildProjectTypesGeneration,
   generateProjectTypes,
@@ -310,7 +310,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; conventions: Co
     details: fixtureDiagnostics,
   });
 
-  const scriptDiagnostics = validatePackageScripts(packageJson, paths.requiredPackageScripts);
+  const scriptDiagnostics = validatePackageScripts(packageJson, paths.requiredPackageScripts, openCanonWorkspace);
   pushCheck(DoctorCheckGroup.Install, {
     id: "package-scripts",
     status: scriptDiagnostics.length === 0 ? DoctorStatus.Pass : DoctorStatus.Fail,
@@ -479,6 +479,8 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
   const projectAuthoring = params.report.checks.find((check) => check.id === "project-authoring");
   const agentEntry = params.report.checks.find((check) => check.id === "agent-entry");
   const openCanonSkill = params.report.checks.find((check) => check.id === "opencanon-skill");
+  const packageScripts = params.report.checks.find((check) => check.id === "package-scripts");
+  const openCanonWorkspace = isOpenCanonFrameworkWorkspace(readPackageJson(path.join(params.paths.rootDir, "packages/core/package.json")));
   if (cacheIgnore?.status === DoctorStatus.Fail) {
     if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
       result.skipped.push("cache-ignore: safe fix outside requested mode.");
@@ -554,10 +556,27 @@ export function applyDoctorFixes(params: { paths: ContextPaths; report: DoctorRe
       result.selectedFixes += 1;
       if (!params.dryRun) {
         try {
+          removeRetiredOpenCanonSkillArtifacts(params.paths.rootDir);
           writeOpenCanonSkillArtifacts(params.paths.rootDir);
           result.appliedFixes += 1;
         } catch (error) {
           result.diagnostics.push(`opencanon-skill: ${errorMessage(error)}`);
+        }
+      }
+    }
+  }
+
+  if (packageScripts?.status === DoctorStatus.Fail && params.paths.requiredPackageScripts.includes("opencanon")) {
+    if (!isFixAllowed(FixModeValue.Safe, params.mode)) {
+      result.skipped.push("package-scripts: safe fix outside requested mode.");
+    } else {
+      result.selectedFixes += 1;
+      if (!params.dryRun) {
+        try {
+          ensureOpenCanonPackageScript(params.paths.rootDir, openCanonWorkspace);
+          result.appliedFixes += 1;
+        } catch (error) {
+          result.diagnostics.push(`package-scripts: ${errorMessage(error)}`);
         }
       }
     }
@@ -1017,10 +1036,51 @@ function validateFixturePresence(paths: ContextPaths, validators: Validator[]): 
   return diagnostics;
 }
 
-function validatePackageScripts(packageJson: Record<string, any> | null, required: string[]): string[] {
+const SourceOpenCanonCliScript = "node packages/cli/src/index.ts";
+
+function validatePackageScripts(packageJson: Record<string, any> | null, required: string[], openCanonWorkspace: boolean): string[] {
   if (!packageJson) return ["package.json is missing."];
-  const scripts = packageJson.scripts ?? {};
-  return required.filter((script) => !scripts[script]).map((script) => `Missing package script: ${script}`);
+  const scripts = isRecord(packageJson.scripts) ? packageJson.scripts : {};
+  const diagnostics = required.filter((script) => !scripts[script]).map((script) => `Missing package script: ${script}`);
+  if (required.includes("opencanon") && scripts.opencanon !== undefined && !isExpectedOpenCanonPackageScript(scripts.opencanon, openCanonWorkspace)) {
+    diagnostics.push(`package.json scripts.opencanon should be "opencanon", found ${JSON.stringify(scripts.opencanon)}. Run opencanon doctor --fix.`);
+  }
+  return diagnostics;
+}
+
+function isExpectedOpenCanonPackageScript(value: unknown, openCanonWorkspace: boolean): boolean {
+  return value === "opencanon" || (openCanonWorkspace && value === SourceOpenCanonCliScript);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function ensureOpenCanonPackageScript(rootDir: string, openCanonWorkspace: boolean): void {
+  const packageJsonPath = path.join(rootDir, "package.json");
+  let packageJson: Record<string, any>;
+  try {
+    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as unknown;
+    packageJson = isRecord(parsed) ? parsed : {};
+  } catch (error) {
+    throw new Error(`Could not update package.json scripts: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const scripts = isRecord(packageJson.scripts) ? packageJson.scripts : {};
+  const openCanonScript = openCanonWorkspace ? SourceOpenCanonCliScript : "opencanon";
+  writeFileSync(
+    packageJsonPath,
+    `${JSON.stringify(
+      {
+        ...packageJson,
+        scripts: {
+          ...scripts,
+          opencanon: openCanonScript,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 function validateDependencyPin(

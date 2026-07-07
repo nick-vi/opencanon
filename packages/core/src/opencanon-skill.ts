@@ -1,9 +1,21 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { relative } from "./core-utils.ts";
 
 export const OpenCanonSkillRoot = ".agents/skills/opencanon";
 export const OpenCanonSkillFilePath = `${OpenCanonSkillRoot}/SKILL.md`;
+export const RetiredOpenCanonSkillArtifactPaths = [
+  `${OpenCanonSkillRoot}/runtime`,
+  `${OpenCanonSkillRoot}/fixtures`,
+  `${OpenCanonSkillRoot}/validators`,
+  `${OpenCanonSkillRoot}/index.ts`,
+  `${OpenCanonSkillRoot}/testing.ts`,
+  `${OpenCanonSkillRoot}/safe-extract.ts`,
+  `${OpenCanonSkillRoot}/package.json`,
+  `${OpenCanonSkillRoot}/scripts/opencanon.ts`,
+  `${OpenCanonSkillRoot}/scripts/opencanon.mjs`,
+  `${OpenCanonSkillRoot}/scripts/opencode-plugin.ts`,
+] as const;
 
 export type OpenCanonSkillArtifact = {
   path: string;
@@ -257,6 +269,12 @@ export function writeOpenCanonSkillArtifacts(rootDir: string): void {
   }
 }
 
+export function removeRetiredOpenCanonSkillArtifacts(rootDir: string): void {
+  for (const retiredPath of RetiredOpenCanonSkillArtifactPaths) {
+    rmSync(path.join(rootDir, retiredPath), { recursive: true, force: true });
+  }
+}
+
 export function validateOpenCanonSkillArtifacts(rootDir: string): string[] {
   const diagnostics: string[] = [];
   for (const artifact of OpenCanonSkillArtifacts) {
@@ -270,6 +288,11 @@ export function validateOpenCanonSkillArtifacts(rootDir: string): string[] {
     if (actual !== artifact.content) diagnostics.push(`OpenCanon skill file drifted: ${displayPath}. Run opencanon doctor --fix.`);
     if (artifact.mode !== undefined && (statSync(absolutePath).mode & 0o111) === 0) {
       diagnostics.push(`OpenCanon skill script is not executable: ${displayPath}. Run opencanon doctor --fix.`);
+    }
+  }
+  for (const retiredPath of RetiredOpenCanonSkillArtifactPaths) {
+    if (existsSync(path.join(rootDir, retiredPath))) {
+      diagnostics.push(`Retired OpenCanon skill artifact remains: ${retiredPath}. Run opencanon doctor --fix.`);
     }
   }
   return diagnostics;

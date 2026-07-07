@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,9 +9,26 @@ import { test } from "vitest";
 function createHashHex(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
+
+function linkWorkspaceTypeScript(rootDir: string): string {
+  const source = path.resolve("node_modules/typescript");
+  const target = path.join(rootDir, "node_modules/typescript");
+  mkdirSync(path.dirname(target), { recursive: true });
+  try {
+    symlinkSync(source, target, "dir");
+  } catch {
+    cpSync(source, target, { recursive: true });
+  }
+  try {
+    return JSON.parse(readFileSync(path.join(target, "package.json"), "utf8")).version as string;
+  } catch (error) {
+    throw new Error(`Could not read linked TypeScript package metadata: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 import {
   applyDoctorFixes,
   applyFindingFixes,
+  BatchProducerPolicy,
   buildDoctorReport,
   createPaths,
   createCommitApprovalContext,
@@ -37,6 +54,7 @@ import {
   resolveCommitGates,
   resolveValidators,
   runValidation,
+  InteractiveProducerPolicy,
   ValidatorOutcomeStatus,
   LiteralContext,
   LiteralValueKind,
@@ -286,7 +304,7 @@ test("runtime validation reports broken finding docs references", async () => {
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, conventions, validators, files: ["src/a.ts"] });
+    const result = await runValidation({ rootDir, paths, conventions, validators, files: ["src/a.ts"], producerPolicy: BatchProducerPolicy });
     // Runtime contract violations are `error` outcomes, never findings.
     const runtimeMessages = result.validatorOutcomes
       .filter((outcome) => outcome.status === ValidatorOutcomeStatus.Error)
@@ -375,7 +393,7 @@ test("validators can emit diff-bound commit gates", async () => {
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: BatchProducerPolicy });
     assert.equal(result.findings.length, 0);
     assert.equal(result.commitGates.length, 1);
     assert.equal(result.commitGates[0]?.id, "auth-session-change");
@@ -453,8 +471,8 @@ test("validator graph hash is based on metadata instead of function source", asy
       }),
     ).validators;
 
-    const firstResult = await runValidation({ rootDir, paths, conventions: [], validators: first, files: [targetFile] });
-    const secondResult = await runValidation({ rootDir, paths, conventions: [], validators: second, files: [targetFile] });
+    const firstResult = await runValidation({ rootDir, paths, conventions: [], validators: first, files: [targetFile], producerPolicy: BatchProducerPolicy });
+    const secondResult = await runValidation({ rootDir, paths, conventions: [], validators: second, files: [targetFile], producerPolicy: BatchProducerPolicy });
     assert.equal(firstResult.validatorGraphHash, secondResult.validatorGraphHash);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -488,7 +506,7 @@ test("invalid commit gate definitions are validator-runtime error outcomes (not 
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: BatchProducerPolicy });
     assert.equal(result.commitGates.length, 0);
     assert.equal(result.findings.length, 0, "a runtime contract violation is an outcome, not a finding");
     const errorOutcome = result.validatorOutcomes.find((outcome) => outcome.status === ValidatorOutcomeStatus.Error);
@@ -530,7 +548,7 @@ test("a validator that throws is isolated as an error outcome; other validators 
     ]).validators;
 
     // The run must NOT reject — one throwing validator cannot abort the whole run.
-    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: BatchProducerPolicy });
 
     const boom = result.validatorOutcomes.find((outcome) => outcome.validatorId === "boom");
     assert.equal(boom?.status, "error");
@@ -617,7 +635,7 @@ test("file-scoped commit gate approvals bind to current file content", async () 
       }),
     ).validators;
 
-    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: BatchProducerPolicy });
     const context = createCommitApprovalContext(paths, result.validatorGraphHash);
     const approval = createCommitApprovalRecord({
       gate: result.commitGates[0]!,
@@ -841,6 +859,7 @@ test("validator analysis globs expose cross-scope project files", async () => {
       conventions: [],
       validators: resolveTestValidators(validator).validators,
       files: ["src/service.ts"],
+      producerPolicy: BatchProducerPolicy,
     });
 
     assert.equal(result.findingCount, 0);
@@ -2062,10 +2081,16 @@ test("doctor reports and fixes managed agent entry blocks", () => {
 test("doctor reports and fixes managed OpenCanon skill files", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-skill-"));
   try {
-    writeFileSync(path.join(rootDir, "package.json"), "{\"name\":\"demo\",\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
+    writeFileSync(path.join(rootDir, "package.json"), "{\"name\":\"demo\",\"type\":\"module\",\"scripts\":{\"opencanon\":\"bun .agents/skills/opencanon/scripts/opencanon.ts\"}}\n");
     const skillPath = path.join(rootDir, OpenCanonSkillFilePath);
     mkdirSync(path.dirname(skillPath), { recursive: true });
     writeFileSync(skillPath, "# OpenCanon\n\nstale\n");
+    const retiredRuntimePath = path.join(rootDir, ".agents/skills/opencanon/runtime/cli.js");
+    const retiredLauncherPath = path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon.ts");
+    mkdirSync(path.dirname(retiredRuntimePath), { recursive: true });
+    mkdirSync(path.dirname(retiredLauncherPath), { recursive: true });
+    writeFileSync(retiredRuntimePath, "old runtime");
+    writeFileSync(retiredLauncherPath, "old launcher");
     const paths = createPaths(rootDir);
 
     const report = buildDoctorReport({ paths, conventions: [], validators: [] });
@@ -2073,6 +2098,10 @@ test("doctor reports and fixes managed OpenCanon skill files", () => {
     assert.equal(check?.status, "fail");
     assert(check?.details?.some((detail) => detail.includes("OpenCanon skill file drifted")));
     assert(check?.details?.some((detail) => detail.includes("references/implementation.md")));
+    assert(check?.details?.some((detail) => detail.includes("Retired OpenCanon skill artifact remains")));
+    const packageScriptsCheck = report.checks.find((item) => item.id === "package-scripts");
+    assert.equal(packageScriptsCheck?.status, "fail");
+    assert(packageScriptsCheck?.details?.some((detail) => detail.includes("scripts.opencanon should be")));
 
     const fix = applyDoctorFixes({ paths, report, mode: FixModeValue.Safe, dryRun: false });
     assert.equal(fix.diagnostics.length, 0);
@@ -2082,8 +2111,12 @@ test("doctor reports and fixes managed OpenCanon skill files", () => {
     assert(fixedSkill.includes("Progressive References"));
     assert(readFileSync(path.join(rootDir, ".agents/skills/opencanon/references/implementation.md"), "utf8").includes("Implementation Workflow"));
     assert.notEqual(statSync(path.join(rootDir, ".agents/skills/opencanon/scripts/opencanon-brief-context.sh")).mode & 0o111, 0);
+    assert.equal(existsSync(path.join(rootDir, ".agents/skills/opencanon/runtime")), false);
+    assert.equal(existsSync(retiredLauncherPath), false);
+    assert.equal(JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf8")).scripts.opencanon, "opencanon");
     const fixedReport = buildDoctorReport({ paths, conventions: [], validators: [] });
     assert.equal(fixedReport.checks.find((item) => item.id === "opencanon-skill")?.status, "pass");
+    assert.equal(fixedReport.checks.find((item) => item.id === "package-scripts")?.status, "pass");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -2647,15 +2680,15 @@ test("ctx.typed.literal returns surroundingType only when the producer is ready"
 });
 
 test("resolveProducerStatuses reports ready / stale / disabled / not-implemented", async () => {
-  const { resolveProducerStatuses, membershipHashOf, listMembershipFiles } = await import("@opencanon/core");
+  const { resolveProducerStatuses, membershipHashOf, listMembershipFiles, ProducerStatusKind } = await import("@opencanon/core");
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-producer-status-"));
   try {
-    // No tsconfig + typescript present (resolved via cwd) → missing-tsconfig.
-    // (typescript resolves from the workspace cwd in this monorepo.)
+    linkWorkspaceTypeScript(rootDir);
+    // No tsconfig + project-local TypeScript present → missing-tsconfig.
     const initial = resolveProducerStatuses(rootDir);
     assert.equal(initial.length, 1);
     assert.equal(initial[0].language, "typescript");
-    assert.ok(["missing-tsconfig", "missing-package"].includes(initial[0].kind));
+    assert.equal(initial[0].kind, ProducerStatusKind.MissingTsconfig);
 
     // Add tsconfig + a fresh sidecar → ready.
     const tsconfig = JSON.stringify({ compilerOptions: { noEmit: true, skipLibCheck: true }, include: ["src/**/*"] });
@@ -2699,9 +2732,74 @@ test("resolveProducerStatuses reports ready / stale / disabled / not-implemented
   }
 });
 
+test("resolveProducerStatuses reports unsupported project TypeScript versions explicitly", async () => {
+  const { resolveProducerStatuses, ProducerStatusKind } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-producer-status-unsupported-"));
+  try {
+    writeFileSync(path.join(rootDir, "tsconfig.json"), JSON.stringify({ compilerOptions: { noEmit: true }, include: [] }));
+    const packageRoot = path.join(rootDir, "node_modules/typescript");
+    mkdirSync(packageRoot, { recursive: true });
+    writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({ name: "typescript", version: "4.9.5" }));
+
+    const status = resolveProducerStatuses(rootDir)[0];
+    assert.equal(status.kind, ProducerStatusKind.UnsupportedPackage);
+    assert.match(status.detail ?? "", />=5\.0\.0 <7\.0\.0/);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("producer registry owns semantic producer definitions and unknown languages are not implemented", async () => {
+  const { ProducerArtifactId, ProducerLiveWorkerId, ProducerStatusKind, ProjectFileLanguage, producerDefinitionForLanguage, producerDefinitions, resolveAuthoritativeProducerStatus } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-producer-registry-"));
+  try {
+    const definitions = producerDefinitions();
+    assert.deepEqual(definitions.map((definition) => definition.language), [ProjectFileLanguage.TypeScript]);
+    const typescriptDefinition = producerDefinitionForLanguage(ProjectFileLanguage.TypeScript);
+    assert.equal(typescriptDefinition?.artifacts[ProducerArtifactId.TypedComparisons]?.id, ProducerArtifactId.TypedComparisons);
+    assert.equal(typescriptDefinition?.liveWorkers[ProducerLiveWorkerId.TypeScriptWatch]?.id, ProducerLiveWorkerId.TypeScriptWatch);
+    assert.equal(producerDefinitionForLanguage(ProjectFileLanguage.Python), undefined);
+
+    const python = resolveAuthoritativeProducerStatus(rootDir, ProjectFileLanguage.Python).status;
+    assert.equal(python.kind, ProducerStatusKind.NotImplemented);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("project-local producer packages do not fall back to OpenCanon's own dependencies", async () => {
+  const { ProducerStatusKind, listMembershipFiles, membershipHashOf, resolveProducerStatuses } = await import("@opencanon/core");
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-producer-local-package-"));
+  try {
+    const tsconfig = JSON.stringify({ compilerOptions: { noEmit: true }, include: [] });
+    writeFileSync(path.join(rootDir, "tsconfig.json"), tsconfig);
+    const status = resolveProducerStatuses(rootDir)[0];
+    assert.equal(status.kind, ProducerStatusKind.MissingPackage);
+    assert.match(status.detail ?? "", /project root/);
+
+    mkdirSync(path.join(rootDir, ".opencanon", "cache"), { recursive: true });
+    writeFileSync(path.join(rootDir, ".opencanon", "cache", "typed-comparisons.json"), JSON.stringify({
+      version: 1,
+      generatedAt: "x",
+      tsconfigPath: "tsconfig.json",
+      tsconfigHash: createHashHex(tsconfig),
+      tsVersion: "",
+      gitHead: "",
+      sourceFiles: [],
+      membershipHash: membershipHashOf(listMembershipFiles(rootDir)),
+      coverage: { programFiles: 0, comparisonSites: 0, checkedSites: 0 },
+      entries: [],
+    }));
+    assert.equal(resolveProducerStatuses(rootDir)[0].kind, ProducerStatusKind.MissingPackage);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("opencanon analyze --typed writes a sidecar with comparison-context entries", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-sidecar-"));
   try {
+    const projectTsVersion = linkWorkspaceTypeScript(rootDir);
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "tsconfig.json"), JSON.stringify({
       compilerOptions: { strict: true, target: "es2022", module: "esnext", moduleResolution: "bundler", noEmit: true, skipLibCheck: true },
@@ -2739,7 +2837,7 @@ test("opencanon analyze --typed writes a sidecar with comparison-context entries
     assert(Array.isArray(payload.sourceFiles), "sidecar records source fingerprints");
     assert(payload.sourceFiles.length > 0);
     assert(payload.sourceFiles.every((sf: { sha256: string; size: number }) => sf.sha256.length === 64 && sf.size >= 0));
-    assert(typeof payload.tsVersion === "string" && payload.tsVersion.length > 0);
+    assert.equal(payload.tsVersion, projectTsVersion);
     assert(payload.coverage && payload.coverage.programFiles >= 1, "sidecar records coverage");
     assert.equal(payload.coverage.comparisonSites, 1);
     assert.equal(payload.coverage.checkedSites, 1);
@@ -2759,6 +2857,7 @@ test("opencanon analyze --typed ignores external declaration fingerprints", asyn
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-sidecar-external-"));
   const externalRoot = mkdtempSync(path.join(tmpdir(), "opencanon-external-types-"));
   try {
+    linkWorkspaceTypeScript(rootDir);
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(
       path.join(rootDir, "tsconfig.json"),
@@ -2932,6 +3031,7 @@ test("opencanon analyze --typed fails loudly on invalid tsconfig and empty resol
 
   const badRoot = mkdtempSync(path.join(tmpdir(), "opencanon-analyze-bad-"));
   try {
+    linkWorkspaceTypeScript(badRoot);
     writeFileSync(path.join(badRoot, "tsconfig.json"), "{ not valid json");
     let threw = false;
     try {
@@ -2947,6 +3047,7 @@ test("opencanon analyze --typed fails loudly on invalid tsconfig and empty resol
 
   const emptyRoot = mkdtempSync(path.join(tmpdir(), "opencanon-analyze-empty-"));
   try {
+    linkWorkspaceTypeScript(emptyRoot);
     writeFileSync(path.join(emptyRoot, "tsconfig.json"), JSON.stringify({
       compilerOptions: { noEmit: true, skipLibCheck: true },
       include: [],
@@ -3045,7 +3146,7 @@ test("C4: a throwing type-facts provider records crashed status and no checked f
       },
     };
     // Must resolve (not reject), install an empty map, and record explicit crashed status.
-    await prewarmContextTypeFacts(ctx, rootDir, throwingProvider);
+    await prewarmContextTypeFacts(ctx, throwingProvider);
     const literals = ctx.typed.literal({ surroundingTypeName: "x" });
     assert.equal(literals.length, 0, "no facts when the provider throws");
     assert.equal(ctx.typed.producerStatus("typescript").kind, "crashed");
@@ -3096,8 +3197,7 @@ test("H2: a multi-validator run issues a single resolveTypes batch", async () =>
     // Count how many times resolveTypes is called by installing a stub provider.
     let calls = 0;
     let lastSiteCount = 0;
-    const core = await import("@opencanon/core");
-    core.setLiveTypeFactsProviderFactory(() => ({
+    const provider = {
       language: "typescript" as const,
       status() {
         return { language: "typescript" as const, kind: "ready" as const };
@@ -3110,13 +3210,9 @@ test("H2: a multi-validator run issues a single resolveTypes batch", async () =>
         lastSiteCount = sites.length;
         return new Map();
       },
-    }));
-    try {
-      const facts = await resolveRunTypeFacts(contexts, rootDir);
-      assert.equal(facts.statuses[0]?.kind, "ready");
-    } finally {
-      core.setLiveTypeFactsProviderFactory(undefined);
-    }
+    };
+    const facts = await resolveRunTypeFacts(contexts, provider);
+    assert.equal(facts.statuses[0]?.kind, "ready");
     assert.equal(calls, 1, "exactly one resolveTypes batch for the whole run");
     assert.equal(lastSiteCount, 2, "the single batch carries the union of both contexts' sites");
   } finally {
@@ -3149,7 +3245,7 @@ test("a requiresProducers validator skips with a diagnostic when its producer is
 
     // Non-strict: validator skips. The skip is a validatorOutcome, NOT a finding
     // (findings are code-only). The body never runs and findings count excludes it.
-    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+    const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: BatchProducerPolicy });
     assert.equal(ran, false, "the validator body must not run when its producer is unmet");
     assert.equal(result.findings.length, 0, "a producer skip must NOT appear as a finding");
     assert.equal(result.findingCount, 0, "findings count excludes outcomes");
@@ -3162,7 +3258,7 @@ test("a requiresProducers validator skips with a diagnostic when its producer is
     // Strict only changes the exit-code semantics (the outcome itself is still a
     // skip); confirm the outcome is present and producer-anchored.
     ran = false;
-    const strict = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], strictProducers: true });
+    const strict = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], strictProducers: true, producerPolicy: BatchProducerPolicy });
     assert.equal(ran, false);
     const strictSkip = strict.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts");
     assert.ok(strictSkip);
@@ -3220,7 +3316,7 @@ test("H1: a producer that crashes DURING the run's resolveTypes records non-read
     ).validators;
 
     try {
-      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       assert.equal(ran, false, "the run-query crash must surface as non-ready so the validator skips (not silent 0 findings)");
       assert.equal(result.findings.length, 0, "a producer skip is never a finding");
       const skip = result.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts");
@@ -3273,7 +3369,7 @@ test("provider throw synthesizes crashed producer status so required validators 
     ).validators;
 
     try {
-      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       assert.equal(ran, false, "a thrown producer query must not let required validators run against empty facts");
       const skip = result.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts-throw");
       assert.ok(skip, "a producer-skip outcome is emitted for the thrown provider");
@@ -3326,7 +3422,7 @@ test("H2: a validator that queries surroundingTypeName WITHOUT requiresProducers
     ).validators;
 
     try {
-      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       assert.equal(result.findings.length, 0, "forgetful-author usage is an outcome, never a finding");
       const warn = result.validatorOutcomes.find(
         (outcome) => outcome.validatorId === "forgetful-rule" && /forgetful-rule used typed facts for typescript/.test(outcome.reason ?? ""),
@@ -3336,7 +3432,7 @@ test("H2: a validator that queries surroundingTypeName WITHOUT requiresProducers
       assert.match(warn!.reason ?? "", /does not declare requiresProducers/);
 
       // Strict escalates the same outcome to an error status.
-      const strict = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], strictProducers: true });
+      const strict = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], strictProducers: true, producerPolicy: InteractiveProducerPolicy });
       const strictWarn = strict.validatorOutcomes.find(
         (outcome) => outcome.validatorId === "forgetful-rule" && /forgetful-rule used typed facts for typescript/.test(outcome.reason ?? ""),
       );
@@ -3395,7 +3491,7 @@ test("CRITICAL1: reading literal.surroundingType records consumption even when t
     ).validators;
 
     try {
-      const result = await runValidation({ rootDir, paths, conventions: [], validators: readingValidators, files: [targetFile] });
+      const result = await runValidation({ rootDir, paths, conventions: [], validators: readingValidators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       assert.equal(result.findings.length, 0, "no findings — the producer-enriched data was empty");
       const warn = result.validatorOutcomes.find(
         (outcome) =>
@@ -3441,7 +3537,7 @@ test("CRITICAL1: reading literal.surroundingType records consumption even when t
     ).validators;
 
     try {
-      const result = await runValidation({ rootDir, paths, conventions: [], validators: nonReadingValidators, files: [targetFile] });
+      const result = await runValidation({ rootDir, paths, conventions: [], validators: nonReadingValidators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       const falseWarn = result.validatorOutcomes.find(
         (outcome) => outcome.validatorId === "no-surrounding-rule" && /used typed facts/.test(outcome.reason ?? ""),
       );
@@ -3523,7 +3619,7 @@ test("ValidationResult.producerSnapshot records the producer kind + generation a
       testValidatorDefinition({ id: "noop", severity: "warning", scope: "file", applies: ["src/**"], validate: () => [] }),
     ).validators;
     try {
-      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       assert.deepEqual(result.producerSnapshot.typescript, { kind: "ready", generation: 42 });
     } finally {
       core.setLiveTypeFactsProviderFactory(undefined);
@@ -3565,7 +3661,7 @@ test("audit C: producerSnapshot binds the generation the FACTS came from, not a 
       testValidatorDefinition({ id: "noop", severity: "warning", scope: "file", applies: ["src/**"], validate: () => [] }),
     ).validators;
     try {
-      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      const result = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       // kind from authoritative status; generation from the facts (N), not N+1.
       assert.deepEqual(result.producerSnapshot.typescript, { kind: "ready", generation: factGen });
     } finally {
@@ -3614,7 +3710,7 @@ test("warming -> ready: a warming producer yields skipped(warming); re-running o
       }),
     ).validators;
     try {
-      const warming = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      const warming = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       assert.equal(ran, false);
       assert.equal(warming.findings.length, 0);
       const skip = warming.validatorOutcomes.find((outcome) => outcome.validatorId === "needs-ts");
@@ -3623,11 +3719,98 @@ test("warming -> ready: a warming producer yields skipped(warming); re-running o
       assert.deepEqual(warming.producerSnapshot.typescript, { kind: "warming", generation: 0 });
 
       warmed = true;
-      const ready = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile] });
+      const ready = await runValidation({ rootDir, paths, conventions: [], validators, files: [targetFile], producerPolicy: InteractiveProducerPolicy });
       assert.equal(ran, true, "the validator runs once its producer is ready");
       const outcome = ready.validatorOutcomes.find((o) => o.validatorId === "needs-ts");
       assert.equal(outcome?.status, "ran");
       assert.deepEqual(ready.producerSnapshot.typescript, { kind: "ready", generation: 1 });
+    } finally {
+      core.setLiveTypeFactsProviderFactory(undefined);
+    }
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("project validation can explicitly use the batch producer policy instead of a live producer", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-batch-producer-policy-"));
+  try {
+    const tsVersion = linkWorkspaceTypeScript(rootDir);
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    mkdirSync(path.join(rootDir, ".opencanon/cache"), { recursive: true });
+    const targetFile = "src/a.ts";
+    writeFileSync(path.join(rootDir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }, null, 2));
+    writeFileSync(path.join(rootDir, targetFile), 'export function f(m: "x" | "y") { return m === "x"; }\n');
+    const { typedSidecarTsconfigHash, membershipHashOf, listMembershipFiles } = await import("@opencanon/core");
+    const sourceStat = statSync(path.join(rootDir, targetFile));
+    const sourceText = readFileSync(path.join(rootDir, targetFile), "utf8");
+    writeFileSync(
+      path.join(rootDir, ".opencanon/cache/typed-comparisons.json"),
+      JSON.stringify(
+        {
+          version: 1,
+          generatedAt: new Date().toISOString(),
+          tsconfigPath: "tsconfig.json",
+          tsconfigHash: typedSidecarTsconfigHash(rootDir),
+          tsVersion,
+          gitHead: "",
+          sourceFiles: [
+            {
+              path: targetFile,
+              sha256: createHashHex(sourceText),
+              mtimeMs: sourceStat.mtimeMs,
+              size: sourceStat.size,
+            },
+          ],
+          membershipHash: membershipHashOf(listMembershipFiles(rootDir)),
+          coverage: { programFiles: 1, comparisonSites: 1, checkedSites: 0 },
+          entries: [],
+        },
+        null,
+        2,
+      ),
+    );
+    const paths = createPaths(rootDir);
+    const core = await import("@opencanon/core");
+    core.setLiveTypeFactsProviderFactory(() => ({
+      language: "typescript" as const,
+      status() {
+        return { language: "typescript" as const, kind: "warming" as const, generation: 0 };
+      },
+      factGeneration() {
+        return undefined;
+      },
+      async resolveTypes() {
+        throw new Error("live producer should not be queried");
+      },
+    }));
+    let ran = false;
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "needs-ts",
+        severity: "warning",
+        scope: "file",
+        applies: ["src/**"],
+        requiresProducers: ["typescript"],
+        validate() {
+          ran = true;
+          return [];
+        },
+      }),
+    ).validators;
+    try {
+      const result = await runValidation({
+        rootDir,
+        paths,
+        conventions: [],
+        validators,
+        project: true,
+        producerPolicy: BatchProducerPolicy,
+      });
+      assert.equal(ran, true, "batch producer policy should ignore the warming live provider");
+      const outcome = result.validatorOutcomes.find((item) => item.validatorId === "needs-ts");
+      assert.equal(outcome?.status, "ran");
+      assert.deepEqual(result.producerSnapshot.typescript, { kind: "ready", generation: 0 });
     } finally {
       core.setLiveTypeFactsProviderFactory(undefined);
     }

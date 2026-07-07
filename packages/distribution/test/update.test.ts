@@ -72,6 +72,34 @@ test("runtime update installs the current engine target from a verified manifest
   }
 });
 
+test("runtime update accepts installed bundle markers without runtimeVersion", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-update-marker-"));
+  const runtimeRoot = path.join(rootDir, "runtime");
+  const target = currentEngineTarget();
+  const manifestPath = path.join(rootDir, "manifest.json");
+
+  try {
+    mkdirSync(runtimeRoot, { recursive: true });
+    const { archivePath, sha256 } = buildBundle(rootDir, target, Buffer.from("engine-binary"));
+    writeFileSync(path.join(runtimeRoot, ".bundle.json"), JSON.stringify({ sha256, target }, null, 2));
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        version: 1,
+        runtimeVersion: "0.4.3",
+        requiredNode: ">=24.12.0",
+        bundles: { [target]: { url: path.basename(archivePath), sha256 } },
+      }),
+    );
+
+    const current = await checkRuntimeUpdate({ manifestSource: manifestPath, cwd: rootDir, runtimeRoot });
+    assert.equal(current.status, "current");
+    assert.equal(current.currentSha256, sha256);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime update atomically swaps an existing runtime directory", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-update-swap-"));
   const runtimeRoot = path.join(rootDir, "runtime");

@@ -11,11 +11,19 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline";
-import type { ProducerStatus, TypeSite } from "@opencanon/core";
+import {
+  installedProducerPackageVersion,
+  producerDefinitionForLanguage,
+  producerPackageVersionSupport,
+  producerSetupStatus,
+  ProducerStatusKind,
+  ProjectFileLanguage,
+  type ProducerStatus,
+  type TypeSite,
+} from "@opencanon/core";
 
 import type { LiteralMember, LiteralUnionSyntax, TypeSource } from "@opencanon/core";
 
@@ -33,6 +41,13 @@ export type ProducerResolution = {
   members?: LiteralMember[];
   syntax?: LiteralUnionSyntax;
 };
+export type ProducerQueryStats = {
+  sites: number;
+  sourceFiles: number;
+  walkedSourceFiles: number;
+  resolutions: number;
+  durationMs: number;
+};
 
 const DefaultIdleTimeoutMs = 5 * 60 * 1000;
 // Hard ceiling on a single resolveTypes RPC. The initial query pays the full
@@ -43,7 +58,6 @@ const DefaultRequestTimeoutMs = 60 * 1000;
 // Explicit health/status warm-up is user-facing. It may pay the cold tsc watch
 // build, but it should not leave the UI waiting as long as a validator RPC.
 const DefaultWarmTimeoutMs = 30 * 1000;
-const requireFromRuntime = createRequire(import.meta.url);
 
 // Source (dev) runs producer-main.ts; the bundled OpenCanon runtime ships
 // producer-main.js next to runtime.js. Prefer whichever sibling exists.
@@ -51,6 +65,7 @@ const defaultProducerMainPath = (() => {
   const sourcePath = fileURLToPath(new URL("./producer-main.ts", import.meta.url));
   return existsSync(sourcePath) ? sourcePath : fileURLToPath(new URL("./producer-main.js", import.meta.url));
 })();
+const TypeScriptProducerDefinition = producerDefinitionForLanguage(ProjectFileLanguage.TypeScript);
 
 /**
  * A resolveTypes RPC result: the resolutions plus the producer `generation` the
@@ -58,7 +73,7 @@ const defaultProducerMainPath = (() => {
  * with the facts — never sampled from a later status). `generation` is
  * `undefined` when the producer was unavailable (no facts resolved).
  */
-export type ProducerQueryResult = { resolutions: ProducerResolution[]; generation?: number };
+export type ProducerQueryResult = { resolutions: ProducerResolution[]; generation?: number; stats?: ProducerQueryStats };
 
 export type TypeProducerRuntime = {
   /** Resolve the surrounding types for `sites`. Empty resolutions are paired with non-ready status when the producer is unavailable. */
@@ -178,7 +193,7 @@ export function createTypeProducerRuntime(input: {
     process.stderr.write(`[type-producer-runtime] ${message}\n`);
   }
 
-  /** Only spawn when `typescript` resolves AND the tsconfig exists. */
+  /** Only spawn when a supported project-local `typescript` resolves and the tsconfig exists. */
   function canSpawn(): boolean {
     if (!existsSync(input.tsconfigPath)) return false;
     return typescriptResolvableFrom(input.rootDir);
@@ -279,11 +294,7 @@ export function createTypeProducerRuntime(input: {
       {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: input.rootDir,
-        // The child's cwd is rootDir (for TS watch correctness), but its
-        // `typescript` MUST resolve from the SAME roots `canSpawn` used —
-        // [rootDir, runtime cwd] — not the child's cwd. Pass the runtime cwd so
-        // the producer's resolution exactly mirrors the greenlight.
-        env: { ...process.env, OPENCANON_RESOLVE_CWD: process.cwd() },
+        env: process.env,
       },
     );
     child = proc;
@@ -297,7 +308,15 @@ export function createTypeProducerRuntime(input: {
       rl.on("line", (line) => {
         const trimmed = line.trim();
         if (!trimmed) return;
-        let message: { id?: number; event?: string; ready?: boolean; building?: boolean; generation?: number; result?: { resolutions?: ProducerResolution[]; generation?: number }; error?: string };
+        let message: {
+          id?: number;
+          event?: string;
+          ready?: boolean;
+          building?: boolean;
+          generation?: number;
+          result?: { resolutions?: ProducerResolution[]; generation?: number; stats?: ProducerQueryStats };
+          error?: string;
+        };
         try {
           message = JSON.parse(trimmed);
         } catch {
@@ -317,7 +336,7 @@ export function createTypeProducerRuntime(input: {
         if (message.error) waiter.reject(new Error(message.error));
         // Bind the response's own generation to these facts — NOT the runtime's
         // `generation`, which a racing `status` event may have already advanced.
-        else waiter.resolve({ resolutions: message.result?.resolutions ?? [], generation: message.result?.generation });
+        else waiter.resolve({ resolutions: message.result?.resolutions ?? [], generation: message.result?.generation, stats: message.result?.stats });
       });
     }
   }
@@ -348,29 +367,26 @@ export function createTypeProducerRuntime(input: {
   }
 
   function currentStatus(): ProducerStatus {
-    if (!existsSync(input.tsconfigPath)) {
-      return { language: "typescript", kind: "missing-tsconfig", detail: `no tsconfig at ${input.tsconfigPath}.` };
-    }
-    if (!typescriptResolvableFrom(input.rootDir)) {
-      return { language: "typescript", kind: "missing-package", detail: "`typescript` is not resolvable from the project root." };
-    }
+    if (!TypeScriptProducerDefinition) return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.NotImplemented };
+    const setupStatus = producerSetupStatus(TypeScriptProducerDefinition, input.rootDir, { configPath: input.tsconfigPath });
+    if (setupStatus) return setupStatus;
     if (lastCrash) {
-      return { language: "typescript", kind: "crashed", detail: lastCrash, generation };
+      return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Crashed, detail: lastCrash, generation };
     }
     // A spawned child whose program has not finished its first build is
     // WARMING (distinct from stale/crashed). Once it has built at least one
     // generation it is ready; an idle-killed child that previously built stays
     // ready (the next query re-warms transparently).
     if (child && building) {
-      return { language: "typescript", kind: "warming", detail: "type program is building.", generation };
+      return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Warming, detail: "type program is building.", generation };
     }
     if (generation === 0) {
       // Spawnable but never warmed (no query yet, or building before first
       // afterProgramCreate). Report warming so a boot snapshot skips loudly
       // instead of baking a stale/empty result.
-      return { language: "typescript", kind: "warming", detail: "type producer not yet warmed.", generation };
+      return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Warming, detail: "type producer not yet warmed.", generation };
     }
-    return { language: "typescript", kind: "ready", generation };
+    return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Ready, generation };
   }
 
   async function shutdownChild(reason: ProducerStopReason): Promise<void> {
@@ -474,10 +490,10 @@ export function createTypeProducerRuntime(input: {
     async warm() {
       if (stopped || !canSpawn()) return currentStatus();
       const status = currentStatus();
-      if (status.kind !== "warming") return status;
+      if (status.kind !== ProducerStatusKind.Warming) return status;
       await resolveTypesRequest([], { allowEmpty: true, timeoutMs: warmTimeoutMs });
       const afterSpawnStatus = currentStatus();
-      if (afterSpawnStatus.kind !== "warming") return afterSpawnStatus;
+      if (afterSpawnStatus.kind !== ProducerStatusKind.Warming) return afterSpawnStatus;
       return await new Promise<ProducerStatus>((resolve) => {
         const waiter = {
           resolve,
@@ -517,18 +533,13 @@ export function createTypeProducerRuntime(input: {
 }
 
 /**
- * Whether `typescript` resolves from a target repo, using the SAME roots the
- * live producer (`producer-main`) uses to load it ([rootDir, process.cwd()]).
- * Single source of truth so the spawn greenlight and the child's actual load
- * never disagree. Shared by `canSpawn` and the live producer's `status()`.
+ * Whether a supported project-local `typescript` resolves from a target repo.
+ * Shared by `canSpawn` and the live producer's `status()`.
  */
 export function typescriptResolvableFrom(rootDir: string): boolean {
-  try {
-    requireFromRuntime.resolve("typescript", { paths: [rootDir, process.cwd()] });
-    return true;
-  } catch {
-    return false;
-  }
+  if (!TypeScriptProducerDefinition) return false;
+  const typeScriptVersion = installedProducerPackageVersion(TypeScriptProducerDefinition, rootDir);
+  return Boolean(typeScriptVersion && producerPackageVersionSupport(TypeScriptProducerDefinition, typeScriptVersion).supported);
 }
 
 /** Default tsconfig location for a project root; undefined when absent. */

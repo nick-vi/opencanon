@@ -55,6 +55,9 @@ import {
   RuntimeWorkerJobKindValue,
   RuntimeWorkerJobStatusValue,
   TaskLeaseStatus,
+  BatchProducerPolicy,
+  InteractiveProducerPolicy,
+  ProducerRunProfile,
   type FeedbackHost,
   type FixMode,
   type CanonEvent,
@@ -62,6 +65,7 @@ import {
   type ChangeCheck,
   type DefinitionHistoryKind,
   type DefinitionHistoryTarget,
+  type ProducerPolicy,
   type RuntimeWorkerJob,
   type WatcherEventBatch,
 } from "@opencanon/core";
@@ -81,7 +85,7 @@ import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
-import { setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
+import { ProjectFileLanguage, setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
 import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-facts-provider.ts";
 import { createProjectObservabilityExporter } from "./observability.ts";
 import {
@@ -244,13 +248,14 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     events,
   });
   projectTypesRuntime.generateNow("Project authoring types generated on runtime startup.");
-  // Runtime-owned live type-producer: ONE runtime per runtime, lazy-spawned on first
-  // typed query and idle-killed afterward. Installed as core's live provider factory
-  // so the canonical validation pre-warm consults it before the sidecar
-  // default — core never imports `typescript`/child_process; it calls back here.
+  // Runtime-owned live type-producer: one worker manager per project runtime,
+  // lazy-spawned on first typed query and idle-killed afterward. Installed as
+  // core's live provider factory; validation uses it only when the selected
+  // producer policy asks for the interactive TypeScript worker.
   // Opt-out: OPENCANON_TYPED_PRODUCER=off (or 0/false) disables the live producer
-  // entirely — typed rules then fall back to the sidecar producer, and the runtime
-  // never spawns the ~2.5GB ts.Program child. Default is on (lazy, idle-timed).
+  // entirely. Interactive typed rules then report the TypeScript producer as
+  // not implemented for this process instead of silently changing source.
+  // Default is on (lazy, idle-timed).
   const typedProducerEnv = (process.env.OPENCANON_TYPED_PRODUCER ?? "").trim().toLowerCase();
   const typedProducerDisabled = typedProducerEnv === "off" || typedProducerEnv === "0" || typedProducerEnv === "false";
   const tsconfigPath = defaultTsconfigPath(rootDir);
@@ -335,7 +340,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     // lazily on the first typed query (post-ready), never on the readiness path.
     if (typeProducerRuntime) {
       const liveProvider = new LiveTypeProducerProvider(typeProducerRuntime);
-      setLiveTypeFactsProviderFactory((queryRoot) => (queryRoot === rootDir ? liveProvider : null));
+      setLiveTypeFactsProviderFactory((queryRoot, language) => (queryRoot === rootDir && language === ProjectFileLanguage.TypeScript ? liveProvider : null));
       // Defect #3: when the lazy producer warms (warming->ready, generation
       // advance), refresh the snapshot so baked skipped(warming) outcomes flip to
       // ran. Debounce rapid transitions; a generation-guard drops a completion
@@ -1759,6 +1764,7 @@ async function runChangeCheck(
       validators: [validator],
       files: scopedFiles,
       project: scopedFiles.length === 0,
+      producerPolicy: InteractiveProducerPolicy,
     });
     const failed = validation.diagnostics.length > 0 || validation.findings.some((finding) => finding.severity === FindingSeverityValue.Error);
     return {
@@ -2033,6 +2039,8 @@ async function validateFromRuntime(rootDir: string, request: Request): Promise<R
   }
   const project = await loadProjectContext(rootDir);
   const profiler = createProfiler(booleanBodyValue(body.profile));
+  const producerPolicy = producerPolicyBodyValue(body.producerPolicy);
+  if (!producerPolicy.ok) return json(diagnosticsFailure(producerPolicy.diagnostics), 400);
   const data = await runValidation({
     rootDir: project.rootDir,
     paths: project.paths,
@@ -2045,6 +2053,7 @@ async function validateFromRuntime(rootDir: string, request: Request): Promise<R
     fixMode: fixModeBodyValue(body.fixMode),
     dryRun: booleanBodyValue(body.dryRun),
     strictProducers: booleanBodyValue(body.strictProducers),
+    producerPolicy: producerPolicy.policy,
     profiler,
   });
   return json({ ok: true, data });
@@ -2126,6 +2135,17 @@ function booleanBodyValue(value: unknown): boolean {
 function fixModeBodyValue(value: unknown): FixMode | undefined {
   if (value === FixModeInput.Safe || value === FixModeInput.Suggested || value === FixModeInput.All) return value;
   return undefined;
+}
+
+function producerPolicyBodyValue(value: unknown): { ok: true; policy: ProducerPolicy } | { ok: false; diagnostics: string[] } {
+  if (value === undefined) return { ok: true, policy: InteractiveProducerPolicy };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, diagnostics: ["producerPolicy must be an object with profile 'batch' or 'interactive'."] };
+  }
+  const profile = (value as { profile?: unknown }).profile;
+  if (profile === ProducerRunProfile.Batch) return { ok: true, policy: BatchProducerPolicy };
+  if (profile === ProducerRunProfile.Interactive) return { ok: true, policy: InteractiveProducerPolicy };
+  return { ok: false, diagnostics: ["producerPolicy.profile must be 'batch' or 'interactive'."] };
 }
 
 function feedbackHostBodyValue(value: unknown): FeedbackHost {

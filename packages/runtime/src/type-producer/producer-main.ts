@@ -40,6 +40,14 @@ type Resolution = {
   members?: Member[];
   syntax?: "ts-union" | "ts-enum" | "ts-const-object" | "py-literal" | "py-enum" | "rust-enum";
 };
+type ResolveStats = {
+  sites: number;
+  sourceFiles: number;
+  walkedSourceFiles: number;
+  resolutions: number;
+  durationMs: number;
+};
+type PositionedSite = Sites[number] & { pos: number };
 
 function log(message: string): void {
   process.stderr.write(`[type-producer] ${message}\n`);
@@ -66,23 +74,14 @@ function parseArgs(argv: string[]): { tsconfig: string; root: string } {
 
 async function main(): Promise<void> {
   const { tsconfig, root } = parseArgs(process.argv.slice(2));
-  // Resolve `typescript` from the TARGET REPO, not relative to this bundled file.
-  // In the installed runtime, a bare `import("typescript")` resolves against the
-  // runtime dir (no target repo typescript) and the child dies. Resolve from the
-  // SAME roots `canSpawn`/the live producer `status()` use ([root, cwd]) so
-  // greenlight and load agree.
+  // Resolve `typescript` from the target repo, not relative to this bundled file.
   const requireFrom = createRequire(import.meta.url);
-  // Resolution roots mirror canSpawn EXACTLY: [root, runtime
-  // cwd]. The runtime passes its own cwd via OPENCANON_RESOLVE_CWD because the
-  // child's own cwd is rootDir, which would diverge from the greenlight.
-  const resolveCwd = process.env.OPENCANON_RESOLVE_CWD ?? process.cwd();
-  const resolveRoots = [root, resolveCwd];
   let tsPath: string;
   try {
-    tsPath = requireFrom.resolve("typescript", { paths: resolveRoots });
+    tsPath = requireFrom.resolve("typescript", { paths: [root] });
   } catch {
     process.stderr.write(
-      `[type-producer] cannot resolve 'typescript' from ${resolveRoots.join(" or ")}; ` +
+      `[type-producer] cannot resolve 'typescript' from ${root}; ` +
         `install it as a devDependency in the target repo. Exiting.\n`,
     );
     process.exit(2);
@@ -163,9 +162,15 @@ async function main(): Promise<void> {
     return new Promise<void>((resolve) => idleWaiters.push(resolve));
   }
 
-  function resolveSites(sites: Sites): Resolution[] {
+  function resolveSites(sites: Sites): { resolutions: Resolution[]; stats: ResolveStats } {
+    const startedAt = Date.now();
     const program = builder?.getProgram();
-    if (!program) return [];
+    if (!program) {
+      return {
+        resolutions: [],
+        stats: { sites: sites.length, sourceFiles: 0, walkedSourceFiles: 0, resolutions: 0, durationMs: Date.now() - startedAt },
+      };
+    }
     const checker = program.getTypeChecker();
     const comparisons = new Set<ts.SyntaxKind>([
       TS.SyntaxKind.EqualsEqualsEqualsToken,
@@ -173,29 +178,48 @@ async function main(): Promise<void> {
       TS.SyntaxKind.EqualsEqualsToken,
       TS.SyntaxKind.ExclamationEqualsToken,
     ]);
+    const bySourceFile = new Map<string, { sourceFile: ts.SourceFile; sitesByStart: Map<number, PositionedSite[]> }>();
     const out: Resolution[] = [];
     for (const site of sites) {
       const abs = path.resolve(root, site.file);
-      const sf = program.getSourceFile(abs);
-      if (!sf) continue;
+      const sourceFile = program.getSourceFile(abs);
+      if (!sourceFile) continue;
       // sites are 1-based (line/column); TS positions are 0-based.
       let pos: number;
       try {
-        pos = sf.getPositionOfLineAndCharacter(site.line - 1, site.column - 1);
+        pos = sourceFile.getPositionOfLineAndCharacter(site.line - 1, site.column - 1);
       } catch {
         continue;
       }
-      const literal = findStringLiteralAt(TS, sf, pos);
-      if (!literal) continue;
-      const parent = literal.parent;
-      if (!parent || !TS.isBinaryExpression(parent) || !comparisons.has(parent.operatorToken.kind)) continue;
-      const opposite = parent.left === literal ? parent.right : parent.left;
-      const type = checker.getTypeAtLocation(opposite);
-      const typeName = checker.typeToString(type);
-      if (!typeName || typeName === "string" || typeName === "any" || typeName === "unknown") continue;
-      out.push({ key: siteKey(site.file, site.line, site.column), ...extractResolution(TS, checker, type, opposite, typeName) });
+      let group = bySourceFile.get(sourceFile.fileName);
+      if (!group) {
+        group = { sourceFile, sitesByStart: new Map() };
+        bySourceFile.set(sourceFile.fileName, group);
+      }
+      const bucket = group.sitesByStart.get(pos);
+      const positionedSite = { ...site, pos };
+      if (bucket) bucket.push(positionedSite);
+      else group.sitesByStart.set(pos, [positionedSite]);
     }
-    return out;
+    let walkedSourceFiles = 0;
+    for (const { sourceFile, sitesByStart } of bySourceFile.values()) {
+      if (sitesByStart.size === 0) continue;
+      walkedSourceFiles += 1;
+      collectSourceFileResolutions(TS, checker, sourceFile, sitesByStart, comparisons, out);
+    }
+    const stats = {
+      sites: sites.length,
+      sourceFiles: bySourceFile.size,
+      walkedSourceFiles,
+      resolutions: out.length,
+      durationMs: Date.now() - startedAt,
+    };
+    if (process.env.OPENCANON_PRODUCER_DEBUG) {
+      log(
+        `resolved ${stats.resolutions}/${stats.sites} sites across ${stats.walkedSourceFiles} source files in ${stats.durationMs}ms`,
+      );
+    }
+    return { resolutions: out, stats };
   }
 
   const rl = readline.createInterface({ input: process.stdin });
@@ -241,8 +265,8 @@ async function main(): Promise<void> {
         // and carry it in the response. This binds the facts to the EXACT
         // generation that produced them, so the consumer never samples a newer
         // generation from a `status` event that races in afterward.
-        const resolutions = resolveSites(sites);
-        send({ id, result: { resolutions, generation } });
+        const { resolutions, stats } = resolveSites(sites);
+        send({ id, result: { resolutions, generation, stats } });
         return;
       }
       send({ id, error: `unknown method: ${String(request.method)}` });
@@ -331,18 +355,37 @@ function literalMemberOf(TS: typeof ts, checker: ts.TypeChecker, arm: ts.Type): 
   return undefined;
 }
 
-function findStringLiteralAt(TS: typeof ts, sf: ts.SourceFile, pos: number): ts.StringLiteral | undefined {
-  let found: ts.StringLiteral | undefined;
+function collectSourceFileResolutions(
+  TS: typeof ts,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  sitesByStart: Map<number, PositionedSite[]>,
+  comparisons: Set<ts.SyntaxKind>,
+  out: Resolution[],
+): void {
   const visit = (node: ts.Node): void => {
-    if (pos < node.getStart(sf) || pos >= node.getEnd()) return;
-    if (TS.isStringLiteral(node) && node.getStart(sf) === pos) {
-      found = node;
-      return;
+    if (sitesByStart.size === 0) return;
+    const start = node.getStart(sourceFile);
+    const matchingSites = sitesByStart.get(start);
+    if (matchingSites && TS.isStringLiteral(node)) {
+      const parent = node.parent;
+      if (parent && TS.isBinaryExpression(parent) && comparisons.has(parent.operatorToken.kind)) {
+        const opposite = parent.left === node ? parent.right : parent.left;
+        const type = checker.getTypeAtLocation(opposite);
+        const typeName = checker.typeToString(type);
+        if (typeName && typeName !== "string" && typeName !== "any" && typeName !== "unknown") {
+          const resolution = extractResolution(TS, checker, type, opposite, typeName);
+          for (const site of matchingSites) {
+            out.push({ key: siteKey(site.file, site.line, site.column), ...resolution });
+          }
+        }
+      }
+      sitesByStart.delete(start);
+      if (sitesByStart.size === 0) return;
     }
     TS.forEachChild(node, visit);
   };
-  visit(sf);
-  return found;
+  visit(sourceFile);
 }
 
 main().catch((error) => {

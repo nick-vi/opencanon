@@ -45,6 +45,44 @@ export type { TypeFactsProvider, TypeSource, TypeSite, TypeResolution, LiteralVa
 import { findingKey } from "./findings.ts";
 import { validateTree } from "./tree.ts";
 import { materializeFixture, type FixtureDefinition } from "./testing.ts";
+import {
+  ProducerArtifactId,
+  ProducerLiveWorkerId,
+  installedTypeScriptVersion,
+  producerDefinitionHasArtifact,
+  producerDefinitionHasLiveWorker,
+  producerDefinitionForLanguage,
+  producerDefinitions,
+  producerSetupStatus,
+  typeScriptVersionSupport,
+} from "./producer-registry.ts";
+
+export {
+  SupportedTypeScriptVersionRange,
+  installedProducerPackageVersion,
+  installedTypeScriptPackageJsonPath,
+  installedTypeScriptVersion,
+  isProducerToolchainAvailable,
+  isSupportedTypeScriptVersion,
+  BatchProducerPolicy,
+  InteractiveProducerPolicy,
+  ProducerArtifactFreshness,
+  ProducerArtifactId,
+  producerDefinitionForLanguage,
+  producerDefinitionHasArtifact,
+  producerDefinitionHasLiveWorker,
+  producerDefinitions,
+  ProducerLiveWorkerId,
+  ProducerRunProfile,
+  ProducerSourceKind,
+  producerPackageJsonPath,
+  producerPackageVersionSupport,
+  producerSetupStatus,
+  producerSourceForLanguage,
+  typeScriptVersionSupport,
+  unsupportedTypeScriptVersionDetail,
+} from "./producer-registry.ts";
+export type { ProducerArtifactDefinition, ProducerDefinition, ProducerLiveWorkerDefinition, ProducerPackageToolchain, ProducerPolicy, ProducerRequiredConfig, ProducerSource, ProducerVersionRange } from "./producer-registry.ts";
 
 export { validateFindings } from "./findings.ts";
 export type { FindingValidationContext } from "./findings.ts";
@@ -882,17 +920,27 @@ export function resolveTypeScriptSidecarStatus(rootDir: string): { status: Produ
     };
   }
   const sidecarPath = path.join(rootDir, ".opencanon", "cache", "typed-comparisons.json");
+  const definition = producerDefinitionForLanguage(ProjectFileLanguage.TypeScript);
+  if (!definition) {
+    return {
+      status: { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.NotImplemented },
+      payload: null,
+    };
+  }
+  const packageVersion = installedTypeScriptVersion(rootDir);
+  const setupStatus = producerSetupStatus(definition, rootDir);
   const read = readSidecarPayloadDetailed(sidecarPath, {
     rootDir,
     tsconfigHash: (tsconfigRelPath: string) => typedSidecarTsconfigHash(rootDir, tsconfigRelPath),
-    tsVersion: () => installedTypeScriptVersion(rootDir),
+    tsVersion: () => packageVersion,
     membershipHash: membershipHashOf(listMembershipFiles(rootDir)),
   });
   const status = sidecarStatusFromRead(read, {
     hasTsconfig: existsSync(path.join(rootDir, "tsconfig.json")),
-    hasTypeScript: installedTypeScriptVersion(rootDir) !== null,
+    hasTypeScript: packageVersion !== null,
+    typeScriptSupport: packageVersion ? typeScriptVersionSupport(packageVersion) : undefined,
   });
-  return { status, payload: read.payload };
+  return { status: setupStatus ?? status, payload: read.payload };
 }
 
 /**
@@ -906,14 +954,33 @@ export function resolveTypeFactsProvider(rootDir: string): TypeFactsProvider {
   return new SidecarTypeFactsProvider(payload, status);
 }
 
+export function resolveArtifactTypeFactsProvider(rootDir: string, language: string, artifactId: ProducerArtifactId): TypeFactsProvider {
+  const definition = producerDefinitionForLanguage(language);
+  if (!definition || !producerDefinitionHasArtifact(definition, artifactId)) {
+    return notImplementedProvider(language, `${language} does not define producer artifact ${artifactId}.`);
+  }
+  if (language === ProjectFileLanguage.TypeScript && artifactId === ProducerArtifactId.TypedComparisons) {
+    return resolveTypeFactsProvider(rootDir);
+  }
+  return notImplementedProvider(language, `${language} producer artifact ${artifactId} is not implemented.`);
+}
+
+export function resolveLiveTypeFactsProvider(rootDir: string, language: string, workerId: ProducerLiveWorkerId): TypeFactsProvider {
+  const definition = producerDefinitionForLanguage(language);
+  if (!definition || !producerDefinitionHasLiveWorker(definition, workerId)) {
+    return notImplementedProvider(language, `${language} does not define live producer ${workerId}.`);
+  }
+  return liveTypeFactsProviderFactory?.(rootDir, definition.language) ?? notImplementedProvider(language, `live producer ${workerId} is not registered in this process.`);
+}
+
 /**
  * Resolve every known per-language producer's status for a run, decoupled from a
  * live validation context. Consults the live producer factory (runtime) when
- * installed; otherwise the headless sidecar producer. Backs `--require-producer`,
- * `doctor`, and `project status`. TypeScript is the only implemented language.
+ * installed; otherwise each registered producer's headless implementation.
+ * Backs `--require-producer`, `doctor`, and `project status`.
  */
 export function resolveProducerStatuses(rootDir: string): ProducerStatus[] {
-  return [resolveAuthoritativeProducerStatus(rootDir, "typescript").status];
+  return producerDefinitions().map((definition) => resolveAuthoritativeProducerStatus(rootDir, definition.language).status);
 }
 
 export function normalizeProducerStatusesForProject(input: {
@@ -963,39 +1030,36 @@ function authoringPrefixes(paths: ContextPaths): string[] {
 }
 
 /**
- * THE single authoritative producer-availability resolver for one language.
- * Every surface (skip logic, /api/producers, --require-producer, doctor, UI)
- * reads THIS — no independent re-resolution anywhere. Builds the candidate set
- * (the live producer when its factory is installed, plus the sidecar ONLY when
- * there is no live producer) and runs `pickAuthoritativeStatus` over it. Because
- * a live ready/warming/crashed status outranks every sidecar state by
- * precedence, a stale sidecar can never beat a ready live producer.
- * Returns the chosen status plus the live provider that won (so the caller can
- * query it for facts), or the sidecar provider when no live producer exists.
+ * Current producer-availability resolver for one language. Status/reporting
+ * surfaces (`/api/producers`, `--require-producer`, doctor, UI health) read this
+ * instead of independently reconstructing producer setup. Validation does not
+ * use this as source selection; it receives an explicit producer policy.
  */
 export function resolveAuthoritativeProducerStatus(
   rootDir: string,
   language: string,
 ): { status: ProducerStatus; provider: TypeFactsProvider } {
-  const live = language === "typescript" ? liveTypeFactsProviderFactory?.(rootDir) ?? null : null;
+  const definition = producerDefinitionForLanguage(language);
+  if (!definition) {
+    const status: ProducerStatus = { language, kind: ProducerStatusKind.NotImplemented };
+    return { status, provider: notImplementedProvider(language) };
+  }
+  const live = liveTypeFactsProviderFactory?.(rootDir, definition.language) ?? null;
   if (live) {
     // A live producer exists: it is authoritative. We do NOT consult the sidecar
     // (precedence would pick the live status regardless; skipping the read avoids
     // a needless sidecar parse and any disagreement surfaces as the live status).
     return { status: live.status(), provider: live };
   }
-  if (language !== "typescript") {
-    const status: ProducerStatus = { language, kind: "not-implemented" };
-    return { status, provider: notImplementedProvider(language) };
-  }
+  if (!producerDefinitionHasArtifact(definition, ProducerArtifactId.TypedComparisons)) return { status: { language, kind: ProducerStatusKind.NotImplemented }, provider: notImplementedProvider(language) };
   const sidecar = resolveTypeFactsProvider(rootDir);
   return { status: pickAuthoritativeStatus([sidecar.status()]), provider: sidecar };
 }
 
-function notImplementedProvider(language: string): TypeFactsProvider {
+function notImplementedProvider(language: string, detail?: string): TypeFactsProvider {
   return {
     language,
-    status: () => ({ language, kind: "not-implemented" }),
+    status: () => ({ language, kind: ProducerStatusKind.NotImplemented, ...(detail ? { detail } : {}) }),
     // No producer registered: no facts, hence no fact generation.
     factGeneration: () => undefined,
     resolveTypes: () => Promise.resolve(new Map()),
@@ -1049,18 +1113,18 @@ export type RunTypeFacts = { map: Map<string, TypeResolution>; statuses: Produce
 /**
  * Resolve the UNION of every context's comparison sites a SINGLE time and return
  * one shared `Map<siteKey, TypeResolution>` plus the producer statuses. The
- * provider is selected once (the live factory if installed, else the headless
- * sidecar producer) and queried with the deduplicated site set — one batch
- * instead of one-RPC-per-validator. A provider failure resolves to an empty fact
- * map with an explicit `crashed` producer status, so required validators skip
- * loudly instead of running against missing facts.
+ * caller supplies the exact provider selected by the run's producer policy, so
+ * validation never changes source based on process-local runtime state.
+ *
+ * `additionalStatuses` carries languages that were part of the policy but not
+ * queried in this TypeScript batch. That keeps the snapshot explicit for
+ * not-yet-implemented languages without pretending they produced facts.
  */
-export async function resolveRunTypeFacts(contexts: ValidationContext[], rootDir: string): Promise<RunTypeFacts> {
-  // Single authoritative resolution: the live producer when installed, else the
-  // sidecar (precedence kills any stale-sidecar-vs-live disagreement). No
-  // independent re-resolution — `resolveAuthoritativeProducerStatus` is the one
-  // source every surface shares.
-  const { provider } = resolveAuthoritativeProducerStatus(rootDir, "typescript");
+export async function resolveRunTypeFacts(
+  contexts: ValidationContext[],
+  provider: TypeFactsProvider,
+  additionalStatuses: ProducerStatus[] = [],
+): Promise<RunTypeFacts> {
   // H1: status is captured AFTER the query (below), never before — a producer
   // that crashes DURING this run's resolveTypes must report `crashed` to the skip
   // logic so `requiresProducers` validators skip loudly instead of running
@@ -1069,7 +1133,11 @@ export async function resolveRunTypeFacts(contexts: ValidationContext[], rootDir
     const status = provider.status();
     // No query happened, so no facts were used: report the producer's current
     // generation (never newer than facts, because there are none).
-    return { map: new Map(), statuses: [status], factGenerations: { [provider.language]: provider.factGeneration() ?? status.generation ?? 0 } };
+    return {
+      map: new Map(),
+      statuses: [status, ...additionalStatuses],
+      factGenerations: { [provider.language]: provider.factGeneration() ?? status.generation ?? 0 },
+    };
   }
   // Union of comparison sites across all contexts, deduplicated by siteKey.
   const byKey = new Map<string, TypeSite>();
@@ -1086,13 +1154,13 @@ export async function resolveRunTypeFacts(contexts: ValidationContext[], rootDir
     const factGeneration = provider.factGeneration();
     return {
       map,
-      statuses: [provider.status()],
+      statuses: [provider.status(), ...additionalStatuses],
       factGenerations: { [provider.language]: factGeneration },
     };
   } catch (error) {
     const status = producerCrashedStatus(provider, error);
     console.warn(`[opencanon] type-facts provider failed; ${provider.language} producer status is crashed: ${status.detail}`);
-    return { map: new Map(), statuses: [status], factGenerations: { [provider.language]: provider.factGeneration() } };
+    return { map: new Map(), statuses: [status, ...additionalStatuses], factGenerations: { [provider.language]: provider.factGeneration() } };
   }
 }
 
@@ -1110,18 +1178,15 @@ function producerCrashedStatus(provider: TypeFactsProvider, error: unknown): Pro
 }
 
 /**
- * Module-level injection seam for a LIVE type-facts provider. The
- * project runtime owns a long-lived TypeScript type-producer child process and registers
- * a provider factory here at startup; `prewarmContextTypeFacts` consults it
- * BEFORE falling back to the sidecar `resolveTypeFactsProvider`. Core stays
- * free of any `typescript`/child-process import — it only calls back through this
- * factory, which the project runtime (the only code that imports `typescript`) supplies.
+ * Module-level injection seam for a LIVE type-facts provider. The project
+ * runtime owns a long-lived TypeScript type-producer child process and registers
+ * a provider factory here at startup. Validation uses this factory only when
+ * the selected producer policy asks for the live TypeScript worker.
  *
- * Headless CLI runs never set this, so they keep the sidecar
- * default. The factory may return `null` to opt out for a given root (e.g. no
- * tsconfig), in which case the default path runs.
+ * Core stays free of any `typescript`/child-process import; it only calls back
+ * through this factory, which the project runtime supplies.
  */
-export type TypeFactsProviderFactory = (rootDir: string) => TypeFactsProvider | null;
+export type TypeFactsProviderFactory = (rootDir: string, language: string) => TypeFactsProvider | null;
 let liveTypeFactsProviderFactory: TypeFactsProviderFactory | undefined;
 
 /** Runtime-only: install (or clear) the live type-facts provider factory. */
@@ -1129,20 +1194,10 @@ export function setLiveTypeFactsProviderFactory(factory: TypeFactsProviderFactor
   liveTypeFactsProviderFactory = factory;
 }
 
-/**
- * Build the project's type-facts provider from a context's analysis files and
- * pre-warm the context with it. Convenience wrapper for validation entry points.
- *
- * Provider precedence: an explicit `providerOverride`, then the runtime's live
- * provider factory (if installed and it returns a provider), then the default
- * sidecar `resolveTypeFactsProvider`.
- */
 export async function prewarmContextTypeFacts(
   ctx: ValidationContext,
-  rootDir: string,
-  providerOverride?: TypeFactsProvider,
+  provider: TypeFactsProvider,
 ): Promise<void> {
-  const provider = providerOverride ?? resolveAuthoritativeProducerStatus(rootDir, "typescript").provider;
   await prewarmTypeFacts(ctx, provider);
 }
 
@@ -1296,28 +1351,6 @@ export function typedSidecarTsconfigHash(rootDir: string, tsconfigRelPath: strin
   } catch {
     return "";
   }
-}
-
-/**
- * Read the installed `typescript` package version without importing the module
- * (keeps core runtime-cheap). Returns null when not resolvable — callers treat
- * that as "can't verify", not "stale".
- */
-export function installedTypeScriptVersion(rootDir: string): string | null {
-  const candidates = [
-    path.join(rootDir, "node_modules", "typescript", "package.json"),
-    path.join(process.cwd(), "node_modules", "typescript", "package.json"),
-  ];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    try {
-      const pkg = JSON.parse(readFileSync(candidate, "utf8")) as { version?: string };
-      if (typeof pkg.version === "string") return pkg.version;
-    } catch {
-      // try next candidate
-    }
-  }
-  return null;
 }
 
 const MembershipExtensions = /\.(ts|tsx|mts|cts)$/;

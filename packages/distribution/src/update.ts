@@ -101,7 +101,7 @@ export type UpdateSafetyGuard = {
 };
 
 type BundleMarker = {
-  runtimeVersion: string;
+  runtimeVersion?: string;
   sha256: string;
   target: EngineTarget;
 };
@@ -198,7 +198,7 @@ export async function applyRuntimeUpdate(input: {
   // version comes from the signature-verified manifest, so an attacker cannot strip it;
   // this blocks replay of a genuinely-signed OLD manifest to force a downgrade.
   const installed = readBundleMarker(check.runtimeRoot);
-  if (installed && !satisfiesMinimumVersion(check.runtimeVersion, installed.runtimeVersion)) {
+  if (installed?.runtimeVersion && !satisfiesMinimumVersion(check.runtimeVersion, installed.runtimeVersion)) {
     throw updateFailed(
       `Refusing to install runtimeVersion ${check.runtimeVersion} over the newer installed ${installed.runtimeVersion} (downgrade).`,
       check.manifestSource,
@@ -284,7 +284,8 @@ function readBundleMarker(runtimeRoot: string): BundleMarker | undefined {
     const parsed = JSON.parse(readFileSync(markerPath, "utf8")) as unknown;
     if (!isRecord(parsed)) return undefined;
     const { runtimeVersion, sha256, target } = parsed as { runtimeVersion?: unknown; sha256?: unknown; target?: unknown };
-    if (typeof runtimeVersion !== "string" || typeof sha256 !== "string" || typeof target !== "string") return undefined;
+    if (typeof sha256 !== "string" || typeof target !== "string") return undefined;
+    if (runtimeVersion !== undefined && typeof runtimeVersion !== "string") return undefined;
     if (!Sha256Pattern.test(sha256) || !isEngineTarget(target)) return undefined;
     return { runtimeVersion, sha256: sha256.toLowerCase(), target };
   } catch {

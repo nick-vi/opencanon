@@ -23,6 +23,7 @@ import {
   definitionTargetFiles,
   conventionDocsReference,
   FixSafety,
+  InteractiveProducerPolicy,
   discoverProjectFiles,
   getGitFileDiff,
   getGitFileHistory,
@@ -355,6 +356,7 @@ export async function buildRuntimeSnapshot(input: {
     changes: project.changes,
     validators: project.validators,
     project: true,
+    producerPolicy: InteractiveProducerPolicy,
   });
 
   const health: RuntimeHealth = {

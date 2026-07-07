@@ -8,6 +8,7 @@ import {
   createPaths,
   DoctorStatus,
   applyDoctorFixes,
+  BatchProducerPolicy,
   generateProjectTypes,
   GeneratedStateIgnoreEntries,
   HookInstallHost,
@@ -214,6 +215,7 @@ export async function runInitFlow(cwd: string, query: InitFlowQuery): Promise<In
           conventions: loaded.context.conventions,
           validators: loaded.context.validators,
           project: true,
+          producerPolicy: BatchProducerPolicy,
         });
         steps.push({
           id: InitStepId.ProjectValidation,
