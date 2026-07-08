@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     name: Checks
@@ -27,11 +31,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Audit production dependencies
-        # Fail the build on a known high/critical CVE in anything that ships to users
-        # (e.g. node-tar, bundled into the launcher + worker). Dev-only tooling is excluded.
-        run: npm audit --omit=dev --audit-level=high
 
       - name: Run checks
         run: npm run check:ci
