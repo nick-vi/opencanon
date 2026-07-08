@@ -1,11 +1,10 @@
 # Explicit Error Contract Spec
 
 Spec id: `explicit-error-contract-spec`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: Failed OpenCanon API envelopes expose a single error payload while diagnostics remain valid domain data inside successful responses.
+Failed OpenCanon API envelopes expose a single error payload while diagnostics remain valid domain data inside successful responses.
 
 ## Scope
 
@@ -63,10 +62,6 @@ Scenario `client-opens-uninitialized-project`
 - Then the problem includes the folder path and setup action
 - Then the client can display a predictable recovery flow
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
-
-## Dependencies
-
-No spec dependencies are recorded.
 
 ## Governance
 

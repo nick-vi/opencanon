@@ -1,11 +1,10 @@
 # Local Service and Project Runtimes
 
 Area id: `local-service-and-runtimes`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: The OpenCanon local service discovers projects and lazily starts isolated per-project runtimes.
+The OpenCanon local service discovers projects and lazily starts isolated per-project runtimes.
 
 ## Ownership
 
@@ -40,10 +39,6 @@ Checks: `runtime-client-tests`, `service-lifecycle-tests`
 
 Behavior `project-worker-single-owner`: local service starts or repairs a project runtime; one project worker owns the repo state before SQLite opens, while stale or duplicate workers are retired.
 Checks: `service-lifecycle-tests`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

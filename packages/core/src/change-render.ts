@@ -44,13 +44,14 @@ export function renderChange(change: Change, style: ChangeRenderStyleType): stri
   lines.push("");
   lines.push(`Change id: \`${change.id}\`.`);
   lines.push(`Change kind: \`${change.kind}\`.`);
-  lines.push(`Render style: \`${style}\`.`);
 
   for (const section of ChangeStyleSections[style]) {
+    const rendered = renderChangeSection(change, style, section);
+    if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${ChangeSectionTitle[section]}`);
     lines.push("");
-    lines.push(...renderChangeSection(change, style, section));
+    lines.push(...rendered);
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
@@ -119,19 +120,19 @@ function renderIntent(change: Change, style: ChangeRenderStyleType): string[] {
 
 function renderUpdates(updates: ChangeUpdates | undefined, style: ChangeRenderStyleType): string[] {
   const rows = updateRows(updates);
-  if (rows.length === 0) return [noneLine(style, "No permanent definitions are linked.")];
+  if (rows.length === 0) return [];
   return rows.flatMap(([label, values]) => values.map((value) => renderLinkedRow(style, label, value)));
 }
 
 function renderScope(scope: ChangeScope | undefined, style: ChangeRenderStyleType): string[] {
   const rows = scopeRows(scope);
-  if (rows.length === 0) return [noneLine(style, "No implementation scope is recorded.")];
+  if (rows.length === 0) return [];
   return rows.flatMap(([label, values]) => values.map((value) => renderPlainRow(style, label, value)));
 }
 
 function renderPlan(change: Change, style: ChangeRenderStyleType): string[] {
   const plan = change.plan ?? [];
-  if (plan.length === 0) return [noneLine(style, "No plan items are recorded.")];
+  if (plan.length === 0) return [];
   return plan.flatMap((item, index) => [
     ...(index > 0 ? [""] : []),
     style === ChangeRenderStyle.Checklist ? `- [ ] Plan \`${item.id}\`: ${item.title}` : `Plan \`${item.id}\`: ${item.title}`,
@@ -142,7 +143,7 @@ function renderPlan(change: Change, style: ChangeRenderStyleType): string[] {
 
 function renderTasks(change: Change, style: ChangeRenderStyleType): string[] {
   const tasks = change.tasks ?? [];
-  if (tasks.length === 0) return [noneLine(style, "No tasks are recorded.")];
+  if (tasks.length === 0) return [];
   return tasks.flatMap((task, index) => [
     ...(index > 0 ? [""] : []),
     style === ChangeRenderStyle.Checklist ? `- [ ] Task \`${task.id}\`: ${task.title}` : `Task \`${task.id}\`: ${task.title}`,
@@ -158,7 +159,7 @@ function renderTasks(change: Change, style: ChangeRenderStyleType): string[] {
 
 function renderChecks(change: Change, style: ChangeRenderStyleType): string[] {
   const checks = change.checks ?? [];
-  if (checks.length === 0) return [noneLine(style, "No checks are recorded.")];
+  if (checks.length === 0) return [];
   return checks.map((check) => (style === ChangeRenderStyle.Checklist ? `- [ ] ${checkSummary(check)}` : `- ${checkSummary(check)}`));
 }
 
@@ -167,7 +168,7 @@ function renderDependencies(change: Change, style: ChangeRenderStyleType): strin
     ...((change.dependsOn ?? []).map((id) => `depends on ${changeLink(id)}`)),
     ...((change.blockedBy ?? []).map((id) => `blocked by ${changeLink(id)}`)),
   ];
-  if (rows.length === 0) return [noneLine(style, "No change dependencies are recorded.")];
+  if (rows.length === 0) return [];
   return rows.map((row) => (style === ChangeRenderStyle.Checklist ? `- [ ] ${row}` : `- ${row}`));
 }
 
@@ -177,7 +178,7 @@ function renderLinks(change: Change, style: ChangeRenderStyleType): string[] {
     ["Pull requests", change.links?.pullRequests ?? []],
     ["Issues", change.links?.issues ?? []],
   ].filter((row): row is [string, string[]] => row[1].length > 0);
-  if (rows.length === 0) return [noneLine(style, "No external links are recorded.")];
+  if (rows.length === 0) return [];
   return rows.flatMap(([label, values]) => values.map((value) => renderPlainRow(style, label, value)));
 }
 
@@ -244,10 +245,6 @@ function impactSurfaceLink(id: string): string {
 
 function changeLink(id: string): string {
   return `[${id}](opencanon://changes/${encodeURIComponent(id)})`;
-}
-
-function noneLine(style: ChangeRenderStyleType, value: string): string {
-  return style === ChangeRenderStyle.Checklist ? `- [ ] ${value}` : value;
 }
 
 function resolveGeneratedMarkdownPath(

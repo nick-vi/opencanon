@@ -43,13 +43,14 @@ export function renderSpec(spec: Spec, style: SpecRenderStyleType): string {
   lines.push(`# ${spec.title}`);
   lines.push("");
   lines.push(`Spec id: \`${spec.id}\`.`);
-  lines.push(`Render style: \`${style}\`.`);
 
   for (const section of SpecStyleSections[style]) {
+    const rendered = renderSpecSection(spec, style, section);
+    if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${SpecSectionTitle[section]}`);
     lines.push("");
-    lines.push(...renderSpecSection(spec, style, section));
+    lines.push(...rendered);
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
@@ -104,7 +105,7 @@ function renderSummary(spec: Spec, style: SpecRenderStyleType): string[] {
     case SpecRenderStyle.Checklist:
       return [`- [ ] Confirm spec intent: ${spec.summary}`];
     case SpecRenderStyle.Reference:
-      return [`Summary: ${spec.summary}`];
+      return [spec.summary];
     case SpecRenderStyle.ArchitectureNote:
       return [`Business behavior: ${spec.summary}`];
     case SpecRenderStyle.DecisionRecord:
@@ -114,13 +115,13 @@ function renderSummary(spec: Spec, style: SpecRenderStyleType): string[] {
 
 function renderScope(scope: SpecScope | undefined, style: SpecRenderStyleType): string[] {
   const rows = definitionTargetRows(scope);
-  if (rows.length === 0) return [noneLine(style, "No implementation scope is recorded.")];
+  if (rows.length === 0) return [];
   return rows.flatMap(([label, values]) => values.map((value) => renderPlainRow(style, label, value)));
 }
 
 function renderRules(spec: Spec, style: SpecRenderStyleType): string[] {
   const rules = spec.rules ?? [];
-  if (rules.length === 0) return [noneLine(style, "No rules are recorded.")];
+  if (rules.length === 0) return [];
   return rules.flatMap((rule, index) => [
     ...(index > 0 ? [""] : []),
     style === SpecRenderStyle.Checklist ? `- [ ] Rule \`${rule.id}\`: ${rule.statement}` : `Rule \`${rule.id}\`: ${rule.statement}`,
@@ -131,7 +132,7 @@ function renderRules(spec: Spec, style: SpecRenderStyleType): string[] {
 
 function renderScenarios(spec: Spec, style: SpecRenderStyleType): string[] {
   const scenarios = spec.scenarios ?? [];
-  if (scenarios.length === 0) return [noneLine(style, "No scenarios are recorded.")];
+  if (scenarios.length === 0) return [];
   return scenarios.flatMap((scenario, index) => [
     ...(index > 0 ? [""] : []),
     style === SpecRenderStyle.Checklist ? `- [ ] Scenario \`${scenario.id}\`` : `Scenario \`${scenario.id}\``,
@@ -144,37 +145,37 @@ function renderScenarios(spec: Spec, style: SpecRenderStyleType): string[] {
 
 function renderChecks(spec: Spec, style: SpecRenderStyleType): string[] {
   const checks = spec.checks ?? [];
-  if (checks.length === 0) return [noneLine(style, "No checks are recorded.")];
+  if (checks.length === 0) return [];
   return checks.map((check) => (style === SpecRenderStyle.Checklist ? `- [ ] ${checkSummary(check)}` : `- ${checkSummary(check)}`));
 }
 
 function renderSurfaces(spec: Spec, style: SpecRenderStyleType): string[] {
   const surfaces = spec.surfaces ?? [];
-  if (surfaces.length === 0) return [noneLine(style, "No impact surfaces are linked.")];
+  if (surfaces.length === 0) return [];
   const links = surfaces.map((surface) => impactSurfaceLink(surface));
   return links.map((item) => (style === SpecRenderStyle.Checklist ? `- [ ] Review impact surface ${item}` : `- ${item}`));
 }
 
 function renderAreas(spec: Spec, style: SpecRenderStyleType): string[] {
   const areas = spec.areas ?? [];
-  if (areas.length === 0) return [noneLine(style, "No areas are linked.")];
+  if (areas.length === 0) return [];
   return areas.map((id) => (style === SpecRenderStyle.Checklist ? `- [ ] Review area ${areaLink(id)}` : `- ${areaLink(id)}`));
 }
 
 function renderDependencies(spec: Spec, style: SpecRenderStyleType): string[] {
   const dependencies = spec.dependsOn ?? [];
-  if (dependencies.length === 0) return [noneLine(style, "No spec dependencies are recorded.")];
+  if (dependencies.length === 0) return [];
   return dependencies.map((id) => (style === SpecRenderStyle.Checklist ? `- [ ] Check dependency ${specLink(id)}` : `- ${specLink(id)}`));
 }
 
 function renderGovernance(spec: Spec, style: SpecRenderStyleType): string[] {
   const governedBy = spec.governedBy;
-  if (!governedBy) return [noneLine(style, "No governance metadata is recorded.")];
+  if (!governedBy) return [];
   const rows = [
     ...(governedBy.inferFromScope ? ["infer governing conventions from spec scope"] : []),
     ...(governedBy.conventions ?? []).map((id) => `convention ${conventionLink(id)}`),
   ];
-  if (rows.length === 0) return [noneLine(style, "No governance metadata is recorded.")];
+  if (rows.length === 0) return [];
   return rows.map((row) => (style === SpecRenderStyle.Checklist ? `- [ ] ${row}` : `- ${row}`));
 }
 
@@ -214,10 +215,6 @@ function impactSurfaceLink(id: string): string {
 
 function specLink(id: string): string {
   return `[${id}](opencanon://specs/${encodeURIComponent(id)})`;
-}
-
-function noneLine(style: SpecRenderStyleType, value: string): string {
-  return style === SpecRenderStyle.Checklist ? `- [ ] ${value}` : value;
 }
 
 function resolveGeneratedMarkdownPath(

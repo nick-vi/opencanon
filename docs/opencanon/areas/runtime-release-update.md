@@ -1,11 +1,10 @@
 # Runtime Updates
 
 Area id: `runtime-release-update`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: Runtime updates are selected from signed manifests with target-specific SHA-256 bundles.
+Runtime updates are selected from signed manifests with target-specific SHA-256 bundles.
 
 ## Ownership
 
@@ -33,10 +32,6 @@ Checks: `release-update-tests`, `release-check`
 
 Behavior `refuses-unsafe-update`: updater applies a runtime bundle; hash or signature failures stop before replacing installed files.
 Checks: `release-update-tests`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

@@ -1,36 +1,22 @@
 # Services do not import DB clients
 
 Convention id: `service-no-db-client`.
-Render style: `reference`.
 
 ## Rule
 
-Rule: Services must not import DB clients directly.
+Services must not import DB clients directly.
 
 ## Applies to
 
-Kind: `imports`
-- import source `src/services/**/*.{ts,tsx}`
-- import source `packages/*/src/services/**/*.{ts,tsx}`
+- from `src/services/**/*.{ts,tsx}`
+- from `packages/*/src/services/**/*.{ts,tsx}`
 
 ## Runtime checks
 
-Kind: `validator`
-Severity: `error`
-Scope: `import-edge`
-Facts: `imports`
-
-## Why
-
-Rationale: No rationale is recorded.
-
-## Examples
-
-No examples are recorded.
-
-## Related impact surfaces
-
-No related impact surfaces are recorded.
+- Kind: `validator`
+- Severity: `error`
+- Scope: `import-edge`
+- Facts: `imports`
 
 ## Related conventions
 

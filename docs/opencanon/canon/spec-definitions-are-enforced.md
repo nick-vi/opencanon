@@ -1,33 +1,26 @@
 # Specs declare enforcement and governance
 
 Convention id: `spec-definitions-are-enforced`.
-Render style: `reference`.
 
 ## Rule
 
-Rule: Specs should declare checks, governing conventions, and either implementation scope or impact surfaces.
+Specs should declare checks, governing conventions, and either implementation scope or impact surfaces.
 
 ## Applies to
 
-Kind: `definitions`
 - spec definitions: all
 
 ## Runtime checks
 
-Kind: `validator`
-Severity: `warning`
-Scope: `project`
-Domain: `definition`
-Facts: none
-Fixtures: `valid-only`
+- Kind: `validator`
+- Severity: `warning`
+- Scope: `project`
+- Domain: `definition`
+- Fixtures: `valid-only`
 
 ## Why
 
-Rationale: Specs are useful only when they stay connected to the implementation and the conventions that constrain it.
-
-## Examples
-
-No examples are recorded.
+Specs are useful only when they stay connected to the implementation and the conventions that constrain it.
 
 ## Related impact surfaces
 

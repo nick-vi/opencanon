@@ -40,13 +40,14 @@ export function renderArea(area: Area, style: AreaRenderStyle): string {
   lines.push(`# ${area.title}`);
   lines.push("");
   lines.push(`Area id: \`${area.id}\`.`);
-  lines.push(`Render style: \`${style}\`.`);
 
   for (const section of AreaStyleSections[style]) {
+    const rendered = renderAreaSection(area, style, section);
+    if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${AreaSectionTitle[section]}`);
     lines.push("");
-    lines.push(...renderAreaSection(area, style, section));
+    lines.push(...rendered);
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
@@ -99,7 +100,7 @@ function renderSummary(area: Area, style: AreaRenderStyle): string[] {
     case AreaRenderStyle.Checklist:
       return [`- [ ] Confirm area intent: ${area.summary}`];
     case AreaRenderStyle.Reference:
-      return [`Summary: ${area.summary}`];
+      return [area.summary];
     case AreaRenderStyle.ArchitectureNote:
       return [`Product behavior: ${area.summary}`];
     case AreaRenderStyle.DecisionRecord:
@@ -109,7 +110,7 @@ function renderSummary(area: Area, style: AreaRenderStyle): string[] {
 
 function renderOwnership(area: Area, style: AreaRenderStyle): string[] {
   const rows = ownershipRows(area);
-  if (rows.length === 0) return [noneLine(style, "No ownership metadata is recorded.")];
+  if (rows.length === 0) return [];
   switch (style) {
     case AreaRenderStyle.Narrative:
       return ["The area owns:", ...rows.map(([label, values]) => `- ${label}: ${values.join(", ")}`)];
@@ -126,7 +127,7 @@ function renderOwnership(area: Area, style: AreaRenderStyle): string[] {
 
 function renderStories(area: Area, style: AreaRenderStyle): string[] {
   const stories = area.stories ?? [];
-  if (stories.length === 0) return [noneLine(style, "No user stories are recorded.")];
+  if (stories.length === 0) return [];
   return stories.flatMap((story, index) => [
     ...(index > 0 ? [""] : []),
     style === AreaRenderStyle.Checklist ? `- [ ] Story \`${story.id}\`: as ${story.as}, I want ${story.want}, so ${story.so}.` : `Story \`${story.id}\`: as ${story.as}, I want ${story.want}, so ${story.so}.`,
@@ -137,7 +138,7 @@ function renderStories(area: Area, style: AreaRenderStyle): string[] {
 
 function renderBehaviors(area: Area, style: AreaRenderStyle): string[] {
   const behaviors = area.behaviors ?? [];
-  if (behaviors.length === 0) return [noneLine(style, "No behaviors are recorded.")];
+  if (behaviors.length === 0) return [];
   return behaviors.flatMap((behavior, index) => [
     ...(index > 0 ? [""] : []),
     style === AreaRenderStyle.Checklist
@@ -149,13 +150,13 @@ function renderBehaviors(area: Area, style: AreaRenderStyle): string[] {
 
 function renderChecks(area: Area, style: AreaRenderStyle): string[] {
   const checks = area.checks ?? [];
-  if (checks.length === 0) return [noneLine(style, "No checks are recorded.")];
+  if (checks.length === 0) return [];
   return checks.map((check) => (style === AreaRenderStyle.Checklist ? `- [ ] ${checkSummary(check)}` : `- ${checkSummary(check)}`));
 }
 
 function renderSurfaces(area: Area, style: AreaRenderStyle): string[] {
   const surfaces = area.surfaces ?? [];
-  if (surfaces.length === 0) return [noneLine(style, "No impact surfaces are linked.")];
+  if (surfaces.length === 0) return [];
   const links = surfaces.map((surface) => impactSurfaceLink(surface));
   switch (style) {
     case AreaRenderStyle.Narrative:
@@ -173,18 +174,18 @@ function renderSurfaces(area: Area, style: AreaRenderStyle): string[] {
 
 function renderDependencies(area: Area, style: AreaRenderStyle): string[] {
   const dependencies = area.dependsOn ?? [];
-  if (dependencies.length === 0) return [noneLine(style, "No area dependencies are recorded.")];
+  if (dependencies.length === 0) return [];
   return dependencies.map((id) => (style === AreaRenderStyle.Checklist ? `- [ ] Check dependency ${areaLink(id)}` : `- ${areaLink(id)}`));
 }
 
 function renderGovernance(area: Area, style: AreaRenderStyle): string[] {
   const governedBy = area.governedBy;
-  if (!governedBy) return [noneLine(style, "No governance metadata is recorded.")];
+  if (!governedBy) return [];
   const rows = [
     ...(governedBy.inferFromScope ? ["infer governing conventions from owned scope"] : []),
     ...(governedBy.conventions ?? []).map((id) => `convention ${conventionLink(id)}`),
   ];
-  if (rows.length === 0) return [noneLine(style, "No governance metadata is recorded.")];
+  if (rows.length === 0) return [];
   return rows.map((row) => (style === AreaRenderStyle.Checklist ? `- [ ] ${row}` : `- ${row}`));
 }
 
@@ -219,10 +220,6 @@ function conventionLink(id: string): string {
 
 function impactSurfaceLink(id: string): string {
   return `[${id}](opencanon://impact-surfaces/${encodeURIComponent(id)})`;
-}
-
-function noneLine(style: AreaRenderStyle, value: string): string {
-  return style === AreaRenderStyle.Checklist ? `- [ ] ${value}` : value;
 }
 
 function resolveGeneratedMarkdownPath(

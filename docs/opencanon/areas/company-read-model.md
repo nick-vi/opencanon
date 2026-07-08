@@ -1,11 +1,10 @@
 # Example Company Read Model
 
 Area id: `company-read-model`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: The example company read model dogfoods service-boundary conventions without representing OpenCanon product behavior.
+The example company read model dogfoods service-boundary conventions without representing OpenCanon product behavior.
 
 ## Ownership
 
@@ -33,10 +32,6 @@ Checks: `company-unit-tests`, `project-validation`
 
 Behavior `protects-company-contract`: route handler reads a company by id; the response contract is isolated from database schema internals.
 Checks: `company-unit-tests`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

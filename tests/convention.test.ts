@@ -316,7 +316,6 @@ test("renderConvention snapshots every style deterministically", () => {
     narrative: `# Sample Rule
 
 Convention id: \`sample-rule\`.
-Render style: \`narrative\`.
 
 ## Why
 
@@ -329,12 +328,11 @@ The convention is: Sample files must use the approved shape.
 ## Applies to
 
 This convention applies to:
-- import source \`src/**/*.ts\`
-- import target \`src/db/**\`
+- from \`src/**/*.ts\`
+- to \`src/db/**\`
 
 ## Examples
 
-Example 1:
 Good:
 \`\`\`
 export const ok = true;
@@ -343,7 +341,7 @@ Bad:
 \`\`\`
 enum Bad { X }
 \`\`\`
-Note: Keep examples short.
+- Keep examples short.
 
 ## Runtime checks
 
@@ -368,7 +366,6 @@ Related conventions:
     checklist: `# Sample Rule
 
 Convention id: \`sample-rule\`.
-Render style: \`checklist\`.
 
 ## Rule
 
@@ -376,8 +373,8 @@ Render style: \`checklist\`.
 
 ## Applies to
 
-- [ ] Check import source \`src/**/*.ts\`
-- [ ] Check import target \`src/db/**\`
+- [ ] Check from \`src/**/*.ts\`
+- [ ] Check to \`src/db/**\`
 
 ## Runtime checks
 
@@ -390,16 +387,15 @@ Render style: \`checklist\`.
 
 ## Examples
 
-- [ ] Review example 1:
-  - Good:
+- [ ] Good:
 \`\`\`
 export const ok = true;
 \`\`\`
-  - Bad:
+- [ ] Bad:
 \`\`\`
 enum Bad { X }
 \`\`\`
-  - Note: Keep examples short.
+- [ ] Keep examples short.
 
 ## Why
 
@@ -416,34 +412,31 @@ enum Bad { X }
     reference: `# Sample Rule
 
 Convention id: \`sample-rule\`.
-Render style: \`reference\`.
 
 ## Rule
 
-Rule: Sample files must use the approved shape.
+Sample files must use the approved shape.
 
 ## Applies to
 
-Kind: \`imports\`
-- import source \`src/**/*.ts\`
-- import target \`src/db/**\`
+- from \`src/**/*.ts\`
+- to \`src/db/**\`
 
 ## Runtime checks
 
-Kind: \`validator\`
-Severity: \`warning\`
-Scope: \`import-edge\`
-Facts: \`imports\`
-Requires producers: \`typescript\`
-Fixtures: \`valid-and-invalid\`
+- Kind: \`validator\`
+- Severity: \`warning\`
+- Scope: \`import-edge\`
+- Facts: \`imports\`
+- Requires producers: \`typescript\`
+- Fixtures: \`valid-and-invalid\`
 
 ## Why
 
-Rationale: The sample rule keeps examples deterministic.
+The sample rule keeps examples deterministic.
 
 ## Examples
 
-Example 1:
 Good:
 \`\`\`
 export const ok = true;
@@ -452,7 +445,7 @@ Bad:
 \`\`\`
 enum Bad { X }
 \`\`\`
-Note: Keep examples short.
+- Keep examples short.
 
 ## Related impact surfaces
 
@@ -465,21 +458,20 @@ Note: Keep examples short.
     "architecture-note": `# Sample Rule
 
 Convention id: \`sample-rule\`.
-Render style: \`architecture-note\`.
 
 ## Why
 
-Architectural intent: The sample rule keeps examples deterministic.
+The sample rule keeps examples deterministic.
 
 ## Applies to
 
 Affected architecture scope:
-- import source \`src/**/*.ts\`
-- import target \`src/db/**\`
+- from \`src/**/*.ts\`
+- to \`src/db/**\`
 
 ## Rule
 
-Architecture rule: Sample files must use the approved shape.
+Sample files must use the approved shape.
 
 ## Related impact surfaces
 
@@ -498,7 +490,6 @@ Runtime guardrails:
 
 ## Examples
 
-Example 1:
 Good:
 \`\`\`
 export const ok = true;
@@ -507,7 +498,7 @@ Bad:
 \`\`\`
 enum Bad { X }
 \`\`\`
-Note: Keep examples short.
+- Keep examples short.
 
 ## Related conventions
 
@@ -517,21 +508,20 @@ Neighboring convention constraints:
     "decision-record": `# Sample Rule
 
 Convention id: \`sample-rule\`.
-Render style: \`decision-record\`.
 
 ## Rule
 
-Decision: Sample files must use the approved shape.
+Sample files must use the approved shape.
 
 ## Why
 
-Context: The sample rule keeps examples deterministic.
+The sample rule keeps examples deterministic.
 
 ## Applies to
 
 Scope of the decision:
-- import source \`src/**/*.ts\`
-- import target \`src/db/**\`
+- from \`src/**/*.ts\`
+- to \`src/db/**\`
 
 ## Runtime checks
 
@@ -555,7 +545,6 @@ Impact surfaces considered:
 
 ## Examples
 
-Example 1:
 Good:
 \`\`\`
 export const ok = true;
@@ -564,7 +553,7 @@ Bad:
 \`\`\`
 enum Bad { X }
 \`\`\`
-Note: Keep examples short.
+- Keep examples short.
 `,
   } satisfies Record<string, string>;
 
@@ -696,19 +685,14 @@ test("renderSpec is deterministic", () => {
   const expected = `# Service Health Spec
 
 Spec id: \`service-health-spec\`.
-Render style: \`reference\`.
 
 ## Summary
 
-Summary: Service health behavior stays visible and enforced.
+Service health behavior stays visible and enforced.
 
 ## Scope
 
 - Files: \`packages/runtime/src/service.ts\`
-
-## Impact surfaces
-
-No impact surfaces are linked.
 
 ## Areas
 
@@ -732,10 +716,6 @@ Scenario \`inspect-health\`
 - Then doctor status is shown
 Checks: \`project-doctor\`
 
-## Dependencies
-
-No spec dependencies are recorded.
-
 ## Governance
 
 - convention [governance-rule](opencanon://conventions/governance-rule)
@@ -755,20 +735,15 @@ test("renderArea is deterministic", () => {
   const expected = `# Service Health
 
 Area id: \`service-health\`.
-Render style: \`reference\`.
 
 ## Summary
 
-Summary: Users can inspect project health from the local service.
+Users can inspect project health from the local service.
 
 ## Ownership
 
 Files: packages/runtime/src/service.ts
 Endpoints: /api/doctor (runtime)
-
-## Impact surfaces
-
-No impact surfaces are linked.
 
 ## Checks
 
@@ -784,10 +759,6 @@ Checks: \`project-doctor\`
 
 Behavior \`shows-doctor-status\`: developer opens Health; doctor failures are visible.
 Checks: \`project-doctor\`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 
@@ -1132,7 +1103,6 @@ test("change render is deterministic", () => {
 
 Change id: \`service-health-change\`.
 Change kind: \`feature\`.
-Render style: \`reference\`.
 
 ## Intent
 
@@ -1164,14 +1134,6 @@ Checks: \`project-doctor\`
 
 Task \`ui\`: Wire health API
 Checks: \`service-build\`
-
-## Dependencies
-
-No change dependencies are recorded.
-
-## Links
-
-No external links are recorded.
 `;
 
   assert.equal(renderChange(sampleChange(), "reference" as ChangeRenderStyle), expected);

@@ -1,20 +1,15 @@
 # Agent Feedback and Gates
 
 Area id: `agent-feedback-and-gates`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: Agent hooks and CLI feedback surface related conventions, impact surfaces, findings, and explicit approval gates.
+Agent hooks and CLI feedback surface related conventions, impact surfaces, findings, and explicit approval gates.
 
 ## Ownership
 
 Files: packages/core/src/feedback.ts, packages/core/src/commit-approvals.ts, packages/core/src/hook-install.ts, packages/cli/src/feedback.ts, packages/cli/src/gate.ts
 Commands: opencanon feedback (cli), opencanon gate (cli)
-
-## Impact surfaces
-
-No impact surfaces are linked.
 
 ## Checks
 
@@ -32,10 +27,6 @@ Checks: `feedback-tests`, `project-doctor`
 
 Behavior `commit-gate-records-user-intent`: commit gate requires approval for sensitive changes; approval context is recorded outside committed canon definitions.
 Checks: `feedback-tests`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

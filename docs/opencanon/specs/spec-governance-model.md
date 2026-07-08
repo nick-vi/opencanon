@@ -1,11 +1,10 @@
 # Spec Governance Model
 
 Spec id: `spec-governance-model`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: Specs describe durable behavior as typed definitions with generated docs, governing conventions, implementation scope, impact links, and executable checks.
+Specs describe durable behavior as typed definitions with generated docs, governing conventions, implementation scope, impact links, and executable checks.
 
 ## Scope
 
@@ -101,10 +100,6 @@ Scenario `agent-follows-ready-change-task`
 - Then the agent can claim a task
 - Then check results and close events update runtime state without editing the Change definition
 Checks: `runtime-client-tests`, `definition-graph-tests`
-
-## Dependencies
-
-No spec dependencies are recorded.
 
 ## Governance
 

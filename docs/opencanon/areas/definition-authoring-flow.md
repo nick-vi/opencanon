@@ -1,21 +1,16 @@
 # Definition Authoring Flow
 
 Area id: `definition-authoring-flow`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: OpenCanon provides project-local authoring support and draft commands for conventions, areas, and change definitions.
+OpenCanon provides project-local authoring support and draft commands for conventions, areas, and change definitions.
 
 ## Ownership
 
 Files: packages/core/src/project-types.ts, packages/runtime/src/project-types-runtime.ts, packages/cli/src/setup.ts, packages/cli/src/areas.ts, packages/cli/src/changes.ts
 Commands: opencanon canon draft convention (cli), opencanon canon draft area (cli), opencanon canon draft change (cli)
 Docs: .agents/skills/opencanon/SKILL.md
-
-## Impact surfaces
-
-No impact surfaces are linked.
 
 ## Checks
 
@@ -34,10 +29,6 @@ Checks: `convention-tests`, `project-doctor`
 
 Behavior `authoring-state-is-derived`: init and project runtime write authoring declaration files automatically; generated files stay under .opencanon/generated and out of committed source.
 Checks: `project-doctor`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

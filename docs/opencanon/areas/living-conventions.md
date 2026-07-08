@@ -1,11 +1,10 @@
 # Living Conventions
 
 Area id: `living-conventions`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: Conventions are typed definitions that can render human docs and enforce runtime validators, gates, or tests.
+Conventions are typed definitions that can render human docs and enforce runtime validators, gates, or tests.
 
 ## Ownership
 
@@ -33,10 +32,6 @@ Checks: `convention-tests`, `project-doctor`
 
 Behavior `runtime-axis-enforces`: validator runtime loads a convention with runtime validation; findings and gates are produced from the convention definition.
 Checks: `convention-tests`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

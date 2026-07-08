@@ -32,13 +32,14 @@ export function renderConvention(convention: Convention, style: RenderStyle): st
   lines.push(`# ${convention.title}`);
   lines.push("");
   lines.push(`Convention id: \`${convention.id}\`.`);
-  lines.push(`Render style: \`${style}\`.`);
 
   for (const section of StyleSections[style]) {
+    const rendered = renderSection(convention, style, section);
+    if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${SectionTitle[section]}`);
     lines.push("");
-    lines.push(...renderSection(convention, style, section));
+    lines.push(...rendered);
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
@@ -83,18 +84,19 @@ function renderSection(convention: Convention, style: RenderStyle, section: Sect
 }
 
 function renderWhy(convention: Convention, style: RenderStyle): string[] {
-  const why = convention.why ?? "No rationale is recorded.";
+  const why = convention.why;
+  if (!why) return [];
   switch (style) {
     case "narrative":
       return [why];
     case "checklist":
       return [`- [ ] Confirm the rationale: ${why}`];
     case "reference":
-      return [`Rationale: ${why}`];
+      return [why];
     case "architecture-note":
-      return [`Architectural intent: ${why}`];
+      return [why];
     case "decision-record":
-      return [`Context: ${why}`];
+      return [why];
   }
 }
 
@@ -105,11 +107,11 @@ function renderRule(convention: Convention, style: RenderStyle): string[] {
     case "checklist":
       return [`- [ ] Enforce: ${convention.rule}`];
     case "reference":
-      return [`Rule: ${convention.rule}`];
+      return [convention.rule];
     case "architecture-note":
-      return [`Architecture rule: ${convention.rule}`];
+      return [convention.rule];
     case "decision-record":
-      return [`Decision: ${convention.rule}`];
+      return [convention.rule];
   }
 }
 
@@ -121,7 +123,7 @@ function renderApplies(applies: Applies, style: RenderStyle): string[] {
     case "checklist":
       return details.map((detail) => `- [ ] Check ${detail}`);
     case "reference":
-      return [`Kind: \`${applies.kind}\``, ...details.map((detail) => `- ${detail}`)];
+      return details.map((detail) => `- ${detail}`);
     case "architecture-note":
       return ["Affected architecture scope:", ...details.map((detail) => `- ${detail}`)];
     case "decision-record":
@@ -131,21 +133,21 @@ function renderApplies(applies: Applies, style: RenderStyle): string[] {
 
 function renderExamples(convention: Convention, style: RenderStyle): string[] {
   const examples = convention.examples ?? [];
-  if (examples.length === 0) return [noneLine(style, "No examples are recorded.")];
+  if (examples.length === 0) return [];
 
   const lines: string[] = [];
   examples.forEach((example, index) => {
     if (index > 0) lines.push("");
-    lines.push(style === ConventionRenderStyle.Checklist ? `- [ ] Review example ${index + 1}:` : `Example ${index + 1}:`);
+    const prefix = style === ConventionRenderStyle.Checklist ? "- [ ] " : "";
     if (example.good) lines.push(...labeledBlock("Good", example.good, style));
     if (example.bad) lines.push(...labeledBlock("Bad", example.bad, style));
-    if (example.note) lines.push(...labeledText("Note", example.note, style));
+    if (example.note) lines.push(`${prefix || "- "}${example.note}`);
   });
   return lines;
 }
 
 function renderRuntime(runtime: Runtime, style: RenderStyle): string[] {
-  if (runtime.kind === ConventionRuntimeKind.None) return [noneLine(style, "No runtime checks are configured.")];
+  if (runtime.kind === ConventionRuntimeKind.None) return [];
   const rows = runtimeDetails(runtime);
   switch (style) {
     case "narrative":
@@ -153,7 +155,7 @@ function renderRuntime(runtime: Runtime, style: RenderStyle): string[] {
     case "checklist":
       return rows.map(([label, value]) => `- [ ] Verify ${label.toLowerCase()}: ${value}`);
     case "reference":
-      return rows.map(([label, value]) => `${label}: ${value}`);
+      return rows.map(([label, value]) => `- ${label}: ${value}`);
     case "architecture-note":
       return ["Runtime guardrails:", ...rows.map(([label, value]) => `- ${label}: ${value}`)];
     case "decision-record":
@@ -163,7 +165,7 @@ function renderRuntime(runtime: Runtime, style: RenderStyle): string[] {
 
 function renderImpactSurfaces(convention: Convention, style: RenderStyle): string[] {
   const surfaces = convention.impactSurfaces ?? [];
-  if (surfaces.length === 0) return [noneLine(style, "No related impact surfaces are recorded.")];
+  if (surfaces.length === 0) return [];
   const linked = surfaces.map((id) => impactSurfaceLink(id));
   switch (style) {
     case "narrative":
@@ -181,7 +183,7 @@ function renderImpactSurfaces(convention: Convention, style: RenderStyle): strin
 
 function renderRelatedConventions(convention: Convention, style: RenderStyle): string[] {
   const related = convention.related ?? [];
-  if (related.length === 0) return [noneLine(style, "No related conventions are recorded.")];
+  if (related.length === 0) return [];
   const linked = related.map((id) => conventionLink(id));
   switch (style) {
     case "narrative":
@@ -200,16 +202,16 @@ function renderRelatedConventions(convention: Convention, style: RenderStyle): s
 function appliesDetails(applies: Applies): string[] {
   switch (applies.kind) {
     case "files":
-      return applies.globs.map((glob) => `file glob \`${glob}\``);
+      return applies.globs.map((glob) => `\`${glob}\``);
     case "symbols":
       return [
-        ...applies.globs.map((glob) => `symbol file glob \`${glob}\``),
-        ...(applies.symbolKinds && applies.symbolKinds.length > 0 ? [`symbol kinds ${applies.symbolKinds.map((kind) => `\`${kind}\``).join(", ")}`] : []),
+        ...applies.globs.map((glob) => `symbol files \`${glob}\``),
+        ...(applies.symbolKinds && applies.symbolKinds.length > 0 ? [`symbol kinds: ${applies.symbolKinds.map((kind) => `\`${kind}\``).join(", ")}`] : []),
       ];
     case "imports":
       return [
-        ...(applies.from ?? []).map((glob) => `import source \`${glob}\``),
-        ...(applies.to ?? []).map((glob) => `import target \`${glob}\``),
+        ...(applies.from ?? []).map((glob) => `from \`${glob}\``),
+        ...(applies.to ?? []).map((glob) => `to \`${glob}\``),
         ...((applies.from ?? []).length === 0 && (applies.to ?? []).length === 0 ? ["all import edges"] : []),
       ];
     case "impact-surface":
@@ -232,7 +234,7 @@ function runtimeDetails(runtime: Exclude<Runtime, { kind: "none" }>): Array<[str
     ["Severity", `\`${runtime.kind === ConventionRuntimeKind.Gate ? "error" : runtime.severity}\``],
     ["Scope", `\`${runtime.scope}\``],
     ...(runtime.domain ? ([["Domain", `\`${runtime.domain}\``]] as Array<[string, string]>) : []),
-    ["Facts", runtime.facts.length === 0 ? "none" : runtime.facts.map((fact) => `\`${fact}\``).join(", ")],
+    ...(runtime.facts.length > 0 ? ([["Facts", runtime.facts.map((fact) => `\`${fact}\``).join(", ")]] as Array<[string, string]>) : []),
     ...(runtime.kind === ConventionRuntimeKind.Gate ? ([["Question", runtime.question]] as Array<[string, string]>) : []),
     ...(runtime.requiresProducers && runtime.requiresProducers.length > 0
       ? ([["Requires producers", runtime.requiresProducers.map((producer) => `\`${producer}\``).join(", ")]] as Array<[string, string]>)
@@ -242,16 +244,8 @@ function runtimeDetails(runtime: Exclude<Runtime, { kind: "none" }>): Array<[str
 }
 
 function labeledBlock(label: string, value: string, style: RenderStyle): string[] {
-  const prefix = style === ConventionRenderStyle.Checklist ? `  - ${label}:` : `${label}:`;
+  const prefix = style === ConventionRenderStyle.Checklist ? `- [ ] ${label}:` : `${label}:`;
   return [prefix, fenceBlock(value)];
-}
-
-function labeledText(label: string, value: string, style: RenderStyle): string[] {
-  return [style === ConventionRenderStyle.Checklist ? `  - ${label}: ${value}` : `${label}: ${value}`];
-}
-
-function noneLine(style: RenderStyle, value: string): string {
-  return style === ConventionRenderStyle.Checklist ? `- [ ] ${value}` : value;
 }
 
 function conventionLink(id: string): string {

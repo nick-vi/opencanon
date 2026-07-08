@@ -1,11 +1,10 @@
 # Project Map Governance
 
 Area id: `project-map-governance`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: OpenCanon derives the Project Map across areas, changes, conventions, surfaces, checks, validators, and owned targets.
+OpenCanon derives the Project Map across areas, changes, conventions, surfaces, checks, validators, and owned targets.
 
 ## Ownership
 
@@ -37,10 +36,6 @@ Checks: `definition-graph-tests`, `project-doctor`
 
 Behavior `derives-impact-backlinks`: project runtime snapshot loads definitions and impact surfaces; area, change, convention, and surface backlinks are available to runtime clients and durable project state.
 Checks: `definition-graph-tests`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

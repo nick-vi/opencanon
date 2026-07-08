@@ -1,11 +1,10 @@
 # Project Context Index
 
 Area id: `project-context-index`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: OpenCanon owns search, chunks, embeddings, vector storage, and related-code retrieval as derived project runtime state tied back to definitions.
+OpenCanon owns search, chunks, embeddings, vector storage, and related-code retrieval as derived project runtime state tied back to definitions.
 
 ## Ownership
 
@@ -48,10 +47,6 @@ Checks: `project-doctor`
 
 Behavior `deterministic-validator-context`: validator runtime queries project context; blocking findings depend on deterministic files, facts, definitions, surfaces, chunks, freshness, coverage, or backlinks.
 Checks: `project-doctor`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

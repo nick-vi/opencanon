@@ -1,11 +1,10 @@
 # Explicit Error Contracts
 
 Area id: `explicit-error-contracts`.
-Render style: `reference`.
 
 ## Summary
 
-Summary: OpenCanon runtime, service, local protocol, CLI, and MCP failures use a single `{ ok: false, error }` envelope.
+OpenCanon runtime, service, local protocol, CLI, and MCP failures use a single `{ ok: false, error }` envelope.
 
 ## Ownership
 
@@ -41,10 +40,6 @@ Checks: `contracts-tests`, `runtime-client-tests`
 
 Behavior `problem-errors-drive-client-recovery`: runtime client opens an uninitialized project; the client receives a structured problem with code, path, action, retryability, and status.
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
-
-## Dependencies
-
-No area dependencies are recorded.
 
 ## Governance
 

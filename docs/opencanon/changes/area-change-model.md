@@ -2,7 +2,6 @@
 
 Change id: `area-change-model`.
 Change kind: `feature`.
-Render style: `reference`.
 
 ## Intent
 
@@ -238,11 +237,3 @@ Task `headless-runtime-split`: Split retired UI and site surfaces away from the 
 Files: `package.json`, `package-lock.json`, `vitest.config.ts`, `.github/workflows/**`, `packages/service-contracts/**`, `packages/runtime/**`, `packages/validators/**`, `apps/site/**`, `opencanon/fixtures/**`, `scripts/**`, `README.md`
 Impact surfaces: [local-service-control](opencanon://impact-surfaces/local-service-control), [project-canon-model](opencanon://impact-surfaces/project-canon-model), [release-update](opencanon://impact-surfaces/release-update)
 Checks: `typecheck`, `release-tests`, `release-check`, `runtime-build`
-
-## Dependencies
-
-No change dependencies are recorded.
-
-## Links
-
-No external links are recorded.
