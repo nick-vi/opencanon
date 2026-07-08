@@ -722,4 +722,6 @@ export type { HookFeedback } from "./hooks.ts";
 export { appendOpenCodeFeedback, createHookFeedback, extractFilesFromPatchText, normalizeHookPayload, renderHookResponse } from "./hooks.ts";
 export type { ValidationInput, ValidationResult, ValidatorOutcome } from "./validation.ts";
 export { runValidation, selectValidators, sortFindings, validatorGraphHash, ValidatorOutcomeStatus } from "./validation.ts";
+export type { ValidationResultCache } from "./validation-result-cache.ts";
+export { createEphemeralValidationResultCache, createValidationResultCache, validationRuntimeFingerprint, validatorRunCacheKey } from "./validation-result-cache.ts";
 export * from "./worktree.ts";

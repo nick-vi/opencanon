@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { createEphemeralValidationResultCache } from "@opencanon/core";
 import type { RuntimeSnapshot } from "../src/snapshot.ts";
 import { createRuntimeStateManager } from "../src/state-manager.ts";
 import type { ProjectInventory } from "../src/server-fs.ts";
@@ -13,6 +14,7 @@ test("RuntimeStateManager serializes rebuilds and refreshes owned state", async 
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
     initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
     maxQueuedRebuilds: 5,
     isStopped: () => false,
     async rebuildNow(summary) {
@@ -49,6 +51,7 @@ test("RuntimeStateManager runs queued watch rebuilds serially and publishes the 
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
     initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
     maxQueuedRebuilds: 5,
     isStopped: () => false,
     async rebuildNow(summary) {

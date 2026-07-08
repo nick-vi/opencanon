@@ -1,10 +1,13 @@
 import type { RuntimeSnapshot } from "./snapshot.ts";
 import type { ProjectInventory } from "./server-fs.ts";
+import type { ValidationResultCache } from "@opencanon/core";
 
 export type RuntimeStateManager = {
   currentSnapshot(): RuntimeSnapshot;
   setSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot;
   currentProjectInventory(): ProjectInventory;
+  validationResultCache(): ValidationResultCache;
+  replaceValidationResultCache(cache: ValidationResultCache): void;
   rebuildAndPublish(summary: string): Promise<RuntimeSnapshot>;
   scheduleRebuild(summary: string): void;
   waitForIdle(): Promise<void>;
@@ -14,6 +17,7 @@ export type RuntimeStateManager = {
 export type RuntimeStateManagerOptions = {
   initialSnapshot: RuntimeSnapshot;
   initialProjectInventory: ProjectInventory;
+  initialValidationResultCache: ValidationResultCache;
   maxQueuedRebuilds: number;
   isStopped(): boolean;
   rebuildNow(summary: string): Promise<RuntimeSnapshot>;
@@ -24,6 +28,7 @@ export type RuntimeStateManagerOptions = {
 export function createRuntimeStateManager(options: RuntimeStateManagerOptions): RuntimeStateManager {
   let snapshot = options.initialSnapshot;
   let projectInventory = options.initialProjectInventory;
+  let validationResultCache = options.initialValidationResultCache;
   let rebuildInFlight: Promise<RuntimeSnapshot> | undefined;
   let watchRebuildInFlight: Promise<void> | undefined;
   const queuedWatchSummaries: string[] = [];
@@ -92,6 +97,12 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     },
     currentProjectInventory() {
       return projectInventory;
+    },
+    validationResultCache() {
+      return validationResultCache;
+    },
+    replaceValidationResultCache(next) {
+      validationResultCache = next;
     },
     rebuildAndPublish,
     scheduleRebuild,

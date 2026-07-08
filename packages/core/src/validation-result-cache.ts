@@ -47,17 +47,12 @@ export type ValidationResultCache = {
   flush(): void;
 };
 
-const caches = new Map<string, ValidationResultCache>();
-
-export function getValidationResultCache(paths: ContextPaths): ValidationResultCache {
+export function createValidationResultCache(paths: ContextPaths): ValidationResultCache {
   const cachePath = path.join(paths.cacheDir, "validation-results.json");
-  const existing = caches.get(cachePath);
-  if (existing) return existing;
-
   let cacheFile = readCacheFile(cachePath);
   let dirty = false;
 
-  const cache: ValidationResultCache = {
+  return {
     get(key) {
       const record = cacheFile.entries[key];
       if (!record) return undefined;
@@ -81,9 +76,30 @@ export function getValidationResultCache(paths: ContextPaths): ValidationResultC
       dirty = false;
     },
   };
+}
 
-  caches.set(cachePath, cache);
-  return cache;
+export function createEphemeralValidationResultCache(): ValidationResultCache {
+  let cacheFile: ValidationResultCacheFile = { version: cacheVersion, entries: {} };
+  return {
+    get(key) {
+      const record = cacheFile.entries[key];
+      if (!record) return undefined;
+      record.accessedAt = Date.now();
+      return cloneCachedResult(record.result);
+    },
+    set(key, result) {
+      cacheFile.entries[key] = {
+        key,
+        createdAt: Date.now(),
+        accessedAt: Date.now(),
+        result: cloneCachedResult(result),
+      };
+      cacheFile = prune(cacheFile);
+    },
+    flush() {
+      cacheFile = prune(cacheFile);
+    },
+  };
 }
 
 export function validatorRunCacheKey(input: ValidatorRunCacheKeyInput): string {

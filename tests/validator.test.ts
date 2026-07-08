@@ -34,6 +34,7 @@ import {
   createCommitApprovalContext,
   createCommitApprovalRecord,
   defineArea,
+  createValidationResultCache,
   createRuntime,
   createConventionFactory,
   conventionToValidator,
@@ -1357,17 +1358,18 @@ test("validation result cache reuses unchanged validator results", async () => {
       }),
     ).validators;
 
-    const first = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy });
+    const resultCache = createValidationResultCache(paths);
+    const first = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
     assert.equal(runs, 1);
     assert.equal(first.findings[0]?.message, "bad value run 1");
     assert.equal(existsSync(cachePath), true);
 
-    const second = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy });
+    const second = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
     assert.equal(runs, 1, "unchanged validation should be served from cache");
     assert.equal(second.findings[0]?.message, "bad value run 1");
 
     writeFileSync(path.join(rootDir, "src/company.ts"), "export const value = 'clean-enough';\n");
-    const third = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy });
+    const third = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
     assert.equal(runs, 2, "changing project input must invalidate the cached validator result");
     assert.equal(third.findings.length, 0);
   } finally {
@@ -1409,10 +1411,11 @@ test("validation result cache invalidates when validator source changes", async 
     ).validators;
 
     assert.equal(validatorGraphHash(firstValidators), validatorGraphHash(secondValidators));
-    const first = await runValidation({ rootDir, paths, conventions: [], validators: firstValidators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy });
+    const resultCache = createValidationResultCache(paths);
+    const first = await runValidation({ rootDir, paths, conventions: [], validators: firstValidators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
     assert.equal(first.findings[0]?.message, "first implementation");
 
-    const second = await runValidation({ rootDir, paths, conventions: [], validators: secondValidators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy });
+    const second = await runValidation({ rootDir, paths, conventions: [], validators: secondValidators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
     assert.equal(secondRuns, 1, "validator source changes must bypass cached results even when graph hash metadata is unchanged");
     assert.equal(second.findings.length, 0);
   } finally {

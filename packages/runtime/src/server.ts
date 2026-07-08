@@ -19,6 +19,7 @@ import {
   createCommitApprovalRecord,
   createPaths,
   createOpenCanonDiagnostic,
+  createValidationResultCache,
   createProfiler,
   getOpenCanonErrorDiagnostics,
   formatOpenCanonDiagnostics,
@@ -67,6 +68,7 @@ import {
   type DefinitionHistoryTarget,
   type ProducerPolicy,
   type RuntimeWorkerJob,
+  type ValidationResultCache,
   type WatcherEventBatch,
 } from "@opencanon/core";
 import { buildRuntimeSnapshot, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
@@ -275,6 +277,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   // blows past the health-probe window and the service declares the runtime dead.
   // The boot snapshot runs without typed facts; the first post-ready validation
   // warms the producer.
+  const validationResultCache = createValidationResultCache(paths);
   let snapshot: RuntimeSnapshot;
   try {
     snapshot = await tracer.span("runtime.snapshot.boot", { kind: SpanKind.TASK, attributes: { phase: "boot" } }, async (span) => {
@@ -284,6 +287,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         store,
         semanticEmbedding: DefaultSemanticEmbeddingConfig,
         semanticIndexMode: "reuse",
+        validationResultCache,
       });
       span.setOutput({
         files: next.files.length,
@@ -308,6 +312,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   const stateManager = createRuntimeStateManager({
     initialSnapshot: snapshot,
     initialProjectInventory: listProjectInventory(rootDir),
+    initialValidationResultCache: validationResultCache,
     maxQueuedRebuilds: MaxQueuedWatchRebuilds,
     isStopped: () => stopped,
     rebuildNow: rebuildAndPublishNow,
@@ -550,7 +555,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
                 },
               },
               async (span) => {
-                const checkResult = await runChangeCheck(rootDir, project, parsed.change, check, store, parsed.task);
+                const checkResult = await runChangeCheck(rootDir, project, parsed.change, check, store, stateManager.validationResultCache(), parsed.task);
                 span.setOutput({ status: checkResult.status });
                 return checkResult;
               },
@@ -689,10 +694,14 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           });
         }
         if (url.pathname === ApiRoute.Validate && request.method === "POST") {
-          return await tracer.span("validation.run", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, () => validateFromRuntime(rootDir, request));
+          return await tracer.span("validation.run", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, () =>
+            validateFromRuntime(rootDir, request, stateManager.validationResultCache()),
+          );
         }
         if (url.pathname === ApiRoute.Feedback && request.method === "POST") {
-          return await tracer.span("feedback.run", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, () => feedbackFromRuntime(rootDir, request));
+          return await tracer.span("feedback.run", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, () =>
+            feedbackFromRuntime(rootDir, request, stateManager.validationResultCache()),
+          );
         }
         if (url.pathname === ApiRoute.HookFeedback && request.method === "POST") {
           return await tracer.span("feedback.hook", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async () =>
@@ -712,6 +721,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           const result = writeProjectSettings(rootDir, await readJsonBody(request));
           if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
           paths = createPaths(rootDir);
+          stateManager.replaceValidationResultCache(createValidationResultCache(paths));
           await restartStore();
           projectTypesRuntime.generateNow("Project authoring types regenerated after settings changed.");
           await stateManager.rebuildAndPublish("Project settings saved.");
@@ -1055,6 +1065,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         engine: prerequisites.engine,
         store: input.store,
         semanticEmbedding: DefaultSemanticEmbeddingConfig,
+        validationResultCache: stateManager.validationResultCache(),
       }));
     } catch (error) {
       throw new Error(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error)));
@@ -1687,6 +1698,7 @@ async function runChangeCheck(
   change: Change,
   check: ChangeCheck,
   store: ProjectStore,
+  resultCache: ValidationResultCache,
   task?: NonNullable<Change["tasks"]>[number],
 ): Promise<RunChangeCheckResult> {
   if (check.kind === ChangeCheckKind.Doctor) {
@@ -1733,6 +1745,7 @@ async function runChangeCheck(
       files: scopedFiles,
       project: scopedFiles.length === 0,
       producerPolicy: InteractiveProducerPolicy,
+      resultCache,
     });
     const failed = validation.diagnostics.length > 0 || validation.findings.some((finding) => finding.severity === FindingSeverityValue.Error);
     return {
@@ -1992,7 +2005,7 @@ async function approveCommitGateFromRuntime(rootDir: string, request: Request): 
   return json({ ok: true, data: { approval: record, gates } });
 }
 
-async function validateFromRuntime(rootDir: string, request: Request): Promise<Response> {
+async function validateFromRuntime(rootDir: string, request: Request, resultCache: ValidationResultCache): Promise<Response> {
   const parsed = await readJsonObjectBody(request);
   if (!parsed.ok) return malformedBodyResponse();
   const body = parsed.body;
@@ -2023,11 +2036,12 @@ async function validateFromRuntime(rootDir: string, request: Request): Promise<R
     strictProducers: booleanBodyValue(body.strictProducers),
     producerPolicy: producerPolicy.policy,
     profiler,
+    resultCache,
   });
   return json({ ok: true, data });
 }
 
-async function feedbackFromRuntime(rootDir: string, request: Request): Promise<Response> {
+async function feedbackFromRuntime(rootDir: string, request: Request, resultCache: ValidationResultCache): Promise<Response> {
   const parsed = await readJsonObjectBody(request);
   if (!parsed.ok) return malformedBodyResponse();
   const body = parsed.body;
@@ -2044,6 +2058,7 @@ async function feedbackFromRuntime(rootDir: string, request: Request): Promise<R
     sessionId: stringBodyValue(body.sessionId),
     turnId: stringBodyValue(body.turnId),
     dedupeScope: feedbackDedupeScopeBodyValue(body.dedupeScope),
+    resultCache,
   });
   return json({ ok: true, data });
 }

@@ -60,6 +60,7 @@ import {
   type SemanticEmbeddingConfig,
   type SemanticChunkMetadata,
   type SemanticIndexSnapshot,
+  type ValidationResultCache,
   type Validator,
   type ValidatorOutcome,
   type ProducerSnapshot,
@@ -287,6 +288,7 @@ export async function buildRuntimeSnapshot(input: {
   store: ProjectStore;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
   semanticIndexMode?: "build" | "reuse";
+  validationResultCache: ValidationResultCache;
 }): Promise<RuntimeSnapshot> {
   const project = await loadProjectContext(input.cwd);
   const discovery = discoverProjectFiles(project.paths);
@@ -357,6 +359,7 @@ export async function buildRuntimeSnapshot(input: {
     validators: project.validators,
     project: true,
     producerPolicy: InteractiveProducerPolicy,
+    resultCache: input.validationResultCache,
   });
 
   const health: RuntimeHealth = {

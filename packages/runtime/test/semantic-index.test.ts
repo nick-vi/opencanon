@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "vitest";
 import { buildProjectSemanticIndex, buildRuntimeSnapshot, createProjectStore, semanticSearchVector, semanticSearchVectorForProvider } from "@opencanon/runtime";
 import { createEngine } from "@opencanon/engine";
-import { createPaths, type FileFacts, type ScanAndDiffResult, type WriteSemanticIndexRequest } from "@opencanon/core";
+import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
 
 test("runtime semantic index chunks files with deterministic local vectors", () => {
@@ -441,7 +441,13 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
     });
     const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: nextScan.statePath });
 
-    const snapshot = await buildRuntimeSnapshot({ cwd: rootDir, engine, store, semanticIndexMode: "reuse" });
+    const snapshot = await buildRuntimeSnapshot({
+      cwd: rootDir,
+      engine,
+      store,
+      semanticIndexMode: "reuse",
+      validationResultCache: createEphemeralValidationResultCache(),
+    });
 
     assert.equal(writes.length, 0);
     assert.equal(snapshot.semanticIndex.status, "stale");
@@ -571,7 +577,12 @@ for (const scenario of [
       });
       const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scan.statePath });
 
-      const snapshot = await buildRuntimeSnapshot({ cwd: rootDir, engine, store });
+      const snapshot = await buildRuntimeSnapshot({
+        cwd: rootDir,
+        engine,
+        store,
+        validationResultCache: createEphemeralValidationResultCache(),
+      });
 
       assert.equal(writes.length, 2);
       assert(writes[0].chunks.some((chunk) => chunk.vector.length === 0));

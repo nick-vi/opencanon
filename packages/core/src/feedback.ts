@@ -11,6 +11,7 @@ import { definitionTargetDocs, definitionTargetFiles } from "./definition-target
 import type { Finding } from "./validator.ts";
 import { loadProjectContext } from "./project.ts";
 import { runValidation } from "./validation.ts";
+import type { ValidationResultCache } from "./validation-result-cache.ts";
 import { BatchProducerPolicy } from "./producer-registry.ts";
 import { writeAtomicJsonFileSync } from "./atomic.ts";
 
@@ -28,6 +29,7 @@ export type FeedbackInput = {
   sessionId?: string;
   turnId?: string;
   dedupeScope?: FeedbackDedupeScope;
+  resultCache?: ValidationResultCache;
 };
 
 export type FeedbackResult = {
@@ -143,6 +145,7 @@ export async function runFeedback(input: FeedbackInput): Promise<FeedbackResult>
     validators: project.validators,
     files,
     producerPolicy: BatchProducerPolicy,
+    resultCache: input.resultCache,
   });
   const change = resolveFeedbackChangeContext({
     files,
