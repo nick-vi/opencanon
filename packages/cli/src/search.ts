@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { CodeSymbol, Convention, Validator } from "@opencanon/core";
 import { fail, Format, listFiles, matchesAny, relative, resolveRootDir, type ContextPaths } from "@opencanon/core";
-import { openCodeGraph } from "./code-graph.ts";
 import { loadProjectContext } from "./project.ts";
 import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 
@@ -41,6 +40,10 @@ type ContextSearchResponse = {
   }>;
 };
 
+type CodeSymbolsResponse = {
+  symbols: CodeSymbol[];
+};
+
 export async function runSearchCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
@@ -69,7 +72,7 @@ async function collectSearchResults(
   input: { conventions: Convention[]; validators: Validator[]; paths: ContextPaths },
 ): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
-  if (query.kind === SearchKind.All || query.kind === SearchKind.Symbol) results.push(...searchSymbols(rootDir, query));
+  if (query.kind === SearchKind.All || query.kind === SearchKind.Symbol) results.push(...(await searchSymbols(rootDir, query)));
   if (query.kind === SearchKind.All || query.kind === SearchKind.Convention) results.push(...searchConventions(rootDir, query.query, input.conventions, input.paths.conventionsPath));
   if (query.kind === SearchKind.All || query.kind === SearchKind.Validator) results.push(...searchValidators(rootDir, query.query, input.validators, input.paths.conventionsPath));
   if (query.kind === SearchKind.All || query.kind === SearchKind.Doc) results.push(...searchDocs(rootDir, query.query, input.paths.docsDir));
@@ -80,15 +83,15 @@ async function collectSearchResults(
     .slice(0, query.limit);
 }
 
-function searchSymbols(rootDir: string, query: SearchQuery): SearchResult[] {
-  const graph = openCodeGraph(rootDir);
-  try {
-    const engineLimit = Math.max(query.limit * (query.scopes.length > 0 ? 10 : 4), 50);
-    const symbols = graph.store.project.searchSymbols({ query: query.query, kind: query.symbolKind, limit: engineLimit }).symbols;
-    return symbols.map((symbol) => symbolResult(symbol, query.query));
-  } finally {
-    graph.close();
-  }
+async function searchSymbols(rootDir: string, query: SearchQuery): Promise<SearchResult[]> {
+  const engineLimit = Math.max(query.limit * (query.scopes.length > 0 ? 10 : 4), 50);
+  const params = new URLSearchParams({
+    query: query.query,
+    limit: String(engineLimit),
+  });
+  if (query.symbolKind) params.set("kind", query.symbolKind);
+  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeSymbols}?${params.toString()}`));
+  return result.symbols.map((symbol) => symbolResult(symbol, query.query));
 }
 
 async function searchProjectContext(rootDir: string, query: SearchQuery): Promise<SearchResult[]> {

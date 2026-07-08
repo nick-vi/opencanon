@@ -1,5 +1,5 @@
 import { fail, Format, resolveRootDir, type CodeGraphEdge } from "@opencanon/core";
-import { openCodeGraph } from "./code-graph.ts";
+import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 
 // Single source of truth for graph commands; reference members instead of inlining the strings.
 const GraphCommand = { Callers: "callers", Callees: "callees", Impact: "impact" } as const;
@@ -13,6 +13,11 @@ type GraphQuery = {
   help: boolean;
 };
 
+type CodeGraphResponse = {
+  sourceFiles: number;
+  edges: CodeGraphEdge[];
+};
+
 export async function runGraphCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
@@ -21,19 +26,15 @@ export async function runGraphCommand(args = process.argv.slice(2), cwd = proces
   }
 
   const rootDir = resolveRootDir(cwd);
-  const graph = openCodeGraph(rootDir);
-  try {
-    const result = graph.store.project.searchGraphEdges({
-      query: query.query,
-      kind: "call",
-      direction: directionForCommand(query.command),
-      limit: query.limit,
-    });
-    if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, command: query.command, query: query.query, edges: result.edges }, null, 2));
-    else printEdges(query.command, result.edges, graph.sourceFiles.length, query.query);
-  } finally {
-    graph.close();
-  }
+  const params = new URLSearchParams({
+    query: query.query,
+    kind: "call",
+    direction: directionForCommand(query.command),
+    limit: String(query.limit),
+  });
+  const result = await withRuntimeClient<CodeGraphResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeGraph}?${params.toString()}`));
+  if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, command: query.command, query: query.query, edges: result.edges }, null, 2));
+  else printEdges(query.command, result.edges, result.sourceFiles, query.query);
 }
 
 function parseArgs(args: string[]): GraphQuery {

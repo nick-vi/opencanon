@@ -20,6 +20,8 @@ export const RuntimeApiRoute = {
   ChangeChecksRun: "/api/changes/checks/run",
   ChangeEvents: "/api/changes/events",
   ChangeReady: "/api/changes/ready",
+  CodeGraph: "/api/code/graph",
+  CodeSymbols: "/api/code/symbols",
   ContextPacket: "/api/context/packet",
   ContextAsk: "/api/context/ask",
   ContextBacklinks: "/api/context/backlinks",

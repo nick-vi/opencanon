@@ -1,5 +1,5 @@
 import { fail, Format, matchesAny, resolveRootDir, type CodeReference, type CodeSymbol } from "@opencanon/core";
-import { openCodeGraph } from "./code-graph.ts";
+import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 
 type SymbolsQuery = {
   query?: string;
@@ -12,6 +12,16 @@ type SymbolsQuery = {
   help: boolean;
 };
 
+type CodeSymbolsResponse = {
+  sourceFiles: number;
+  symbols: CodeSymbol[];
+};
+
+type CodeReferencesResponse = {
+  sourceFiles: number;
+  references: CodeReference[];
+};
+
 export async function runSymbolsCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
@@ -20,33 +30,21 @@ export async function runSymbolsCommand(args = process.argv.slice(2), cwd = proc
   }
 
   const rootDir = resolveRootDir(cwd);
-  const graph = openCodeGraph(rootDir);
-  try {
-    const engineLimit = query.scopes.length > 0 ? Math.max(query.limit * 10, 500) : query.limit;
-    if (query.references) {
-      const result = graph.store.project.searchReferences({
-        query: query.query,
-        path: query.inPath,
-        kind: query.kind,
-        limit: engineLimit,
-      });
-      const references = filterReferences(result.references, query);
-      if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, references }, null, 2));
-      else printReferences(references, graph.sourceFiles.length, query);
-      return;
-    }
-    const result = graph.store.project.searchSymbols({
-      query: query.query,
-      path: query.inPath,
-      kind: query.kind,
-      limit: engineLimit,
-    });
-    const symbols = filterSymbols(result.symbols, query);
-    if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: graph.sourceFiles.length, symbols }, null, 2));
-    else printSymbols(symbols, graph.sourceFiles.length, query);
-  } finally {
-    graph.close();
+  const params = symbolSearchParams(query);
+  const engineLimit = query.scopes.length > 0 ? Math.max(query.limit * 10, 500) : query.limit;
+  params.set("limit", String(engineLimit));
+  if (query.references) {
+    params.set("references", "1");
+    const result = await withRuntimeClient<CodeReferencesResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeSymbols}?${params.toString()}`));
+    const references = filterReferences(result.references, query);
+    if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, references }, null, 2));
+    else printReferences(references, result.sourceFiles, query);
+    return;
   }
+  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeSymbols}?${params.toString()}`));
+  const symbols = filterSymbols(result.symbols, query);
+  if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, symbols }, null, 2));
+  else printSymbols(symbols, result.sourceFiles, query);
 }
 
 function parseArgs(args: string[]): SymbolsQuery {
@@ -106,6 +104,14 @@ function parseArgs(args: string[]): SymbolsQuery {
   if (positional.length > 1) fail(`Unexpected symbols arguments: ${positional.slice(1).join(", ")}`);
   query = positional[0];
   return { query, inPath, kind, scopes, limit, references, format, help };
+}
+
+function symbolSearchParams(query: SymbolsQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.query) params.set("query", query.query);
+  if (query.inPath) params.set("path", query.inPath);
+  if (query.kind) params.set("kind", query.kind);
+  return params;
 }
 
 function filterSymbols(symbols: CodeSymbol[], query: SymbolsQuery): CodeSymbol[] {

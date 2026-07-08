@@ -30,6 +30,7 @@ import {
   intersects,
   loadProjectContext,
   isEngineExtractableFile,
+  isCodeGraphIndexableFile,
   engineSourceLanguage,
   matchesAny,
   matchesAnyFile,
@@ -314,6 +315,11 @@ export async function buildRuntimeSnapshot(input: {
   const facts = input.store.project.extractFacts({
     files: factFiles,
     facts: allFactKinds,
+    parserVersion: ENGINE_PARSER_VERSION,
+  });
+  input.store.project.indexCodeGraph({
+    files: factFiles.filter((file) => isCodeGraphIndexableFile(file.path)),
+    deletedFiles: scan.deletedFiles.filter(isCodeGraphIndexableFile),
     parserVersion: ENGINE_PARSER_VERSION,
   });
   const factDiagnostics = [

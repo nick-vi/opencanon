@@ -172,7 +172,7 @@ export const importRewritableExtensions: string[] = LANGUAGE_DESCRIPTORS.filter(
 
 /** The source-type hint the engine parser wants for a file — finer-grained than
  * LanguageId (oxc needs tsx/jsx/js variants). Single source for every engine
- * extract/index call site (facts provider, snapshot, code-graph) so they can't
+ * extract/index call site (facts provider and runtime graph indexing) so they can't
  * drift on extensions like .mjs/.cjs. Only meaningful for engine-extractable
  * files; defaults to "typescript". */
 export type EngineSourceLanguage = "typescript" | "tsx" | "javascript" | "jsx" | "python" | "svelte";

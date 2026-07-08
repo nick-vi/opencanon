@@ -94,6 +94,35 @@ test("GET /api/project/summary returns a lightweight project projection", () => 
   }
 });
 
+test("Code graph routes expose runtime-owned symbol and edge search", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-code-graph-routes-"));
+  createAuthoringProject(rootDir);
+  mkdirSync(path.join(rootDir, "src"), { recursive: true });
+  writeFileSync(
+    path.join(rootDir, "src/company.ts"),
+    [
+      "export function loadCompany() {",
+      "  return normalizeCompany('Acme');",
+      "}",
+      "",
+      "export function normalizeCompany(name: string) {",
+      "  return name.toLowerCase();",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", codeGraphRouteCheckSource(), rootDir], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("Project Context routes expose search, ask, chunks, coverage, and backlinks", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-context-routes-"));
   createAuthoringProject(rootDir);
@@ -593,6 +622,43 @@ function runtimeSummaryRouteCheckSource(): string {
       }
       assert.equal(readySummary.health.status, "ready");
       assert.equal(readySummary.semanticIndex.status, "ready");
+    } finally {
+      await server.stop();
+    }
+  `;
+}
+
+function codeGraphRouteCheckSource(): string {
+  const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
+  return `
+    import assert from "node:assert/strict";
+    import { runtimeAuthHeaders, startOpenCanonRuntime } from ${JSON.stringify(runtimeUrl)};
+
+    const rootDir = process.argv[1];
+    const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+    const headers = runtimeAuthHeaders(server.authToken);
+    async function get(path) {
+      const response = await fetch(server.url + path, { headers });
+      const text = await response.text();
+      assert.equal(response.status, 200, text);
+      const body = JSON.parse(text);
+      assert.equal(body.ok, true, text);
+      return body.data;
+    }
+    try {
+      const indexResponse = await fetch(server.url + "/api/index", { method: "POST", headers });
+      const indexText = await indexResponse.text();
+      assert.equal(indexResponse.status, 200, indexText);
+
+      const symbols = await get("/api/code/symbols?query=loadCompany&limit=10");
+      assert.equal(typeof symbols.sourceFiles, "number");
+      assert(symbols.symbols.some((symbol) => symbol.name === "loadCompany" && symbol.path === "src/company.ts"));
+
+      const references = await get("/api/code/symbols?query=normalizeCompany&references=1&limit=10");
+      assert(references.references.some((reference) => reference.name === "normalizeCompany" && reference.path === "src/company.ts"));
+
+      const graph = await get("/api/code/graph?query=normalizeCompany&kind=call&direction=incoming&limit=10");
+      assert(graph.edges.some((edge) => edge.source.name === "loadCompany" && edge.target.name === "normalizeCompany"));
     } finally {
       await server.stop();
     }

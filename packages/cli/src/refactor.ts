@@ -10,9 +10,11 @@ import {
   splitModule,
   updateImports,
   Format,
+  type CodeReference,
+  type CodeSymbol,
   type RefactorPlan,
 } from "@opencanon/core";
-import { openCodeGraph } from "./code-graph.ts";
+import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
 type RefactorQuery = {
@@ -26,6 +28,14 @@ type RefactorQuery = {
   help: boolean;
 };
 
+type CodeSymbolsResponse = {
+  symbols: CodeSymbol[];
+};
+
+type CodeReferencesResponse = {
+  references: CodeReference[];
+};
+
 export async function runRefactorCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const query = parseArgs(args);
   if (query.help) {
@@ -35,7 +45,7 @@ export async function runRefactorCommand(args = process.argv.slice(2), cwd = pro
 
   const rootDir = resolveRootDir(cwd);
   const common = { rootDir, files: query.files, include: query.includes };
-  const plan = createPlan(query, common);
+  const plan = await createPlan(query, common);
   const result = applyRefactorPlan({ rootDir, plan, dryRun: !query.apply });
 
   if (query.format === Format.Json) {
@@ -71,10 +81,10 @@ function parseArgs(args: string[]): RefactorQuery {
   };
 }
 
-function createPlan(query: RefactorQuery, common: { rootDir: string; files: string[]; include: string[] }): RefactorPlan {
+async function createPlan(query: RefactorQuery, common: { rootDir: string; files: string[]; include: string[] }): Promise<RefactorPlan> {
   if (query.command === "rename-symbol") {
     assertArgCount(query, 2);
-    return renameSymbol({ ...common, from: query.args[0], to: query.args[1], ...graphRenameInputs(common.rootDir, query.args[0]), graphOnly: query.graphOnly });
+    return renameSymbol({ ...common, from: query.args[0], to: query.args[1], ...(await graphRenameInputs(common.rootDir, query.args[0])), graphOnly: query.graphOnly });
   }
   if (query.command === "update-imports") {
     assertArgCount(query, 2);
@@ -103,16 +113,19 @@ function createPlan(query: RefactorQuery, common: { rootDir: string; files: stri
   fail(`Unknown refactor command: ${query.command}`);
 }
 
-function graphRenameInputs(rootDir: string, name: string): Pick<Parameters<typeof renameSymbol>[0], "symbols" | "references"> {
-  const graph = openCodeGraph(rootDir);
-  try {
+async function graphRenameInputs(rootDir: string, name: string): Promise<Pick<Parameters<typeof renameSymbol>[0], "symbols" | "references">> {
+  return withRuntimeClient(rootDir, async (client) => {
+    const symbolsParams = new URLSearchParams({ query: name, limit: "500" });
+    const referencesParams = new URLSearchParams({ query: name, limit: "1000", references: "1" });
+    const [symbols, references] = await Promise.all([
+      client.get<CodeSymbolsResponse>(`${RuntimeApiRoute.CodeSymbols}?${symbolsParams.toString()}`),
+      client.get<CodeReferencesResponse>(`${RuntimeApiRoute.CodeSymbols}?${referencesParams.toString()}`),
+    ]);
     return {
-      symbols: graph.store.project.searchSymbols({ query: name, limit: 500 }).symbols,
-      references: graph.store.project.searchReferences({ query: name, limit: 1000 }).references,
+      symbols: symbols.symbols,
+      references: references.references,
     };
-  } finally {
-    graph.close();
-  }
+  });
 }
 
 function assertArgCount(query: RefactorQuery, count: number): void {

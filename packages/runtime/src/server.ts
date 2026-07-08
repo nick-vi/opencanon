@@ -38,6 +38,7 @@ import {
   loadSpecHistoryTarget,
   loadPendingCommitGates,
   loadProjectContext,
+  isCodeGraphIndexableFile,
   parseConventionGitLog,
   renderHookResponse,
   resource,
@@ -156,6 +157,13 @@ const RuntimeHealthStatusValue = {
   Ready: "ready",
   Stale: "stale",
 } as const;
+
+const CodeGraphDirection = {
+  Incoming: "incoming",
+  Outgoing: "outgoing",
+  Both: "both",
+} as const;
+type CodeGraphDirection = (typeof CodeGraphDirection)[keyof typeof CodeGraphDirection];
 
 const DefinitionHistoryKindValue = {
   Convention: "convention",
@@ -403,6 +411,46 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         }
         if (url.pathname === ApiRoute.ContextStatus) {
           return json({ ok: true, data: store.readSemanticIndexStatus({ indexId: "project" }) });
+        }
+        if (url.pathname === ApiRoute.CodeSymbols) {
+          const snapshot = await refreshCurrentSnapshot();
+          const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
+          if (!safePath.ok) return json(safePath.error, 400);
+          const sourceFiles = snapshot.files.filter(isCodeGraphIndexableFile).length;
+          const limit = Math.min(1000, numberParam(url, UrlSearchParam.Limit, 50));
+          if (url.searchParams.get(UrlSearchParam.References) === "1") {
+            const result = store.project.searchReferences({
+              query: optionalStringParam(url, UrlSearchParam.Query),
+              path: safePath.path,
+              source: optionalStringParam(url, UrlSearchParam.Source),
+              kind: optionalStringParam(url, UrlSearchParam.Kind),
+              limit,
+            });
+            return json({ ok: true, data: { sourceFiles, references: result.references } });
+          }
+          const result = store.project.searchSymbols({
+            query: optionalStringParam(url, UrlSearchParam.Query),
+            path: safePath.path,
+            kind: optionalStringParam(url, UrlSearchParam.Kind),
+            limit: Math.min(500, limit),
+          });
+          return json({ ok: true, data: { sourceFiles, symbols: result.symbols } });
+        }
+        if (url.pathname === ApiRoute.CodeGraph) {
+          const snapshot = await refreshCurrentSnapshot();
+          const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
+          if (!safePath.ok) return json(safePath.error, 400);
+          const direction = codeGraphDirectionParam(url);
+          if (!direction.ok) return json(direction.error, 400);
+          const result = store.project.searchGraphEdges({
+            query: optionalStringParam(url, UrlSearchParam.Query),
+            symbolId: optionalStringParam(url, UrlSearchParam.SymbolId),
+            path: safePath.path,
+            kind: optionalStringParam(url, UrlSearchParam.Kind),
+            direction: direction.direction,
+            limit: Math.min(1000, numberParam(url, UrlSearchParam.Limit, 50)),
+          });
+          return json({ ok: true, data: { sourceFiles: snapshot.files.filter(isCodeGraphIndexableFile).length, edges: result.edges } });
         }
         if (url.pathname === ApiRoute.ContextChunks) {
           const snapshot = await refreshCurrentSnapshot();
@@ -2163,6 +2211,31 @@ function numberParam(url: URL, key: string, fallback: number): number {
   if (!raw) return fallback;
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function optionalStringParam(url: URL, key: string): string | undefined {
+  const value = (url.searchParams.get(key) ?? "").trim();
+  return value || undefined;
+}
+
+function optionalRelativePathParam(url: URL, key: string): { ok: true; path?: string } | { ok: false; error: RuntimeError } {
+  const requested = optionalStringParam(url, key);
+  if (!requested) return { ok: true };
+  const safe = validateRelativePath(requested, { allowEmpty: false });
+  if (!safe.ok) return safe;
+  return { ok: true, path: safe.path };
+}
+
+function codeGraphDirectionParam(url: URL): { ok: true; direction?: CodeGraphDirection } | { ok: false; error: RuntimeError } {
+  const value = optionalStringParam(url, UrlSearchParam.Direction);
+  if (!value) return { ok: true };
+  if (value === CodeGraphDirection.Incoming || value === CodeGraphDirection.Outgoing || value === CodeGraphDirection.Both) {
+    return { ok: true, direction: value };
+  }
+  return {
+    ok: false,
+    error: diagnostic(diagnosticCodes.invalidRuntimeResponse, "Code graph direction must be incoming, outgoing, or both."),
+  };
 }
 
 function nonNegativeNumberParam(url: URL, key: string, fallback: number): number {
