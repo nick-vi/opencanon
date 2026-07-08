@@ -33,4 +33,5 @@ No related impact surfaces are recorded.
 
 ## Related conventions
 
-No related conventions are recorded.
+- [spec-definitions-are-enforced](opencanon://conventions/spec-definitions-are-enforced)
+- [source-files-stay-cohesive](opencanon://conventions/source-files-stay-cohesive)

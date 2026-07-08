@@ -34,3 +34,4 @@ No related impact surfaces are recorded.
 
 - [no-dumpster-folders](opencanon://conventions/no-dumpster-folders)
 - [folder-file-naming](opencanon://conventions/folder-file-naming)
+- [source-files-stay-cohesive](opencanon://conventions/source-files-stay-cohesive)

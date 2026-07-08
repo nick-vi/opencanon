@@ -33,3 +33,4 @@ No related impact surfaces are recorded.
 ## Related conventions
 
 - [no-deep-relative-imports](opencanon://conventions/no-deep-relative-imports)
+- [source-files-stay-cohesive](opencanon://conventions/source-files-stay-cohesive)

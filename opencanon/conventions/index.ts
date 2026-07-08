@@ -22,6 +22,7 @@ import repeatedDomainLiterals from "./repeated-domain-literals.ts";
 import sensitiveChangeRequiresApproval from "./sensitive-change-requires-approval.ts";
 import shimRequiresExpiry from "./shim-requires-expiry.ts";
 import serviceNoDbClient from "./service-no-db-client.ts";
+import sourceFilesStayCohesive from "./source-files-stay-cohesive.ts";
 import specDefinitionsAreEnforced from "./spec-definitions-are-enforced.ts";
 
 export default [
@@ -49,5 +50,6 @@ export default [
   sensitiveChangeRequiresApproval,
   noSecretLikeLiterals,
   noHardcodedConfigValues,
+  sourceFilesStayCohesive,
   specDefinitionsAreEnforced,
 ];
