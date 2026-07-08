@@ -85,6 +85,7 @@ import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
+import { createRuntimeStateManager } from "./state-manager.ts";
 import { ProjectFileLanguage, setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
 import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-facts-provider.ts";
 import { createProjectObservabilityExporter } from "./observability.ts";
@@ -302,25 +303,32 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     workerLease.release();
     throw error;
   }
-  const validatorGraphRuntime = createValidatorGraphRuntime({
+  let stopped = false;
+  let validatorGraphRuntime: ReturnType<typeof createValidatorGraphRuntime> | undefined;
+  const stateManager = createRuntimeStateManager({
+    initialSnapshot: snapshot,
+    initialProjectInventory: listProjectInventory(rootDir),
+    maxQueuedRebuilds: MaxQueuedWatchRebuilds,
+    isStopped: () => stopped,
+    rebuildNow: rebuildAndPublishNow,
+    readProjectInventory: () => listProjectInventory(rootDir),
+    onRebuildError(error) {
+      events.broadcast(streamErrorEvent(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error))));
+    },
+  });
+  validatorGraphRuntime = createValidatorGraphRuntime({
     rootDir,
     paths: () => paths,
     events,
-    initialDependencyFiles: snapshot.health.validatorGraph?.dependencyFiles,
-    rebuildAndPublish,
+    initialDependencyFiles: stateManager.currentSnapshot().health.validatorGraph?.dependencyFiles,
+    rebuildAndPublish: stateManager.rebuildAndPublish,
     isStopped: () => stopped,
   });
-  let projectInventory = listProjectInventory(rootDir);
-  let rebuildInFlight: Promise<RuntimeSnapshot> | undefined;
-  let watchRebuildInFlight: Promise<void> | undefined;
-  const queuedWatchSummaries: string[] = [];
-  const queuedWatchSummarySet = new Set<string>();
   let coordinationDirectoryWatcher: FSWatcher | undefined;
   let coordinationSignalWatcher: FSWatcher | undefined;
   let coordinationRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let startupRebuildTimer: ReturnType<typeof setTimeout> | undefined;
   let coordinationSignature = "";
-  let stopped = false;
   const idleTimeoutMs = options.idleTimeoutMs && options.idleTimeoutMs > 0 ? options.idleTimeoutMs : undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   // Producer warming->ready refresh state. `latestReadyGeneration` is the newest
@@ -335,7 +343,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   try {
     startStoreWatcher();
     startCoordinationWatcher();
-    snapshot = withProcessIdentity(refreshSnapshotRefreshStatus(snapshot, store));
+    stateManager.setSnapshot(withProcessIdentity(refreshSnapshotRefreshStatus(stateManager.currentSnapshot(), store)));
     // Install the live type producer now that boot is essentially done — it spawns
     // lazily on the first typed query (post-ready), never on the readiness path.
     if (typeProducerRuntime) {
@@ -373,25 +381,26 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           if (!isAuthorizedRuntimeRequest(request, url, authToken)) {
             return json({ ok: true, data: { status: "ok" } });
           }
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           return json({ ok: true, data: snapshot.health });
         }
         if (url.pathname === ApiRoute.State) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           return json({ ok: true, data: snapshot.state });
         }
         if (url.pathname === ApiRoute.Snapshot) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           return json({ ok: true, data: snapshot });
         }
         if (url.pathname === ApiRoute.ProjectSummary) {
+          const snapshot = await refreshCurrentSnapshot();
           return json({ ok: true, data: buildProjectSummary({ rootDir, snapshot, store }) });
         }
         if (url.pathname === ApiRoute.ContextStatus) {
           return json({ ok: true, data: store.readSemanticIndexStatus({ indexId: "project" }) });
         }
         if (url.pathname === ApiRoute.ContextChunks) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
           if (!pathFilter.ok) return json(pathFilter.error, 400);
           return json({
@@ -408,7 +417,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         }
         if (url.pathname === ApiRoute.ContextSearch) {
           return await tracer.span("project-context.search", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-            snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+            const snapshot = await refreshCurrentSnapshot();
             const query = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
             const limit = Math.min(100, numberParam(url, UrlSearchParam.Limit, 20));
             const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
@@ -437,7 +446,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         }
         if (url.pathname === ApiRoute.ContextAsk) {
           return await tracer.span("project-context.ask", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-            snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+            const snapshot = await refreshCurrentSnapshot();
             const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
             if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context Ask requires a query."), 400);
             try {
@@ -458,11 +467,11 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           });
         }
         if (url.pathname === ApiRoute.ContextCoverage) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           return json({ ok: true, data: projectContextCoverage({ store, snapshot }) });
         }
         if (url.pathname === ApiRoute.ContextPacket) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.File));
           if (!pathFilter.ok) return json(pathFilter.error, 400);
           const changeIds = url.searchParams.getAll(UrlSearchParam.ChangeId).map((id) => id.trim()).filter(Boolean);
@@ -494,13 +503,13 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           });
         }
         if (url.pathname === ApiRoute.ContextBacklinks) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           const query = (url.searchParams.get(UrlSearchParam.Query) ?? url.searchParams.get(UrlSearchParam.Id) ?? url.searchParams.get(UrlSearchParam.Path) ?? "").trim();
           if (!query) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context backlinks requires query, id, or path."), 400);
           return json({ ok: true, data: projectContextBacklinks({ snapshot, query }) });
         }
         if (url.pathname === ApiRoute.Changes) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           return json({ ok: true, data: snapshot.changes });
         }
         if (url.pathname === ApiRoute.ChangeReady) {
@@ -516,6 +525,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
           const results: RunChangeCheckResult[] = [];
           const checkEvents: CanonEvent[] = [];
+          let snapshot = stateManager.currentSnapshot();
           for (const check of parsed.checks) {
             const started = createChangeCheckEvent({
               changeId: parsed.change.id,
@@ -527,7 +537,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
             });
             writeRuntimeEvent(rootDir, store, started);
             checkEvents.push(started);
-            snapshot = await rebuildAndPublish(started.summary);
+            snapshot = await stateManager.rebuildAndPublish(started.summary);
             const result = await tracer.span(
               "change.check.run",
               {
@@ -558,7 +568,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
             });
             writeRuntimeEvent(rootDir, store, finished);
             checkEvents.push(finished);
-            snapshot = await rebuildAndPublish(finished.summary);
+            snapshot = await stateManager.rebuildAndPublish(finished.summary);
           }
           const lastEvent = checkEvents[checkEvents.length - 1];
           return json({ ok: true, data: { result: results[0], results, event: lastEvent, events: checkEvents, changes: snapshot.changes } });
@@ -576,11 +586,11 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           const ownership = applyTaskOwnershipEvent(rootDir, parsed.event);
           if (!ownership.ok) return json(diagnosticsFailure(ownership.diagnostics), ownership.status);
           writeRuntimeEvent(rootDir, store, ownership.event);
-          snapshot = await rebuildAndPublish(ownership.event.summary);
+          const snapshot = await stateManager.rebuildAndPublish(ownership.event.summary);
           return json({ ok: true, data: { event: ownership.event, changes: snapshot.changes } });
         }
         if (url.pathname === ApiRoute.CanonRelated) {
-          snapshot = withProcessIdentity(await validatorGraphRuntime.refreshIfChanged(snapshot));
+          const snapshot = await refreshCurrentSnapshot();
           const body = request.method === "POST" ? await readJsonBody(request) : {};
           const requestedFiles = request.method === "POST" ? stringArrayBodyValue(body.files) : url.searchParams.getAll(UrlSearchParam.File);
           const safeFiles = validateOptionalRelativePaths(requestedFiles);
@@ -606,7 +616,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           });
         }
         if (url.pathname === ApiRoute.EventsStream) {
-          return eventStream(events.connect(snapshotEvent(snapshot, "Connected to runtime stream.")));
+          return eventStream(events.connect(snapshotEvent(stateManager.currentSnapshot(), "Connected to runtime stream.")));
         }
         if (url.pathname === ApiRoute.Events)
           return json({
@@ -691,7 +701,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         }
         if (url.pathname === ApiRoute.Index && request.method === "POST") {
           const body = await readJsonBody(request);
-          snapshot = await rebuildAndPublish("Manual reindex completed.");
+          const snapshot = await stateManager.rebuildAndPublish("Manual reindex completed.");
           if (body.response === ProjectIndexResponseMode.SemanticIndex) {
             return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
           }
@@ -704,7 +714,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           paths = createPaths(rootDir);
           await restartStore();
           projectTypesRuntime.generateNow("Project authoring types regenerated after settings changed.");
-          snapshot = await rebuildAndPublish("Project settings saved.");
+          await stateManager.rebuildAndPublish("Project settings saved.");
           return json({ ok: true, data: result.settings });
         }
         if (url.pathname === ApiRoute.AuthoringFactories) {
@@ -726,13 +736,15 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         if (url.pathname === ApiRoute.AuthoringValidatorsApply && request.method === "POST") {
           const result = await applyAuthoringValidator(rootDir, await readJsonBody(request));
           if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
-          snapshot = await rebuildAndPublish("Definition authoring applied a convention.");
+          await stateManager.rebuildAndPublish("Definition authoring applied a convention.");
           return json({ ok: true, data: result.result });
         }
         if (url.pathname === ApiRoute.ServiceProjects) {
+          const snapshot = await refreshCurrentSnapshot();
           return json({ ok: true, data: await listProjects(rootDir, snapshot) });
         }
         if (url.pathname === ApiRoute.FsTree) {
+          const snapshot = await refreshCurrentSnapshot();
           const requested = url.searchParams.get(UrlSearchParam.Path) ?? "";
           const safe = validateRelativePath(requested, { allowEmpty: true });
           if (!safe.ok) return json(safe.error, 400);
@@ -742,6 +754,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           const withFindingsOnly = url.searchParams.get(UrlSearchParam.WithFindings) === "1";
           let sourceFiles = snapshot.files;
           if (scope === TreeScope.All) {
+            const projectInventory = stateManager.currentProjectInventory();
             if (!projectInventory.ok) return json(projectInventory.error, 500);
             sourceFiles = projectInventory.files;
           }
@@ -757,6 +770,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           return await tracer.span("fs.file.read", { kind: SpanKind.TASK, attributes: { path: safe.path } }, () => readFileResponse(rootDir, safe.path));
         }
         if (url.pathname === ApiRoute.Findings) {
+          const snapshot = await refreshCurrentSnapshot();
           const requested = url.searchParams.get(UrlSearchParam.File);
           if (!requested) {
             return json({ ok: true, data: snapshot.findings });
@@ -792,7 +806,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     });
     startupRebuildTimer = setTimeout(() => {
       startupRebuildTimer = undefined;
-      scheduleWatchRebuild("Project Context refreshed after startup.");
+      stateManager.scheduleRebuild("Project Context refreshed after startup.");
     }, 0);
     if (typeof startupRebuildTimer === "object" && "unref" in startupRebuildTimer) {
       (startupRebuildTimer as { unref: () => void }).unref();
@@ -834,44 +848,13 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
 
   async function scheduleWatchRebuildForProducer(generation: number): Promise<void> {
     if (stopped || generation < latestReadyGeneration) return;
-    scheduleWatchRebuild(`Type producer ready (generation ${generation}); re-running producer-dependent validators.`);
+    stateManager.scheduleRebuild(`Type producer ready (generation ${generation}); re-running producer-dependent validators.`);
   }
 
-  function scheduleWatchRebuild(summary: string): void {
-    if (stopped) return;
-    queueWatchSummary(summary);
-    startWatchRebuildLoop();
-  }
-
-  function queueWatchSummary(summary: string): void {
-    if (queuedWatchSummarySet.has(summary)) return;
-    if (queuedWatchSummaries.length >= MaxQueuedWatchRebuilds) {
-      const removed = queuedWatchSummaries.shift();
-      if (removed) queuedWatchSummarySet.delete(removed);
-    }
-    queuedWatchSummaries.push(summary);
-    queuedWatchSummarySet.add(summary);
-  }
-
-  function startWatchRebuildLoop(): void {
-    if (watchRebuildInFlight) return;
-    watchRebuildInFlight = runQueuedWatchRebuilds().finally(() => {
-      watchRebuildInFlight = undefined;
-      if (queuedWatchSummaries.length > 0) startWatchRebuildLoop();
-    });
-  }
-
-  async function runQueuedWatchRebuilds(): Promise<void> {
-    while (queuedWatchSummaries.length > 0) {
-      const summary = queuedWatchSummaries.shift();
-      if (!summary) continue;
-      queuedWatchSummarySet.delete(summary);
-      try {
-        snapshot = await rebuildAndPublish(summary);
-      } catch (error) {
-        events.broadcast(streamErrorEvent(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error))));
-      }
-    }
+  async function refreshCurrentSnapshot(): Promise<RuntimeSnapshot> {
+    if (!validatorGraphRuntime) return stateManager.currentSnapshot();
+    const refreshed = await validatorGraphRuntime.refreshIfChanged(stateManager.currentSnapshot());
+    return stateManager.setSnapshot(withProcessIdentity(refreshed));
   }
 
   function startStoreWatcher(): void {
@@ -880,12 +863,12 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         if (stopped) return;
         const summary = watcherBatchSummary(batch);
         projectTypesRuntime.scheduleForFiles(batch.paths, "Project authoring types updated after indexed files changed.");
-        if (summary) scheduleWatchRebuild(summary);
+        if (summary) stateManager.scheduleRebuild(summary);
       });
-      snapshot = refreshSnapshotRefreshStatus(snapshot, store);
+      stateManager.setSnapshot(refreshSnapshotRefreshStatus(stateManager.currentSnapshot(), store));
     } catch (error) {
       const reason = `File watching is unavailable; manual refresh is required: ${errorMessage(error)}`;
-      snapshot = refreshSnapshotRefreshStatus(snapshot, store, reason);
+      stateManager.setSnapshot(refreshSnapshotRefreshStatus(stateManager.currentSnapshot(), store, reason));
       events.broadcast(indexingEvent(reason, {
         phase: "file-discovery",
         label: "Project refresh is stale",
@@ -946,7 +929,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       const nextSignature = currentCoordinationSignature();
       if (nextSignature === coordinationSignature) return;
       coordinationSignature = nextSignature;
-      scheduleWatchRebuild("Active work changed.");
+      stateManager.scheduleRebuild("Active work changed.");
     }, CoordinationRefreshDebounceMs);
     if (typeof coordinationRefreshTimer === "object" && "unref" in coordinationRefreshTimer) {
       (coordinationRefreshTimer as { unref: () => void }).unref();
@@ -991,26 +974,12 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
 
   async function restartStore(): Promise<void> {
-    if (rebuildInFlight) await rebuildInFlight.catch(() => undefined);
-    if (watchRebuildInFlight) await watchRebuildInFlight.catch(() => undefined);
+    await stateManager.waitForIdle();
     stopStoreWatcher();
     await storeResource.dispose();
     store = await storeResource.get();
     engineAstProvider = engineProjectAstFactsProvider(store.project);
     startStoreWatcher();
-  }
-
-  async function rebuildAndPublish(summary: string): Promise<RuntimeSnapshot> {
-    const previous = rebuildInFlight?.catch(() => undefined);
-    const current = (async () => {
-      await previous;
-      return rebuildAndPublishNow(summary);
-    })();
-    const tracked = current.finally(() => {
-      if (rebuildInFlight === tracked) rebuildInFlight = undefined;
-    });
-    rebuildInFlight = tracked;
-    return tracked;
   }
 
   async function rebuildAndPublishNow(summary: string): Promise<RuntimeSnapshot> {
@@ -1045,8 +1014,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           total: next.definitionGraph.nodes.length,
           unit: "nodes",
         }));
-        validatorGraphRuntime.recordCurrentSourceSignature();
-        projectInventory = listProjectInventory(rootDir);
+        validatorGraphRuntime?.recordCurrentSourceSignature();
         store.writeEvent(indexedEvent(next, summary));
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
           label: "Project context ready",
@@ -1055,7 +1023,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           unit: "files",
           message: summary,
         });
-        snapshot = withProcessIdentity(next);
+        const publishedSnapshot = withProcessIdentity(next);
         events.broadcast(indexingEvent(summary, {
           phase: "ready",
           label: "Project context ready",
@@ -1063,13 +1031,13 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           total: next.files.length,
           unit: "files",
         }));
-        events.broadcast(snapshotEvent(snapshot, summary));
+        events.broadcast(snapshotEvent(publishedSnapshot, summary));
         span.setOutput({
           files: next.files.length,
           findings: next.findings.length,
           validators: next.validators.length,
         });
-        return snapshot;
+        return publishedSnapshot;
       } catch (error) {
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
           label: "Project context refresh failed",
@@ -1188,8 +1156,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     setProjectAstFactsProviderFactory(undefined);
     fixtureAst.dispose();
     await typeProducerRuntime?.stop();
-    if (rebuildInFlight) await rebuildInFlight.catch(() => undefined);
-    if (watchRebuildInFlight) await watchRebuildInFlight.catch(() => undefined);
+    await stateManager.waitForIdle();
+    stateManager.stop();
     events.close();
     await pipeServer?.stop(true);
     await server?.stop(true);
