@@ -7,7 +7,7 @@ OpenCanon transport failures return `{ ok: false, error }`, where `error.kind` i
 ## Applies to
 
 - `packages/runtime/src/routes.ts`
-- `packages/runtime/src/server.ts`
+- `packages/runtime/src/server*.ts`
 - `packages/runtime/src/service.ts`
 - `packages/runtime/src/local-protocol.ts`
 - `packages/runtime/test/**/*.ts`

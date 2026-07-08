@@ -109,7 +109,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/runtime/src/type-producer/producer-main.ts`
 - Files: `packages/runtime/src/type-producer/runtime.ts`
 - Files: `packages/runtime/src/routes.ts`
-- Files: `packages/runtime/src/server.ts`
+- Files: `packages/runtime/src/server*.ts`
 - Files: `packages/runtime/src/server-fs.ts`
 - Files: `packages/runtime/src/snapshot.ts`
 - Files: `packages/runtime/test/**`
@@ -232,7 +232,7 @@ Impact surfaces: [Release and update path](../areas/runtime-release-update.md#ru
 Checks: `release-tests`, `typecheck`, `project-doctor`
 
 Task `runtime-repair-hardening`: Make supervised runtime repair deterministic across worktrees and stale pipes
-Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/cli/src/validate.ts`, `packages/core/src/index.ts`, `packages/core/src/language-analyzer.ts`, `packages/core/src/producer-registry.ts`, `packages/core/src/type-facts-provider.ts`, `packages/core/src/validator.ts`, `packages/runtime/src/server.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/producer-main.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/type-producer.test.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`
+Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/cli/src/validate.ts`, `packages/core/src/index.ts`, `packages/core/src/language-analyzer.ts`, `packages/core/src/producer-registry.ts`, `packages/core/src/type-facts-provider.ts`, `packages/core/src/validator.ts`, `packages/runtime/src/server*.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/producer-main.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/type-producer.test.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`
 Impact surfaces: [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 Checks: `runtime-tests`, `service-lifecycle-tests`, `worktree-tests`
 

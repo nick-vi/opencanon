@@ -33,7 +33,7 @@ Specs describe durable behavior as typed definitions with generated docs, govern
 - Files: `packages/cli/src/init-flow.ts`
 - Files: `packages/cli/src/init-scaffold.ts`
 - Files: `packages/runtime/src/routes.ts`
-- Files: `packages/runtime/src/server.ts`
+- Files: `packages/runtime/src/server*.ts`
 - Files: `packages/runtime/src/snapshot.ts`
 - Files: `packages/runtime/src/state.ts`
 - Files: `opencanon/specs/index.ts`

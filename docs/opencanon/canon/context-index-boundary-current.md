@@ -9,7 +9,7 @@ Project context indexing belongs to OpenCanon runtime state; authored definition
 - `packages/core/src/semantic-index.ts`
 - `packages/runtime/src/semantic-index.ts`
 - `packages/runtime/src/snapshot.ts`
-- `packages/runtime/src/server.ts`
+- `packages/runtime/src/server*.ts`
 - `crates/opencanon-vector/**`
 - `crates/opencanon-inference/**`
 - `docs/opencanon/canon/architecture.md`

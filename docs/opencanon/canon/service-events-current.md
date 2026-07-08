@@ -8,7 +8,7 @@ Service and project-runtime data updates come from explicit runtime events; tran
 
 - `packages/runtime/src/server-events.ts`
 - `packages/runtime/src/service.ts`
-- `packages/runtime/src/server.ts`
+- `packages/runtime/src/server*.ts`
 - `packages/runtime/test/service.test.ts`
 - `packages/runtime/test/client.test.ts`
 

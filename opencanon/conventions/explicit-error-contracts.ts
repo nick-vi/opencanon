@@ -4,7 +4,7 @@ const docs = ["docs/opencanon/canon/explicit-error-contracts.md#runtime-failures
 
 const transportBoundaryGlobs = [
   "packages/runtime/src/routes.ts",
-  "packages/runtime/src/server.ts",
+  "packages/runtime/src/server*.ts",
   "packages/runtime/src/service.ts",
   "packages/runtime/src/local-protocol.ts",
   "packages/runtime/test/**/*.ts",

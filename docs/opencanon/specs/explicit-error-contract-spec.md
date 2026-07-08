@@ -9,7 +9,7 @@ Failed OpenCanon API envelopes expose a single error payload while diagnostics r
 - Files: `packages/core/src/errors.ts`
 - Files: `packages/core/src/contracts.ts`
 - Files: `packages/runtime/src/routes.ts`
-- Files: `packages/runtime/src/server.ts`
+- Files: `packages/runtime/src/server*.ts`
 - Files: `packages/runtime/src/service.ts`
 - Files: `packages/runtime/src/local-protocol.ts`
 - Files: `opencanon/conventions/explicit-error-contracts.ts`

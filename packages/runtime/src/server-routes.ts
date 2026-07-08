@@ -1,0 +1,567 @@
+import { SpanKind, type SimpleTracer } from "@opencanon/observability";
+import {
+  createOpenCanonDiagnostic,
+  createPaths,
+  createValidationResultCache,
+  buildDoctorReport,
+  deriveChangeWorkQueue,
+  isCodeGraphIndexableFile,
+  loadPendingCommitGates,
+  loadProjectContext,
+  normalizeProducerStatusesForProject,
+  resolveProducerStatuses,
+  type CanonEvent,
+} from "@opencanon/core";
+import { buildProjectSummary, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
+import { TreeScope, buildTreeResponse, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
+import { eventStream, snapshotEvent, type EventBroadcaster } from "./server-events.ts";
+import { isAuthorizedRuntimeRequest } from "./auth.ts";
+import { readProjectSettings, writeProjectSettings } from "./settings.ts";
+import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
+import { listProjects } from "./project-summary.ts";
+import { askProjectContext, listProjectContextChunks, projectContextBacklinks, projectContextCoverage, searchProjectContext } from "./project-context.ts";
+import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, validateRuntimeAuth, validateMethod } from "./routes.ts";
+import type { RuntimeStateManager } from "./state-manager.ts";
+import type { ProjectStore } from "./state.ts";
+import type { createProjectTypesRuntime } from "./project-types-runtime.ts";
+import type { createTypeProducerRuntime } from "./type-producer/runtime.ts";
+import {
+  activeTaskLeaseSummaries,
+  listWorktreeOverview,
+} from "./worktree-coordination.ts";
+import { buildContextPacket } from "./server-context-packet.ts";
+import { canonHistoryFromRuntime } from "./server-history.ts";
+import { listChangeEvents, listRuntimeEvents, writeRuntimeEvent } from "./server-canon-events.ts";
+import {
+  ChangeEventType,
+  applyTaskOwnershipEvent,
+  createChangeCheckEvent,
+  parseChangeEventRequest,
+  parseRunChangeCheckRequest,
+  runChangeCheck,
+  type RunChangeCheckResult,
+} from "./server-change-runtime.ts";
+import {
+  approveCommitGateFromRuntime,
+  feedbackFromRuntime,
+  hookFeedbackFromRuntime,
+  readJsonBody,
+  stringArrayBodyValue,
+  validateFromRuntime,
+} from "./server-runtime-actions.ts";
+import {
+  codeGraphDirectionParam,
+  nonNegativeNumberParam,
+  numberParam,
+  optionalRelativePathParam,
+  optionalStringParam,
+  validateRelatedSelectors,
+} from "./server-query.ts";
+
+type RuntimePaths = ReturnType<typeof createPaths>;
+
+export type RuntimeRouteHandlerInput = {
+  rootDir: string;
+  authToken: string;
+  tracer: SimpleTracer;
+  events: EventBroadcaster;
+  stateManager: RuntimeStateManager;
+  projectTypesRuntime: ReturnType<typeof createProjectTypesRuntime>;
+  typeProducerRuntime?: ReturnType<typeof createTypeProducerRuntime>;
+  paths(): RuntimePaths;
+  setPaths(paths: RuntimePaths): void;
+  store(): ProjectStore;
+  resetIdleTimer(): void;
+  refreshCurrentSnapshot(): Promise<RuntimeSnapshot>;
+  restartStore(): Promise<void>;
+};
+
+export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (request: Request) => Promise<Response> {
+  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, resetIdleTimer, refreshCurrentSnapshot, restartStore } = input;
+  let paths = input.paths();
+  const currentStore = () => input.store();
+
+  const routeRequest = async (request: Request): Promise<Response> => {
+    resetIdleTimer();
+    const url = new URL(request.url);
+    return tracer.span(
+      "runtime.request",
+      { kind: SpanKind.SERVER, attributes: { method: request.method, path: url.pathname } },
+      async (span) => {
+        const response = await routeRequestInner(request, url);
+        span.setOutput({ status: response.status });
+        return response;
+      },
+    );
+  };
+  const routeRequestInner = async (request: Request, url: URL): Promise<Response> => {
+    const methodValidation = validateMethod(url.pathname, request.method);
+    if (!methodValidation.ok) return json(methodValidation.error, 405);
+    const authValidation = validateRuntimeAuth(request, url, authToken);
+    if (!authValidation.ok) return json(authValidation.error, 401);
+    if (url.pathname === ApiRoute.Health) {
+        // Public liveness, but the detailed health (engine/schema versions, graph hash,
+        // refresh state, counts) is only disclosed to authorized callers.
+        if (!isAuthorizedRuntimeRequest(request, url, authToken)) {
+          return json({ ok: true, data: { status: "ok" } });
+        }
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: snapshot.health });
+      }
+      if (url.pathname === ApiRoute.State) {
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: snapshot.state });
+      }
+      if (url.pathname === ApiRoute.Snapshot) {
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: snapshot });
+      }
+      if (url.pathname === ApiRoute.ProjectSummary) {
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: buildProjectSummary({ rootDir, snapshot, store: currentStore() }) });
+      }
+      if (url.pathname === ApiRoute.ContextStatus) {
+        return json({ ok: true, data: currentStore().readSemanticIndexStatus({ indexId: "project" }) });
+      }
+      if (url.pathname === ApiRoute.CodeSymbols) {
+        const snapshot = await refreshCurrentSnapshot();
+        const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
+        if (!safePath.ok) return json(safePath.error, 400);
+        const sourceFiles = snapshot.files.filter(isCodeGraphIndexableFile).length;
+        const limit = Math.min(1000, numberParam(url, UrlSearchParam.Limit, 50));
+        if (url.searchParams.get(UrlSearchParam.References) === "1") {
+          const result = currentStore().project.searchReferences({
+            query: optionalStringParam(url, UrlSearchParam.Query),
+            path: safePath.path,
+            source: optionalStringParam(url, UrlSearchParam.Source),
+            kind: optionalStringParam(url, UrlSearchParam.Kind),
+            limit,
+          });
+          return json({ ok: true, data: { sourceFiles, references: result.references } });
+        }
+        const result = currentStore().project.searchSymbols({
+          query: optionalStringParam(url, UrlSearchParam.Query),
+          path: safePath.path,
+          kind: optionalStringParam(url, UrlSearchParam.Kind),
+          limit: Math.min(500, limit),
+        });
+        return json({ ok: true, data: { sourceFiles, symbols: result.symbols } });
+      }
+      if (url.pathname === ApiRoute.CodeGraph) {
+        const snapshot = await refreshCurrentSnapshot();
+        const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
+        if (!safePath.ok) return json(safePath.error, 400);
+        const direction = codeGraphDirectionParam(url);
+        if (!direction.ok) return json(direction.error, 400);
+        const result = currentStore().project.searchGraphEdges({
+          query: optionalStringParam(url, UrlSearchParam.Query),
+          symbolId: optionalStringParam(url, UrlSearchParam.SymbolId),
+          path: safePath.path,
+          kind: optionalStringParam(url, UrlSearchParam.Kind),
+          direction: direction.direction,
+          limit: Math.min(1000, numberParam(url, UrlSearchParam.Limit, 50)),
+        });
+        return json({ ok: true, data: { sourceFiles: snapshot.files.filter(isCodeGraphIndexableFile).length, edges: result.edges } });
+      }
+      if (url.pathname === ApiRoute.ContextChunks) {
+        const snapshot = await refreshCurrentSnapshot();
+        const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
+        if (!pathFilter.ok) return json(pathFilter.error, 400);
+        return json({
+          ok: true,
+          data: listProjectContextChunks({
+            store: currentStore(),
+            snapshot,
+            paths: pathFilter.paths,
+            definitionIds: url.searchParams.getAll(UrlSearchParam.Definition),
+            limit: Math.min(500, numberParam(url, UrlSearchParam.Limit, 100)),
+            offset: nonNegativeNumberParam(url, UrlSearchParam.Offset, 0),
+          }),
+        });
+      }
+      if (url.pathname === ApiRoute.ContextSearch) {
+        return await tracer.span("project-context.search", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
+          const snapshot = await refreshCurrentSnapshot();
+          const query = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
+          const limit = Math.min(100, numberParam(url, UrlSearchParam.Limit, 20));
+          const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
+          if (!pathFilter.ok) return json(pathFilter.error, 400);
+          try {
+            const result = searchProjectContext({
+              store: currentStore(),
+              snapshot,
+              query: { query, paths: pathFilter.paths, limit },
+              semanticEmbedding: paths.semanticEmbedding,
+            });
+            span.setOutput({ results: result.results.length, indexed: Boolean(result.index) });
+            return json({ ok: true, data: result });
+          } catch (error) {
+            return json(
+              diagnosticsFailure([
+                createOpenCanonDiagnostic({
+                  code: diagnosticCodes.inferenceError,
+                  message: `Could not search Project Context: ${error instanceof Error ? error.message : String(error)}`,
+                }),
+              ], diagnosticCodes.inferenceError),
+              500,
+            );
+          }
+        });
+      }
+      if (url.pathname === ApiRoute.ContextAsk) {
+        return await tracer.span("project-context.ask", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
+          const snapshot = await refreshCurrentSnapshot();
+          const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
+          if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context Ask requires a query."), 400);
+          try {
+            const result = askProjectContext({ store: currentStore(), snapshot, question, semanticEmbedding: paths.semanticEmbedding });
+            span.setOutput({ evidence: result.evidence.length, indexed: Boolean(result.index) });
+            return json({ ok: true, data: result });
+          } catch (error) {
+            return json(
+              diagnosticsFailure([
+                createOpenCanonDiagnostic({
+                  code: diagnosticCodes.inferenceError,
+                  message: `Could not ask Project Context: ${error instanceof Error ? error.message : String(error)}`,
+                }),
+              ], diagnosticCodes.inferenceError),
+              500,
+            );
+          }
+        });
+      }
+      if (url.pathname === ApiRoute.ContextCoverage) {
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: projectContextCoverage({ store: currentStore(), snapshot }) });
+      }
+      if (url.pathname === ApiRoute.ContextPacket) {
+        const snapshot = await refreshCurrentSnapshot();
+        const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.File));
+        if (!pathFilter.ok) return json(pathFilter.error, 400);
+        const changeIds = url.searchParams.getAll(UrlSearchParam.ChangeId).map((id) => id.trim()).filter(Boolean);
+        const missingChangeId = changeIds.find((id) => !snapshot.changes.some((change) => change.id === id));
+        if (missingChangeId) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, `Unknown change id: ${missingChangeId}.`), 404);
+        const project = await loadProjectContext(rootDir);
+        const doctor = buildDoctorReport({
+          paths: project.paths,
+          areas: project.areas,
+          changes: project.changes,
+          conventions: project.conventions,
+          specs: project.specs,
+          validators: project.validators,
+          producerStatuses: resolveProducerStatuses(rootDir),
+          semanticIndex: currentStore().readSemanticIndexStatus({ indexId: "project" }).index,
+        });
+        return json({
+          ok: true,
+          data: buildContextPacket({
+            rootDir,
+            mode: (url.searchParams.get(UrlSearchParam.Mode) ?? "agent-context").trim() || "agent-context",
+            snapshot,
+            doctorStatus: doctor.status,
+            files: pathFilter.paths,
+            changeIds,
+            events: listChangeEvents(rootDir, currentStore(), { limit: Math.min(100, numberParam(url, UrlSearchParam.Limit, 25)) }),
+            limit: Math.min(100, numberParam(url, UrlSearchParam.Limit, 25)),
+          }),
+        });
+      }
+      if (url.pathname === ApiRoute.ContextBacklinks) {
+        const snapshot = await refreshCurrentSnapshot();
+        const query = (url.searchParams.get(UrlSearchParam.Query) ?? url.searchParams.get(UrlSearchParam.Id) ?? url.searchParams.get(UrlSearchParam.Path) ?? "").trim();
+        if (!query) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context backlinks requires query, id, or path."), 400);
+        return json({ ok: true, data: projectContextBacklinks({ snapshot, query }) });
+      }
+      if (url.pathname === ApiRoute.Changes) {
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: snapshot.changes });
+      }
+      if (url.pathname === ApiRoute.ChangeReady) {
+        const project = await loadProjectContext(rootDir);
+        return json({ ok: true, data: deriveChangeWorkQueue(project.changes, listRuntimeEvents(rootDir, currentStore(), 500), { leases: activeTaskLeaseSummaries(rootDir) }) });
+      }
+      if (url.pathname === ApiRoute.Worktrees) {
+        return json({ ok: true, data: listWorktreeOverview(rootDir) });
+      }
+      if (url.pathname === ApiRoute.ChangeChecksRun) {
+        const project = await loadProjectContext(rootDir);
+        const parsed = parseRunChangeCheckRequest(await readJsonBody(request), project.changes);
+        if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
+        const results: RunChangeCheckResult[] = [];
+        const checkEvents: CanonEvent[] = [];
+        let snapshot = stateManager.currentSnapshot();
+        for (const check of parsed.checks) {
+          const started = createChangeCheckEvent({
+            changeId: parsed.change.id,
+            taskId: parsed.task?.id,
+            checkId: check.id,
+            type: parsed.task ? ChangeEventType.TaskCheckStarted : ChangeEventType.CheckStarted,
+            actor: parsed.actor,
+            summary: parsed.task ? `Task ${parsed.task.id} check ${check.id} started.` : `Check ${check.id} started.`,
+          });
+          writeRuntimeEvent(rootDir, currentStore(), started);
+          checkEvents.push(started);
+          snapshot = await stateManager.rebuildAndPublish(started.summary);
+          const result = await tracer.span(
+            "change.check.run",
+            {
+              kind: SpanKind.TASK,
+              attributes: {
+                changeId: parsed.change.id,
+                taskId: parsed.task?.id,
+                checkId: check.id,
+                checkKind: check.kind,
+              },
+            },
+            async (span) => {
+              const checkResult = await runChangeCheck(rootDir, project, parsed.change, check, currentStore(), stateManager.validationResultCache(), parsed.task);
+              span.setOutput({ status: checkResult.status });
+              return checkResult;
+            },
+          );
+          results.push(result);
+          const finished = createChangeCheckEvent({
+            changeId: parsed.change.id,
+            taskId: parsed.task?.id,
+            checkId: check.id,
+            type: parsed.task
+              ? (result.status === "passed" ? ChangeEventType.TaskCheckPassed : ChangeEventType.TaskCheckFailed)
+              : (result.status === "passed" ? ChangeEventType.CheckPassed : ChangeEventType.CheckFailed),
+            actor: parsed.actor,
+            summary: result.summary,
+          });
+          writeRuntimeEvent(rootDir, currentStore(), finished);
+          checkEvents.push(finished);
+          snapshot = await stateManager.rebuildAndPublish(finished.summary);
+        }
+        const lastEvent = checkEvents[checkEvents.length - 1];
+        return json({ ok: true, data: { result: results[0], results, event: lastEvent, events: checkEvents, changes: snapshot.changes } });
+      }
+      if (url.pathname === ApiRoute.ChangeEvents) {
+        if (request.method === "GET") {
+          const changeId = url.searchParams.get(UrlSearchParam.ChangeId) ?? undefined;
+          const taskId = url.searchParams.get(UrlSearchParam.TaskId) ?? undefined;
+          const checkId = url.searchParams.get(UrlSearchParam.CheckId) ?? undefined;
+          return json({ ok: true, data: listChangeEvents(rootDir, currentStore(), { changeId, taskId, checkId, limit: numberParam(url, UrlSearchParam.Limit, 50) }) });
+        }
+        const project = await loadProjectContext(rootDir);
+        const parsed = parseChangeEventRequest(await readJsonBody(request), project.changes);
+        if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
+        const ownership = applyTaskOwnershipEvent(rootDir, parsed.event);
+        if (!ownership.ok) return json(diagnosticsFailure(ownership.diagnostics), ownership.status);
+        writeRuntimeEvent(rootDir, currentStore(), ownership.event);
+        const snapshot = await stateManager.rebuildAndPublish(ownership.event.summary);
+        return json({ ok: true, data: { event: ownership.event, changes: snapshot.changes } });
+      }
+      if (url.pathname === ApiRoute.CanonRelated) {
+        const snapshot = await refreshCurrentSnapshot();
+        const body = request.method === "POST" ? await readJsonBody(request) : {};
+        const requestedFiles = request.method === "POST" ? stringArrayBodyValue(body.files) : url.searchParams.getAll(UrlSearchParam.File);
+        const safeFiles = validateOptionalRelativePaths(requestedFiles);
+        if (!safeFiles.ok) return json(safeFiles.error, 400);
+        const currentSnapshot = snapshot;
+        const query = {
+          files: safeFiles.paths,
+          topics: request.method === "POST" ? stringArrayBodyValue(body.topics) : url.searchParams.getAll(UrlSearchParam.Topic).filter(Boolean),
+          conventionIds: request.method === "POST" ? stringArrayBodyValue(body.conventionIds) : url.searchParams.getAll(UrlSearchParam.ConventionId).filter(Boolean),
+          validatorIds: request.method === "POST" ? stringArrayBodyValue(body.validatorIds) : url.searchParams.getAll(UrlSearchParam.ValidatorId).filter(Boolean),
+          findingIds: request.method === "POST" ? stringArrayBodyValue(body.findingIds) : url.searchParams.getAll(UrlSearchParam.FindingId).filter(Boolean),
+        };
+        const selectorError = validateRelatedSelectors(currentSnapshot, query);
+        if (selectorError) return json(selectorError.error, selectorError.status);
+        return json({
+          ok: true,
+          data: buildRelatedCanon({
+            rootDir,
+            paths,
+            snapshot: currentSnapshot,
+            query,
+          }),
+        });
+      }
+      if (url.pathname === ApiRoute.EventsStream) {
+        return eventStream(events.connect(snapshotEvent(stateManager.currentSnapshot(), "Connected to runtime stream.")));
+      }
+      if (url.pathname === ApiRoute.Events)
+        return json({
+          ok: true,
+          data: listRuntimeEvents(rootDir, currentStore(), numberParam(url, UrlSearchParam.Limit, 50)),
+        });
+      if (url.pathname === ApiRoute.Observability) {
+        const traceId = url.searchParams.get(UrlSearchParam.TraceId)?.trim() || undefined;
+        return json({
+          ok: true,
+          data: currentStore().listObservabilityRecords({
+            limit: numberParam(url, UrlSearchParam.Limit, 100),
+            traceId,
+          }),
+        });
+      }
+      if (url.pathname === ApiRoute.CanonHistory) {
+        return await canonHistoryFromRuntime(rootDir, url);
+      }
+      if (url.pathname === ApiRoute.GitHistory) {
+        const safeFiles = validateRelativePaths(url.searchParams.getAll(UrlSearchParam.File));
+        if (!safeFiles.ok) return json(safeFiles.error, 400);
+        return json({
+          ok: true,
+          data: gitHistorySnapshot(rootDir, safeFiles.paths, numberParam(url, UrlSearchParam.Limit, 5)),
+        });
+      }
+      if (url.pathname === ApiRoute.GitDiff) {
+        const safeFile = validateRelativePath(url.searchParams.get(UrlSearchParam.File) ?? "", { allowEmpty: false });
+        if (!safeFile.ok) return json(safeFile.error, 400);
+        const safeCommit = validateCommitHash(url.searchParams.get(UrlSearchParam.Commit) ?? "");
+        if (!safeCommit.ok) return json(safeCommit.error, 400);
+        return json({
+          ok: true,
+          data: gitDiffSnapshot(rootDir, safeFile.path, safeCommit.commit),
+        });
+      }
+      if (url.pathname === ApiRoute.Producers) {
+        // Live producer status (the runtime owns it). resolveProducerStatuses
+        // consults the installed live factory; the response is the binary,
+        // first-class producer-state surface for `project status` + CI gates.
+        if (url.searchParams.get("warm") === "1") await typeProducerRuntime?.warm();
+        const producers = resolveProducerStatuses(rootDir);
+        try {
+          const project = await loadProjectContext(rootDir);
+          return json({ ok: true, data: { producers: normalizeProducerStatusesForProject({ paths: project.paths, validators: project.validators, producers }) } });
+        } catch {
+          return json({ ok: true, data: { producers: normalizeProducerStatusesForProject({ paths, producers }) } });
+        }
+      }
+      if (url.pathname === ApiRoute.Doctor) {
+        return tracer.span("doctor.report", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
+          if (url.searchParams.get("warm") === "1") await typeProducerRuntime?.warm();
+          const project = await loadProjectContext(rootDir);
+          const report = buildDoctorReport({
+            paths: project.paths,
+            areas: project.areas,
+            changes: project.changes,
+            conventions: project.conventions,
+            specs: project.specs,
+            validators: project.validators,
+            producerStatuses: resolveProducerStatuses(rootDir),
+            semanticIndex: currentStore().readSemanticIndexStatus({ indexId: "project" }).index,
+          });
+          span.setOutput({ status: report.status, checks: report.checks.length });
+          return json({
+            ok: true,
+            data: report,
+          });
+        });
+      }
+      if (url.pathname === ApiRoute.Validate && request.method === "POST") {
+        return await tracer.span("validation.run", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, () =>
+          validateFromRuntime(rootDir, request, stateManager.validationResultCache()),
+        );
+      }
+      if (url.pathname === ApiRoute.Feedback && request.method === "POST") {
+        return await tracer.span("feedback.run", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, () =>
+          feedbackFromRuntime(rootDir, request, stateManager.validationResultCache()),
+        );
+      }
+      if (url.pathname === ApiRoute.HookFeedback && request.method === "POST") {
+        return await tracer.span("feedback.hook", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async () =>
+          json({ ok: true, data: await hookFeedbackFromRuntime(rootDir, request) }),
+        );
+      }
+      if (url.pathname === ApiRoute.Index && request.method === "POST") {
+        const body = await readJsonBody(request);
+        const snapshot = await stateManager.rebuildAndPublish("Manual reindex completed.");
+        if (body.response === ProjectIndexResponseMode.SemanticIndex) {
+          return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
+        }
+        return json({ ok: true, data: snapshot });
+      }
+      if (url.pathname === ApiRoute.Settings) {
+        if (request.method === "GET") return json({ ok: true, data: readProjectSettings(rootDir) });
+        const result = writeProjectSettings(rootDir, await readJsonBody(request));
+        if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
+        paths = createPaths(rootDir);
+        stateManager.replaceValidationResultCache(createValidationResultCache(paths));
+        await restartStore();
+        projectTypesRuntime.generateNow("Project authoring types regenerated after settings changed.");
+        await stateManager.rebuildAndPublish("Project settings saved.");
+        return json({ ok: true, data: result.settings });
+      }
+      if (url.pathname === ApiRoute.AuthoringFactories) {
+        return json({ ok: true, data: listAuthoringFactories() });
+      }
+      if (url.pathname === ApiRoute.AuthoringValidators) {
+        return json({ ok: true, data: await listAuthoringValidators(rootDir) });
+      }
+      if (url.pathname === ApiRoute.AuthoringValidatorsPreview && request.method === "POST") {
+        const result = previewAuthoringValidator(rootDir, await readJsonBody(request));
+        if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
+        return json({ ok: true, data: result.preview });
+      }
+      if (url.pathname === ApiRoute.AuthoringValidatorsRunFixtures && request.method === "POST") {
+        const result = await runAuthoringValidatorFixtures(rootDir, await readJsonBody(request));
+        if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
+        return json({ ok: true, data: result.run });
+      }
+      if (url.pathname === ApiRoute.AuthoringValidatorsApply && request.method === "POST") {
+        const result = await applyAuthoringValidator(rootDir, await readJsonBody(request));
+        if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
+        await stateManager.rebuildAndPublish("Definition authoring applied a convention.");
+        return json({ ok: true, data: result.result });
+      }
+      if (url.pathname === ApiRoute.ServiceProjects) {
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: await listProjects(rootDir, snapshot) });
+      }
+      if (url.pathname === ApiRoute.FsTree) {
+        const snapshot = await refreshCurrentSnapshot();
+        const requested = url.searchParams.get(UrlSearchParam.Path) ?? "";
+        const safe = validateRelativePath(requested, { allowEmpty: true });
+        if (!safe.ok) return json(safe.error, 400);
+        const scope = treeScopeParam(url);
+        const query = url.searchParams.get(UrlSearchParam.Query) ?? "";
+        const showDotEntries = url.searchParams.get(UrlSearchParam.Dot) !== "0";
+        const withFindingsOnly = url.searchParams.get(UrlSearchParam.WithFindings) === "1";
+        let sourceFiles = snapshot.files;
+        if (scope === TreeScope.All) {
+          const projectInventory = stateManager.currentProjectInventory();
+          if (!projectInventory.ok) return json(projectInventory.error, 500);
+          sourceFiles = projectInventory.files;
+        }
+        return json({
+          ok: true,
+          data: buildTreeResponse(safe.path, sourceFiles, snapshot, { query, showDotEntries, withFindingsOnly }),
+        });
+      }
+      if (url.pathname === ApiRoute.FsFile) {
+        const requested = url.searchParams.get(UrlSearchParam.Path) ?? "";
+        const safe = validateRelativePath(requested, { allowEmpty: false });
+        if (!safe.ok) return json(safe.error, 400);
+        return await tracer.span("fs.file.read", { kind: SpanKind.TASK, attributes: { path: safe.path } }, () => readFileResponse(rootDir, safe.path));
+      }
+      if (url.pathname === ApiRoute.Findings) {
+        const snapshot = await refreshCurrentSnapshot();
+        const requested = url.searchParams.get(UrlSearchParam.File);
+        if (!requested) {
+          return json({ ok: true, data: snapshot.findings });
+        }
+        const safe = validateRelativePath(requested, { allowEmpty: false });
+        if (!safe.ok) return json(safe.error, 400);
+        return json({
+          ok: true,
+          data: snapshot.findings.filter((f) => f.file === safe.path),
+        });
+      }
+      if (url.pathname === ApiRoute.GatePending) {
+        return json({ ok: true, data: loadPendingCommitGates(createPaths(rootDir)) });
+      }
+      if (url.pathname === ApiRoute.GateApprove && request.method === "POST") {
+        return await tracer.span("gate.approve", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, () => approveCommitGateFromRuntime(rootDir, request));
+      }
+      if (url.pathname.startsWith(ApiPathPrefix)) {
+        return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, `Unknown runtime route: ${url.pathname}.`), 404);
+      }
+      return new Response("OpenCanon project runtime exposes /api/* only.", { status: 404 });
+  };
+
+  return routeRequest;
+}
