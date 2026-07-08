@@ -16,6 +16,7 @@ import { applyFindingFixes } from "./fixes.ts";
 import type { FixApplicationResult, FixMode } from "./fixes.ts";
 import { createProfiler } from "./profiler.ts";
 import type { ProfileEntry, Profiler } from "./profiler.ts";
+import { getValidationResultCache, validationRuntimeFingerprint, validatorRunCacheKey } from "./validation-result-cache.ts";
 import type { Finding, Validator } from "./validator.ts";
 import type { CommitGate } from "./validator.ts";
 import type { ProducerStatus, ProducerSnapshot } from "./type-facts-provider.ts";
@@ -318,6 +319,12 @@ async function runValidators(params: {
   }
   const projectFiles = projectDiscovery.files;
   const cache = getAnalysisCache(params.paths);
+  const resultCache = getValidationResultCache(params.paths);
+  const runtimeFingerprint = validationRuntimeFingerprint({
+    conventions: params.runtime.conventions.all,
+    definitions: params.runtime.definitions.all(),
+    impactSurfaces: loadImpactSurfaces(params.paths).surfaces,
+  });
 
   for (const file of params.files) {
     if (!existsSync(path.join(params.rootDir, file))) {
@@ -341,7 +348,14 @@ async function runValidators(params: {
   // ONCE per run. Resolving per-validator inside the Promise.all fired N
   // concurrent resolveTypes RPCs over largely the same sites, racing the cold
   // watch build. One batch, one shared map.
-  type ValidatorJob = { validator: Validator; ctx: ReturnType<typeof createValidationContext> } | { validator: Validator; ctx: null };
+  type ValidatorJob =
+    | {
+        validator: Validator;
+        ctx: ReturnType<typeof createValidationContext>;
+        targetFiles: string[];
+        analysisFiles: string[];
+      }
+    | { validator: Validator; ctx: null; targetFiles: string[]; analysisFiles: string[] };
   const jobs: ValidatorJob[] = params.selectedValidators.map((validator) => {
     const targetFiles = targetFilesForValidator(validator, {
       rootDir: params.rootDir,
@@ -349,19 +363,22 @@ async function runValidators(params: {
       project: params.project,
       projectFiles,
     });
-    if (targetFiles.length === 0 && shouldSkipEmptyTargetValidator(validator, { project: params.project, files: params.files, runtime: params.runtime })) return { validator, ctx: null };
+    if (targetFiles.length === 0 && shouldSkipEmptyTargetValidator(validator, { project: params.project, files: params.files, runtime: params.runtime })) {
+      return { validator, ctx: null, targetFiles, analysisFiles: [] };
+    }
+    const analysisFiles = analysisFilesForValidator(validator, { projectFiles, targetFiles });
     const ctx = createValidationContext({
       rootDir: params.rootDir,
       paths: params.paths,
       files: projectFiles,
       targetFiles,
-      analysisFiles: analysisFilesForValidator(validator, { projectFiles, targetFiles }),
+      analysisFiles,
       project: params.project,
       validator,
       cache,
       profiler: params.profiler,
     });
-    return { validator, ctx };
+    return { validator, ctx, targetFiles, analysisFiles };
   });
 
   // Single shared pre-warm: resolve the union of every context's comparison
@@ -462,6 +479,23 @@ async function runValidators(params: {
         // abort the whole run (which would skip cache flush and surface as an
         // uncaught runtime /api/validate failure). Map the throw to an `error`
         // outcome — the channel that exists for exactly this — and keep going.
+        const cacheKey = validatorRunCacheKey({
+          rootDir: params.rootDir,
+          paths: params.paths,
+          projectFiles,
+          targetFiles: job.targetFiles,
+          analysisFiles: job.analysisFiles,
+          project: params.project,
+          strictProducers: params.strictProducers,
+          validator,
+          producerSnapshot,
+          runtimeFingerprint,
+        });
+        const cached = resultCache.get(cacheKey);
+        if (cached) {
+          flushValidationContextCache(ctx);
+          return cached;
+        }
         try {
           const findings = (await validator.validate({ ctx, runtime: params.runtime })).map((finding) => attachFindingReferences(finding, validator));
           const commitGates = commitGatesFromValidationContext(ctx).map((gate) => attachCommitGateReferences(gate, validator));
@@ -490,7 +524,9 @@ async function runValidators(params: {
             outcomes.push({ validatorId: validator.id, status: params.strictProducers ? "error" : "skipped", reason });
           }
           if (outcomes.length === 0) outcomes.push({ validatorId: validator.id, status: "ran" });
-          return { findings, commitGates, outcomes };
+          const result = { findings, commitGates, outcomes };
+          if (outcomes.length === 1 && outcomes[0]?.status === ValidatorOutcomeStatus.Ran) resultCache.set(cacheKey, result);
+          return result;
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           return {
@@ -509,6 +545,7 @@ async function runValidators(params: {
   commitGates.push(...validatorResults.flatMap((result) => result.commitGates));
   outcomes.push(...validatorResults.flatMap((result) => result.outcomes));
   cache.flush();
+  resultCache.flush();
 
   return {
     findings: sortFindings(findings),
