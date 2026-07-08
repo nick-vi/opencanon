@@ -84,7 +84,7 @@ Rules:
 - Context index state lives in `.opencanon/` SQLite/vector storage and can be rebuilt from committed definitions plus project files.
 - Chunks can backlink to conventions, checks, findings, specs, areas, change, impact surfaces, docs, files, and symbols.
 - Embedding and LLM-derived results are advisory context unless a deterministic convention runtime, check, gate, or test enforces the claim.
-- Do not expose `Context Engine` as a separate user-facing product inside OpenCanon. Use OpenCanon product terms and keep implementation names in architecture/source contexts.
+- Do not expose implementation substrate names as separate user-facing products inside OpenCanon. Use OpenCanon product terms and keep implementation names in architecture/source contexts.
 
 ## State Ownership
 

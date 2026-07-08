@@ -151,7 +151,7 @@ Runtime unification removes duplicate validation paths from the CLI. Normal comm
 
 ## Context Index Boundary
 
-OpenCanon absorbs project-knowledge-engine search and retrieval internals as substrate, not as a parallel product or second runtime.
+OpenCanon owns search and retrieval internals as runtime substrate, not as a parallel product or second runtime.
 
 Source-of-truth rules:
 
