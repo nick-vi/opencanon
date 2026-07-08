@@ -18,4 +18,4 @@ Deprecated internal code requires owner, replacement, and remove-by metadata.
 
 ## Related conventions
 
-- [comments-current](opencanon://conventions/comments-current)
+- [Comments describe current intent](comments-current.md)

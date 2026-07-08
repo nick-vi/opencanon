@@ -16,4 +16,4 @@ Sensitive impact-surface changes must satisfy the configured change policy.
 
 ## Related conventions
 
-- [impact-surfaces-current](opencanon://conventions/impact-surfaces-current)
+- [Impact surfaces describe sensitive downstream effects](impact-surfaces-current.md)

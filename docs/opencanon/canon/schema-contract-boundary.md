@@ -16,5 +16,5 @@ Boundary schemas stabilize request/response contracts. Database table definition
 
 ## Related conventions
 
-- [no-db-schema-in-contracts](opencanon://conventions/no-db-schema-in-contracts)
-- [duplicate-boundary-literals](opencanon://conventions/duplicate-boundary-literals)
+- [Public contracts do not import database schemas](no-db-schema-in-contracts.md)
+- [Boundary literals have a canonical owner](duplicate-boundary-literals.md)

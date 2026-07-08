@@ -34,4 +34,4 @@ Humans and agents need predictable failure envelopes across runtime HTTP, local 
 
 ## Related impact surfaces
 
-- [local-service-control](opencanon://impact-surfaces/local-service-control)
+- [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)

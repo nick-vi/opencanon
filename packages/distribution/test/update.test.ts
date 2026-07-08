@@ -58,6 +58,16 @@ test("runtime update installs the current engine target from a verified manifest
 
     const installed = await applyRuntimeUpdate({ manifestSource: manifestPath, cwd: rootDir, runtimeRoot, safety: updateSafety });
     assert.equal(installed.status, "installed");
+    assert.deepEqual(installed.projectActions, [
+      {
+        id: "refresh-managed-project-artifacts",
+        title: "Refresh managed project artifacts",
+        command: "opencanon doctor --fix",
+        scope: "initialized-projects",
+        reason:
+          "Runtime updates can change managed agent guidance, agent entry blocks, generated authoring files, and install metadata. Doctor is the single repair path for those project-owned artifacts.",
+      },
+    ]);
     assert.equal(readFileSync(engineRuntimePathForTarget(runtimeRoot, target)).toString(), "engine-binary");
     assert.equal(readFileSync(path.join(runtimeRoot, "cli.js")).toString().trim(), "export const runtime = true;");
     const marker = JSON.parse(readFileSync(path.join(runtimeRoot, ".bundle.json"), "utf8")) as { sha256: string; target: string };
@@ -67,6 +77,10 @@ test("runtime update installs the current engine target from a verified manifest
     const current = await checkRuntimeUpdate({ manifestSource: manifestPath, cwd: rootDir, runtimeRoot });
     assert.equal(current.status, "current");
     assert.equal(current.currentSha256, sha256);
+
+    const alreadyCurrent = await applyRuntimeUpdate({ manifestSource: manifestPath, cwd: rootDir, runtimeRoot, safety: updateSafety });
+    assert.equal(alreadyCurrent.status, "current");
+    assert.deepEqual(alreadyCurrent.projectActions, []);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

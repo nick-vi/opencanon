@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { BatchProducerPolicy, DefinitionTargetKind, ValidatorDomain, buildDoctorReport, createPaths, DoctorCheckGroup, DoctorStatus, loadProjectContext, resolveGoverningConventionsForFiles, resolveImpactSurfaceConventionsForFiles, resolveValidators, runValidation, validateContext } from "@opencanon/core";
+import { BatchProducerPolicy, DefinitionTargetKind, ValidatorDomain, buildDoctorReport, createPaths, createRenderLinkContext, DoctorCheckGroup, DoctorStatus, loadProjectContext, resolveGoverningConventionsForFiles, resolveImpactSurfaceConventionsForFiles, resolveValidators, runValidation, validateContext } from "@opencanon/core";
 import { defineArea, resolveAreas, type Area, type AreaRenderStyle } from "@opencanon/core/area";
 import { renderArea } from "@opencanon/core/area-render";
 import { defineSpec, type Spec, type SpecRenderStyle } from "@opencanon/core/spec";
@@ -311,6 +311,28 @@ test("renderConvention snapshots every style deterministically", () => {
       validate: () => [],
     },
   });
+  const linkContext = createRenderLinkContext({
+    conventions: [
+      convention,
+      defineConvention({
+        id: "other-rule",
+        title: "Other Rule",
+        rule: "Other rule.",
+        applies: { kind: "files", globs: ["src/**/*.ts"] },
+        render: { kind: "generated", docs: "docs/other-rule.md", style: "reference" },
+        runtime: { kind: "none" },
+      }),
+    ],
+    impactSurfaces: [
+      {
+        id: "sample-surface",
+        title: "Sample Surface",
+        applies: ["src/**"],
+        docs: ["docs/surfaces.md#sample-surface"],
+        conventionIds: ["sample-rule"],
+      },
+    ],
+  });
 
   const snapshots = {
     narrative: `# Sample Rule
@@ -354,12 +376,12 @@ Runtime enforcement is configured as:
 ## Related impact surfaces
 
 Related impact surfaces:
-- [sample-surface](opencanon://impact-surfaces/sample-surface)
+- [Sample Surface](surfaces.md#sample-surface)
 
 ## Related conventions
 
 Related conventions:
-- [other-rule](opencanon://conventions/other-rule)
+- [Other Rule](other-rule.md)
 `,
     checklist: `# Sample Rule
 
@@ -399,11 +421,11 @@ enum Bad { X }
 
 ## Related conventions
 
-- [ ] Compare with [other-rule](opencanon://conventions/other-rule)
+- [ ] Compare with [Other Rule](other-rule.md)
 
 ## Related impact surfaces
 
-- [ ] Review impact surface [sample-surface](opencanon://impact-surfaces/sample-surface)
+- [ ] Review impact surface [Sample Surface](surfaces.md#sample-surface)
 `,
     reference: `# Sample Rule
 
@@ -443,11 +465,11 @@ enum Bad { X }
 
 ## Related impact surfaces
 
-- [sample-surface](opencanon://impact-surfaces/sample-surface)
+- [Sample Surface](surfaces.md#sample-surface)
 
 ## Related conventions
 
-- [other-rule](opencanon://conventions/other-rule)
+- [Other Rule](other-rule.md)
 `,
     "architecture-note": `# Sample Rule
 
@@ -468,7 +490,7 @@ Sample files must use the approved shape.
 ## Related impact surfaces
 
 Architecture surfaces affected:
-- [sample-surface](opencanon://impact-surfaces/sample-surface)
+- [Sample Surface](surfaces.md#sample-surface)
 
 ## Runtime checks
 
@@ -495,7 +517,7 @@ enum Bad { X }
 ## Related conventions
 
 Neighboring convention constraints:
-- [other-rule](opencanon://conventions/other-rule)
+- [Other Rule](other-rule.md)
 `,
     "decision-record": `# Sample Rule
 
@@ -526,12 +548,12 @@ Enforcement recorded for this decision:
 ## Related conventions
 
 Related convention records:
-- [other-rule](opencanon://conventions/other-rule)
+- [Other Rule](other-rule.md)
 
 ## Related impact surfaces
 
 Impact surfaces considered:
-- [sample-surface](opencanon://impact-surfaces/sample-surface)
+- [Sample Surface](surfaces.md#sample-surface)
 
 ## Examples
 
@@ -548,7 +570,7 @@ enum Bad { X }
   } satisfies Record<string, string>;
 
   for (const [style, snapshot] of Object.entries(snapshots)) {
-    assert.equal(renderConvention(convention, style as RenderStyle), snapshot);
+    assert.equal(renderConvention(convention, style as RenderStyle, linkContext), snapshot);
   }
 });
 
@@ -672,6 +694,15 @@ function sampleChange(extra: Partial<Change> = {}): Change {
 
 test("renderSpec is deterministic", () => {
   const spec = sampleSpec();
+  const linkContext = createRenderLinkContext({
+    areas: [sampleArea()],
+    conventions: [
+      docsOnly("governance-rule", {
+        title: "Governance Rule",
+        render: { kind: "generated", docs: "docs/governance-rule.md", style: "reference" },
+      }),
+    ],
+  });
   const expected = `# Service Health Spec
 
 ## Summary
@@ -684,7 +715,7 @@ Service health behavior stays visible and enforced.
 
 ## Areas
 
-- [service-health](opencanon://areas/service-health)
+- [Service Health](service-health.md)
 
 ## Checks
 
@@ -706,10 +737,10 @@ Checks: \`project-doctor\`
 
 ## Governance
 
-- convention [governance-rule](opencanon://conventions/governance-rule)
+- convention [Governance Rule](governance-rule.md)
 `;
 
-  assert.equal(renderSpec(spec, "reference" as SpecRenderStyle), expected);
+  assert.equal(renderSpec(spec, "reference" as SpecRenderStyle, linkContext), expected);
 });
 
 test("area definitions resolve duplicate ids", () => {
@@ -1085,6 +1116,7 @@ test("change definitions resolve duplicate ids", () => {
 });
 
 test("change render is deterministic", () => {
+  const linkContext = createRenderLinkContext({ areas: [sampleArea()] });
   const expected = `# Service Health Change
 
 Change kind: \`feature\`.
@@ -1098,7 +1130,7 @@ Summary: Expose service health as typed change.
 
 ## Updates
 
-- Areas: [service-health](opencanon://areas/service-health)
+- Areas: [Service Health](service-health.md)
 
 ## Scope
 
@@ -1121,7 +1153,7 @@ Task \`ui\`: Wire health API
 Checks: \`service-build\`
 `;
 
-  assert.equal(renderChange(sampleChange(), "reference" as ChangeRenderStyle), expected);
+  assert.equal(renderChange(sampleChange(), "reference" as ChangeRenderStyle, linkContext), expected);
 });
 
 test("context validation reports change link and check errors", () => {

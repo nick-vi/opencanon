@@ -14,5 +14,5 @@ Runtime path mutation hides dependency boundaries. Package imports are easier fo
 
 ## Related conventions
 
-- [python-no-sys-path-mutation](opencanon://conventions/python-no-sys-path-mutation)
-- [python-no-bare-except](opencanon://conventions/python-no-bare-except)
+- [Python modules do not mutate sys.path](python-no-sys-path-mutation.md)
+- [Python catches specific exception types](python-no-bare-except.md)

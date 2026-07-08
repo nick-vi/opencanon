@@ -25,6 +25,6 @@ Services often need multi-step writes to commit or roll back as one unit. Routes
 
 ## Related conventions
 
-- [dal-transaction-param](opencanon://conventions/dal-transaction-param)
-- [no-route-dal-import](opencanon://conventions/no-route-dal-import)
-- [service-no-db-client](opencanon://conventions/service-no-db-client)
+- [DAL functions keep transaction clients last](dal-transaction-param.md)
+- [Routes call services instead of DAL modules](no-route-dal-import.md)
+- [Services do not import DB clients](service-no-db-client.md)

@@ -18,7 +18,7 @@ opencanon project start --foreground`;
 opencanon project stop
 opencanon update check --manifest ./opencanon-runtime-manifest.json
 opencanon update apply --manifest ./opencanon-runtime-manifest.json
-opencanon project check`;
+opencanon doctor --fix`;
 </script>
 
 <svelte:head><title>Runtime | OpenCanon</title></svelte:head>
@@ -65,7 +65,9 @@ opencanon project check`;
 <p>
   Runtime updates are manifest-driven. The CLI selects the current target,
   checks schema and Node compatibility, verifies asset hashes, and refuses to
-  write while the service or current project runtime is running.
+  write while the service or current project runtime is running. Runtime updates
+  do not mutate project files directly; Doctor owns managed project artifact
+  repair through <code>opencanon doctor --fix</code>.
 </p>
 <CodeBlock title="runtime update" language="shell" code={updateCommands} />
 

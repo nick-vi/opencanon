@@ -18,4 +18,4 @@ Secret-like literals must not be committed.
 
 ## Related conventions
 
-- [hardcoded-secrets-and-config](opencanon://conventions/hardcoded-secrets-and-config)
+- [Secrets and environment config stay out of source literals](hardcoded-secrets-and-config.md)

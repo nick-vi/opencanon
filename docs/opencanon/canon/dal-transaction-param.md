@@ -17,4 +17,4 @@ Exported DAL functions should accept an optional transaction/client parameter an
 
 ## Related conventions
 
-- [dal-transaction-flow](opencanon://conventions/dal-transaction-flow)
+- [DAL functions accept optional transactions](dal-transaction-flow.md)

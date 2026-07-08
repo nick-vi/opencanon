@@ -17,4 +17,4 @@ Repeated domain literals should be promoted to a const object plus derived union
 
 ## Related conventions
 
-- [const-object-enums](opencanon://conventions/const-object-enums)
+- [Use const objects instead of native TypeScript enums](const-object-enums.md)

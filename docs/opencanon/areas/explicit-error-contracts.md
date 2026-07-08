@@ -13,8 +13,8 @@ Resources: runtime-error-envelope
 
 ## Impact surfaces
 
-- [local-service-control](opencanon://impact-surfaces/local-service-control)
-- [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+- [Local service control plane](local-service-and-runtimes.md#local-service-and-project-runtimes)
+- [Project Canon model](project-map-governance.md#project-map-governance)
 
 ## Checks
 
@@ -42,5 +42,5 @@ Checks: `service-lifecycle-tests`, `runtime-client-tests`
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [explicit-error-contracts](opencanon://conventions/explicit-error-contracts)
-- convention [tests-follow-risk](opencanon://conventions/tests-follow-risk)
+- convention [Runtime failures use explicit error payloads](../canon/explicit-error-contracts.md)
+- convention [Tests scale with blast radius](../canon/tests-follow-risk.md)

@@ -35,6 +35,6 @@ Large mixed-responsibility files hide ownership boundaries, slow reviews, and ma
 
 ## Related conventions
 
-- [folder-structure-current](opencanon://conventions/folder-structure-current)
-- [import-boundaries-current](opencanon://conventions/import-boundaries-current)
-- [tests-follow-risk](opencanon://conventions/tests-follow-risk)
+- [Folders use approved responsibility names](folder-structure-current.md)
+- [Imports preserve local ownership boundaries](import-boundaries-current.md)
+- [Tests scale with blast radius](tests-follow-risk.md)

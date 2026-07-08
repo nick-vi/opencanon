@@ -20,4 +20,4 @@ Boundary literals should have a canonical owner.
 
 ## Related conventions
 
-- [schema-contract-boundary](opencanon://conventions/schema-contract-boundary)
+- [Schemas define contracts at package boundaries](schema-contract-boundary.md)

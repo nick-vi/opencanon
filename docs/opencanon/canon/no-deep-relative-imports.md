@@ -19,4 +19,4 @@ Deep relative import crosses too many ownership levels.
 
 ## Related conventions
 
-- [import-boundaries-current](opencanon://conventions/import-boundaries-current)
+- [Imports preserve local ownership boundaries](import-boundaries-current.md)

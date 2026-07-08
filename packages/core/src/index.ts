@@ -228,6 +228,18 @@ export {
   parseMarkdownDoc,
   resolveDocsReferences,
 } from "./docs.ts";
+export {
+  createRenderLinkContext,
+  renderAreaMarkdownLink,
+  renderChangeMarkdownLink,
+  renderConventionMarkdownLink,
+  renderDefinitionMarkdownLink,
+  renderDocsMarkdownLink,
+  renderImpactSurfaceMarkdownLink,
+  renderLinkContextForDocs,
+  renderSpecMarkdownLink,
+} from "./render-links.ts";
+export type { RenderLinkContext, RenderLinkContextInput, RenderLinkTarget } from "./render-links.ts";
 export type { GitCommitInfo, GitFileDiff, GitFileHistory } from "./git.ts";
 export { getChangedFiles, getGitFileDiff, getGitFileHistory, getGitRoot } from "./git.ts";
 export type {

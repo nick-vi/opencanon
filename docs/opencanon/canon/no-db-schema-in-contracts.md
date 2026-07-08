@@ -18,4 +18,4 @@ Public contract modules must not import database schema internals.
 
 ## Related conventions
 
-- [schema-contract-boundary](opencanon://conventions/schema-contract-boundary)
+- [Schemas define contracts at package boundaries](schema-contract-boundary.md)

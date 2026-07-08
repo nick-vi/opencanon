@@ -91,9 +91,18 @@ export type RuntimeUpdateCheck = {
   currentSha256?: string;
 };
 
+export type RuntimeUpdateProjectAction = {
+  id: "refresh-managed-project-artifacts";
+  title: string;
+  command: "opencanon doctor --fix";
+  scope: "initialized-projects";
+  reason: string;
+};
+
 export type RuntimeUpdateApplyResult = {
   status: Extract<RuntimeUpdateStatus, "current" | "dry-run" | "installed">;
   check: RuntimeUpdateCheck;
+  projectActions: RuntimeUpdateProjectAction[];
 };
 
 export type UpdateSafetyGuard = {
@@ -192,7 +201,7 @@ export async function applyRuntimeUpdate(input: {
   if (!input.dryRun) await input.safety.assertSafeToUpdate();
 
   const check = await checkRuntimeUpdate(input);
-  if (check.status === RuntimeUpdateStatus.Current) return { status: RuntimeUpdateStatus.Current, check };
+  if (check.status === RuntimeUpdateStatus.Current) return { status: RuntimeUpdateStatus.Current, check, projectActions: [] };
 
   // Rollback protection: never install an older runtimeVersion over a newer one. The
   // version comes from the signature-verified manifest, so an attacker cannot strip it;
@@ -205,7 +214,7 @@ export async function applyRuntimeUpdate(input: {
     );
   }
 
-  if (input.dryRun) return { status: RuntimeUpdateStatus.DryRun, check };
+  if (input.dryRun) return { status: RuntimeUpdateStatus.DryRun, check, projectActions: [] };
 
   const bytes = await readBytes(check.resolvedBundleSource, input.cwd ?? process.cwd());
   const downloadedSha256 = sha256Bytes(bytes);
@@ -226,7 +235,21 @@ export async function applyRuntimeUpdate(input: {
     marker: { runtimeVersion: check.runtimeVersion, sha256: check.expectedSha256, target: check.target },
   });
 
-  return { status: RuntimeUpdateStatus.Installed, check: { ...check, currentSha256: check.expectedSha256, status: RuntimeUpdateStatus.Current } };
+  return {
+    status: RuntimeUpdateStatus.Installed,
+    check: { ...check, currentSha256: check.expectedSha256, status: RuntimeUpdateStatus.Current },
+    projectActions: [runtimeUpdateProjectRefreshAction()],
+  };
+}
+
+export function runtimeUpdateProjectRefreshAction(): RuntimeUpdateProjectAction {
+  return {
+    id: "refresh-managed-project-artifacts",
+    title: "Refresh managed project artifacts",
+    command: "opencanon doctor --fix",
+    scope: "initialized-projects",
+    reason: "Runtime updates can change managed agent guidance, agent entry blocks, generated authoring files, and install metadata. Doctor is the single repair path for those project-owned artifacts.",
+  };
 }
 
 // Atomic rename of runtimeRoot can fail on Windows if cli.js inside is mapped by the calling process; invoke from outside the runtime dir on Windows.

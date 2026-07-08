@@ -2,6 +2,13 @@ import type { ContextPaths } from "./context.ts";
 import { ConventionRenderKind, ConventionRenderStyle, ConventionRuntimeKind, type Applies, type Convention, type RenderStyle, type Runtime } from "./convention.ts";
 import { normalizeMarkdownHeading } from "./docs.ts";
 import { resolveInsideRoot } from "./paths.ts";
+import {
+  renderDefinitionMarkdownLink,
+  renderImpactSurfaceMarkdownLink,
+  renderLinkContextForDocs,
+  renderConventionMarkdownLink,
+  type RenderLinkContext,
+} from "./render-links.ts";
 
 type SectionKey = "why" | "rule" | "applies" | "examples" | "runtime" | "impactSurfaces" | "related";
 
@@ -27,12 +34,13 @@ const StyleSections: Record<RenderStyle, SectionKey[]> = {
   "decision-record": ["rule", "why", "applies", "runtime", "related", "impactSurfaces", "examples"],
 };
 
-export function renderConvention(convention: Convention, style: RenderStyle): string {
+export function renderConvention(convention: Convention, style: RenderStyle, context?: RenderLinkContext): string {
+  const linkContext = renderLinkContextForDocs(context, convention.render.kind === ConventionRenderKind.Generated ? convention.render.docs : context?.currentDocs);
   const lines: string[] = [];
   lines.push(`# ${convention.title}`);
 
   for (const section of StyleSections[style]) {
-    const rendered = renderSection(convention, style, section);
+    const rendered = renderSection(convention, style, section, linkContext);
     if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${SectionTitle[section]}`);
@@ -62,22 +70,22 @@ export function validateGeneratedConventionDocsPath(owner: string, docsPath: str
   return resolved.ok ? [] : resolved.diagnostics;
 }
 
-function renderSection(convention: Convention, style: RenderStyle, section: SectionKey): string[] {
+function renderSection(convention: Convention, style: RenderStyle, section: SectionKey, context: RenderLinkContext | undefined): string[] {
   switch (section) {
     case "why":
       return renderWhy(convention, style);
     case "rule":
       return renderRule(convention, style);
     case "applies":
-      return renderApplies(convention.applies, style);
+      return renderApplies(convention.applies, style, context);
     case "examples":
       return renderExamples(convention, style);
     case "runtime":
       return renderRuntime(convention.runtime, style);
     case "impactSurfaces":
-      return renderImpactSurfaces(convention, style);
+      return renderImpactSurfaces(convention, style, context);
     case "related":
-      return renderRelatedConventions(convention, style);
+      return renderRelatedConventions(convention, style, context);
   }
 }
 
@@ -113,8 +121,8 @@ function renderRule(convention: Convention, style: RenderStyle): string[] {
   }
 }
 
-function renderApplies(applies: Applies, style: RenderStyle): string[] {
-  const details = appliesDetails(applies);
+function renderApplies(applies: Applies, style: RenderStyle, context: RenderLinkContext | undefined): string[] {
+  const details = appliesDetails(applies, context);
   switch (style) {
     case "narrative":
       return ["This convention applies to:", ...details.map((detail) => `- ${detail}`)];
@@ -161,10 +169,10 @@ function renderRuntime(runtime: Runtime, style: RenderStyle): string[] {
   }
 }
 
-function renderImpactSurfaces(convention: Convention, style: RenderStyle): string[] {
+function renderImpactSurfaces(convention: Convention, style: RenderStyle, context: RenderLinkContext | undefined): string[] {
   const surfaces = convention.impactSurfaces ?? [];
   if (surfaces.length === 0) return [];
-  const linked = surfaces.map((id) => impactSurfaceLink(id));
+  const linked = surfaces.map((id) => renderImpactSurfaceMarkdownLink(context, id));
   switch (style) {
     case "narrative":
       return ["Related impact surfaces:", ...linked.map((item) => `- ${item}`)];
@@ -179,10 +187,10 @@ function renderImpactSurfaces(convention: Convention, style: RenderStyle): strin
   }
 }
 
-function renderRelatedConventions(convention: Convention, style: RenderStyle): string[] {
+function renderRelatedConventions(convention: Convention, style: RenderStyle, context: RenderLinkContext | undefined): string[] {
   const related = convention.related ?? [];
   if (related.length === 0) return [];
-  const linked = related.map((id) => conventionLink(id));
+  const linked = related.map((id) => renderConventionMarkdownLink(context, id));
   switch (style) {
     case "narrative":
       return ["Related conventions:", ...linked.map((item) => `- ${item}`)];
@@ -197,7 +205,7 @@ function renderRelatedConventions(convention: Convention, style: RenderStyle): s
   }
 }
 
-function appliesDetails(applies: Applies): string[] {
+function appliesDetails(applies: Applies, context: RenderLinkContext | undefined): string[] {
   switch (applies.kind) {
     case "files":
       return applies.globs.map((glob) => `\`${glob}\``);
@@ -213,10 +221,10 @@ function appliesDetails(applies: Applies): string[] {
         ...((applies.from ?? []).length === 0 && (applies.to ?? []).length === 0 ? ["all import edges"] : []),
       ];
     case "impact-surface":
-      return applies.surfaceIds.map((id) => `impact surface ${impactSurfaceLink(id)}`);
+      return applies.surfaceIds.map((id) => `impact surface ${renderImpactSurfaceMarkdownLink(context, id)}`);
     case "definitions":
       return applies.definitions.map((target) => {
-        const ids = target.ids && target.ids.length > 0 ? target.ids.map((id) => definitionLink(target.kind, id)).join(", ") : "all";
+        const ids = target.ids && target.ids.length > 0 ? target.ids.map((id) => renderDefinitionMarkdownLink(context, target.kind, id)).join(", ") : "all";
         return `${target.kind} definitions: ${ids}`;
       });
     case "project":
@@ -244,33 +252,6 @@ function runtimeDetails(runtime: Exclude<Runtime, { kind: "none" }>): Array<[str
 function labeledBlock(label: string, value: string, style: RenderStyle): string[] {
   const prefix = style === ConventionRenderStyle.Checklist ? `- [ ] ${label}:` : `${label}:`;
   return [prefix, fenceBlock(value)];
-}
-
-function conventionLink(id: string): string {
-  return `[${id}](opencanon://conventions/${encodeURIComponent(id)})`;
-}
-
-function impactSurfaceLink(id: string): string {
-  return `[${id}](opencanon://impact-surfaces/${encodeURIComponent(id)})`;
-}
-
-function definitionLink(kind: string, id: string): string {
-  return `[${id}](opencanon://${definitionRoute(kind)}/${encodeURIComponent(id)})`;
-}
-
-function definitionRoute(kind: string): string {
-  switch (kind) {
-    case "area":
-      return "areas";
-    case "spec":
-      return "specs";
-    case "change":
-      return "changes";
-    case "convention":
-      return "conventions";
-    default:
-      return `${kind}s`;
-  }
 }
 
 function fenceBlock(value: string): string {

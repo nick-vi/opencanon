@@ -16,4 +16,4 @@ Python code should catch specific exception types instead of using bare except c
 
 ## Related conventions
 
-- [python-module-boundaries](opencanon://conventions/python-module-boundaries)
+- [Python modules use package imports instead of sys.path mutation](python-module-boundaries.md)

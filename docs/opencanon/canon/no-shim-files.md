@@ -17,4 +17,4 @@ Internal source files should not be named around shims, compatibility, legacy, o
 
 ## Related conventions
 
-- [comments-current](opencanon://conventions/comments-current)
+- [Comments describe current intent](comments-current.md)

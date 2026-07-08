@@ -22,9 +22,9 @@ Specs are useful only when they stay connected to the implementation and the con
 
 ## Related impact surfaces
 
-- [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+- [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 
 ## Related conventions
 
-- [state-ownership-current](opencanon://conventions/state-ownership-current)
-- [tests-follow-risk](opencanon://conventions/tests-follow-risk)
+- [Repo definitions own truth; generated state stays derived](state-ownership-current.md)
+- [Tests scale with blast radius](tests-follow-risk.md)

@@ -6,13 +6,13 @@ Conventions are typed definitions that can render human docs and enforce runtime
 
 ## Ownership
 
-Files: packages/core/src/convention.ts, packages/core/src/convention-render.ts, packages/core/src/validator-graph.ts, packages/core/src/validation.ts, opencanon/conventions/index.ts, opencanon/conventions/docs-only-conventions.ts, tests/convention.test.ts
+Files: packages/core/src/convention.ts, packages/core/src/convention-render.ts, packages/core/src/render-links.ts, packages/core/src/validator-graph.ts, packages/core/src/validation.ts, opencanon/conventions/index.ts, opencanon/conventions/docs-only-conventions.ts, tests/convention.test.ts
 Commands: opencanon canon (cli), opencanon validate (cli)
 Docs: docs/opencanon/canon/architecture.md
 
 ## Impact surfaces
 
-- [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+- [Project Canon model](project-map-governance.md#project-map-governance)
 
 ## Checks
 

@@ -16,5 +16,5 @@ Agents tend to copy nearby imports. Deep relative paths make it hard to see whet
 
 ## Related conventions
 
-- [no-deep-relative-imports](opencanon://conventions/no-deep-relative-imports)
-- [source-files-stay-cohesive](opencanon://conventions/source-files-stay-cohesive)
+- [Imports avoid deep relative parent climbs](no-deep-relative-imports.md)
+- [Source files keep one primary responsibility](source-files-stay-cohesive.md)

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { cac } from "cac";
 import {
   ConventionRenderKind,
+  createRenderLinkContext,
   fail,
   Format,
   renderConvention,
@@ -362,6 +363,7 @@ async function runConventionsImpactEvolutionCommand(args: string[], cwd: string)
 
 async function renderGeneratedConventions(cwd: string, options: { dryRun: boolean }): Promise<RenderConventionsResult> {
   const project = await loadProjectContext(cwd);
+  const linkContext = createRenderLinkContext(project);
   const files: RenderedConventionFile[] = [];
 
   for (const convention of project.conventions) {
@@ -369,7 +371,7 @@ async function renderGeneratedConventions(cwd: string, options: { dryRun: boolea
     const resolved = resolveConventionGeneratedDocsPath(project.paths, convention);
     if (!resolved.ok) fail(resolved.diagnostics.join("\n"));
 
-    const expected = renderConvention(convention, convention.render.style);
+    const expected = renderConvention(convention, convention.render.style, linkContext);
     const current = existsSync(resolved.absolutePath) ? readFileSync(resolved.absolutePath, "utf8") : undefined;
     const changed = current !== expected;
     if (changed && !options.dryRun) writeAtomicTextFileSync(resolved.absolutePath, expected);

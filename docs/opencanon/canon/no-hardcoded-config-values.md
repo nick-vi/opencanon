@@ -18,4 +18,4 @@ Environment-specific config values should live behind named config.
 
 ## Related conventions
 
-- [hardcoded-secrets-and-config](opencanon://conventions/hardcoded-secrets-and-config)
+- [Secrets and environment config stay out of source literals](hardcoded-secrets-and-config.md)

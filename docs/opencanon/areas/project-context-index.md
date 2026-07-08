@@ -13,7 +13,7 @@ Resources: semantic-index, semantic-chunks, vector-store
 
 ## Impact surfaces
 
-- [project-context-index](opencanon://impact-surfaces/project-context-index)
+- [Project context index](project-context-index.md#project-context-index)
 
 ## Checks
 
@@ -49,6 +49,6 @@ Checks: `project-doctor`
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [context-index-boundary-current](opencanon://conventions/context-index-boundary-current)
-- convention [state-ownership-current](opencanon://conventions/state-ownership-current)
-- convention [product-language-current](opencanon://conventions/product-language-current)
+- convention [Context indexing is derived OpenCanon runtime state](../canon/context-index-boundary-current.md)
+- convention [Repo definitions own truth; generated state stays derived](../canon/state-ownership-current.md)
+- convention [Product-facing language stays simple](../canon/product-language-current.md)

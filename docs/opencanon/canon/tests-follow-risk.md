@@ -17,5 +17,5 @@ Tests should catch regressions at the same boundary where the risk was introduce
 
 ## Related conventions
 
-- [spec-definitions-are-enforced](opencanon://conventions/spec-definitions-are-enforced)
-- [source-files-stay-cohesive](opencanon://conventions/source-files-stay-cohesive)
+- [Specs declare enforcement and governance](spec-definitions-are-enforced.md)
+- [Source files keep one primary responsibility](source-files-stay-cohesive.md)

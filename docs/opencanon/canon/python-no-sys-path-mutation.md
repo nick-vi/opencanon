@@ -16,4 +16,4 @@ Python modules should not mutate sys.path to cross package boundaries.
 
 ## Related conventions
 
-- [python-module-boundaries](opencanon://conventions/python-module-boundaries)
+- [Python modules use package imports instead of sys.path mutation](python-module-boundaries.md)

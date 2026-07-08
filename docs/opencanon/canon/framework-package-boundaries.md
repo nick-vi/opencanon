@@ -17,4 +17,4 @@ OpenCanon framework packages must depend only on approved lower-level packages.
 
 ## Related conventions
 
-- [framework-package-boundaries](opencanon://conventions/framework-package-boundaries)
+- [Framework packages depend inward](framework-package-boundaries.md)

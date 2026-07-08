@@ -15,9 +15,9 @@ Committed secrets are difficult to revoke reliably after publication. Hardcoded 
 
 ## Related impact surfaces
 
-- [release-update](opencanon://impact-surfaces/release-update)
+- [Release and update path](../areas/runtime-release-update.md#runtime-updates)
 
 ## Related conventions
 
-- [no-secret-like-literals](opencanon://conventions/no-secret-like-literals)
-- [no-hardcoded-config-values](opencanon://conventions/no-hardcoded-config-values)
+- [Secret-like literals stay out of source](no-secret-like-literals.md)
+- [Environment config stays behind named settings](no-hardcoded-config-values.md)

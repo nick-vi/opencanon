@@ -26,6 +26,11 @@ An official remote install/update trusts a release only if **all** hold:
 5. **No live runtime swap** — `opencanon update apply` refuses while the global service
    or any registered project runtime is running, so the runtime directory is not replaced
    underneath active OpenCanon processes.
+6. **No implicit project mutation** — runtime update installs runtime assets only. When
+   the runtime changes managed project artifacts, the apply result reports the explicit
+   project action: run `opencanon doctor --fix` in initialized projects. Doctor remains
+   the single writer for managed agent guidance, agent entry blocks, generated authoring
+   files, and install metadata.
 
 Signature verification policy is shared by the distribution module and mirrored in the
 release-rendered standalone installer; `create-opencanon-release` injects the same

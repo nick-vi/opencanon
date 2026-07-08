@@ -15,8 +15,8 @@ Import graphs miss domain dependencies such as data, events, jobs, permissions, 
 
 ## Related impact surfaces
 
-- [company-read-model](opencanon://impact-surfaces/company-read-model)
+- [Company read model](impact.md#impact-surfaces)
 
 ## Related conventions
 
-- [sensitive-change-requires-approval](opencanon://conventions/sensitive-change-requires-approval)
+- [Sensitive surface changes require approval](sensitive-change-requires-approval.md)

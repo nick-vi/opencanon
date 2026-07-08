@@ -19,4 +19,4 @@ Files matching src/**/*.{ts,tsx}, tests/**/*.{ts,tsx}, packages/*/src/**/*.{ts,t
 
 ## Related conventions
 
-- [const-object-enums](opencanon://conventions/const-object-enums)
+- [Use const objects instead of native TypeScript enums](const-object-enums.md)

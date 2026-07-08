@@ -4,6 +4,7 @@ import {
   AreaCheckKind,
   AreaRenderKind,
   AreaRenderStyle,
+  createRenderLinkContext,
   buildDefinitionDiffGitArgs,
   buildDefinitionHistoryGitArgs,
   buildDefinitionVersionsGitArgs,
@@ -325,6 +326,7 @@ async function runAreasVersionsCommand(args: string[], cwd: string): Promise<voi
 
 async function renderGeneratedAreas(cwd: string, options: { dryRun: boolean }): Promise<RenderAreasResult> {
   const project = await loadProjectContext(cwd);
+  const linkContext = createRenderLinkContext(project);
   const files: RenderedAreaFile[] = [];
 
   for (const area of project.areas) {
@@ -332,7 +334,7 @@ async function renderGeneratedAreas(cwd: string, options: { dryRun: boolean }): 
     const resolved = resolveAreaGeneratedDocsPath(project.paths, area);
     if (!resolved.ok) fail(resolved.diagnostics.join("\n"));
 
-    const expected = renderArea(area, area.render.style);
+    const expected = renderArea(area, area.render.style, linkContext);
     const current = existsSync(resolved.absolutePath) ? readFileSync(resolved.absolutePath, "utf8") : undefined;
     const changed = current !== expected;
     if (changed && !options.dryRun) writeAtomicTextFileSync(resolved.absolutePath, expected);

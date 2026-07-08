@@ -11,7 +11,7 @@ Commands: opencanon update (cli)
 
 ## Impact surfaces
 
-- [release-update](opencanon://impact-surfaces/release-update)
+- [Release and update path](runtime-release-update.md#runtime-updates)
 
 ## Checks
 
@@ -24,6 +24,7 @@ Story `targeted-runtime-install`: as developer, I want updates to select the cur
 - manifest checks validate hashes
 - install rehearsal verifies runtime layout
 - the CLI supplies service and project runtime safety guards before writes
+- installed updates report the Doctor fix command for managed project artifacts
 Checks: `release-update-tests`, `release-check`
 
 ## Behaviors
@@ -31,7 +32,10 @@ Checks: `release-update-tests`, `release-check`
 Behavior `refuses-unsafe-update`: updater applies a runtime bundle; hash or signature failures stop before replacing installed files.
 Checks: `release-update-tests`
 
+Behavior `reports-project-refresh-action`: updater installs a new runtime bundle; the apply result reports opencanon doctor --fix as the only managed-project-artifact repair path.
+Checks: `release-update-tests`
+
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [hardcoded-secrets-and-config](opencanon://conventions/hardcoded-secrets-and-config)
+- convention [Secrets and environment config stay out of source literals](../canon/hardcoded-secrets-and-config.md)

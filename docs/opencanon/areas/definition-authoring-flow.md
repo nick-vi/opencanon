@@ -6,7 +6,7 @@ OpenCanon provides project-local authoring support and draft commands for conven
 
 ## Ownership
 
-Files: packages/core/src/project-types.ts, packages/runtime/src/project-types-runtime.ts, packages/cli/src/setup.ts, packages/cli/src/areas.ts, packages/cli/src/changes.ts
+Files: packages/core/src/project-types.ts, packages/runtime/src/project-types-runtime.ts, packages/cli/src/setup.ts, packages/cli/src/areas.ts, packages/cli/src/changes.ts, packages/cli/src/changes-definition.ts
 Commands: opencanon canon draft convention (cli), opencanon canon draft area (cli), opencanon canon draft change (cli)
 Docs: .agents/skills/opencanon/SKILL.md
 
@@ -31,5 +31,5 @@ Checks: `project-doctor`
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [state-ownership-current](opencanon://conventions/state-ownership-current)
-- convention [product-language-current](opencanon://conventions/product-language-current)
+- convention [Repo definitions own truth; generated state stays derived](../canon/state-ownership-current.md)
+- convention [Product-facing language stays simple](../canon/product-language-current.md)

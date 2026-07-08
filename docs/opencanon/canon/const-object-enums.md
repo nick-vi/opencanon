@@ -22,5 +22,5 @@ Const objects are plain JavaScript and avoid TypeScript enum runtime semantics. 
 
 ## Related conventions
 
-- [no-native-enums](opencanon://conventions/no-native-enums)
-- [repeated-domain-literals](opencanon://conventions/repeated-domain-literals)
+- [Use const objects instead of native TypeScript enums](no-native-enums.md)
+- [Repeated domain literals move into const objects](repeated-domain-literals.md)

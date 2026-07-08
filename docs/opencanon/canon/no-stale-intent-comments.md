@@ -18,4 +18,4 @@ Comment describes stale compatibility intent.
 
 ## Related conventions
 
-- [comments-current](opencanon://conventions/comments-current)
+- [Comments describe current intent](comments-current.md)

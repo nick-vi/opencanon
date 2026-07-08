@@ -18,4 +18,4 @@ JSON.parse() of file I/O must sit inside a try/catch so a malformed file degrade
 
 ## Related conventions
 
-- [guard-file-json-parse](opencanon://conventions/guard-file-json-parse)
+- [JSON.parse of file I/O must be guarded by try/catch](guard-file-json-parse.md)

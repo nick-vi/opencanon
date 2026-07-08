@@ -21,4 +21,4 @@ Comparisons against a checked finite-literal set should reference the declared m
 
 ## Related conventions
 
-- [inline-soft-enum-literal](opencanon://conventions/inline-soft-enum-literal)
+- [Soft enum comparisons use declared members](inline-soft-enum-literal.md)

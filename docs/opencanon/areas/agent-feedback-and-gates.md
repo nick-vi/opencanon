@@ -29,4 +29,4 @@ Checks: `feedback-tests`
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [sensitive-change-requires-approval](opencanon://conventions/sensitive-change-requires-approval)
+- convention [Sensitive surface changes require approval](../canon/sensitive-change-requires-approval.md)

@@ -11,34 +11,34 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 
 ## Updates
 
-- Areas: [company-read-model](opencanon://areas/company-read-model)
-- Areas: [project-map-governance](opencanon://areas/project-map-governance)
-- Areas: [project-context-index](opencanon://areas/project-context-index)
-- Areas: [local-service-and-runtimes](opencanon://areas/local-service-and-runtimes)
-- Areas: [living-conventions](opencanon://areas/living-conventions)
-- Areas: [product-docs-and-guidance](opencanon://areas/product-docs-and-guidance)
-- Areas: [definition-authoring-flow](opencanon://areas/definition-authoring-flow)
-- Areas: [agent-feedback-and-gates](opencanon://areas/agent-feedback-and-gates)
-- Areas: [runtime-release-update](opencanon://areas/runtime-release-update)
-- Specs: [spec-governance-model](opencanon://specs/spec-governance-model)
-- Conventions: [service-events-current](opencanon://conventions/service-events-current)
-- Impact surfaces: [company-read-model](opencanon://impact-surfaces/company-read-model)
-- Impact surfaces: [local-service-control](opencanon://impact-surfaces/local-service-control)
-- Impact surfaces: [project-canon-model](opencanon://impact-surfaces/project-canon-model)
-- Impact surfaces: [project-context-index](opencanon://impact-surfaces/project-context-index)
-- Impact surfaces: [release-update](opencanon://impact-surfaces/release-update)
-- Docs: `docs/opencanon/canon/architecture.md`
-- Docs: `docs/opencanon/canon/service-events-current.md`
-- Docs: `docs/opencanon/areas/company-read-model.md`
-- Docs: `docs/opencanon/areas/definition-authoring-flow.md`
-- Docs: `docs/opencanon/areas/project-map-governance.md`
-- Docs: `docs/opencanon/areas/project-context-index.md`
-- Docs: `docs/opencanon/areas/local-service-and-runtimes.md`
-- Docs: `docs/opencanon/areas/living-conventions.md`
-- Docs: `docs/opencanon/areas/agent-feedback-and-gates.md`
-- Docs: `docs/opencanon/areas/product-docs-and-guidance.md`
-- Docs: `docs/opencanon/areas/runtime-release-update.md`
-- Docs: `docs/opencanon/specs/spec-governance-model.md`
+- Areas: [Example Company Read Model](../areas/company-read-model.md)
+- Areas: [Project Map Governance](../areas/project-map-governance.md)
+- Areas: [Project Context Index](../areas/project-context-index.md)
+- Areas: [Local Service and Project Runtimes](../areas/local-service-and-runtimes.md)
+- Areas: [Living Conventions](../areas/living-conventions.md)
+- Areas: [Product Docs and Agent Guidance](../areas/product-docs-and-guidance.md)
+- Areas: [Definition Authoring Flow](../areas/definition-authoring-flow.md)
+- Areas: [Agent Feedback and Gates](../areas/agent-feedback-and-gates.md)
+- Areas: [Runtime Updates](../areas/runtime-release-update.md)
+- Specs: [Spec Governance Model](../specs/spec-governance-model.md)
+- Conventions: [Runtime data updates through explicit service events](../canon/service-events-current.md)
+- Impact surfaces: [Company read model](../canon/impact.md#impact-surfaces)
+- Impact surfaces: [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
+- Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
+- Impact surfaces: [Project context index](../areas/project-context-index.md#project-context-index)
+- Impact surfaces: [Release and update path](../areas/runtime-release-update.md#runtime-updates)
+- Docs: [docs/opencanon/canon/architecture.md](../canon/architecture.md)
+- Docs: [docs/opencanon/canon/service-events-current.md](../canon/service-events-current.md)
+- Docs: [docs/opencanon/areas/company-read-model.md](../areas/company-read-model.md)
+- Docs: [docs/opencanon/areas/definition-authoring-flow.md](../areas/definition-authoring-flow.md)
+- Docs: [docs/opencanon/areas/project-map-governance.md](../areas/project-map-governance.md)
+- Docs: [docs/opencanon/areas/project-context-index.md](../areas/project-context-index.md)
+- Docs: [docs/opencanon/areas/local-service-and-runtimes.md](../areas/local-service-and-runtimes.md)
+- Docs: [docs/opencanon/areas/living-conventions.md](../areas/living-conventions.md)
+- Docs: [docs/opencanon/areas/agent-feedback-and-gates.md](../areas/agent-feedback-and-gates.md)
+- Docs: [docs/opencanon/areas/product-docs-and-guidance.md](../areas/product-docs-and-guidance.md)
+- Docs: [docs/opencanon/areas/runtime-release-update.md](../areas/runtime-release-update.md)
+- Docs: [docs/opencanon/specs/spec-governance-model.md](../specs/spec-governance-model.md)
 
 ## Scope
 
@@ -60,6 +60,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/core/src/change.ts`
 - Files: `packages/core/src/change-loader.ts`
 - Files: `packages/core/src/change-render.ts`
+- Files: `packages/core/src/render-links.ts`
 - Files: `packages/core/src/context.ts`
 - Files: `packages/core/src/contracts.ts`
 - Files: `packages/core/src/core-utils.ts`
@@ -69,6 +70,8 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/core/src/semantic-models.ts`
 - Files: `packages/core/src/definition-target.ts`
 - Files: `packages/core/src/doctor.ts`
+- Files: `packages/core/src/doctor-checks.ts`
+- Files: `packages/core/src/doctor-types.ts`
 - Files: `packages/core/src/feedback.ts`
 - Files: `packages/core/src/hooks.ts`
 - Files: `packages/core/src/index.ts`
@@ -84,6 +87,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/cli/src/areas.ts`
 - Files: `packages/cli/src/specs.ts`
 - Files: `packages/cli/src/changes.ts`
+- Files: `packages/cli/src/changes-definition.ts`
 - Files: `packages/cli/src/conventions.ts`
 - Files: `packages/cli/src/context.ts`
 - Files: `packages/cli/src/analyze.ts`
@@ -194,45 +198,45 @@ Checks: `typecheck`, `release-tests`, `release-check`, `runtime-build`
 
 Task `board-state`: Keep task events from closing whole Changes in the board projection
 Files: `packages/runtime/src/snapshot.ts`, `packages/runtime/test/client.test.ts`
-Impact surfaces: [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `runtime-tests`
 
 Task `context-index-recovery`: Rebuild semantic vectors after missing-vector reuse failures
 Files: `packages/runtime/src/snapshot.ts`, `packages/runtime/test/semantic-index.test.ts`
-Impact surfaces: [project-context-index](opencanon://impact-surfaces/project-context-index)
+Impact surfaces: [Project context index](../areas/project-context-index.md#project-context-index)
 Checks: `semantic-index-tests`
 
 Task `cli-copy-cleanup`: Remove stale Change check alias and refresh current command copy
 Files: `packages/cli/src/changes.ts`, `packages/cli/src/context.ts`, `README.md`, `crates/opencanon-engine/src/state.rs`, `packages/runtime/test/service.test.ts`
-Impact surfaces: [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `service-lifecycle-tests`
 
 Task `examples-current-canon`: Replace old decision examples with current Project Canon definitions
 Files: `examples/projects/**`
-Impact surfaces: [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `project-doctor`
 
 Task `hook-and-export-cleanup`: Expose hook failures and remove stale package export paths
 Files: `.opencode/plugins/opencanon.ts`, `packages/core/package.json`, `packages/core/src/opencanon-skill.ts`, `packages/service-contracts/src/index.ts`
-Impact surfaces: [project-canon-model](opencanon://impact-surfaces/project-canon-model), [local-service-control](opencanon://impact-surfaces/local-service-control)
+Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance), [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 Checks: `typecheck`
 
 Task `release-gate-proof`: Make the release test gate cover every committed test file
 Files: `package.json`, `tests/release.test.ts`
-Impact surfaces: [release-update](opencanon://impact-surfaces/release-update)
+Impact surfaces: [Release and update path](../areas/runtime-release-update.md#runtime-updates)
 Checks: `release-tests`, `test-tree`
 
 Task `release-update-hardening`: Harden updater safety, release watching, hook scoping, and machine-readable CLI output
 Files: `packages/cli/src/update.ts`, `packages/cli/src/feedback.ts`, `packages/cli/src/analyze.ts`, `packages/core/src/hooks.ts`, `scripts/publish-opencanon-release.ts`, `docs/runtime-update-security.md`, `README.md`, `tests/update-guard.test.ts`, `tests/feedback.test.ts`, `tests/validator.test.ts`, `tests/release.test.ts`
-Impact surfaces: [release-update](opencanon://impact-surfaces/release-update), [local-service-control](opencanon://impact-surfaces/local-service-control), [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+Impact surfaces: [Release and update path](../areas/runtime-release-update.md#runtime-updates), [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes), [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `release-tests`, `typecheck`, `project-doctor`
 
 Task `runtime-repair-hardening`: Make supervised runtime repair deterministic across worktrees and stale pipes
 Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/cli/src/validate.ts`, `packages/core/src/index.ts`, `packages/core/src/language-analyzer.ts`, `packages/core/src/producer-registry.ts`, `packages/core/src/type-facts-provider.ts`, `packages/core/src/validator.ts`, `packages/runtime/src/server.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/producer-main.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/type-producer.test.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`
-Impact surfaces: [local-service-control](opencanon://impact-surfaces/local-service-control)
+Impact surfaces: [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 Checks: `runtime-tests`, `service-lifecycle-tests`, `worktree-tests`
 
 Task `headless-runtime-split`: Split retired UI and site surfaces away from the runtime API branch
 Files: `package.json`, `package-lock.json`, `vitest.config.ts`, `.github/workflows/**`, `packages/service-contracts/**`, `packages/runtime/**`, `packages/validators/**`, `apps/site/**`, `opencanon/fixtures/**`, `scripts/**`, `README.md`
-Impact surfaces: [local-service-control](opencanon://impact-surfaces/local-service-control), [project-canon-model](opencanon://impact-surfaces/project-canon-model), [release-update](opencanon://impact-surfaces/release-update)
+Impact surfaces: [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes), [Project Canon model](../areas/project-map-governance.md#project-map-governance), [Release and update path](../areas/runtime-release-update.md#runtime-updates)
 Checks: `typecheck`, `release-tests`, `release-check`, `runtime-build`

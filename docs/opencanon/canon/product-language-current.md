@@ -37,4 +37,4 @@ The internal model needs precise terms, but docs and agent guidance should prese
 
 ## Related impact surfaces
 
-- [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+- [Project Canon model](../areas/project-map-governance.md#project-map-governance)

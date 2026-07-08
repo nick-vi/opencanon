@@ -26,8 +26,8 @@ Project data should either come from the project runtime event stream or be visi
 
 ## Related impact surfaces
 
-- [local-service-control](opencanon://impact-surfaces/local-service-control)
+- [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 
 ## Related conventions
 
-- [state-ownership-current](opencanon://conventions/state-ownership-current)
+- [Repo definitions own truth; generated state stays derived](state-ownership-current.md)

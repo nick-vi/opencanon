@@ -18,4 +18,4 @@ Folder name is too ambiguous for source ownership.
 
 ## Related conventions
 
-- [folder-structure-current](opencanon://conventions/folder-structure-current)
+- [Folders use approved responsibility names](folder-structure-current.md)

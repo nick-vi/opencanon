@@ -18,5 +18,5 @@ Services must not import DB clients directly.
 
 ## Related conventions
 
-- [dal-transaction-flow](opencanon://conventions/dal-transaction-flow)
-- [service-db-boundary](opencanon://conventions/service-db-boundary)
+- [DAL functions accept optional transactions](dal-transaction-flow.md)
+- [Services compose DAL instead of direct DB clients](service-db-boundary.md)

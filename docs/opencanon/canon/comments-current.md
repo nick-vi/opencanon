@@ -15,7 +15,7 @@ Agents may treat comments as live instructions. Legacy/deprecation/shim comments
 
 ## Related conventions
 
-- [no-stale-intent-comments](opencanon://conventions/no-stale-intent-comments)
-- [no-shim-files](opencanon://conventions/no-shim-files)
-- [shim-requires-expiry](opencanon://conventions/shim-requires-expiry)
-- [deprecated-requires-replacement](opencanon://conventions/deprecated-requires-replacement)
+- [Comments do not preserve stale compatibility intent](no-stale-intent-comments.md)
+- [Internal source does not preserve shim files](no-shim-files.md)
+- [Shim annotations declare owner, replacement, and removal date](shim-requires-expiry.md)
+- [Deprecated code names its replacement and removal owner](deprecated-requires-replacement.md)

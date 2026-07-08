@@ -4,6 +4,7 @@ export type {
   RuntimeManifest,
   RuntimeUpdateApplyResult,
   RuntimeUpdateCheck,
+  RuntimeUpdateProjectAction,
   UpdateSafetyGuard,
 } from "./update.ts";
 export {
@@ -12,5 +13,6 @@ export {
   currentEngineTarget,
   engineRuntimePathForTarget,
   RuntimeUpdateStatus,
+  runtimeUpdateProjectRefreshAction,
 } from "./update.ts";
 export { currentNodeVersion, requiredNodeRequirement, requiredNodeVersion } from "./node.ts";

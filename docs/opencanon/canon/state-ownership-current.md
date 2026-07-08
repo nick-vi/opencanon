@@ -25,6 +25,6 @@ A local service introduces global state, project-local state, and committed defi
 
 ## Related impact surfaces
 
-- [local-service-control](opencanon://impact-surfaces/local-service-control)
-- [project-context-index](opencanon://impact-surfaces/project-context-index)
-- [project-canon-model](opencanon://impact-surfaces/project-canon-model)
+- [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
+- [Project context index](../areas/project-context-index.md#project-context-index)
+- [Project Canon model](../areas/project-map-governance.md#project-map-governance)

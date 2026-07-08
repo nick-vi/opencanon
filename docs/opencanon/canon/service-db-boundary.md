@@ -15,4 +15,4 @@ DAL modules keep table/query details in one layer. Services stay focused on busi
 
 ## Related conventions
 
-- [service-no-db-client](opencanon://conventions/service-no-db-client)
+- [Services do not import DB clients](service-no-db-client.md)

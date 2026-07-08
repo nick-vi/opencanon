@@ -74,7 +74,7 @@ Manifest contract:
 
 Every bundle is a single `tar.gz` whose contents drop directly into the installed OpenCanon runtime: `cli.js`, `validators.js`, and `engine/<target>/opencanon.<target>.node`. Engine binary and JS runtime ship together to make schema drift impossible.
 
-`opencanon update check` reads the default signed stable manifest unless `--manifest` or `OPENCANON_UPDATE_MANIFEST` overrides it, selects the current target, validates the pinned Node version, and reports `current`, `missing`, or `update-available` against the `.bundle.json` marker. `opencanon update apply` refuses to write while the service or any registered project runtime is running, downloads the target runtime bundle over HTTPS, `file:`, or a local path, verifies SHA-256, extracts to a staging directory, and swaps it into place atomically.
+`opencanon update check` reads the default signed stable manifest unless `--manifest` or `OPENCANON_UPDATE_MANIFEST` overrides it, selects the current target, validates the pinned Node version, and reports `current`, `missing`, or `update-available` against the `.bundle.json` marker. `opencanon update apply` refuses to write while the service or any registered project runtime is running, downloads the target runtime bundle over HTTPS, `file:`, or a local path, verifies SHA-256, extracts to a staging directory, and swaps it into place atomically. After a real install, the apply result tells users to run `opencanon doctor --fix` inside initialized projects so Doctor refreshes managed agent guidance, agent entry blocks, generated authoring files, and install metadata through the single project-repair path.
 
 ### Toolchain
 

@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "vitest";
-import { createRuntimeUpdateSafetyGuard } from "../packages/cli/src/update.ts";
+import { createRuntimeUpdateSafetyGuard, renderRuntimeUpdateApplyMarkdown } from "../packages/cli/src/update.ts";
+import { currentEngineTarget, runtimeUpdateProjectRefreshAction } from "@opencanon/distribution";
 import {
   LocalControlProtocolVersion,
   LocalTransportKind,
@@ -100,6 +101,31 @@ test("CLI update safety guard refuses while any project runtime is registered", 
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
+});
+
+test("CLI update apply output includes managed project artifact refresh action", () => {
+  const markdown = renderRuntimeUpdateApplyMarkdown({
+    status: "installed",
+    check: {
+      status: "current",
+      manifestSource: "/tmp/manifest.json",
+      channel: "stable",
+      runtimeVersion: "0.4.0-test",
+      requiredNode: ">=24.12.0",
+      target: currentEngineTarget(),
+      bundleUrl: "bundle.tar.gz",
+      resolvedBundleSource: "/tmp/bundle.tar.gz",
+      runtimeRoot: "/tmp/runtime",
+      runtimePath: "/tmp/runtime/engine/opencanon.node",
+      expectedSha256: "0".repeat(64),
+      currentSha256: "0".repeat(64),
+    },
+    projectActions: [runtimeUpdateProjectRefreshAction()],
+  });
+
+  assert.match(markdown, /Project actions:/);
+  assert.match(markdown, /Refresh managed project artifacts/);
+  assert.match(markdown, /`opencanon doctor --fix`/);
 });
 
 const testRuntimeIdentity = {

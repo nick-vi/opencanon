@@ -16,6 +16,6 @@ Agents copy folder names they see. Ambiguous folders make ownership and import d
 
 ## Related conventions
 
-- [no-dumpster-folders](opencanon://conventions/no-dumpster-folders)
-- [folder-file-naming](opencanon://conventions/folder-file-naming)
-- [source-files-stay-cohesive](opencanon://conventions/source-files-stay-cohesive)
+- [Folders name real responsibilities](no-dumpster-folders.md)
+- [Service files use the service suffix](folder-file-naming.md)
+- [Source files keep one primary responsibility](source-files-stay-cohesive.md)

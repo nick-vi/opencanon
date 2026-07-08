@@ -103,7 +103,9 @@ opencanon state reset --confirm`;
 <p>
   Updates read a manifest, select the current engine target, and verify
   checksums before writing runtime assets. Writes fail while the service or
-  current project runtime is running.
+  current project runtime is running. After a real install, run
+  <code>opencanon doctor --fix</code> in initialized projects to refresh managed
+  agent guidance and setup artifacts.
 </p>
 
 <h2>Baselines</h2>

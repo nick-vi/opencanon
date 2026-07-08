@@ -170,8 +170,13 @@ function renderRuntimeUpdateCheckMarkdown(check: RuntimeUpdateCheck): string {
     .join("\n");
 }
 
-function renderRuntimeUpdateApplyMarkdown(result: RuntimeUpdateApplyResult): string {
-  return [renderRuntimeUpdateCheckMarkdown(result.check), "", `Apply: ${result.status}`].join("\n");
+export function renderRuntimeUpdateApplyMarkdown(result: RuntimeUpdateApplyResult): string {
+  const lines = [renderRuntimeUpdateCheckMarkdown(result.check), "", `Apply: ${result.status}`];
+  if (result.projectActions.length > 0) {
+    lines.push("", "Project actions:");
+    for (const action of result.projectActions) lines.push(`- ${action.title}: run \`${action.command}\` in initialized projects. ${action.reason}`);
+  }
+  return lines.join("\n");
 }
 
 function printUpdateHelp(): void {

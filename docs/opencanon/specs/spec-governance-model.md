@@ -14,15 +14,19 @@ Specs describe durable behavior as typed definitions with generated docs, govern
 - Files: `packages/core/src/change-render.ts`
 - Files: `packages/core/src/context.ts`
 - Files: `packages/core/src/convention.ts`
+- Files: `packages/core/src/render-links.ts`
 - Files: `packages/core/src/validation.ts`
 - Files: `packages/core/src/validator-types.ts`
 - Files: `packages/core/src/validator.ts`
 - Files: `packages/core/src/definition-graph.ts`
 - Files: `packages/core/src/doctor.ts`
+- Files: `packages/core/src/doctor-checks.ts`
+- Files: `packages/core/src/doctor-types.ts`
 - Files: `packages/core/src/convention-history.ts`
 - Files: `packages/core/src/project-types.ts`
 - Files: `packages/cli/src/specs.ts`
 - Files: `packages/cli/src/changes.ts`
+- Files: `packages/cli/src/changes-definition.ts`
 - Files: `packages/cli/src/brief.ts`
 - Files: `packages/cli/src/index.ts`
 - Files: `packages/cli/src/mcp.ts`
@@ -40,14 +44,14 @@ Specs describe durable behavior as typed definitions with generated docs, govern
 
 ## Impact surfaces
 
-- [project-canon-model](opencanon://impact-surfaces/project-canon-model)
-- [project-context-index](opencanon://impact-surfaces/project-context-index)
+- [Project Canon model](../areas/project-map-governance.md#project-map-governance)
+- [Project context index](../areas/project-context-index.md#project-context-index)
 
 ## Areas
 
-- [living-conventions](opencanon://areas/living-conventions)
-- [definition-authoring-flow](opencanon://areas/definition-authoring-flow)
-- [project-map-governance](opencanon://areas/project-map-governance)
+- [Living Conventions](../areas/living-conventions.md)
+- [Definition Authoring Flow](../areas/definition-authoring-flow.md)
+- [Project Map Governance](../areas/project-map-governance.md)
 
 ## Checks
 
@@ -102,6 +106,6 @@ Checks: `runtime-client-tests`, `definition-graph-tests`
 ## Governance
 
 - infer governing conventions from spec scope
-- convention [spec-definitions-are-enforced](opencanon://conventions/spec-definitions-are-enforced)
-- convention [state-ownership-current](opencanon://conventions/state-ownership-current)
-- convention [tests-follow-risk](opencanon://conventions/tests-follow-risk)
+- convention [Specs declare enforcement and governance](../canon/spec-definitions-are-enforced.md)
+- convention [Repo definitions own truth; generated state stays derived](../canon/state-ownership-current.md)
+- convention [Tests scale with blast radius](../canon/tests-follow-risk.md)

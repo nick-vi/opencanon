@@ -12,6 +12,16 @@ import {
 import { definitionTargetRows } from "./definition-target.ts";
 import { normalizeMarkdownHeading } from "./docs.ts";
 import { resolveInsideRoot } from "./paths.ts";
+import {
+  renderAreaMarkdownLink,
+  renderChangeMarkdownLink,
+  renderConventionMarkdownLink,
+  renderDocsMarkdownLink,
+  renderImpactSurfaceMarkdownLink,
+  renderLinkContextForDocs,
+  renderSpecMarkdownLink,
+  type RenderLinkContext,
+} from "./render-links.ts";
 
 type ChangeSectionKey = "intent" | "updates" | "scope" | "plan" | "tasks" | "checks" | "dependencies" | "links";
 
@@ -38,14 +48,15 @@ const ChangeStyleSections: Record<ChangeRenderStyleType, ChangeSectionKey[]> = {
   "decision-record": ["intent", "updates", "scope", "dependencies", "checks", "plan", "tasks", "links"],
 };
 
-export function renderChange(change: Change, style: ChangeRenderStyleType): string {
+export function renderChange(change: Change, style: ChangeRenderStyleType, context?: RenderLinkContext): string {
+  const linkContext = renderLinkContextForDocs(context, change.render.kind === ChangeRenderKind.Generated ? change.render.docs : context?.currentDocs);
   const lines: string[] = [];
   lines.push(`# ${change.title}`);
   lines.push("");
   lines.push(`Change kind: \`${change.kind}\`.`);
 
   for (const section of ChangeStyleSections[style]) {
-    const rendered = renderChangeSection(change, style, section);
+    const rendered = renderChangeSection(change, style, section, linkContext);
     if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${ChangeSectionTitle[section]}`);
@@ -75,22 +86,22 @@ export function validateGeneratedChangeDocsPath(owner: string, docsPath: string,
   return resolved.ok ? [] : resolved.diagnostics;
 }
 
-function renderChangeSection(change: Change, style: ChangeRenderStyleType, section: ChangeSectionKey): string[] {
+function renderChangeSection(change: Change, style: ChangeRenderStyleType, section: ChangeSectionKey, context: RenderLinkContext | undefined): string[] {
   switch (section) {
     case "intent":
       return renderIntent(change, style);
     case "updates":
-      return renderUpdates(change.updates, style);
+      return renderUpdates(change.updates, style, context);
     case "scope":
       return renderScope(change.scope, style);
     case "plan":
       return renderPlan(change, style);
     case "tasks":
-      return renderTasks(change, style);
+      return renderTasks(change, style, context);
     case "checks":
       return renderChecks(change, style);
     case "dependencies":
-      return renderDependencies(change, style);
+      return renderDependencies(change, style, context);
     case "links":
       return renderLinks(change, style);
   }
@@ -117,8 +128,8 @@ function renderIntent(change: Change, style: ChangeRenderStyleType): string[] {
   }
 }
 
-function renderUpdates(updates: ChangeUpdates | undefined, style: ChangeRenderStyleType): string[] {
-  const rows = updateRows(updates);
+function renderUpdates(updates: ChangeUpdates | undefined, style: ChangeRenderStyleType, context: RenderLinkContext | undefined): string[] {
+  const rows = updateRows(updates, context);
   if (rows.length === 0) return [];
   return rows.flatMap(([label, values]) => values.map((value) => renderLinkedRow(style, label, value)));
 }
@@ -140,7 +151,7 @@ function renderPlan(change: Change, style: ChangeRenderStyleType): string[] {
   ]);
 }
 
-function renderTasks(change: Change, style: ChangeRenderStyleType): string[] {
+function renderTasks(change: Change, style: ChangeRenderStyleType, context: RenderLinkContext | undefined): string[] {
   const tasks = change.tasks ?? [];
   if (tasks.length === 0) return [];
   return tasks.flatMap((task, index) => [
@@ -148,11 +159,11 @@ function renderTasks(change: Change, style: ChangeRenderStyleType): string[] {
     style === ChangeRenderStyle.Checklist ? `- [ ] Task \`${task.id}\`: ${task.title}` : `Task \`${task.id}\`: ${task.title}`,
     ...(task.detail ? [`Detail: ${task.detail}`] : []),
     ...(task.files && task.files.length > 0 ? [`Files: ${task.files.map((file) => `\`${file}\``).join(", ")}`] : []),
-    ...(task.surfaces && task.surfaces.length > 0 ? [`Impact surfaces: ${task.surfaces.map(impactSurfaceLink).join(", ")}`] : []),
+    ...(task.surfaces && task.surfaces.length > 0 ? [`Impact surfaces: ${task.surfaces.map((surface) => renderImpactSurfaceMarkdownLink(context, surface)).join(", ")}`] : []),
     ...(task.checks && task.checks.length > 0 ? [`Checks: ${task.checks.map((check) => checkLink(check)).join(", ")}`] : []),
     ...(task.dependsOn && task.dependsOn.length > 0 ? [`Depends on: ${task.dependsOn.map((id) => `\`${id}\``).join(", ")}`] : []),
     ...(task.blockedBy && task.blockedBy.length > 0 ? [`Blocked by: ${task.blockedBy.map((id) => `\`${id}\``).join(", ")}`] : []),
-    ...taskUpdateRows(task.updates).map(([label, values]) => `${label}: ${values.join(", ")}`),
+    ...taskUpdateRows(task.updates, context).map(([label, values]) => `${label}: ${values.join(", ")}`),
   ]);
 }
 
@@ -162,10 +173,10 @@ function renderChecks(change: Change, style: ChangeRenderStyleType): string[] {
   return checks.map((check) => (style === ChangeRenderStyle.Checklist ? `- [ ] ${checkSummary(check)}` : `- ${checkSummary(check)}`));
 }
 
-function renderDependencies(change: Change, style: ChangeRenderStyleType): string[] {
+function renderDependencies(change: Change, style: ChangeRenderStyleType, context: RenderLinkContext | undefined): string[] {
   const rows = [
-    ...((change.dependsOn ?? []).map((id) => `depends on ${changeLink(id)}`)),
-    ...((change.blockedBy ?? []).map((id) => `blocked by ${changeLink(id)}`)),
+    ...((change.dependsOn ?? []).map((id) => `depends on ${renderChangeMarkdownLink(context, id)}`)),
+    ...((change.blockedBy ?? []).map((id) => `blocked by ${renderChangeMarkdownLink(context, id)}`)),
   ];
   if (rows.length === 0) return [];
   return rows.map((row) => (style === ChangeRenderStyle.Checklist ? `- [ ] ${row}` : `- ${row}`));
@@ -181,18 +192,18 @@ function renderLinks(change: Change, style: ChangeRenderStyleType): string[] {
   return rows.flatMap(([label, values]) => values.map((value) => renderPlainRow(style, label, value)));
 }
 
-function updateRows(updates: ChangeUpdates | undefined): Array<[string, string[]]> {
+function updateRows(updates: ChangeUpdates | undefined, context: RenderLinkContext | undefined): Array<[string, string[]]> {
   return [
-    ["Areas", (updates?.areas ?? []).map(areaLink)],
-    ["Specs", (updates?.specs ?? []).map(specLink)],
-    ["Conventions", (updates?.conventions ?? []).map(conventionLink)],
-    ["Impact surfaces", (updates?.surfaces ?? []).map(impactSurfaceLink)],
-    ["Docs", (updates?.docs ?? []).map((doc) => `\`${doc}\``)],
+    ["Areas", (updates?.areas ?? []).map((area) => renderAreaMarkdownLink(context, area))],
+    ["Specs", (updates?.specs ?? []).map((spec) => renderSpecMarkdownLink(context, spec))],
+    ["Conventions", (updates?.conventions ?? []).map((convention) => renderConventionMarkdownLink(context, convention))],
+    ["Impact surfaces", (updates?.surfaces ?? []).map((surface) => renderImpactSurfaceMarkdownLink(context, surface))],
+    ["Docs", (updates?.docs ?? []).map((doc) => renderDocsMarkdownLink(context, doc))],
   ].filter((row): row is [string, string[]] => row[1].length > 0);
 }
 
-function taskUpdateRows(updates: ChangeUpdates | undefined): Array<[string, string[]]> {
-  return updateRows(updates);
+function taskUpdateRows(updates: ChangeUpdates | undefined, context: RenderLinkContext | undefined): Array<[string, string[]]> {
+  return updateRows(updates, context);
 }
 
 function scopeRows(scope: ChangeScope | undefined): Array<[string, string[]]> {
@@ -224,26 +235,6 @@ function checkSummary(check: ChangeCheck): string {
 
 function checkLink(id: string): string {
   return `\`${id}\``;
-}
-
-function areaLink(id: string): string {
-  return `[${id}](opencanon://areas/${encodeURIComponent(id)})`;
-}
-
-function specLink(id: string): string {
-  return `[${id}](opencanon://specs/${encodeURIComponent(id)})`;
-}
-
-function conventionLink(id: string): string {
-  return `[${id}](opencanon://conventions/${encodeURIComponent(id)})`;
-}
-
-function impactSurfaceLink(id: string): string {
-  return `[${id}](opencanon://impact-surfaces/${encodeURIComponent(id)})`;
-}
-
-function changeLink(id: string): string {
-  return `[${id}](opencanon://changes/${encodeURIComponent(id)})`;
 }
 
 function resolveGeneratedMarkdownPath(

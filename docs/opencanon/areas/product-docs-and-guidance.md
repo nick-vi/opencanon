@@ -28,5 +28,5 @@ Checks: `project-doctor`
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [product-language-current](opencanon://conventions/product-language-current)
-- convention [state-ownership-current](opencanon://conventions/state-ownership-current)
+- convention [Product-facing language stays simple](../canon/product-language-current.md)
+- convention [Repo definitions own truth; generated state stays derived](../canon/state-ownership-current.md)

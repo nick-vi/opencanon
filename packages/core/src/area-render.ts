@@ -9,6 +9,7 @@ import {
 import { definitionTargetRows } from "./definition-target.ts";
 import { normalizeMarkdownHeading } from "./docs.ts";
 import { resolveInsideRoot } from "./paths.ts";
+import { renderAreaMarkdownLink, renderConventionMarkdownLink, renderImpactSurfaceMarkdownLink, renderLinkContextForDocs, type RenderLinkContext } from "./render-links.ts";
 
 type AreaSectionKey = "summary" | "ownership" | "stories" | "behaviors" | "checks" | "surfaces" | "dependencies" | "governance";
 
@@ -35,12 +36,13 @@ const AreaStyleSections: Record<AreaRenderStyle, AreaSectionKey[]> = {
   "decision-record": ["summary", "surfaces", "ownership", "dependencies", "checks", "behaviors", "stories", "governance"],
 };
 
-export function renderArea(area: Area, style: AreaRenderStyle): string {
+export function renderArea(area: Area, style: AreaRenderStyle, context?: RenderLinkContext): string {
+  const linkContext = renderLinkContextForDocs(context, area.render.kind === AreaRenderKind.Generated ? area.render.docs : context?.currentDocs);
   const lines: string[] = [];
   lines.push(`# ${area.title}`);
 
   for (const section of AreaStyleSections[style]) {
-    const rendered = renderAreaSection(area, style, section);
+    const rendered = renderAreaSection(area, style, section, linkContext);
     if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${AreaSectionTitle[section]}`);
@@ -70,7 +72,7 @@ export function validateGeneratedAreaDocsPath(owner: string, docsPath: string, c
   return resolved.ok ? [] : resolved.diagnostics;
 }
 
-function renderAreaSection(area: Area, style: AreaRenderStyle, section: AreaSectionKey): string[] {
+function renderAreaSection(area: Area, style: AreaRenderStyle, section: AreaSectionKey, context: RenderLinkContext | undefined): string[] {
   switch (section) {
     case "summary":
       return renderSummary(area, style);
@@ -83,11 +85,11 @@ function renderAreaSection(area: Area, style: AreaRenderStyle, section: AreaSect
     case "checks":
       return renderChecks(area, style);
     case "surfaces":
-      return renderSurfaces(area, style);
+      return renderSurfaces(area, style, context);
     case "dependencies":
-      return renderDependencies(area, style);
+      return renderDependencies(area, style, context);
     case "governance":
-      return renderGovernance(area, style);
+      return renderGovernance(area, style, context);
   }
 }
 
@@ -152,10 +154,10 @@ function renderChecks(area: Area, style: AreaRenderStyle): string[] {
   return checks.map((check) => (style === AreaRenderStyle.Checklist ? `- [ ] ${checkSummary(check)}` : `- ${checkSummary(check)}`));
 }
 
-function renderSurfaces(area: Area, style: AreaRenderStyle): string[] {
+function renderSurfaces(area: Area, style: AreaRenderStyle, context: RenderLinkContext | undefined): string[] {
   const surfaces = area.surfaces ?? [];
   if (surfaces.length === 0) return [];
-  const links = surfaces.map((surface) => impactSurfaceLink(surface));
+  const links = surfaces.map((surface) => renderImpactSurfaceMarkdownLink(context, surface));
   switch (style) {
     case AreaRenderStyle.Narrative:
       return ["Linked impact surfaces:", ...links.map((item) => `- ${item}`)];
@@ -170,18 +172,18 @@ function renderSurfaces(area: Area, style: AreaRenderStyle): string[] {
   }
 }
 
-function renderDependencies(area: Area, style: AreaRenderStyle): string[] {
+function renderDependencies(area: Area, style: AreaRenderStyle, context: RenderLinkContext | undefined): string[] {
   const dependencies = area.dependsOn ?? [];
   if (dependencies.length === 0) return [];
-  return dependencies.map((id) => (style === AreaRenderStyle.Checklist ? `- [ ] Check dependency ${areaLink(id)}` : `- ${areaLink(id)}`));
+  return dependencies.map((id) => (style === AreaRenderStyle.Checklist ? `- [ ] Check dependency ${renderAreaMarkdownLink(context, id)}` : `- ${renderAreaMarkdownLink(context, id)}`));
 }
 
-function renderGovernance(area: Area, style: AreaRenderStyle): string[] {
+function renderGovernance(area: Area, style: AreaRenderStyle, context: RenderLinkContext | undefined): string[] {
   const governedBy = area.governedBy;
   if (!governedBy) return [];
   const rows = [
     ...(governedBy.inferFromScope ? ["infer governing conventions from owned scope"] : []),
-    ...(governedBy.conventions ?? []).map((id) => `convention ${conventionLink(id)}`),
+    ...(governedBy.conventions ?? []).map((id) => `convention ${renderConventionMarkdownLink(context, id)}`),
   ];
   if (rows.length === 0) return [];
   return rows.map((row) => (style === AreaRenderStyle.Checklist ? `- [ ] ${row}` : `- ${row}`));
@@ -206,18 +208,6 @@ function checkSummary(check: AreaCheck): string {
 
 function checkLink(id: string): string {
   return `\`${id}\``;
-}
-
-function areaLink(id: string): string {
-  return `[${id}](opencanon://areas/${encodeURIComponent(id)})`;
-}
-
-function conventionLink(id: string): string {
-  return `[${id}](opencanon://conventions/${encodeURIComponent(id)})`;
-}
-
-function impactSurfaceLink(id: string): string {
-  return `[${id}](opencanon://impact-surfaces/${encodeURIComponent(id)})`;
 }
 
 function resolveGeneratedMarkdownPath(

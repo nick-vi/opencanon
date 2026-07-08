@@ -12,7 +12,7 @@ Commands: opencanon service (cli), opencanon project (cli)
 
 ## Impact surfaces
 
-- [local-service-control](opencanon://impact-surfaces/local-service-control)
+- [Local service control plane](local-service-and-runtimes.md#local-service-and-project-runtimes)
 
 ## Checks
 
@@ -41,5 +41,5 @@ Checks: `service-lifecycle-tests`
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [framework-package-boundaries](opencanon://conventions/framework-package-boundaries)
-- convention [service-events-current](opencanon://conventions/service-events-current)
+- convention [Framework packages depend inward](../canon/framework-package-boundaries.md)
+- convention [Runtime data updates through explicit service events](../canon/service-events-current.md)

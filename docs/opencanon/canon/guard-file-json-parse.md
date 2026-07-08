@@ -18,4 +18,4 @@ JSON.parse throws a SyntaxError on malformed input; an unguarded parse of an on-
 
 ## Related conventions
 
-- [no-unguarded-json-parse](opencanon://conventions/no-unguarded-json-parse)
+- [File JSON.parse calls are guarded](no-unguarded-json-parse.md)

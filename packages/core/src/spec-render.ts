@@ -11,6 +11,14 @@ import {
 import { definitionTargetRows } from "./definition-target.ts";
 import { normalizeMarkdownHeading } from "./docs.ts";
 import { resolveInsideRoot } from "./paths.ts";
+import {
+  renderAreaMarkdownLink,
+  renderConventionMarkdownLink,
+  renderImpactSurfaceMarkdownLink,
+  renderLinkContextForDocs,
+  renderSpecMarkdownLink,
+  type RenderLinkContext,
+} from "./render-links.ts";
 
 type SpecSectionKey = "summary" | "scope" | "rules" | "scenarios" | "checks" | "surfaces" | "areas" | "dependencies" | "governance";
 
@@ -38,12 +46,13 @@ const SpecStyleSections: Record<SpecRenderStyleType, SpecSectionKey[]> = {
   "decision-record": ["summary", "surfaces", "scope", "dependencies", "checks", "rules", "scenarios", "areas", "governance"],
 };
 
-export function renderSpec(spec: Spec, style: SpecRenderStyleType): string {
+export function renderSpec(spec: Spec, style: SpecRenderStyleType, context?: RenderLinkContext): string {
+  const linkContext = renderLinkContextForDocs(context, spec.render.kind === SpecRenderKind.Generated ? spec.render.docs : context?.currentDocs);
   const lines: string[] = [];
   lines.push(`# ${spec.title}`);
 
   for (const section of SpecStyleSections[style]) {
-    const rendered = renderSpecSection(spec, style, section);
+    const rendered = renderSpecSection(spec, style, section, linkContext);
     if (rendered.length === 0) continue;
     lines.push("");
     lines.push(`## ${SpecSectionTitle[section]}`);
@@ -73,7 +82,7 @@ export function validateGeneratedSpecDocsPath(owner: string, docsPath: string, c
   return resolved.ok ? [] : resolved.diagnostics;
 }
 
-function renderSpecSection(spec: Spec, style: SpecRenderStyleType, section: SpecSectionKey): string[] {
+function renderSpecSection(spec: Spec, style: SpecRenderStyleType, section: SpecSectionKey, context: RenderLinkContext | undefined): string[] {
   switch (section) {
     case "summary":
       return renderSummary(spec, style);
@@ -86,13 +95,13 @@ function renderSpecSection(spec: Spec, style: SpecRenderStyleType, section: Spec
     case "checks":
       return renderChecks(spec, style);
     case "surfaces":
-      return renderSurfaces(spec, style);
+      return renderSurfaces(spec, style, context);
     case "areas":
-      return renderAreas(spec, style);
+      return renderAreas(spec, style, context);
     case "dependencies":
-      return renderDependencies(spec, style);
+      return renderDependencies(spec, style, context);
     case "governance":
-      return renderGovernance(spec, style);
+      return renderGovernance(spec, style, context);
   }
 }
 
@@ -147,31 +156,31 @@ function renderChecks(spec: Spec, style: SpecRenderStyleType): string[] {
   return checks.map((check) => (style === SpecRenderStyle.Checklist ? `- [ ] ${checkSummary(check)}` : `- ${checkSummary(check)}`));
 }
 
-function renderSurfaces(spec: Spec, style: SpecRenderStyleType): string[] {
+function renderSurfaces(spec: Spec, style: SpecRenderStyleType, context: RenderLinkContext | undefined): string[] {
   const surfaces = spec.surfaces ?? [];
   if (surfaces.length === 0) return [];
-  const links = surfaces.map((surface) => impactSurfaceLink(surface));
+  const links = surfaces.map((surface) => renderImpactSurfaceMarkdownLink(context, surface));
   return links.map((item) => (style === SpecRenderStyle.Checklist ? `- [ ] Review impact surface ${item}` : `- ${item}`));
 }
 
-function renderAreas(spec: Spec, style: SpecRenderStyleType): string[] {
+function renderAreas(spec: Spec, style: SpecRenderStyleType, context: RenderLinkContext | undefined): string[] {
   const areas = spec.areas ?? [];
   if (areas.length === 0) return [];
-  return areas.map((id) => (style === SpecRenderStyle.Checklist ? `- [ ] Review area ${areaLink(id)}` : `- ${areaLink(id)}`));
+  return areas.map((id) => (style === SpecRenderStyle.Checklist ? `- [ ] Review area ${renderAreaMarkdownLink(context, id)}` : `- ${renderAreaMarkdownLink(context, id)}`));
 }
 
-function renderDependencies(spec: Spec, style: SpecRenderStyleType): string[] {
+function renderDependencies(spec: Spec, style: SpecRenderStyleType, context: RenderLinkContext | undefined): string[] {
   const dependencies = spec.dependsOn ?? [];
   if (dependencies.length === 0) return [];
-  return dependencies.map((id) => (style === SpecRenderStyle.Checklist ? `- [ ] Check dependency ${specLink(id)}` : `- ${specLink(id)}`));
+  return dependencies.map((id) => (style === SpecRenderStyle.Checklist ? `- [ ] Check dependency ${renderSpecMarkdownLink(context, id)}` : `- ${renderSpecMarkdownLink(context, id)}`));
 }
 
-function renderGovernance(spec: Spec, style: SpecRenderStyleType): string[] {
+function renderGovernance(spec: Spec, style: SpecRenderStyleType, context: RenderLinkContext | undefined): string[] {
   const governedBy = spec.governedBy;
   if (!governedBy) return [];
   const rows = [
     ...(governedBy.inferFromScope ? ["infer governing conventions from spec scope"] : []),
-    ...(governedBy.conventions ?? []).map((id) => `convention ${conventionLink(id)}`),
+    ...(governedBy.conventions ?? []).map((id) => `convention ${renderConventionMarkdownLink(context, id)}`),
   ];
   if (rows.length === 0) return [];
   return rows.map((row) => (style === SpecRenderStyle.Checklist ? `- [ ] ${row}` : `- ${row}`));
@@ -197,22 +206,6 @@ function renderPlainRow(style: SpecRenderStyleType, label: string, value: string
 
 function checkLink(id: string): string {
   return `\`${id}\``;
-}
-
-function areaLink(id: string): string {
-  return `[${id}](opencanon://areas/${encodeURIComponent(id)})`;
-}
-
-function conventionLink(id: string): string {
-  return `[${id}](opencanon://conventions/${encodeURIComponent(id)})`;
-}
-
-function impactSurfaceLink(id: string): string {
-  return `[${id}](opencanon://impact-surfaces/${encodeURIComponent(id)})`;
-}
-
-function specLink(id: string): string {
-  return `[${id}](opencanon://specs/${encodeURIComponent(id)})`;
 }
 
 function resolveGeneratedMarkdownPath(

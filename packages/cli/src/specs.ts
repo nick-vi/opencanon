@@ -5,6 +5,7 @@ import {
   SpecCheckKind,
   SpecRenderKind,
   SpecRenderStyle,
+  createRenderLinkContext,
   buildDefinitionDiffGitArgs,
   buildDefinitionHistoryGitArgs,
   buildDefinitionVersionsGitArgs,
@@ -389,6 +390,7 @@ async function runSpecsVersionsCommand(args: string[], cwd: string): Promise<voi
 
 async function renderGeneratedSpecs(cwd: string, options: { dryRun: boolean }): Promise<RenderSpecsResult> {
   const project = await loadProjectContext(cwd);
+  const linkContext = createRenderLinkContext(project);
   const files: RenderedSpecFile[] = [];
 
   for (const spec of project.specs) {
@@ -396,7 +398,7 @@ async function renderGeneratedSpecs(cwd: string, options: { dryRun: boolean }): 
     const resolved = resolveSpecGeneratedDocsPath(project.paths, spec);
     if (!resolved.ok) fail(resolved.diagnostics.join("\n"));
 
-    const expected = renderSpec(spec, spec.render.style);
+    const expected = renderSpec(spec, spec.render.style, linkContext);
     const current = existsSync(resolved.absolutePath) ? readFileSync(resolved.absolutePath, "utf8") : undefined;
     const changed = current !== expected;
     if (changed && !options.dryRun) writeAtomicTextFileSync(resolved.absolutePath, expected);

@@ -26,4 +26,4 @@ Search, chunks, embeddings, and related-code retrieval are valuable only when th
 
 ## Related impact surfaces
 
-- [project-context-index](opencanon://impact-surfaces/project-context-index)
+- [Project context index](../areas/project-context-index.md#project-context-index)

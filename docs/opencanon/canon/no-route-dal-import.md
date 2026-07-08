@@ -18,4 +18,4 @@ Route handlers must call services, not DAL modules.
 
 ## Related conventions
 
-- [dal-transaction-flow](opencanon://conventions/dal-transaction-flow)
+- [DAL functions accept optional transactions](dal-transaction-flow.md)

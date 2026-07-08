@@ -12,7 +12,7 @@ Resources: db:companies
 
 ## Impact surfaces
 
-- [company-read-model](opencanon://impact-surfaces/company-read-model)
+- [Company read model](../canon/impact.md#impact-surfaces)
 
 ## Checks
 
@@ -33,6 +33,6 @@ Checks: `company-unit-tests`
 
 ## Governance
 
-- convention [no-route-dal-import](opencanon://conventions/no-route-dal-import)
-- convention [service-db-boundary](opencanon://conventions/service-db-boundary)
-- convention [impact-surfaces-current](opencanon://conventions/impact-surfaces-current)
+- convention [Routes call services instead of DAL modules](../canon/no-route-dal-import.md)
+- convention [Services compose DAL instead of direct DB clients](../canon/service-db-boundary.md)
+- convention [Impact surfaces describe sensitive downstream effects](../canon/impact-surfaces-current.md)
