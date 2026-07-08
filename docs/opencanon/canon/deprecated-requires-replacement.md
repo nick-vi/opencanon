@@ -1,7 +1,5 @@
 # Deprecated code names its replacement and removal owner
 
-Convention id: `deprecated-requires-replacement`.
-
 ## Rule
 
 Deprecated internal code requires owner, replacement, and remove-by metadata.

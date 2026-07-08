@@ -1,7 +1,5 @@
 # Public contracts do not import database schemas
 
-Convention id: `no-db-schema-in-contracts`.
-
 ## Rule
 
 Public contract modules must not import database schema internals.

@@ -1,7 +1,5 @@
 # Use const objects instead of native TypeScript enums
 
-Convention id: `const-object-enums`.
-
 ## Rule
 
 Enum-like values use JavaScript const objects plus a derived union type instead of native TypeScript enums.

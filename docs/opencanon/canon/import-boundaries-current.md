@@ -1,7 +1,5 @@
 # Imports preserve local ownership boundaries
 
-Convention id: `import-boundaries-current`.
-
 ## Rule
 
 Deep relative imports are treated as a boundary smell because they make layer ownership implicit.

@@ -1,7 +1,5 @@
 # JSON.parse of file I/O must be guarded by try/catch
 
-Convention id: `guard-file-json-parse`.
-
 ## Rule
 
 Parsing file contents with JSON.parse must sit inside a try/catch so a malformed file degrades gracefully instead of throwing an unhandled SyntaxError.

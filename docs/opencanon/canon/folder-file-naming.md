@@ -1,7 +1,5 @@
 # Service files use the service suffix
 
-Convention id: `folder-file-naming`.
-
 ## Rule
 
 Service implementation files must use the *.service.ts naming pattern.

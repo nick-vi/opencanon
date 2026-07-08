@@ -1,7 +1,5 @@
 # DAL functions keep transaction clients last
 
-Convention id: `dal-transaction-param`.
-
 ## Rule
 
 Exported DAL functions should accept an optional transaction/client parameter and route queries through a transaction-aware client.

@@ -1,7 +1,5 @@
 # Sensitive surface changes require approval
 
-Convention id: `sensitive-change-requires-approval`.
-
 ## Rule
 
 Sensitive impact-surface changes must satisfy the configured change policy.

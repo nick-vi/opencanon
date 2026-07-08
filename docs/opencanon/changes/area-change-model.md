@@ -1,6 +1,5 @@
 # Area and Change Model
 
-Change id: `area-change-model`.
 Change kind: `feature`.
 
 ## Intent

@@ -1,7 +1,5 @@
 # Services do not import DB clients
 
-Convention id: `service-no-db-client`.
-
 ## Rule
 
 Services must not import DB clients directly.

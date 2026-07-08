@@ -1,7 +1,5 @@
 # Secrets and environment config stay out of source literals
 
-Convention id: `hardcoded-secrets-and-config`.
-
 ## Rule
 
 Source code should not contain live-looking secrets or environment-specific configuration literals.

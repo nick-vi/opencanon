@@ -1,7 +1,5 @@
 # Source files keep one primary responsibility
 
-Convention id: `source-files-stay-cohesive`.
-
 ## Rule
 
 Source files should stay cohesive. A large file should be split once it combines lifecycle, routing, storage, rendering, validation, or unrelated test concerns.

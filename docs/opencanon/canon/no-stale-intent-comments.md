@@ -1,7 +1,5 @@
 # Comments do not preserve stale compatibility intent
 
-Convention id: `no-stale-intent-comments`.
-
 ## Rule
 
 Comment describes stale compatibility intent.

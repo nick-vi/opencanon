@@ -1,7 +1,5 @@
 # Soft enum comparisons use declared members
 
-Convention id: `inline-soft-enum-literal`.
-
 ## Rule
 
 Comparisons against a checked finite-literal set should reference the declared member, not inline the raw string.

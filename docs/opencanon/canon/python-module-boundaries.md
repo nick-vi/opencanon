@@ -1,7 +1,5 @@
 # Python modules use package imports instead of sys.path mutation
 
-Convention id: `python-module-boundaries`.
-
 ## Rule
 
 Python code should use normal package/module configuration rather than mutating sys.path at runtime.

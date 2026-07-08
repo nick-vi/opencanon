@@ -1,7 +1,5 @@
 # DAL functions accept optional transactions
 
-Convention id: `dal-transaction-flow`.
-
 ## Rule
 
 Database access functions accept an optional transaction/client so services can compose multi-step writes atomically.

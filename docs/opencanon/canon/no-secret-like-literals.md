@@ -1,7 +1,5 @@
 # Secret-like literals stay out of source
 
-Convention id: `no-secret-like-literals`.
-
 ## Rule
 
 Secret-like literals must not be committed.

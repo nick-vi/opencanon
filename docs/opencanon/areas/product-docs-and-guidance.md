@@ -1,7 +1,5 @@
 # Product Docs and Agent Guidance
 
-Area id: `product-docs-and-guidance`.
-
 ## Summary
 
 The public docs, README, managed skill, and product copy explain OpenCanon as agent-ready, human-readable, runtime-enforced Project Canon, Proof, Knowledge, Activity, and Health.

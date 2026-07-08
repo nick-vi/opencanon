@@ -1,7 +1,5 @@
 # Repo definitions own truth; generated state stays derived
 
-Convention id: `state-ownership-current`.
-
 ## Rule
 
 Committed repo definitions are the source of truth; .opencanon and OpenCanon home directory data are generated state, projections, cache, history, indexes, or local service metadata.

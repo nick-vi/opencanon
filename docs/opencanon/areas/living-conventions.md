@@ -1,7 +1,5 @@
 # Living Conventions
 
-Area id: `living-conventions`.
-
 ## Summary
 
 Conventions are typed definitions that can render human docs and enforce runtime validators, gates, or tests.

@@ -1,7 +1,5 @@
 # Specs declare enforcement and governance
 
-Convention id: `spec-definitions-are-enforced`.
-
 ## Rule
 
 Specs should declare checks, governing conventions, and either implementation scope or impact surfaces.

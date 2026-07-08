@@ -38,8 +38,6 @@ const AreaStyleSections: Record<AreaRenderStyle, AreaSectionKey[]> = {
 export function renderArea(area: Area, style: AreaRenderStyle): string {
   const lines: string[] = [];
   lines.push(`# ${area.title}`);
-  lines.push("");
-  lines.push(`Area id: \`${area.id}\`.`);
 
   for (const section of AreaStyleSections[style]) {
     const rendered = renderAreaSection(area, style, section);

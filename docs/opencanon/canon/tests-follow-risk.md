@@ -1,7 +1,5 @@
 # Tests scale with blast radius
 
-Convention id: `tests-follow-risk`.
-
 ## Rule
 
 Narrow changes get focused unit tests; shared behavior and cross-layer workflows need broader tests.

@@ -1,7 +1,5 @@
 # Imports avoid deep relative parent climbs
 
-Convention id: `no-deep-relative-imports`.
-
 ## Rule
 
 Deep relative import crosses too many ownership levels.

@@ -1,7 +1,5 @@
 # Internal source does not preserve shim files
 
-Convention id: `no-shim-files`.
-
 ## Rule
 
 Internal source files should not be named around shims, compatibility, legacy, or deprecated paths.

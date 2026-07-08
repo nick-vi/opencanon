@@ -1,7 +1,5 @@
 # Environment config stays behind named settings
 
-Convention id: `no-hardcoded-config-values`.
-
 ## Rule
 
 Environment-specific config values should live behind named config.

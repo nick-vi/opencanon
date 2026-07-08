@@ -41,8 +41,6 @@ const SpecStyleSections: Record<SpecRenderStyleType, SpecSectionKey[]> = {
 export function renderSpec(spec: Spec, style: SpecRenderStyleType): string {
   const lines: string[] = [];
   lines.push(`# ${spec.title}`);
-  lines.push("");
-  lines.push(`Spec id: \`${spec.id}\`.`);
 
   for (const section of SpecStyleSections[style]) {
     const rendered = renderSpecSection(spec, style, section);

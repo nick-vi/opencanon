@@ -1,7 +1,5 @@
 # Explicit Error Contracts
 
-Area id: `explicit-error-contracts`.
-
 ## Summary
 
 OpenCanon runtime, service, local protocol, CLI, and MCP failures use a single `{ ok: false, error }` envelope.

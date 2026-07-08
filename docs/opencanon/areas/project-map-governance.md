@@ -1,7 +1,5 @@
 # Project Map Governance
 
-Area id: `project-map-governance`.
-
 ## Summary
 
 OpenCanon derives the Project Map across areas, changes, conventions, surfaces, checks, validators, and owned targets.

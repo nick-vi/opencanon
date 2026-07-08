@@ -1,7 +1,5 @@
 # Routes call services instead of DAL modules
 
-Convention id: `no-route-dal-import`.
-
 ## Rule
 
 Route handlers must call services, not DAL modules.

@@ -1,7 +1,5 @@
 # Definition Authoring Flow
 
-Area id: `definition-authoring-flow`.
-
 ## Summary
 
 OpenCanon provides project-local authoring support and draft commands for conventions, areas, and change definitions.

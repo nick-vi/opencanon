@@ -1,7 +1,5 @@
 # Services compose DAL instead of direct DB clients
 
-Convention id: `service-db-boundary`.
-
 ## Rule
 
 Services own workflow composition but should use DAL modules for persistence details.

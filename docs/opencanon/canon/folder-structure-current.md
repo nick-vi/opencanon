@@ -1,7 +1,5 @@
 # Folders use approved responsibility names
 
-Convention id: `folder-structure-current`.
-
 ## Rule
 
 Folders should communicate ownership and layer responsibility instead of becoming dumping grounds.

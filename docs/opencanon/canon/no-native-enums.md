@@ -1,7 +1,5 @@
 # Use const objects instead of native TypeScript enums
 
-Convention id: `no-native-enums`.
-
 ## Rule
 
 Files matching src/**/*.{ts,tsx}, tests/**/*.{ts,tsx}, packages/*/src/**/*.{ts,tsx} must use const-object enum patterns instead of native TypeScript enums.

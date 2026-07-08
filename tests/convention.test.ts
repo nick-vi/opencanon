@@ -315,8 +315,6 @@ test("renderConvention snapshots every style deterministically", () => {
   const snapshots = {
     narrative: `# Sample Rule
 
-Convention id: \`sample-rule\`.
-
 ## Why
 
 The sample rule keeps examples deterministic.
@@ -365,8 +363,6 @@ Related conventions:
 `,
     checklist: `# Sample Rule
 
-Convention id: \`sample-rule\`.
-
 ## Rule
 
 - [ ] Enforce: Sample files must use the approved shape.
@@ -411,8 +407,6 @@ enum Bad { X }
 `,
     reference: `# Sample Rule
 
-Convention id: \`sample-rule\`.
-
 ## Rule
 
 Sample files must use the approved shape.
@@ -456,8 +450,6 @@ enum Bad { X }
 - [other-rule](opencanon://conventions/other-rule)
 `,
     "architecture-note": `# Sample Rule
-
-Convention id: \`sample-rule\`.
 
 ## Why
 
@@ -506,8 +498,6 @@ Neighboring convention constraints:
 - [other-rule](opencanon://conventions/other-rule)
 `,
     "decision-record": `# Sample Rule
-
-Convention id: \`sample-rule\`.
 
 ## Rule
 
@@ -684,8 +674,6 @@ test("renderSpec is deterministic", () => {
   const spec = sampleSpec();
   const expected = `# Service Health Spec
 
-Spec id: \`service-health-spec\`.
-
 ## Summary
 
 Service health behavior stays visible and enforced.
@@ -733,8 +721,6 @@ test("area definitions resolve duplicate ids", () => {
 test("renderArea is deterministic", () => {
   const area = sampleArea();
   const expected = `# Service Health
-
-Area id: \`service-health\`.
 
 ## Summary
 
@@ -1101,7 +1087,6 @@ test("change definitions resolve duplicate ids", () => {
 test("change render is deterministic", () => {
   const expected = `# Service Health Change
 
-Change id: \`service-health-change\`.
 Change kind: \`feature\`.
 
 ## Intent

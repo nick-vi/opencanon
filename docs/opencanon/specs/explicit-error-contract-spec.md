@@ -1,7 +1,5 @@
 # Explicit Error Contract Spec
 
-Spec id: `explicit-error-contract-spec`.
-
 ## Summary
 
 Failed OpenCanon API envelopes expose a single error payload while diagnostics remain valid domain data inside successful responses.

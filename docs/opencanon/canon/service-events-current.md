@@ -1,7 +1,5 @@
 # Runtime data updates through explicit service events
 
-Convention id: `service-events-current`.
-
 ## Rule
 
 Service and project-runtime data updates come from explicit runtime events; transport failures enter reconnecting or offline states rather than hidden project-data fallback.

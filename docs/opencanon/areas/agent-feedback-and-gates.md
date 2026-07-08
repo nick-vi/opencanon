@@ -1,7 +1,5 @@
 # Agent Feedback and Gates
 
-Area id: `agent-feedback-and-gates`.
-
 ## Summary
 
 Agent hooks and CLI feedback surface related conventions, impact surfaces, findings, and explicit approval gates.

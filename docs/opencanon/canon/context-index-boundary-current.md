@@ -1,7 +1,5 @@
 # Context indexing is derived OpenCanon runtime state
 
-Convention id: `context-index-boundary-current`.
-
 ## Rule
 
 Project context indexing belongs to OpenCanon runtime state; authored definitions stay in repo source, and semantic results remain advisory unless backed by checks or convention runtimes.

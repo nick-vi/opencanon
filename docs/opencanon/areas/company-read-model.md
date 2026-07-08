@@ -1,7 +1,5 @@
 # Example Company Read Model
 
-Area id: `company-read-model`.
-
 ## Summary
 
 The example company read model dogfoods service-boundary conventions without representing OpenCanon product behavior.

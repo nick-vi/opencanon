@@ -1,7 +1,5 @@
 # Local Service and Project Runtimes
 
-Area id: `local-service-and-runtimes`.
-
 ## Summary
 
 The OpenCanon local service discovers projects and lazily starts isolated per-project runtimes.

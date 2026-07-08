@@ -1,7 +1,5 @@
 # Folders name real responsibilities
 
-Convention id: `no-dumpster-folders`.
-
 ## Rule
 
 Folder name is too ambiguous for source ownership.

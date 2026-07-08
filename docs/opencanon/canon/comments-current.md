@@ -1,7 +1,5 @@
 # Comments describe current intent
 
-Convention id: `comments-current`.
-
 ## Rule
 
 Comments should explain current behavior, not preserve stale compatibility narratives.

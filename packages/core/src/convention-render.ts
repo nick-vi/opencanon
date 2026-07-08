@@ -30,8 +30,6 @@ const StyleSections: Record<RenderStyle, SectionKey[]> = {
 export function renderConvention(convention: Convention, style: RenderStyle): string {
   const lines: string[] = [];
   lines.push(`# ${convention.title}`);
-  lines.push("");
-  lines.push(`Convention id: \`${convention.id}\`.`);
 
   for (const section of StyleSections[style]) {
     const rendered = renderSection(convention, style, section);

@@ -1,7 +1,5 @@
 # Impact surfaces describe sensitive downstream effects
 
-Convention id: `impact-surfaces-current`.
-
 ## Rule
 
 Sensitive files and domain resources are linked through impact surfaces so agents can see downstream effects before changing them.

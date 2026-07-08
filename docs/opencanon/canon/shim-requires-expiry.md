@@ -1,7 +1,5 @@
 # Shim annotations declare owner, replacement, and removal date
 
-Convention id: `shim-requires-expiry`.
-
 ## Rule
 
 Lifecycle shim annotations require owner, replacement, and remove-by metadata.

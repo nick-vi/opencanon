@@ -1,7 +1,5 @@
 # Schemas define contracts at package boundaries
 
-Convention id: `schema-contract-boundary`.
-
 ## Rule
 
 Validation schemas and DTO contracts live at boundaries; internals use typed domain objects.

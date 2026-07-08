@@ -1,7 +1,5 @@
 # Boundary literals have a canonical owner
 
-Convention id: `duplicate-boundary-literals`.
-
 ## Rule
 
 Boundary literals should have a canonical owner.

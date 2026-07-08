@@ -1,7 +1,5 @@
 # Python modules do not mutate sys.path
 
-Convention id: `python-no-sys-path-mutation`.
-
 ## Rule
 
 Python modules should not mutate sys.path to cross package boundaries.

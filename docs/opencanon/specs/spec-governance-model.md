@@ -1,7 +1,5 @@
 # Spec Governance Model
 
-Spec id: `spec-governance-model`.
-
 ## Summary
 
 Specs describe durable behavior as typed definitions with generated docs, governing conventions, implementation scope, impact links, and executable checks.

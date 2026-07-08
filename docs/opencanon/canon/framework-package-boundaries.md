@@ -1,7 +1,5 @@
 # Framework packages depend inward
 
-Convention id: `framework-package-boundaries`.
-
 ## Rule
 
 OpenCanon framework packages must depend only on approved lower-level packages.

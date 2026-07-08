@@ -1,7 +1,5 @@
 # Runtime failures use explicit error payloads
 
-Convention id: `explicit-error-contracts`.
-
 ## Rule
 
 OpenCanon transport failures return `{ ok: false, error }`, where `error.kind` is either `problem` or `diagnostics`; top-level `diagnostics` remains internal/domain data only.

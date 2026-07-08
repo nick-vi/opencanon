@@ -1,7 +1,5 @@
 # Project Context Index
 
-Area id: `project-context-index`.
-
 ## Summary
 
 OpenCanon owns search, chunks, embeddings, vector storage, and related-code retrieval as derived project runtime state tied back to definitions.

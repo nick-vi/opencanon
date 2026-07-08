@@ -1,7 +1,5 @@
 # Product-facing language stays simple
 
-Convention id: `product-language-current`.
-
 ## Rule
 
 Use Project Canon, Proof, Knowledge, Activity, Areas, Specs, Changes, Surfaces, Project Map, Search, Doctor, and Health in product-facing surfaces unless an exact internal type is required.

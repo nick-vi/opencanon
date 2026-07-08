@@ -1,7 +1,5 @@
 # Python catches specific exception types
 
-Convention id: `python-no-bare-except`.
-
 ## Rule
 
 Python code should catch specific exception types instead of using bare except clauses.

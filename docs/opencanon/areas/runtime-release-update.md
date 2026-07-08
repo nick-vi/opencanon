@@ -1,7 +1,5 @@
 # Runtime Updates
 
-Area id: `runtime-release-update`.
-
 ## Summary
 
 Runtime updates are selected from signed manifests with target-specific SHA-256 bundles.

@@ -42,7 +42,6 @@ export function renderChange(change: Change, style: ChangeRenderStyleType): stri
   const lines: string[] = [];
   lines.push(`# ${change.title}`);
   lines.push("");
-  lines.push(`Change id: \`${change.id}\`.`);
   lines.push(`Change kind: \`${change.kind}\`.`);
 
   for (const section of ChangeStyleSections[style]) {
