@@ -103,9 +103,12 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/runtime/src/local-protocol.ts`
 - Files: `packages/runtime/src/cli.ts`
 - Files: `packages/runtime/src/index.ts`
+- Files: `packages/runtime/src/service-monitor.ts`
+- Files: `packages/runtime/src/service-start.ts`
 - Files: `packages/runtime/src/service.ts`
 - Files: `packages/runtime/src/state.ts`
 - Files: `packages/runtime/src/semantic-index.ts`
+- Files: `packages/runtime/src/semantic-index-snapshot.ts`
 - Files: `packages/runtime/src/type-producer/producer-main.ts`
 - Files: `packages/runtime/src/type-producer/runtime.ts`
 - Files: `packages/runtime/src/routes.ts`
@@ -173,7 +176,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 Plan `board-state`: Derive Change board columns from change-level events and task aggregate state
 Checks: `runtime-tests`
 
-Plan `context-index-recovery`: Repair generated semantic vectors when cached metadata points at missing vectors
+Plan `context-index-recovery`: Reset incompatible semantic index cache to current provider state
 Checks: `semantic-index-tests`
 
 Plan `cli-and-copy`: Remove stale command aliases and keep CLI and README examples on current surfaces
@@ -196,13 +199,13 @@ Checks: `typecheck`, `release-tests`, `release-check`, `runtime-build`
 
 ## Tasks
 
-Task `board-state`: Keep task events from closing whole Changes in the board projection
-Files: `packages/runtime/src/snapshot.ts`, `packages/runtime/test/client.test.ts`
+Task `board-state`: Prove task events cannot close whole Changes in the board projection
+Files: `packages/core/src/change-state.ts`, `tests/change-state.test.ts`, `packages/runtime/test/client.test.ts`
 Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `runtime-tests`
 
-Task `context-index-recovery`: Rebuild semantic vectors after missing-vector reuse failures
-Files: `packages/runtime/src/snapshot.ts`, `packages/runtime/test/semantic-index.test.ts`
+Task `context-index-recovery`: Reset incompatible semantic index cache to current provider state
+Files: `packages/core/src/semantic-index.ts`, `packages/runtime/src/snapshot.ts`, `packages/runtime/src/semantic-index-snapshot.ts`, `packages/runtime/test/semantic-index.test.ts`, `packages/runtime/test/engine.test.ts`, `tests/contracts.test.ts`, `crates/opencanon-engine/src/tests/semantic_index.rs`
 Impact surfaces: [Project context index](../areas/project-context-index.md#project-context-index)
 Checks: `semantic-index-tests`
 
@@ -232,7 +235,7 @@ Impact surfaces: [Release and update path](../areas/runtime-release-update.md#ru
 Checks: `release-tests`, `typecheck`, `project-doctor`
 
 Task `runtime-repair-hardening`: Make supervised runtime repair deterministic across worktrees and stale pipes
-Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/cli/src/validate.ts`, `packages/core/src/index.ts`, `packages/core/src/language-analyzer.ts`, `packages/core/src/producer-registry.ts`, `packages/core/src/type-facts-provider.ts`, `packages/core/src/validator.ts`, `packages/runtime/src/server*.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/producer-main.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/type-producer.test.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`
+Files: `packages/cli/src/brief.ts`, `packages/cli/src/changes.ts`, `packages/cli/src/runtime-client.ts`, `packages/cli/src/validate.ts`, `packages/core/src/index.ts`, `packages/core/src/language-analyzer.ts`, `packages/core/src/producer-registry.ts`, `packages/core/src/type-facts-provider.ts`, `packages/core/src/validator.ts`, `packages/runtime/src/server*.ts`, `packages/runtime/src/service-monitor.ts`, `packages/runtime/src/service-start.ts`, `packages/runtime/src/service.ts`, `packages/runtime/src/type-producer/producer-main.ts`, `packages/runtime/src/type-producer/runtime.ts`, `packages/runtime/test/type-producer.test.ts`, `packages/runtime/test/service.test.ts`, `tests/validator.test.ts`, `tests/worktree.test.ts`
 Impact surfaces: [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 Checks: `runtime-tests`, `service-lifecycle-tests`, `worktree-tests`
 
