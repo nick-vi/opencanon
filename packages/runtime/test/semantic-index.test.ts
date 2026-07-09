@@ -740,7 +740,7 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
   }
 });
 
-test("runtime snapshot marks cached semantic index stale after provider config changes", async () => {
+test("runtime snapshot resets cached semantic index after provider config changes", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-provider-change-"));
   try {
     createAuthoringProject(rootDir);
@@ -842,8 +842,11 @@ test("runtime snapshot marks cached semantic index stale after provider config c
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
-        readSemanticIndexStatusJson: () => JSON.stringify({ index: previous.index }),
-        listSemanticChunksJson: () => JSON.stringify({ index: previous.index, chunks: previous.chunks.map((chunk) => chunk.metadata) }),
+        readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? previous.index }),
+        listSemanticChunksJson: () => {
+          const latest = writes.at(-1);
+          return JSON.stringify({ index: latest?.index ?? previous.index, chunks: latest ? latest.chunks.map((chunk) => chunk.metadata) : previous.chunks.map((chunk) => chunk.metadata) });
+        },
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
         embedSemanticTextsJson: (requestJson: string) => {
           const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
@@ -873,9 +876,13 @@ test("runtime snapshot marks cached semantic index stale after provider config c
       validationResultCache: createEphemeralValidationResultCache(),
     });
 
-    assert.equal(writes.length, 0);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].chunks, []);
     assert.equal(snapshot.semanticIndex.status, "stale");
-    assert.equal(snapshot.semanticIndex.staleChunkCount, previous.index.chunkCount);
+    assert.equal(snapshot.semanticIndex.provider.modelId, "jina-code-v2");
+    assert.equal(snapshot.semanticIndex.chunkCount, 0);
+    assert.equal(snapshot.semanticIndex.vectorCount, 0);
+    assert.equal(snapshot.semanticIndex.staleChunkCount, 0);
     assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-provider-changed"));
     store.close();
   } finally {

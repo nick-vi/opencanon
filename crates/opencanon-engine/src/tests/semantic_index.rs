@@ -13,7 +13,7 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
             json!({
                 "index": {
                     "id": "project",
-                    "version": "semantic-index-v1",
+                    "version": "semantic-index-v2",
                     "status": "ready",
                     "provider": {
                         "id": "opencanon-native-test",
@@ -149,7 +149,7 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
     let reuse_request = json!({
         "index": {
             "id": "project",
-            "version": "semantic-index-v1",
+            "version": "semantic-index-v2",
             "status": "ready",
             "provider": {
                 "id": "opencanon-native-test",
@@ -262,7 +262,7 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
             json!({
                 "index": {
                     "id": "project",
-                    "version": "semantic-index-v1",
+                    "version": "semantic-index-v2",
                     "status": "ready",
                     "provider": {
                         "id": "opencanon-native-test",
@@ -336,7 +336,7 @@ fn semantic_index_recovers_when_vector_store_has_stale_duplicate_id() {
     let request = json!({
         "index": {
             "id": "project",
-            "version": "semantic-index-v1",
+            "version": "semantic-index-v2",
             "status": "ready",
             "provider": {
                 "id": "opencanon-native-test",
@@ -428,7 +428,7 @@ fn semantic_index_repair_clears_unsupported_provider_state() {
                 json!({
                     "index": {
                         "id": "project",
-                        "version": "semantic-index-v1",
+                        "version": "semantic-index-v2",
                         "status": "ready",
                         "provider": {
                             "id": "unsupported-provider",

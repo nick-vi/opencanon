@@ -211,7 +211,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   project.writeSemanticIndex({
     index: {
       id: "project",
-      version: "semantic-index-v1",
+      version: "semantic-index-v2",
       status: "ready",
       provider: {
         id: "opencanon-native-jina-code-v2",

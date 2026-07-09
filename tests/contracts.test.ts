@@ -356,7 +356,7 @@ test("semantic index contracts require provider identity and chunk metadata", ()
   const request = WriteSemanticIndexRequestSchema.parse({
     index: {
       id: "project",
-      version: "semantic-index-v1",
+      version: "semantic-index-v2",
       status: "ready",
       provider: {
         id: "opencanon-native-jina-code-v2",

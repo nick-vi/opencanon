@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const SemanticIndexVersion = "semantic-index-v1";
+export const SemanticIndexVersion = "semantic-index-v2";
 export const SemanticChunkerVersion = "opencanon-fact-semantic-chunker-v1";
 export const SemanticEmbeddingProducerVersion = "opencanon-semantic-producer-v1";
 export const DefaultSemanticIndexId = "project";
