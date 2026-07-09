@@ -77,6 +77,7 @@ export const UrlSearchParam = {
   FindingId: "findingId",
   Id: "id",
   Kind: "kind",
+  Index: "index",
   Limit: "limit",
   Mode: "mode",
   Offset: "offset",
@@ -97,6 +98,7 @@ export const diagnosticCodes = {
   invalidRuntimeResponse: "invalid-runtime-response",
   inferenceError: "inference-error",
   projectInventoryFailed: "project-inventory-failed",
+  semanticIndexNotReady: "semantic-index-not-ready",
 } as const;
 
 export type ApiSuccess<T> = {

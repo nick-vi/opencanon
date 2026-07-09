@@ -16,6 +16,7 @@ type SearchQuery = {
   symbolKind?: string;
   scopes: string[];
   limit: number;
+  index: boolean;
   format: Format;
   help: boolean;
 };
@@ -99,6 +100,7 @@ async function searchProjectContext(rootDir: string, query: SearchQuery): Promis
     const params = new URLSearchParams();
     params.set("query", query.query);
     params.set("limit", String(query.limit));
+    if (query.index) params.set("index", "1");
     const response = await withRuntimeClient<ContextSearchResponse>(
       rootDir,
       (client) => client.get(`${RuntimeApiRoute.ContextSearch}?${params.toString()}`),
@@ -242,6 +244,7 @@ function parseArgs(args: string[]): SearchQuery {
   let symbolKind: string | undefined;
   const scopes: string[] = [];
   let limit = 50;
+  let indexBeforeContextSearch = false;
   let format: Format = "markdown";
   let help = false;
   const positional: string[] = [];
@@ -279,6 +282,10 @@ function parseArgs(args: string[]): SearchQuery {
       index += 1;
       continue;
     }
+    if (arg === "--index") {
+      indexBeforeContextSearch = true;
+      continue;
+    }
     if (arg === "--format") {
       const value = args[index + 1];
       if (value !== Format.Markdown && value !== Format.Json) fail(`Invalid --format: ${String(value)}`);
@@ -289,9 +296,9 @@ function parseArgs(args: string[]): SearchQuery {
     if (arg.startsWith("--")) fail(`Unknown search option: ${arg}`);
     positional.push(arg);
   }
-  if (help) return { query: "", kind, symbolKind, scopes, limit, format, help };
+  if (help) return { query: "", kind, symbolKind, scopes, limit, index: indexBeforeContextSearch, format, help };
   if (positional.length !== 1) fail("Expected one search query.");
-  return { query: positional[0], kind, symbolKind, scopes, limit, format, help };
+  return { query: positional[0], kind, symbolKind, scopes, limit, index: indexBeforeContextSearch, format, help };
 }
 
 function printResults(query: SearchQuery, results: SearchResult[]): void {
@@ -319,6 +326,7 @@ Options:
   --symbol-kind    Restrict symbol results to a graph symbol kind.
   --scope <glob>   Restrict result paths to matching file globs. Repeatable.
   --limit <n>      Maximum results to return (default 50, max 500).
+  --index          Build Project Context before context search.
   --format <fmt>   markdown or json.
 `);
 }

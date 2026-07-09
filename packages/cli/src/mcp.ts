@@ -174,7 +174,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextSearch,
     {
       title: "OpenCanon Project Context Search",
-      description: "Read-only. Search Project Context and return grounded evidence, backlinks, freshness, and citations.",
+      description: "Read-only. Search ready Project Context and return grounded evidence, backlinks, freshness, and citations. If the index is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {
         query: z.string().min(1).describe("Search text."),
         limit: z.number().int().min(1).max(100).optional().describe("Maximum results. Defaults to 20."),
@@ -195,7 +195,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextAsk,
     {
       title: "OpenCanon Project Context Ask",
-      description: "Read-only. Ask a grounded project question. Answers are deterministic navigation evidence, not enforcement.",
+      description: "Read-only. Ask a grounded project question against a ready Project Context index. Answers are deterministic navigation evidence, not enforcement. If the index is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {
         question: z.string().min(1).describe("Project question."),
       },
@@ -212,7 +212,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextChunks,
     {
       title: "OpenCanon Project Context Chunks",
-      description: "Read-only. List indexed Project Context chunks by optional file path or definition id.",
+      description: "Read-only. List chunks from a ready Project Context index by optional file path or definition id. If the index is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {
         paths: z.array(z.string().min(1)).optional().describe("Optional repository-relative paths."),
         definitions: z.array(z.string().min(1)).optional().describe("Optional definition ids whose covered files should provide chunks."),
@@ -235,7 +235,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextCoverage,
     {
       title: "OpenCanon Project Context Coverage",
-      description: "Read-only. Return Project Context coverage across indexed, governed, stale, and orphan files.",
+      description: "Read-only. Return coverage from a ready Project Context index across indexed, governed, stale, and orphan files. If the index is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {},
     },
     async () => {

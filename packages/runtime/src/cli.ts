@@ -635,19 +635,24 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
     printProjectHelp();
     return;
   }
+  const format = formatOption(options.format);
   await ensureProjectRuntimeViaService({ cwd });
   const inspection = await waitForProjectRuntimeReady(cwd, { timeoutMs: ProjectRuntimeReadyTimeoutMs });
+  if (format !== Format.Json) {
+    console.log("# OpenCanon Project Index");
+    console.log("");
+    console.log("Indexing Project Context...");
+    console.log("");
+  }
   const snapshot = await requestLocalJson<{ state?: { semanticIndex?: SemanticIndexSnapshot }; semanticIndex?: SemanticIndexSnapshot | null }>(
     localProtocolEndpointFromEntry(inspection.entry),
     { method: "POST", path: ApiRoute.Index, body: { response: ProjectIndexResponseMode.SemanticIndex } },
   );
   const index = snapshot.state?.semanticIndex ?? snapshot.semanticIndex;
-  if (formatOption(options.format) === Format.Json) {
+  if (format === Format.Json) {
     writeJson({ index: index ?? null });
     return;
   }
-  console.log("# OpenCanon Project Index");
-  console.log("");
   if (!index) {
     console.log("Reindex requested; no context index snapshot is available yet.");
     return;

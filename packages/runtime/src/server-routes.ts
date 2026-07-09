@@ -11,6 +11,7 @@ import {
   normalizeProducerStatusesForProject,
   resolveProducerStatuses,
   type CanonEvent,
+  type SemanticIndexSnapshot,
 } from "@opencanon/core";
 import { buildProjectSummary, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
 import { TreeScope, buildTreeResponse, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
@@ -60,6 +61,14 @@ import {
 
 type RuntimePaths = ReturnType<typeof createPaths>;
 
+const UrlSearchParamValue = {
+  Enabled: "1",
+} as const;
+
+const SemanticIndexReadinessStatus = {
+  Ready: "ready",
+} as const;
+
 export type RuntimeRouteHandlerInput = {
   rootDir: string;
   authToken: string;
@@ -73,14 +82,39 @@ export type RuntimeRouteHandlerInput = {
   store(): ProjectStore;
   resetIdleTimer(): void;
   refreshCurrentSnapshot(): Promise<RuntimeSnapshot>;
-  ensureIndexedSnapshot(summary: string): Promise<RuntimeSnapshot>;
+  ensureProjectSnapshot(summary: string): Promise<RuntimeSnapshot>;
+  buildIndexedSnapshot(summary: string): Promise<RuntimeSnapshot>;
   restartStore(): Promise<void>;
 };
 
 export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (request: Request) => Promise<Response> {
-  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, resetIdleTimer, refreshCurrentSnapshot, ensureIndexedSnapshot, restartStore } = input;
+  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, resetIdleTimer, refreshCurrentSnapshot, ensureProjectSnapshot, buildIndexedSnapshot, restartStore } = input;
   let paths = input.paths();
   const currentStore = () => input.store();
+
+  const semanticContextSnapshot = async (url: URL, summary: string): Promise<RuntimeSnapshot> => {
+    if (url.searchParams.get(UrlSearchParam.Index) === UrlSearchParamValue.Enabled) {
+      return await buildIndexedSnapshot(summary);
+    }
+    return await ensureProjectSnapshot(summary);
+  };
+
+  const semanticIndexNotReadyResponse = (snapshot: RuntimeSnapshot): Response | undefined => {
+    const index = snapshot.state.semanticIndex ?? snapshot.semanticIndex;
+    if (semanticIndexReady(index)) return undefined;
+    const details = semanticIndexDiagnosticDetails(index);
+    return json(
+      diagnosticsFailure([
+        createOpenCanonDiagnostic({
+          code: diagnosticCodes.semanticIndexNotReady,
+          message: "Project Context index is not ready. Run opencanon project index before using Search, Ask, Chunks, or Coverage.",
+          details,
+          action: "Run opencanon project index, or call this API with index=1 when you intentionally want the request to build the index first.",
+        }),
+      ], diagnosticCodes.semanticIndexNotReady),
+      409,
+    );
+  };
 
   const routeRequest = async (request: Request): Promise<Response> => {
     resetIdleTimer();
@@ -114,7 +148,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: snapshot.state });
       }
       if (url.pathname === ApiRoute.Snapshot) {
-        const snapshot = await ensureIndexedSnapshot("Snapshot requested current project context.");
+        const snapshot = await ensureProjectSnapshot("Snapshot requested current project state.");
         return json({ ok: true, data: snapshot });
       }
       if (url.pathname === ApiRoute.ProjectSummary) {
@@ -126,7 +160,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { index: snapshot.state.semanticIndex ?? snapshot.semanticIndex } });
       }
       if (url.pathname === ApiRoute.CodeSymbols) {
-        const snapshot = await ensureIndexedSnapshot("Code symbol search requested current project context.");
+        const snapshot = await ensureProjectSnapshot("Code symbol search requested current project state.");
         const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
         if (!safePath.ok) return json(safePath.error, 400);
         const sourceFiles = snapshot.files.filter(isCodeGraphIndexableFile).length;
@@ -150,7 +184,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { sourceFiles, symbols: result.symbols } });
       }
       if (url.pathname === ApiRoute.CodeGraph) {
-        const snapshot = await ensureIndexedSnapshot("Code graph search requested current project context.");
+        const snapshot = await ensureProjectSnapshot("Code graph search requested current project state.");
         const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
         if (!safePath.ok) return json(safePath.error, 400);
         const direction = codeGraphDirectionParam(url);
@@ -166,7 +200,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { sourceFiles: snapshot.files.filter(isCodeGraphIndexableFile).length, edges: result.edges } });
       }
       if (url.pathname === ApiRoute.ContextChunks) {
-        const snapshot = await ensureIndexedSnapshot("Project Context chunks requested current index.");
+        const snapshot = await semanticContextSnapshot(url, "Project Context chunks requested current index.");
+        const notReady = semanticIndexNotReadyResponse(snapshot);
+        if (notReady) return notReady;
         const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
         if (!pathFilter.ok) return json(pathFilter.error, 400);
         return json({
@@ -183,7 +219,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextSearch) {
         return await tracer.span("project-context.search", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await ensureIndexedSnapshot("Project Context search requested current index.");
+          const snapshot = await semanticContextSnapshot(url, "Project Context search requested current index.");
+          const notReady = semanticIndexNotReadyResponse(snapshot);
+          if (notReady) return notReady;
           const query = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
           const limit = Math.min(100, numberParam(url, UrlSearchParam.Limit, 20));
           const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
@@ -212,7 +250,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextAsk) {
         return await tracer.span("project-context.ask", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await ensureIndexedSnapshot("Project Context Ask requested current index.");
+          const snapshot = await semanticContextSnapshot(url, "Project Context Ask requested current index.");
+          const notReady = semanticIndexNotReadyResponse(snapshot);
+          if (notReady) return notReady;
           const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
           if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context Ask requires a query."), 400);
           try {
@@ -233,7 +273,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextCoverage) {
-        const snapshot = await ensureIndexedSnapshot("Project Context coverage requested current index.");
+        const snapshot = await semanticContextSnapshot(url, "Project Context coverage requested current index.");
+        const notReady = semanticIndexNotReadyResponse(snapshot);
+        if (notReady) return notReady;
         return json({ ok: true, data: projectContextCoverage({ store: currentStore(), snapshot }) });
       }
       if (url.pathname === ApiRoute.ContextPacket) {
@@ -269,7 +311,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextBacklinks) {
-        const snapshot = await ensureIndexedSnapshot("Project Context backlinks requested current index.");
+        const snapshot = await ensureProjectSnapshot("Project Context backlinks requested current project state.");
         const query = (url.searchParams.get(UrlSearchParam.Query) ?? url.searchParams.get(UrlSearchParam.Id) ?? url.searchParams.get(UrlSearchParam.Path) ?? "").trim();
         if (!query) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context backlinks requires query, id, or path."), 400);
         return json({ ok: true, data: projectContextBacklinks({ snapshot, query }) });
@@ -361,7 +403,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const safeFiles = validateOptionalRelativePaths(requestedFiles);
         if (!safeFiles.ok) return json(safeFiles.error, 400);
         const snapshot = safeFiles.paths.length > 0
-          ? await ensureIndexedSnapshot("File-scoped related canon requested current project context.")
+          ? await ensureProjectSnapshot("File-scoped related canon requested current project state.")
           : await refreshCurrentSnapshot();
         const currentSnapshot = snapshot;
         const query = {
@@ -473,7 +515,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.Index && request.method === "POST") {
         const body = await readJsonBody(request);
-        const snapshot = await stateManager.rebuildAndPublish("Manual reindex completed.");
+        const snapshot = await buildIndexedSnapshot("Manual reindex completed.");
         if (body.response === ProjectIndexResponseMode.SemanticIndex) {
           return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
         }
@@ -568,4 +610,18 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
   };
 
   return routeRequest;
+}
+
+function semanticIndexReady(index: SemanticIndexSnapshot | undefined): boolean {
+  return index?.status === SemanticIndexReadinessStatus.Ready && index.staleChunkCount === 0;
+}
+
+function semanticIndexDiagnosticDetails(index: SemanticIndexSnapshot | undefined): string[] {
+  if (!index) return ["Project Context index: missing"];
+  return [
+    `Project Context index status: ${index.status}`,
+    `Stale chunks: ${index.staleChunkCount}`,
+    `Provider: ${index.provider.displayName ?? index.provider.id} (${index.provider.modelId})`,
+    ...index.diagnostics.map((diagnostic) => `${diagnostic.severity}: ${diagnostic.message}`),
+  ];
 }

@@ -601,7 +601,7 @@ function runtimeSummaryRouteCheckSource(): string {
       const body = JSON.parse(text);
       assert.equal(body.ok, true, text);
       assert.equal(body.data.rootDir, rootDir);
-      assert.equal(body.data.health.status, "stale");
+      assert.equal(body.data.health.status, "ready");
       assert.equal(typeof body.data.files, "number");
       assert.equal(typeof body.data.findings, "number");
       assert.equal(typeof body.data.staleFiles, "number");
@@ -633,10 +633,6 @@ function codeGraphRouteCheckSource(): string {
       return body.data;
     }
     try {
-      const indexResponse = await fetch(server.url + "/api/index", { method: "POST", headers });
-      const indexText = await indexResponse.text();
-      assert.equal(indexResponse.status, 200, indexText);
-
       const symbols = await get("/api/code/symbols?query=loadCompany&limit=10");
       assert.equal(typeof symbols.sourceFiles, "number");
       assert(symbols.symbols.some((symbol) => symbol.name === "loadCompany" && symbol.path === "src/company.ts"));
@@ -678,7 +674,15 @@ function projectContextRouteCheckSource(): string {
       return body.data;
     }
     try {
-      await post("/api/index");
+      const initialStatus = await get("/api/context/status");
+      assert.equal(initialStatus.index.status, "stale");
+      const staleSearchResponse = await fetch(server.url + "/api/context/search?query=invoice%20search%20term&limit=5", { headers });
+      const staleSearchText = await staleSearchResponse.text();
+      assert.equal(staleSearchResponse.status, 409, staleSearchText);
+      const staleSearchBody = JSON.parse(staleSearchText);
+      assert.equal(staleSearchBody.ok, false, staleSearchText);
+      assert.equal(staleSearchBody.error.diagnostics[0].code, "semantic-index-not-ready");
+
       const compactResponse = await fetch(server.url + "/api/index", {
         method: "POST",
         headers: { ...headers, "content-type": "application/json; charset=utf-8" },

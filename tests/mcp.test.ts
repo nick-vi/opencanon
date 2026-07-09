@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,13 +13,21 @@ test("opencanon mcp exposes project tools backed by the runtime", async () => {
   createAuthoringProject(rootDir);
   mkdirSync(path.join(rootDir, "src"), { recursive: true });
   writeFileSync(path.join(rootDir, "src/company.ts"), "export const billingSemanticAnchor = 'invoice search term';\n");
+  const env = testEnv(rootDir);
+  const index = spawnSync(process.execPath, [path.join(process.cwd(), "packages/cli/src/index.ts"), "project", "index", "--format", "json"], {
+    cwd: rootDir,
+    encoding: "utf8",
+    env,
+    timeout: 60_000,
+  });
+  assert.equal(index.status, 0, index.stderr || index.stdout);
 
   const client = new Client({ name: "opencanon-mcp-test", version: "0.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(process.cwd(), "packages/cli/src/index.ts"), "mcp", "--root", rootDir],
     cwd: process.cwd(),
-    env: testEnv(rootDir),
+    env,
     stderr: "pipe",
   });
 

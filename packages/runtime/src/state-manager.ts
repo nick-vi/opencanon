@@ -8,10 +8,19 @@ export type RuntimeStateManager = {
   currentProjectInventory(): ProjectInventory;
   validationResultCache(): ValidationResultCache;
   replaceValidationResultCache(cache: ValidationResultCache): void;
-  rebuildAndPublish(summary: string): Promise<RuntimeSnapshot>;
-  scheduleRebuild(summary: string): void;
+  rebuildAndPublish(summary: string, options?: RuntimeRebuildOptions): Promise<RuntimeSnapshot>;
+  scheduleRebuild(summary: string, options?: RuntimeRebuildOptions): void;
   waitForIdle(): Promise<void>;
   stop(): void;
+};
+
+export const RuntimeSemanticIndexMode = {
+  Build: "build",
+  Reuse: "reuse",
+} as const;
+export type RuntimeSemanticIndexMode = (typeof RuntimeSemanticIndexMode)[keyof typeof RuntimeSemanticIndexMode];
+export type RuntimeRebuildOptions = {
+  semanticIndexMode?: RuntimeSemanticIndexMode;
 };
 
 export type RuntimeStateManagerOptions = {
@@ -20,7 +29,7 @@ export type RuntimeStateManagerOptions = {
   initialValidationResultCache: ValidationResultCache;
   maxQueuedRebuilds: number;
   isStopped(): boolean;
-  rebuildNow(summary: string): Promise<RuntimeSnapshot>;
+  rebuildNow(summary: string, options: Required<RuntimeRebuildOptions>): Promise<RuntimeSnapshot>;
   readProjectInventory(): ProjectInventory;
   onRebuildError(error: unknown): void;
 };
@@ -31,14 +40,15 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   let validationResultCache = options.initialValidationResultCache;
   let rebuildInFlight: Promise<RuntimeSnapshot> | undefined;
   let watchRebuildInFlight: Promise<void> | undefined;
-  const queuedWatchSummaries: string[] = [];
+  const queuedWatchRebuilds: Array<{ summary: string; options: Required<RuntimeRebuildOptions> }> = [];
   const queuedWatchSummarySet = new Set<string>();
 
-  async function rebuildAndPublish(summary: string): Promise<RuntimeSnapshot> {
+  async function rebuildAndPublish(summary: string, inputOptions?: RuntimeRebuildOptions): Promise<RuntimeSnapshot> {
+    const rebuildOptions = normalizeRebuildOptions(inputOptions);
     const previous = rebuildInFlight?.catch(() => undefined);
     const current = (async () => {
       await previous;
-      const next = await options.rebuildNow(summary);
+      const next = await options.rebuildNow(summary, rebuildOptions);
       projectInventory = options.readProjectInventory();
       snapshot = next;
       return snapshot;
@@ -50,19 +60,19 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     return tracked;
   }
 
-  function scheduleRebuild(summary: string): void {
+  function scheduleRebuild(summary: string, inputOptions?: RuntimeRebuildOptions): void {
     if (options.isStopped()) return;
-    queueWatchSummary(summary);
+    queueWatchRebuild(summary, normalizeRebuildOptions(inputOptions));
     startWatchRebuildLoop();
   }
 
-  function queueWatchSummary(summary: string): void {
+  function queueWatchRebuild(summary: string, rebuildOptions: Required<RuntimeRebuildOptions>): void {
     if (queuedWatchSummarySet.has(summary)) return;
-    if (queuedWatchSummaries.length >= options.maxQueuedRebuilds) {
-      const removed = queuedWatchSummaries.shift();
-      if (removed) queuedWatchSummarySet.delete(removed);
+    if (queuedWatchRebuilds.length >= options.maxQueuedRebuilds) {
+      const removed = queuedWatchRebuilds.shift();
+      if (removed) queuedWatchSummarySet.delete(removed.summary);
     }
-    queuedWatchSummaries.push(summary);
+    queuedWatchRebuilds.push({ summary, options: rebuildOptions });
     queuedWatchSummarySet.add(summary);
   }
 
@@ -70,17 +80,17 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     if (watchRebuildInFlight) return;
     watchRebuildInFlight = runQueuedWatchRebuilds().finally(() => {
       watchRebuildInFlight = undefined;
-      if (queuedWatchSummaries.length > 0) startWatchRebuildLoop();
+      if (queuedWatchRebuilds.length > 0) startWatchRebuildLoop();
     });
   }
 
   async function runQueuedWatchRebuilds(): Promise<void> {
-    while (queuedWatchSummaries.length > 0) {
-      const summary = queuedWatchSummaries.shift();
-      if (!summary) continue;
-      queuedWatchSummarySet.delete(summary);
+    while (queuedWatchRebuilds.length > 0) {
+      const queued = queuedWatchRebuilds.shift();
+      if (!queued) continue;
+      queuedWatchSummarySet.delete(queued.summary);
       try {
-        await rebuildAndPublish(summary);
+        await rebuildAndPublish(queued.summary, queued.options);
       } catch (error) {
         options.onRebuildError(error);
       }
@@ -111,8 +121,14 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       if (watchRebuildInFlight) await watchRebuildInFlight.catch(() => undefined);
     },
     stop() {
-      queuedWatchSummaries.length = 0;
+      queuedWatchRebuilds.length = 0;
       queuedWatchSummarySet.clear();
     },
+  };
+}
+
+function normalizeRebuildOptions(options: RuntimeRebuildOptions | undefined): Required<RuntimeRebuildOptions> {
+  return {
+    semanticIndexMode: options?.semanticIndexMode ?? RuntimeSemanticIndexMode.Reuse,
   };
 }

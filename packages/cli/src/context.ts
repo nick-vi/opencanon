@@ -27,6 +27,7 @@ import type {
   ProjectContextAskResult,
   ProjectContextBacklinksResult,
   ProjectContextCoverageResult,
+  ReadSemanticIndexStatusResult,
 } from "@opencanon/core";
 
 type Query = {
@@ -59,10 +60,12 @@ type ProjectContextQueryArgs = { help: true } | { help?: false; params: URLSearc
 let rootDir = "";
 let paths: ReturnType<typeof createPaths>;
 const maxRelatedContextGetPathLength = 6000;
-const projectContextSubcommands = new Set(["chunks", "coverage", "backlinks"]);
+const projectContextSubcommands = new Set(["status", "chunks", "coverage", "backlinks"]);
+const SemanticIndexReadinessStatus = {
+  Ready: "ready",
+} as const;
 const removedProjectContextSubcommands: ReadonlyMap<string, string> = new Map([
   ["index", "opencanon project index"],
-  ["status", "opencanon project status"],
   ["search", "opencanon search <query>"],
   ["ask", "opencanon ask <question>"],
 ] as const);
@@ -168,6 +171,9 @@ export async function runAskCommand(args = process.argv.slice(2), cwd = process.
 async function runProjectContextSubcommand(args: string[], cwd: string): Promise<void> {
   const [subcommand, ...rest] = args;
   switch (subcommand) {
+    case "status":
+      await runProjectContextStatus(rest, cwd);
+      return;
     case "chunks":
       await runProjectContextChunks(rest, cwd);
       return;
@@ -182,6 +188,26 @@ async function runProjectContextSubcommand(args: string[], cwd: string): Promise
   }
 }
 
+async function runProjectContextStatus(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon context status");
+  cli.option("--format <format>", "Output format.");
+  cli.option("-h, --help", "Show help.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["format", "help", "h"]);
+  if (parsed.args.length > 0) fail(`Unexpected arguments: ${parsed.args.join(", ")}`);
+  if (booleanOption(options.help) || booleanOption(options.h)) {
+    printContextStatusHelp();
+    return;
+  }
+  const result = await withRuntimeClient<ReadSemanticIndexStatusResult>(cwd, (client) => client.get(RuntimeApiRoute.ContextStatus));
+  if (formatOption(options.format) === Format.Json) {
+    writeJson(result);
+    return;
+  }
+  console.log(renderProjectContextStatusMarkdown(result));
+}
+
 async function runProjectContextChunks(args: string[], cwd: string): Promise<void> {
   const cli = cac("opencanon context chunks");
   cli.option("--file <path>", "Repository-relative file path.");
@@ -189,15 +215,17 @@ async function runProjectContextChunks(args: string[], cwd: string): Promise<voi
   cli.option("--definition <id>", "Definition id whose covered files should provide chunks.");
   cli.option("--limit <n>", "Maximum chunks.");
   cli.option("--offset <n>", "Chunk offset.");
+  cli.option("--index", "Build Project Context before listing chunks.");
   cli.option("--format <format>", "Output format.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["file", "path", "definition", "limit", "offset", "format"]);
+  rejectUnknownOptions(options, ["file", "path", "definition", "limit", "offset", "index", "format"]);
   const params = new URLSearchParams();
   for (const file of [...stringValues(options.file), ...stringValues(options.path)]) params.append("path", toRepoRelativePath(rootDir, file));
   for (const definition of stringValues(options.definition)) params.append("definition", definition);
   params.set("limit", String(positiveIntegerOption(options.limit, "--limit", 50)));
   params.set("offset", String(nonNegativeIntegerOption(options.offset, "--offset", 0)));
+  if (booleanOption(options.index)) params.set("index", "1");
   const format = formatOption(options.format);
   const result = await withRuntimeClient<ListSemanticChunksResult>(cwd, (client) => client.get(`${RuntimeApiRoute.ContextChunks}?${params.toString()}`));
   if (format === Format.Json) {
@@ -216,9 +244,9 @@ async function runProjectContextChunks(args: string[], cwd: string): Promise<voi
 }
 
 async function runProjectContextAsk(args: string[], cwd: string, command: string): Promise<void> {
-  const parsed = parseProjectContextQueryArgs(command, args);
+  const parsed = parseProjectContextQueryArgs(command, args, { allowIndex: true });
   if (parsed.help) {
-    printProjectContextQueryHelp(command);
+    printProjectContextQueryHelp(command, { allowIndex: true });
     return;
   }
   const result = await withRuntimeClient<ProjectContextAskResult>(cwd, (client) => client.get(`${RuntimeApiRoute.ContextAsk}?${parsed.params.toString()}`));
@@ -243,9 +271,16 @@ async function runProjectContextAsk(args: string[], cwd: string, command: string
 }
 
 async function runProjectContextCoverage(args: string[], cwd: string): Promise<void> {
-  const format = formatFromArgs(args);
-  const result = await withRuntimeClient<ProjectContextCoverageResult>(cwd, (client) => client.get(RuntimeApiRoute.ContextCoverage));
-  if (format === Format.Json) {
+  const parsed = parseContextCoverageArgs(args);
+  if (parsed.help) {
+    printContextCoverageHelp();
+    return;
+  }
+  const params = new URLSearchParams();
+  if (parsed.index) params.set("index", "1");
+  const path = params.size > 0 ? `${RuntimeApiRoute.ContextCoverage}?${params.toString()}` : RuntimeApiRoute.ContextCoverage;
+  const result = await withRuntimeClient<ProjectContextCoverageResult>(cwd, (client) => client.get(path));
+  if (parsed.format === Format.Json) {
     writeJson(result);
     return;
   }
@@ -263,9 +298,9 @@ async function runProjectContextCoverage(args: string[], cwd: string): Promise<v
 }
 
 async function runProjectContextBacklinks(args: string[], cwd: string): Promise<void> {
-  const parsed = parseProjectContextQueryArgs("opencanon context backlinks", args);
+  const parsed = parseProjectContextQueryArgs("opencanon context backlinks", args, { allowIndex: false });
   if (parsed.help) {
-    printProjectContextQueryHelp("opencanon context backlinks");
+    printProjectContextQueryHelp("opencanon context backlinks", { allowIndex: false });
     return;
   }
   const result = await withRuntimeClient<ProjectContextBacklinksResult>(cwd, (client) => client.get(`${RuntimeApiRoute.ContextBacklinks}?${parsed.params.toString()}`));
@@ -288,16 +323,17 @@ async function runProjectContextBacklinks(args: string[], cwd: string): Promise<
   if (result.links.length === 0 && result.files.length === 0) console.log("\nNo backlinks found.");
 }
 
-function parseProjectContextQueryArgs(command: string, args: string[]): ProjectContextQueryArgs {
+function parseProjectContextQueryArgs(command: string, args: string[], input: { allowIndex: boolean }): ProjectContextQueryArgs {
   const cli = cac(command);
   cli.option("-h, --help", "Show help.");
   cli.option("--limit <n>", "Maximum results.");
   cli.option("--path <path>", "Repository-relative path filter.");
   cli.option("--file <path>", "Alias for --path.");
+  if (input.allowIndex) cli.option("--index", "Build Project Context before querying.");
   cli.option("--format <format>", "Output format.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["help", "h", "limit", "path", "file", "format"]);
+  rejectUnknownOptions(options, input.allowIndex ? ["help", "h", "limit", "path", "file", "index", "format"] : ["help", "h", "limit", "path", "file", "format"]);
   if (booleanOption(options.help) || booleanOption(options.h)) return { help: true };
   const query = parsed.args.map(String).join(" ").trim();
   if (!query) fail(`${command} requires a query.`);
@@ -305,17 +341,21 @@ function parseProjectContextQueryArgs(command: string, args: string[]): ProjectC
   params.set("query", query);
   params.set("limit", String(positiveIntegerOption(options.limit, "--limit", 20)));
   for (const file of [...stringValues(options.path), ...stringValues(options.file)]) params.append("path", toRepoRelativePath(rootDir, file));
+  if (input.allowIndex && booleanOption(options.index)) params.set("index", "1");
   return { params, format: formatOption(options.format) };
 }
 
-function formatFromArgs(args: string[]): Format {
-  const cli = cac("opencanon context");
+function parseContextCoverageArgs(args: string[]): { help: true } | { help?: false; format: Format; index: boolean } {
+  const cli = cac("opencanon context coverage");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--index", "Build Project Context before computing coverage.");
   cli.option("--format <format>", "Output format.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["format"]);
+  rejectUnknownOptions(options, ["format", "index", "help", "h"]);
+  if (booleanOption(options.help) || booleanOption(options.h)) return { help: true };
   if (parsed.args.length > 0) fail(`Unexpected arguments: ${parsed.args.join(", ")}`);
-  return formatOption(options.format);
+  return { format: formatOption(options.format), index: booleanOption(options.index) };
 }
 
 function nonNegativeIntegerOption(value: unknown, name: string, fallback: number): number {
@@ -702,6 +742,31 @@ function writeJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
+function renderProjectContextStatusMarkdown(result: ReadSemanticIndexStatusResult): string {
+  const lines = ["# Project Context Status", ""];
+  if (!result.index) {
+    lines.push("Status: missing", "", "Action: Run opencanon project index to build Search, Ask, Chunks, and Coverage.");
+    return lines.join("\n");
+  }
+  lines.push(`Status: ${result.index.status}`);
+  lines.push(`Chunks: ${result.index.chunkCount}`);
+  lines.push(`Vectors: ${result.index.vectorCount}`);
+  lines.push(`Stale chunks: ${result.index.staleChunkCount}`);
+  lines.push(`Provider: ${result.index.provider.displayName ?? result.index.provider.id} (${result.index.provider.modelId})`);
+  lines.push(`Indexed: ${result.index.indexedAt}`);
+  if (result.index.embeddingStats) {
+    lines.push(`Embeddings: ${result.index.embeddingStats.embeddedChunks} embedded, ${result.index.embeddingStats.reusedChunks} reused of ${result.index.embeddingStats.totalChunks}`);
+  }
+  if (result.index.diagnostics.length > 0) {
+    lines.push("", "Diagnostics:");
+    for (const diagnostic of result.index.diagnostics) lines.push(`- ${diagnostic.severity}: ${diagnostic.message}`);
+  }
+  if (result.index.status !== SemanticIndexReadinessStatus.Ready || result.index.staleChunkCount > 0) {
+    lines.push("", "Action: Run opencanon project index to build Search, Ask, Chunks, and Coverage.");
+  }
+  return lines.join("\n");
+}
+
 function printHelp(): void {
   console.log(`Usage:
   opencanon context --files <paths...>
@@ -713,6 +778,7 @@ function printHelp(): void {
   opencanon context --list-topics
   opencanon context --list-exceptions
   opencanon context --check
+  opencanon context status
   opencanon context chunks --file src/auth.ts
   opencanon context chunks --definition project-context-index
   opencanon context coverage
@@ -732,7 +798,30 @@ Options:
 `);
 }
 
-function printProjectContextQueryHelp(command: string): void {
+function printContextStatusHelp(): void {
+  console.log(`Usage:
+  opencanon context status
+  opencanon context status --format json
+
+Options:
+  --format markdown|json   Output format. Default: markdown.
+`);
+}
+
+function printContextCoverageHelp(): void {
+  console.log(`Usage:
+  opencanon context coverage
+  opencanon context coverage --index
+  opencanon context coverage --format json
+
+Options:
+  --index                  Build Project Context before computing coverage.
+  --format markdown|json   Output format. Default: markdown.
+`);
+}
+
+function printProjectContextQueryHelp(command: string, input: { allowIndex: boolean }): void {
+  const indexLine = input.allowIndex ? "  --index                  Build Project Context before querying.\n" : "";
   console.log(`Usage:
   ${command} <query>
   ${command} <query> --path src/auth.ts
@@ -742,6 +831,6 @@ Options:
   --limit <n>          Maximum results. Default: 20.
   --path <path>        Repository-relative path filter. Repeatable.
   --file <path>        Alias for --path.
-  --format markdown|json   Output format. Default: markdown.
+${indexLine}  --format markdown|json   Output format. Default: markdown.
 `);
 }

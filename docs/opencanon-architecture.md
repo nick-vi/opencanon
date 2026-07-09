@@ -411,6 +411,7 @@ GET  /api/context/search
 GET  /api/context/ask
 GET  /api/context/chunks
 GET  /api/context/coverage
+GET  /api/context/status
 GET  /api/context/backlinks
 GET  /api/doctor
 GET  /api/events
@@ -671,9 +672,13 @@ opencanon project start --foreground
 ```
 
 `project start` opens the supervised local API and reuses cached Project Context
-state. It does not perform a hidden full Search/Ask/Project Map rebuild on the
-startup path. `project index` is the explicit command for rebuilding derived
-project knowledge.
+state. It does not perform a hidden Search/Ask/Chunks/Coverage vector rebuild on
+the startup path. Runtime reads may refresh deterministic inventory, graph,
+validation, and Project Map state with `semanticIndexMode: "reuse"`; only
+`project index`, `POST /api/index`, or semantic Project Context routes called
+with `index=1` build native vectors. Semantic Project Context routes fail fast
+with `semantic-index-not-ready` when the index is missing, stale, failed, or
+still indexing.
 
 Validation:
 

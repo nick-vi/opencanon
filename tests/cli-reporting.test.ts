@@ -150,7 +150,7 @@ test("changes ready and brief expose agent-ready task work", () => {
   } finally {
     removeTestRoot(rootDir);
   }
-});
+}, CliSpawnTimeoutMs);
 
 function removeTestRoot(rootDir: string): void {
   stopTestRuntime(rootDir);
