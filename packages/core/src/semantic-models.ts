@@ -1,5 +1,4 @@
 export const SemanticEmbeddingProviderKind = {
-  Local: "local",
   Native: "native",
 } as const;
 export type SemanticEmbeddingProviderKind = (typeof SemanticEmbeddingProviderKind)[keyof typeof SemanticEmbeddingProviderKind];
@@ -24,7 +23,6 @@ export type SemanticEmbeddingModelDefinition = {
 };
 
 export const SemanticEmbeddingModelId = {
-  LocalHash128: "opencanon-local-hash-128",
   JinaCodeV2: "jina-code-v2",
   JinaCodeV2Large: "jina-code-v2-large",
   Qwen3Embed: "qwen3-embed",
@@ -32,18 +30,6 @@ export const SemanticEmbeddingModelId = {
 export type SemanticEmbeddingModelId = (typeof SemanticEmbeddingModelId)[keyof typeof SemanticEmbeddingModelId];
 
 export const SemanticEmbeddingModels = {
-  [SemanticEmbeddingModelId.LocalHash128]: {
-    id: SemanticEmbeddingModelId.LocalHash128,
-    providerKind: SemanticEmbeddingProviderKind.Local,
-    displayName: "OpenCanon Local Search",
-    dimensions: 128,
-    contextLength: 8192,
-    distance: "cosine",
-    config: {
-      algorithm: "signed-token-hash",
-      dimensions: 128,
-    },
-  },
   [SemanticEmbeddingModelId.JinaCodeV2]: {
     id: SemanticEmbeddingModelId.JinaCodeV2,
     providerKind: SemanticEmbeddingProviderKind.Native,
@@ -85,11 +71,11 @@ export const SemanticEmbeddingModels = {
   },
 } as const satisfies Record<SemanticEmbeddingModelId, SemanticEmbeddingModelDefinition>;
 
-export const DefaultSemanticEmbeddingModelId = SemanticEmbeddingModelId.LocalHash128;
+export const DefaultSemanticEmbeddingModelId = SemanticEmbeddingModelId.JinaCodeV2;
 export const DefaultNativeSemanticEmbeddingModelId = SemanticEmbeddingModelId.JinaCodeV2;
 
 export const DefaultSemanticEmbeddingConfig = {
-  mode: SemanticEmbeddingProviderKind.Local,
+  mode: SemanticEmbeddingProviderKind.Native,
   modelId: DefaultSemanticEmbeddingModelId,
   showDownloadProgress: true,
 } as const satisfies SemanticEmbeddingConfig;

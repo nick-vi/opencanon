@@ -73,11 +73,12 @@ export type RuntimeRouteHandlerInput = {
   store(): ProjectStore;
   resetIdleTimer(): void;
   refreshCurrentSnapshot(): Promise<RuntimeSnapshot>;
+  ensureIndexedSnapshot(summary: string): Promise<RuntimeSnapshot>;
   restartStore(): Promise<void>;
 };
 
 export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (request: Request) => Promise<Response> {
-  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, resetIdleTimer, refreshCurrentSnapshot, restartStore } = input;
+  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, resetIdleTimer, refreshCurrentSnapshot, ensureIndexedSnapshot, restartStore } = input;
   let paths = input.paths();
   const currentStore = () => input.store();
 
@@ -113,7 +114,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: snapshot.state });
       }
       if (url.pathname === ApiRoute.Snapshot) {
-        const snapshot = await refreshCurrentSnapshot();
+        const snapshot = await ensureIndexedSnapshot("Snapshot requested current project context.");
         return json({ ok: true, data: snapshot });
       }
       if (url.pathname === ApiRoute.ProjectSummary) {
@@ -121,10 +122,11 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: buildProjectSummary({ rootDir, snapshot, store: currentStore() }) });
       }
       if (url.pathname === ApiRoute.ContextStatus) {
-        return json({ ok: true, data: currentStore().readSemanticIndexStatus({ indexId: "project" }) });
+        const snapshot = await refreshCurrentSnapshot();
+        return json({ ok: true, data: { index: snapshot.state.semanticIndex ?? snapshot.semanticIndex } });
       }
       if (url.pathname === ApiRoute.CodeSymbols) {
-        const snapshot = await refreshCurrentSnapshot();
+        const snapshot = await ensureIndexedSnapshot("Code symbol search requested current project context.");
         const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
         if (!safePath.ok) return json(safePath.error, 400);
         const sourceFiles = snapshot.files.filter(isCodeGraphIndexableFile).length;
@@ -148,7 +150,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { sourceFiles, symbols: result.symbols } });
       }
       if (url.pathname === ApiRoute.CodeGraph) {
-        const snapshot = await refreshCurrentSnapshot();
+        const snapshot = await ensureIndexedSnapshot("Code graph search requested current project context.");
         const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
         if (!safePath.ok) return json(safePath.error, 400);
         const direction = codeGraphDirectionParam(url);
@@ -164,7 +166,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { sourceFiles: snapshot.files.filter(isCodeGraphIndexableFile).length, edges: result.edges } });
       }
       if (url.pathname === ApiRoute.ContextChunks) {
-        const snapshot = await refreshCurrentSnapshot();
+        const snapshot = await ensureIndexedSnapshot("Project Context chunks requested current index.");
         const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
         if (!pathFilter.ok) return json(pathFilter.error, 400);
         return json({
@@ -181,7 +183,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextSearch) {
         return await tracer.span("project-context.search", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await refreshCurrentSnapshot();
+          const snapshot = await ensureIndexedSnapshot("Project Context search requested current index.");
           const query = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
           const limit = Math.min(100, numberParam(url, UrlSearchParam.Limit, 20));
           const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
@@ -210,7 +212,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextAsk) {
         return await tracer.span("project-context.ask", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await refreshCurrentSnapshot();
+          const snapshot = await ensureIndexedSnapshot("Project Context Ask requested current index.");
           const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
           if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context Ask requires a query."), 400);
           try {
@@ -231,7 +233,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextCoverage) {
-        const snapshot = await refreshCurrentSnapshot();
+        const snapshot = await ensureIndexedSnapshot("Project Context coverage requested current index.");
         return json({ ok: true, data: projectContextCoverage({ store: currentStore(), snapshot }) });
       }
       if (url.pathname === ApiRoute.ContextPacket) {
@@ -267,7 +269,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextBacklinks) {
-        const snapshot = await refreshCurrentSnapshot();
+        const snapshot = await ensureIndexedSnapshot("Project Context backlinks requested current index.");
         const query = (url.searchParams.get(UrlSearchParam.Query) ?? url.searchParams.get(UrlSearchParam.Id) ?? url.searchParams.get(UrlSearchParam.Path) ?? "").trim();
         if (!query) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context backlinks requires query, id, or path."), 400);
         return json({ ok: true, data: projectContextBacklinks({ snapshot, query }) });
@@ -354,11 +356,13 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { event: ownership.event, changes: snapshot.changes } });
       }
       if (url.pathname === ApiRoute.CanonRelated) {
-        const snapshot = await refreshCurrentSnapshot();
         const body = request.method === "POST" ? await readJsonBody(request) : {};
         const requestedFiles = request.method === "POST" ? stringArrayBodyValue(body.files) : url.searchParams.getAll(UrlSearchParam.File);
         const safeFiles = validateOptionalRelativePaths(requestedFiles);
         if (!safeFiles.ok) return json(safeFiles.error, 400);
+        const snapshot = safeFiles.paths.length > 0
+          ? await ensureIndexedSnapshot("File-scoped related canon requested current project context.")
+          : await refreshCurrentSnapshot();
         const currentSnapshot = snapshot;
         const query = {
           files: safeFiles.paths,

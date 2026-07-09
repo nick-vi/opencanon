@@ -459,8 +459,8 @@ function validateSemanticEmbeddingConfig(config: unknown): string[] {
   const diagnostics: string[] = [];
   if (!isRecord(config)) return ["semanticEmbedding must be an object."];
   const ids = semanticEmbeddingModelIds();
-  if (config.mode !== SemanticEmbeddingProviderKind.Local && config.mode !== SemanticEmbeddingProviderKind.Native) {
-    diagnostics.push(`semanticEmbedding.mode must be "${SemanticEmbeddingProviderKind.Local}" or "${SemanticEmbeddingProviderKind.Native}".`);
+  if (config.mode !== SemanticEmbeddingProviderKind.Native) {
+    diagnostics.push(`semanticEmbedding.mode must be "${SemanticEmbeddingProviderKind.Native}".`);
   }
   if (typeof config.modelId !== "string" || !ids.includes(config.modelId as SemanticEmbeddingModelId)) {
     diagnostics.push(`semanticEmbedding.modelId must be one of: ${ids.join(", ")}.`);
@@ -469,9 +469,6 @@ function validateSemanticEmbeddingConfig(config: unknown): string[] {
 
   const modelId = config.modelId as SemanticEmbeddingModelId;
   const model = semanticEmbeddingModel(modelId);
-  if (config.mode === SemanticEmbeddingProviderKind.Local && model.providerKind !== SemanticEmbeddingProviderKind.Local) {
-    diagnostics.push(`semanticEmbedding.modelId must be the local model when mode is "${SemanticEmbeddingProviderKind.Local}".`);
-  }
   if (config.mode === SemanticEmbeddingProviderKind.Native && model.providerKind !== SemanticEmbeddingProviderKind.Native) {
     diagnostics.push(`semanticEmbedding.modelId must be a native model such as "${DefaultNativeSemanticEmbeddingModelId}" when mode is "${SemanticEmbeddingProviderKind.Native}".`);
   }

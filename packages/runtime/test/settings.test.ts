@@ -61,7 +61,7 @@ test("runtime project settings read and write opencanon config", () => {
     assert.equal(invalid.ok, false);
     const invalidSemantic = writeProjectSettings(rootDir, {
       overrides: {
-        semanticEmbedding: { mode: "native", modelId: "opencanon-local-hash-128", showDownloadProgress: true },
+        semanticEmbedding: { mode: "native", modelId: "unknown-embedding-model", showDownloadProgress: true },
       },
     });
     assert.equal(invalidSemantic.ok, false);

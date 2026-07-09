@@ -42,7 +42,7 @@ export type ServiceRegistryEntry = {
 };
 
 // Single source of truth for runtime inspection statuses; reference members instead of inlining the strings.
-export const RuntimeStatus = { Running: "running", Starting: "starting", Unhealthy: "unhealthy", Stale: "stale" } as const;
+export const RuntimeStatus = { Busy: "busy", Running: "running", Starting: "starting", Unhealthy: "unhealthy", Stale: "stale" } as const;
 export type RuntimeStatus = (typeof RuntimeStatus)[keyof typeof RuntimeStatus];
 
 export type ServiceRecentProject = {
@@ -165,6 +165,7 @@ export type ServiceServer = {
 
 export const ProcessLifecycleStatus = {
   Starting: "starting",
+  Busy: "busy",
   Running: "running",
   BackingOff: "backing-off",
   Failed: "failed",
@@ -234,6 +235,7 @@ export type ServiceHealth = {
 
 export type ReconcileProjectRuntimesResult = {
   inspected: number;
+  busy: number;
   running: number;
   starting: number;
   restarted: number;

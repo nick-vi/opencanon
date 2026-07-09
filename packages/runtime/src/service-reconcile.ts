@@ -1,5 +1,5 @@
 import { createLifecycle, restartDue, runtimeFailureLifecycle } from "./service-lifecycle.ts";
-import { inspectAllRuntimes, runtimeStartupStillWithinGrace } from "./service-monitor.ts";
+import { inspectAllRuntimes, runtimeBusyStillWithinBudget, runtimeStartupStillWithinGrace } from "./service-monitor.ts";
 import { repairRegisteredServiceProcessArtifacts, retireConflictingProjectWorkerLease } from "./service-process.ts";
 import { startProjectRuntime } from "./service-start.ts";
 import {
@@ -22,6 +22,7 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
   const repair = await repairRegisteredServiceProcessArtifacts(registryPath);
   const result: ReconcileProjectRuntimesResult = {
     inspected: 0,
+    busy: 0,
     running: 0,
     starting: 0,
     restarted: 0,
@@ -36,14 +37,20 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
   for (const inspection of inspections) {
     result.inspected += 1;
     const withinStartupGrace = runtimeStartupStillWithinGrace(inspection.entry, nowMs);
+    const withinBusyBudget = runtimeBusyStillWithinBudget(inspection.entry, nowMs);
     await retireConflictingProjectWorkerLease(inspection.entry.rootDir, registryPath, inspection.entry.pid, {
-      allowStaleAllowedPid: withinStartupGrace,
+      allowStaleAllowedPid: withinStartupGrace || withinBusyBudget,
     });
     if (inspection.status === RuntimeStatus.Running) {
       result.running += 1;
       if (inspection.entry.lifecycle.status !== ProcessLifecycleStatus.Running) {
         updateRuntimeLifecycle(inspection.entry, createLifecycle(ProcessLifecycleStatus.Running, inspection.message), registryPath);
       }
+      continue;
+    }
+
+    if (inspection.status === RuntimeStatus.Busy || withinBusyBudget) {
+      result.busy += 1;
       continue;
     }
 

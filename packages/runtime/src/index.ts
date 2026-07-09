@@ -7,9 +7,6 @@ export { createProjectObservabilityExporter } from "./observability.ts";
 export {
   buildProjectSemanticIndex,
   createSemanticEmbeddingBackend,
-  localHashEmbeddingBackend,
-  localHashEmbeddingProvider,
-  semanticSearchVector,
   semanticSearchVectorForProvider,
 } from "./semantic-index.ts";
 export type { SemanticEmbeddingBackend } from "./semantic-index.ts";

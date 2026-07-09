@@ -187,6 +187,24 @@ fn repair_semantic_index_schema(conn: &Connection) -> napi::Result<()> {
              delete from semantic_index_snapshots;",
         )
         .map_err(|error| sqlite_error("Could not clear stale semantic index state", error))?;
+        return Ok(());
+    }
+
+    let unsupported_providers: i64 = conn
+        .query_row(
+            "select count(*) from semantic_index_snapshots
+             where coalesce(json_extract(payload, '$.provider.kind'), '') not in ('native', 'remote')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| sqlite_error("Could not inspect semantic index providers", error))?;
+    if unsupported_providers > 0 {
+        conn.execute_batch(
+            "delete from semantic_chunks_fts;
+             delete from semantic_chunks;
+             delete from semantic_index_snapshots;",
+        )
+        .map_err(|error| sqlite_error("Could not clear unsupported semantic index state", error))?;
     }
     Ok(())
 }

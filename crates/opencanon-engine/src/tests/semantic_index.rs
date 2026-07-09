@@ -16,9 +16,9 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
                     "version": "semantic-index-v1",
                     "status": "ready",
                     "provider": {
-                        "id": "opencanon-local-hash",
-                        "kind": "local",
-                        "modelId": "opencanon-local-hash-2",
+                        "id": "opencanon-native-test",
+                        "kind": "native",
+                        "modelId": "test-native-embedding-2",
                         "dimensions": 2,
                         "distance": "cosine",
                         "configHash": "config"
@@ -95,7 +95,7 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
     assert_eq!(status["index"]["embeddingStats"]["reusedChunks"], 0);
     assert_eq!(
         status["index"]["provider"]["modelId"],
-        "opencanon-local-hash-2"
+        "test-native-embedding-2"
     );
 
     let search = project
@@ -152,9 +152,9 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
             "version": "semantic-index-v1",
             "status": "ready",
             "provider": {
-                "id": "opencanon-local-hash",
-                "kind": "local",
-                "modelId": "opencanon-local-hash-2",
+                "id": "opencanon-native-test",
+                "kind": "native",
+                "modelId": "test-native-embedding-2",
                 "dimensions": 2,
                 "distance": "cosine",
                 "configHash": "config"
@@ -265,9 +265,9 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
                     "version": "semantic-index-v1",
                     "status": "ready",
                     "provider": {
-                        "id": "opencanon-local-hash",
-                        "kind": "local",
-                        "modelId": "opencanon-local-hash-2",
+                        "id": "opencanon-native-test",
+                        "kind": "native",
+                        "modelId": "test-native-embedding-2",
                         "dimensions": 2,
                         "distance": "cosine",
                         "configHash": "config"
@@ -339,9 +339,9 @@ fn semantic_index_recovers_when_vector_store_has_stale_duplicate_id() {
             "version": "semantic-index-v1",
             "status": "ready",
             "provider": {
-                "id": "opencanon-local-hash",
-                "kind": "local",
-                "modelId": "opencanon-local-hash-2",
+                "id": "opencanon-native-test",
+                "kind": "native",
+                "modelId": "test-native-embedding-2",
                 "dimensions": 2,
                 "distance": "cosine",
                 "configHash": "config"
@@ -416,6 +416,85 @@ fn semantic_index_recovers_when_vector_store_has_stale_duplicate_id() {
         .unwrap();
     let search: Value = serde_json::from_str(&search).unwrap();
     assert_eq!(search["results"][0]["chunk"]["id"], "chunk:stale");
+}
+
+#[test]
+fn semantic_index_repair_clears_unsupported_provider_state() {
+    let root = test_root("semantic-index-unsupported-provider");
+    {
+        let project = open_test_project(&root);
+        project
+            .write_semantic_index_json(
+                json!({
+                    "index": {
+                        "id": "project",
+                        "version": "semantic-index-v1",
+                        "status": "ready",
+                        "provider": {
+                            "id": "unsupported-provider",
+                            "kind": "unsupported",
+                            "modelId": "test-unsupported-embedding-2",
+                            "dimensions": 2,
+                            "distance": "cosine",
+                            "configHash": "config"
+                        },
+                        "chunkerVersion": "chunker",
+                        "producerVersion": "producer",
+                        "sourceInventoryHash": "inventory",
+                        "chunkTreeHash": "chunk-tree",
+                        "identityHash": "identity",
+                        "chunkCount": 1,
+                        "vectorCount": 1,
+                        "staleChunkCount": 0,
+                        "indexedAt": "2026-06-06T00:00:00.000Z",
+                        "diagnostics": []
+                    },
+                    "chunks": [
+                        {
+                            "metadata": {
+                                "id": "chunk:unsupported-provider",
+                                "path": "src/company.ts",
+                                "contentHash": "content",
+                                "chunkHash": "chunk",
+                                "embeddingHash": "embedding",
+                                "kind": "file",
+                                "language": "typescript",
+                                "ordinal": 0,
+                                "range": {
+                                    "start": { "line": 1, "column": 1, "byte": 0 },
+                                    "end": { "line": 1, "column": 10, "byte": 10 }
+                                },
+                                "tokenEstimate": 2,
+                                "preview": "active company"
+                            },
+                            "text": "active company",
+                            "vector": [1.0, 0.0]
+                        }
+                    ]
+                })
+                .to_string(),
+            )
+            .unwrap();
+    }
+
+    let project = open_test_project(&root);
+    let status = project
+        .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+        .unwrap();
+    let status: Value = serde_json::from_str(&status).unwrap();
+    assert_eq!(status["index"], Value::Null);
+
+    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let snapshot_count: i64 = conn
+        .query_row("select count(*) from semantic_index_snapshots", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let chunk_count: i64 = conn
+        .query_row("select count(*) from semantic_chunks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(snapshot_count, 0);
+    assert_eq!(chunk_count, 0);
 }
 
 #[test]

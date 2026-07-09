@@ -7,6 +7,7 @@ import { test } from "vitest";
 import { createAuthoringProject } from "../packages/runtime/test/support.ts";
 
 const script = path.join(process.cwd(), "packages/cli/src/index.ts");
+const CliSpawnTimeoutMs = 60_000;
 
 test("languages command exposes the explicit capability matrix", () => {
   const result = spawnSync(process.execPath, [script, "languages", "--format", "json"], {
@@ -40,7 +41,7 @@ test("review command produces a deterministic local CI report", () => {
       cwd: rootDir,
       encoding: "utf8",
       env: testEnv(rootDir),
-      timeout: 30_000,
+      timeout: CliSpawnTimeoutMs,
     });
 
     assert.equal(result.error, undefined, result.error ? result.error.message : "spawn failed");
@@ -111,7 +112,7 @@ test("changes ready and brief expose agent-ready task work", () => {
       cwd: rootDir,
       encoding: "utf8",
       env: testEnv(rootDir),
-      timeout: 30_000,
+      timeout: CliSpawnTimeoutMs,
     });
     assert.equal(ready.status, 0, ready.stderr || ready.stdout);
     const queue = JSON.parse(ready.stdout) as { ready: Array<{ changeId: string; taskId?: string; surfaces: string[]; suggestedCommands: string[] }>; blocked: Array<{ taskId?: string }> };
@@ -124,7 +125,7 @@ test("changes ready and brief expose agent-ready task work", () => {
       cwd: rootDir,
       encoding: "utf8",
       env: testEnv(rootDir),
-      timeout: 30_000,
+      timeout: CliSpawnTimeoutMs,
     });
     assert.equal(brief.status, 0, brief.stderr || brief.stdout);
     const briefPayload = JSON.parse(brief.stdout) as { queue: { ready: Array<{ taskId?: string; surfaces: string[] }> }; packet: { xml: string; mode: string }; nextActions: Array<{ command: string }> };

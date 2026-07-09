@@ -214,10 +214,12 @@ test("engine JSON binding is wrapped in typed contracts", () => {
       version: "semantic-index-v1",
       status: "ready",
       provider: {
-        id: "opencanon-local-hash",
-        kind: "local",
-        modelId: "opencanon-local-hash-128",
-        dimensions: 2,
+        id: "opencanon-native-jina-code-v2",
+        kind: "native",
+        displayName: "Jina Code v2",
+        modelId: "jina-code-v2",
+        modelDigest: "model",
+        dimensions: 896,
         distance: "cosine",
         configHash: "config",
       },
@@ -248,12 +250,12 @@ test("engine JSON binding is wrapped in typed contracts", () => {
           preview: "company code",
         },
         text: "company code",
-        vector: [1, 0],
+        vector: [1, ...Array.from({ length: 895 }, () => 0)],
       },
     ],
   });
   assert.equal(project.readSemanticIndexStatus().index?.chunkCount, 1);
-  assert.equal(project.searchSemanticIndex({ vector: [1, 0] }).results[0].chunk.path, "src/company.ts");
+  assert.equal(project.searchSemanticIndex({ vector: [1, ...Array.from({ length: 895 }, () => 0)] }).results[0].chunk.path, "src/company.ts");
   assert.equal(project.listSemanticChunks({ paths: ["src/company.ts"] }).chunks[0].path, "src/company.ts");
   assert.deepEqual(
     project.embedSemanticTexts({

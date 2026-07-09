@@ -83,7 +83,7 @@ OpenCanon uses one lightweight global service registered in `~/.opencanon/servic
 
 `opencanon service open` opens the local service API URL. `opencanon project open` opens the current project's runtime API URL.
 
-Normal `context`, `search`, `ask`, `validate`, `feedback`, hook, and workbench commands reuse a running project runtime or ask the service to start one. Project-local generated state remains under `.opencanon/` and is ignored by Git, including SQLite state and context-index vector files. `project start --foreground` runs this project runtime in the foreground for local runtime debugging.
+Normal `context`, `search`, `ask`, `validate`, `feedback`, hook, and workbench commands reuse a running project runtime or ask the service to start one. Project start is intentionally cheap: it opens the local API and reuses cached Project Context state. Run `opencanon project index` when Search, Ask, or Project Map derived state needs a full rebuild. Project-local generated state remains under `.opencanon/` and is ignored by Git, including SQLite state and context-index vector files. `project start --foreground` runs this project runtime in the foreground for local runtime debugging.
 
 ## Runtime Updates
 

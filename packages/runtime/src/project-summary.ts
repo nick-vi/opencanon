@@ -7,7 +7,7 @@ export type ProjectSummary = {
   id: string;
   rootDir: string;
   url: string;
-  status: "running" | "starting" | "unhealthy" | "stale" | "current";
+  status: "busy" | "running" | "starting" | "unhealthy" | "stale" | "current";
   pid?: number;
   port?: number;
   files?: number;

@@ -212,6 +212,7 @@ export function serviceEntryJson(entry: ServiceRegistryEntry): Omit<ServiceRegis
 }
 
 function runtimeStatusActions(inspection: RuntimeInspection): string[] {
+  if (inspection.status === RuntimeStatus.Busy) return ["Wait for current project work to finish, then rerun opencanon project status."];
   if (inspection.status === RuntimeStatus.Starting) return ["Wait for runtime readiness, then rerun opencanon project status."];
   if (inspection.status === RuntimeStatus.Stale) return ["Run opencanon project start to recreate project runtime state."];
   if (inspection.status === RuntimeStatus.Unhealthy) return ["Run opencanon project stop, then opencanon project start."];

@@ -670,6 +670,11 @@ opencanon project open
 opencanon project start --foreground
 ```
 
+`project start` opens the supervised local API and reuses cached Project Context
+state. It does not perform a hidden full Search/Ask/Project Map rebuild on the
+startup path. `project index` is the explicit command for rebuilding derived
+project knowledge.
+
 Validation:
 
 ```bash

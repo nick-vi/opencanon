@@ -16,7 +16,7 @@ export type SemanticDistance = z.infer<typeof SemanticDistanceSchema>;
 
 export const SemanticEmbeddingProviderSchema = z.object({
   id: z.string().min(1),
-  kind: z.enum(["local", "native", "remote"]).default("local"),
+  kind: z.enum(["native", "remote"]).default("native"),
   displayName: z.string().min(1).optional(),
   modelId: z.string().min(1),
   modelDigest: z.string().min(1).optional(),

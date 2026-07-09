@@ -9,7 +9,7 @@ import {
   serviceRegistryPath,
   stopProjectRuntime,
   RuntimeStatus,
-  waitForProjectRuntimeReady,
+  type RuntimeInspection,
   type RuntimeRegistryEntry,
 } from "@opencanon/runtime";
 import { resolveRootDir } from "@opencanon/core";
@@ -42,6 +42,7 @@ export const RuntimeApiRoute = {
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
 const RunningRuntimeProducerWarmTimeoutMs = 35_000;
 const SupervisedRuntimeStartupAttempts = 3;
+const SupervisedRuntimePollMs = 250;
 
 /**
  * Authoritative producer statuses from an ALREADY-running runtime, or undefined
@@ -168,7 +169,7 @@ async function ensureSupervisedRuntimeReady(rootDir: string, registryPath: strin
   for (let attempt = 0; attempt < SupervisedRuntimeStartupAttempts; attempt += 1) {
     await ensureProjectRuntimeViaService({ cwd: rootDir, waitForReady: false, registryPath });
     try {
-      return (await waitForProjectRuntimeReady(rootDir, { registryPath, timeoutMs })).entry;
+      return await waitForSupervisedRuntimeUsable(rootDir, registryPath, timeoutMs);
     } catch (error) {
       lastError = error;
       if (!(await shouldRetryFailedSupervisedStartup(rootDir, registryPath))) throw error;
@@ -176,6 +177,30 @@ async function ensureSupervisedRuntimeReady(rootDir: string, registryPath: strin
     }
   }
   throw lastError;
+}
+
+async function waitForSupervisedRuntimeUsable(rootDir: string, registryPath: string, timeoutMs: number): Promise<RuntimeRegistryEntry> {
+  const startedAt = Date.now();
+  let lastMessage = "Project runtime did not become usable.";
+  while (Date.now() - startedAt < timeoutMs) {
+    const inspection = await inspectProjectRuntime(rootDir, registryPath);
+    const entry = usableRuntimeEntry(inspection);
+    if (entry) return entry;
+    if (!inspection) throw new Error("Project runtime did not become usable: no project runtime is registered.");
+    if (inspection.status === RuntimeStatus.Stale || inspection.status === RuntimeStatus.Unhealthy) {
+      throw new Error(`Project runtime did not become usable: ${inspection.status}: ${inspection.message}`);
+    }
+    lastMessage = inspection.message;
+    await sleep(SupervisedRuntimePollMs);
+  }
+  throw new Error(`Project runtime did not become usable within ${timeoutMs}ms: ${lastMessage}`);
+}
+
+function usableRuntimeEntry(inspection: RuntimeInspection | undefined): RuntimeRegistryEntry | undefined {
+  if (!inspection) return undefined;
+  if (inspection.status === RuntimeStatus.Running) return inspection.entry;
+  if (inspection.status === RuntimeStatus.Busy && inspection.health) return inspection.entry;
+  return undefined;
 }
 
 async function shouldRetryFailedSupervisedStartup(rootDir: string, registryPath: string): Promise<boolean> {
@@ -198,6 +223,10 @@ function isLocalTransportFailure(error: unknown): boolean {
     message.includes("ENOENT") ||
     message.includes("No such file or directory")
   );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function errorMessages(error: unknown, seen = new Set<unknown>()): string[] {

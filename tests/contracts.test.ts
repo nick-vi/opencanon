@@ -46,6 +46,7 @@ import {
   DefaultSemanticEmbeddingConfig,
   semanticEmbeddingModel,
   SemanticEmbeddingModelId,
+  SemanticEmbeddingProviderKind,
   semanticEmbeddingModelIds,
   type ContextPaths,
 } from "@opencanon/core";
@@ -358,10 +359,12 @@ test("semantic index contracts require provider identity and chunk metadata", ()
       version: "semantic-index-v1",
       status: "ready",
       provider: {
-        id: "opencanon-local-hash",
-        kind: "local",
-        modelId: "opencanon-local-hash-128",
-        dimensions: 128,
+        id: "opencanon-native-jina-code-v2",
+        kind: "native",
+        displayName: "Jina Code v2",
+        modelId: "jina-code-v2",
+        modelDigest: "model-hash",
+        dimensions: 896,
         distance: "cosine",
         configHash: "config-hash",
       },
@@ -392,26 +395,24 @@ test("semantic index contracts require provider identity and chunk metadata", ()
           preview: "company loader",
         },
         text: "company loader",
-        vector: [1, 0],
+        vector: [1, ...Array.from({ length: 895 }, () => 0)],
       },
     ],
   });
-  const search = SearchSemanticIndexRequestSchema.parse({ vector: [1, 0] });
+  const search = SearchSemanticIndexRequestSchema.parse({ vector: [1, ...Array.from({ length: 895 }, () => 0)] });
 
-  assert.equal(request.index.provider.modelId, "opencanon-local-hash-128");
+  assert.equal(request.index.provider.modelId, "jina-code-v2");
   assert.equal(request.chunks[0].metadata.embeddingHash, "embedding");
   assert.equal(search.indexId, "project");
   assert.equal(search.limit, 20);
 });
 
-test("semantic embedding model registry exposes local and native embedding models", () => {
-  const local = semanticEmbeddingModel(SemanticEmbeddingModelId.LocalHash128);
+test("semantic embedding model registry exposes native embedding models", () => {
   const native = semanticEmbeddingModel(SemanticEmbeddingModelId.JinaCodeV2);
 
-  assert.equal(local.providerKind, "local");
-  assert.equal(local.dimensions, 128);
-  assert.equal(native.providerKind, "native");
+  assert.equal(native.providerKind, SemanticEmbeddingProviderKind.Native);
   assert.equal(native.dimensions, 896);
+  assert.equal(semanticEmbeddingModelIds().every((id) => semanticEmbeddingModel(id).providerKind === SemanticEmbeddingProviderKind.Native), true);
   assert(semanticEmbeddingModelIds().includes(SemanticEmbeddingModelId.Qwen3Embed));
 });
 

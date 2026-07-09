@@ -9,7 +9,7 @@ import { stopProjectRuntime, stopService } from "./service-control.ts";
 import { discoverOpenCanonProject } from "./service-discovery.ts";
 import { runtimeIdentityForEntrypoint, runtimeIdentityMatches, ownerPidFromEnv, createProcessLeaseId } from "./service-identity.ts";
 import { createLifecycle, withLifecycle } from "./service-lifecycle.ts";
-import { inspectProjectRuntime, inspectService, runtimeStartupStillWithinGrace, waitForRuntimeHealth, waitForRuntimeHealthResult, waitForServiceHealthResult } from "./service-monitor.ts";
+import { inspectProjectRuntime, inspectService, runtimeBusyStillWithinBudget, runtimeStartupStillWithinGrace, waitForRuntimeHealth, waitForRuntimeHealthResult, waitForServiceHealthResult } from "./service-monitor.ts";
 import {
   chooseAvailablePort,
   portRangeKeyForRegistry,
@@ -85,8 +85,9 @@ export async function startProjectRuntime(input: {
     const cli = runtimeCliInvocation(rootDir, ["project", "start", "--foreground", "--host", host, "--port", String(input.port ?? defaultRuntimePort)]);
     const runtimeIdentity = runtimeIdentityForEntrypoint(cli.entrypoint);
     const existing = await inspectProjectRuntime(rootDir, registryPath);
+    const nowMs = Date.now();
     await retireConflictingProjectWorkerLease(rootDir, registryPath, existing?.entry.pid, {
-      allowStaleAllowedPid: existing ? runtimeStartupStillWithinGrace(existing.entry, Date.now()) : false,
+      allowStaleAllowedPid: existing ? runtimeStartupStillWithinGrace(existing.entry, nowMs) || runtimeBusyStillWithinBudget(existing.entry, nowMs) : false,
     });
     if (existing && !runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
       await stopProjectRuntime(rootDir, registryPath);
@@ -110,6 +111,12 @@ export async function startProjectRuntime(input: {
       await stopProjectRuntime(rootDir, registryPath);
     } else if (existing?.status === RuntimeStatus.Unhealthy) {
       await stopProjectRuntime(rootDir, registryPath);
+    } else if (existing?.status === RuntimeStatus.Busy) {
+      return {
+        status: "already-running",
+        entry: existing.entry,
+        message: `OpenCanon project runtime is busy for ${rootDir}.`,
+      };
     } else if (existing?.status === RuntimeStatus.Running) {
       return {
         status: "already-running",

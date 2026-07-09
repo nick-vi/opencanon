@@ -273,6 +273,10 @@ async function runServeCommand(args: string[], cwd: string, surface: ProjectRunt
 
   const registryPath = typeof options.registry === "string" ? options.registry : process.env[RuntimeEnv.RegistryPath];
   const resolvedRootDir = resolveRootDir(cwd);
+  let resolveStopped: () => void = () => undefined;
+  const stoppedPromise = new Promise<void>((resolve) => {
+    resolveStopped = resolve;
+  });
   const server = await startOpenCanonRuntime({
     cwd,
     host: typeof options.host === "string" ? options.host : undefined,
@@ -282,17 +286,24 @@ async function runServeCommand(args: string[], cwd: string, surface: ProjectRunt
     onIdle: registryPath
       ? () => forgetRuntimeEntryForPid(resolvedRootDir, process.pid, registryPath)
       : undefined,
+    onStopped: resolveStopped,
   });
+  let stopping = false;
   const stop = async () => {
+    if (stopping) return;
+    stopping = true;
     if (registryPath) forgetRuntimeEntryForPid(resolvedRootDir, process.pid, registryPath);
-    await server.stop();
-    process.exit(0);
+    try {
+      await server.stop();
+    } finally {
+      resolveStopped();
+    }
   };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
   console.log(`OpenCanon ${surface.displayName.toLowerCase()} listening at ${server.url}`);
   console.log(`OpenCanon ${surface.displayName.toLowerCase()} pipe at ${server.pipeEndpoint}`);
-  await new Promise(() => undefined);
+  await stoppedPromise;
 }
 
 async function runProjectStatusCommand(args: string[], cwd: string, surface: ProjectRuntimeCliSurface): Promise<void> {
@@ -359,11 +370,12 @@ async function runServiceStartCommand(args: string[], cwd: string): Promise<void
   const cli = cac("opencanon service start");
   cli.option("--host <host>", "Host to bind.");
   cli.option("--port <port>", "Port to bind.");
+  cli.option("--format <format>", "Output format.");
   cli.option(RuntimeCliOptionFlag.AllowRemote, "Allow binding outside loopback addresses.");
   cli.option("-h, --help", "Show help.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnexpectedCommandInput(parsed.args, "opencanon service start", options, ["help", "h", "host", "port", "allowRemote"]);
+  rejectUnexpectedCommandInput(parsed.args, "opencanon service start", options, ["help", "h", "host", "port", "format", "allowRemote"]);
   if (options.help || options.h) {
     printServiceHelp();
     return;
@@ -374,6 +386,16 @@ async function runServiceStartCommand(args: string[], cwd: string): Promise<void
     port: normalizeRuntimePort(options.port),
     allowRemote: options.allowRemote === true,
   });
+  if (formatOption(options.format) === Format.Json) {
+    writeJson({
+      service: {
+        status: result.status,
+        message: result.message,
+        entry: serviceEntryJson(result.entry),
+      },
+    });
+    return;
+  }
   console.log(`# OpenCanon Service`);
   console.log("");
   console.log(`Status: ${result.status}`);
@@ -399,6 +421,10 @@ async function runServiceServeCommand(args: string[]): Promise<void> {
   }
   const registryPath = typeof options.registry === "string" ? options.registry : process.env[RuntimeEnv.RegistryPath] ?? serviceRegistryPath();
   const leaseId = process.env.OPENCANON_SERVICE_LEASE_ID?.trim() || `service-${process.pid}`;
+  let resolveStopped: () => void = () => undefined;
+  const stoppedPromise = new Promise<void>((resolve) => {
+    resolveStopped = resolve;
+  });
   const server = await startServiceServer({
     host: typeof options.host === "string" ? options.host : undefined,
     port: normalizeRuntimePort(options.port),
@@ -429,16 +455,22 @@ async function runServiceServeCommand(args: string[]): Promise<void> {
     },
     registryPath,
   );
+  let stopping = false;
   const stop = async () => {
+    if (stopping) return;
+    stopping = true;
     forgetServiceEntryForPid(process.pid, registryPath);
-    await server.stop();
-    process.exit(0);
+    try {
+      await server.stop();
+    } finally {
+      resolveStopped();
+    }
   };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
   console.log(`OpenCanon service listening at ${server.url}`);
   console.log(`OpenCanon service pipe at ${server.pipeEndpoint}`);
-  await new Promise(() => undefined);
+  await stoppedPromise;
 }
 
 async function runServiceEventsCommand(args: string[]): Promise<void> {
@@ -768,7 +800,7 @@ Options:
 
 function printServiceHelp(): void {
   console.log(`Usage:
-  opencanon service start
+  opencanon service start --format json
   opencanon service run
   opencanon service status
   opencanon service status --format json
@@ -787,6 +819,6 @@ Commands:
   stop    Stop the global OpenCanon service.
 
 Options:
-  --format markdown|json  Status output format. Default: markdown.
+  --format markdown|json  Output format for start, status, events, and stop. Default: markdown.
 `);
 }

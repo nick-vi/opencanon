@@ -10,7 +10,7 @@ import {
   SemanticIndexVersion,
   buildDefinitionGraph,
   FixSafety,
-  InteractiveProducerPolicy,
+  BatchProducerPolicy,
   discoverProjectFiles,
   loadProjectContext,
   isEngineExtractableFile,
@@ -40,17 +40,20 @@ import {
   type ChangeTaskState,
   type RepoGraph,
   type SemanticEmbeddingConfig,
+  type SemanticEmbeddingProvider,
   type SemanticChunkMetadata,
+  type SemanticIndexDiagnostic,
   type SemanticIndexSnapshot,
   type ValidationResultCache,
   type Validator,
   type ValidatorOutcome,
+  type ProducerPolicy,
   type ProducerSnapshot,
 } from "@opencanon/core";
 import type { Engine } from "@opencanon/engine";
 import type { ProjectStore } from "./state.ts";
 import { ENGINE_PARSER_VERSION } from "./ast-facts-provider.ts";
-import { buildProjectSemanticIndex, localHashEmbeddingProvider } from "./semantic-index.ts";
+import { buildProjectSemanticIndex, configuredSemanticEmbeddingProvider } from "./semantic-index.ts";
 import { activeTaskLeaseSummaries, listGlobalCanonEvents, mergeCanonEvents } from "./worktree-coordination.ts";
 import {
   buildProductModelProjection,
@@ -81,6 +84,11 @@ const SnapshotFindingKind = {
 const SnapshotValidator = {
   Id: "runtime-snapshot",
   Severity: "warning",
+} as const;
+
+const SemanticIndexStatus = {
+  Failed: "failed",
+  Stale: "stale",
 } as const;
 
 export type RuntimeSnapshot = {
@@ -277,12 +285,130 @@ export type RelatedCanon = {
   impactSurfaces: ImpactSurface[];
 };
 
+export async function buildStartupRuntimeSnapshot(input: {
+  cwd: string;
+  engine: Engine;
+  store: ProjectStore;
+}): Promise<RuntimeSnapshot> {
+  const project = await loadProjectContext(input.cwd);
+  const recentEvents = mergeCanonEvents([...input.store.listEvents(200), ...listGlobalCanonEvents(project.paths.rootDir, 200)], 200);
+  const taskLeases = activeTaskLeaseSummaries(project.paths.rootDir);
+  const findings: CanonFinding[] = [];
+  const areas: SnapshotArea[] = project.areas.map((area) => snapshotArea(project.paths.rootDir, project.paths.areasPath, area));
+  const specs: SnapshotSpec[] = project.specs.map((spec) => snapshotSpec(project.paths.rootDir, project.paths.specsPath, spec));
+  const changes: SnapshotChange[] = project.changes.map((change) =>
+    snapshotChange(project.paths.rootDir, project.paths.changesPath, change, {
+      events: recentEvents,
+      findings,
+      taskLeases,
+    }),
+  );
+  const conventions: SnapshotConvention[] = project.conventions.map((convention) => snapshotConvention(project.paths.rootDir, project.paths.conventionsPath, convention));
+  const impactSurfaces: SnapshotImpactSurface[] = snapshotImpactSurfaces(project.impactSurfaces, project.areas, project.specs, project.changes);
+  const validators = project.validators.map((validator) => ({
+    id: validator.id,
+    severity: validator.severity,
+    scope: validator.scope,
+    domain: validator.domain,
+    facts: validator.facts,
+    analysisGlobs: validator.analysisGlobs,
+    topics: validator.topics,
+    appliesScopes: validator.appliesScopes,
+    conventionIds: validator.conventionIds,
+    docs: validator.docs,
+    summary: validator.summary,
+    visuals: validator.visuals.map((visual) => ({ kind: visual.kind, title: visual.title, definition: visual.definition })),
+  }));
+  const definitionGraph = buildDefinitionGraph({
+    areas: project.areas,
+    specs: project.specs,
+    changes: project.changes,
+    conventions: project.conventions,
+    impactSurfaces: project.impactSurfaces,
+    validators: project.validators.map((validator) => ({ id: validator.id, conventionIds: validator.conventionIds })),
+  });
+  definitionGraph.fileCoverage = buildSnapshotFileCoverage({
+    files: [],
+    areas,
+    specs,
+    changes,
+    conventions,
+    impactSurfaces,
+  });
+  const productModel = buildProductModelProjection({
+    areas,
+    specs,
+    changes,
+    conventions,
+    impactSurfaces,
+    validators,
+    definitionGraph,
+  });
+  const semanticIndex = cachedStartupSemanticIndexSnapshot(input.store, project.paths.semanticEmbedding);
+  const graph: RepoGraph = {
+    rootDir: project.paths.rootDir,
+    graphHash: createHash("sha256").update(`startup:${productModel.graphHash}:${productModel.definitionsHash}`).digest("hex"),
+    files: [],
+    packages: [],
+    importEdges: [],
+  };
+  const conventionDocsByReference = docsByConvention(project.conventions);
+  const health: RuntimeHealth = {
+    status: "stale",
+    engine: input.engine.version(),
+    refresh: input.store.project.status().refresh,
+    startedAt: new Date().toISOString(),
+    validatorGraph: {
+      entrypoint: project.validatorGraph.entrypoint,
+      hash: project.validatorGraph.hash,
+      loadedAt: project.validatorGraph.loadedAt,
+      validatorCount: project.validatorGraph.validatorCount,
+      dependencyFiles: project.validatorGraph.dependencyFiles,
+    },
+  };
+  const storeState = input.store.readState();
+  return {
+    health,
+    state: {
+      health,
+      files: storeState.files,
+      findings: storeState.findings,
+      staleFiles: storeState.staleFiles,
+      cacheHits: 0,
+      cacheMisses: 0,
+      semanticIndex,
+      productModel: {
+        ...productModel.counts,
+        graphHash: productModel.graphHash,
+        definitionsHash: productModel.definitionsHash,
+        indexedAt: productModel.indexedAt,
+      },
+    },
+    files: [],
+    areas,
+    specs,
+    changes,
+    conventions,
+    docs: resolveDocsReferences(project.paths, [...conventionDocsByReference.keys()], conventionDocsByReference),
+    graph,
+    facts: [],
+    findings,
+    definitionGraph,
+    validatorOutcomes: [],
+    producerSnapshot: {},
+    semanticIndex,
+    impactSurfaces,
+    validators,
+  };
+}
+
 export async function buildRuntimeSnapshot(input: {
   cwd: string;
   engine: Engine;
   store: ProjectStore;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
   semanticIndexMode?: "build" | "reuse";
+  producerPolicy?: ProducerPolicy;
   validationResultCache: ValidationResultCache;
 }): Promise<RuntimeSnapshot> {
   const project = await loadProjectContext(input.cwd);
@@ -358,7 +484,7 @@ export async function buildRuntimeSnapshot(input: {
     changes: project.changes,
     validators: project.validators,
     project: true,
-    producerPolicy: InteractiveProducerPolicy,
+    producerPolicy: input.producerPolicy ?? BatchProducerPolicy,
     resultCache: input.validationResultCache,
   });
 
@@ -468,6 +594,7 @@ export async function buildRuntimeSnapshot(input: {
     semanticIndexSnapshot = cachedSemanticIndexSnapshot({
       scan,
       store: input.store,
+      semanticEmbedding: project.paths.semanticEmbedding,
     });
   } else {
     let semanticIndex = buildProjectSemanticIndex({
@@ -551,28 +678,91 @@ function listPreviousSemanticChunks(store: ProjectStore): SemanticChunkMetadata[
 function cachedSemanticIndexSnapshot(input: {
   scan: { inventoryHash: string };
   store: ProjectStore;
+  semanticEmbedding?: SemanticEmbeddingConfig | undefined;
 }): SemanticIndexSnapshot {
+  const providerCheck = configuredSemanticEmbeddingProvider(input.semanticEmbedding);
   const previous = input.store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index;
+  if (hasSemanticIndexError(providerCheck.diagnostics)) {
+    return failedSemanticIndexSnapshot({
+      sourceInventoryHash: input.scan.inventoryHash,
+      provider: providerCheck.provider,
+      diagnostics: providerCheck.diagnostics,
+    });
+  }
   if (previous) {
     const sourceCurrent = previous.sourceInventoryHash === input.scan.inventoryHash;
+    const providerCurrent = semanticProvidersMatch(previous.provider, providerCheck.provider);
+    const current = sourceCurrent && providerCurrent;
     return {
       ...previous,
-      status: sourceCurrent ? previous.status : "stale",
+      status: current ? previous.status : "stale",
       sourceInventoryHash: sourceCurrent ? previous.sourceInventoryHash : input.scan.inventoryHash,
-      staleChunkCount: sourceCurrent ? previous.staleChunkCount : Math.max(previous.staleChunkCount, previous.chunkCount),
-      diagnostics: sourceCurrent
+      staleChunkCount: current ? previous.staleChunkCount : Math.max(previous.staleChunkCount, previous.chunkCount),
+      diagnostics: current
         ? previous.diagnostics
         : [
             ...previous.diagnostics.filter((diagnostic) => diagnostic.code !== "semantic-index-stale-on-startup"),
+            ...semanticProviderChangedDiagnostics(previous.provider, providerCheck.provider).filter(
+              (diagnostic) => !previous.diagnostics.some((existing) => existing.code === diagnostic.code),
+            ),
             {
               code: "semantic-index-stale-on-startup",
-              message: "The cached Project Context index is being refreshed by the worker.",
+              message: providerCurrent
+                ? "The cached Project Context index is being refreshed by the worker."
+                : "The cached Project Context index was built with a different embedding provider and is being rebuilt.",
               severity: DiagnosticSeverity.Info,
             },
           ],
     };
   }
-  const provider = localHashEmbeddingProvider();
+  return missingSemanticIndexSnapshot(input.scan.inventoryHash, input.semanticEmbedding);
+}
+
+function cachedStartupSemanticIndexSnapshot(store: ProjectStore, semanticEmbedding?: SemanticEmbeddingConfig | undefined): SemanticIndexSnapshot {
+  const providerCheck = configuredSemanticEmbeddingProvider(semanticEmbedding);
+  const previous = store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index;
+  if (hasSemanticIndexError(providerCheck.diagnostics)) {
+    return failedSemanticIndexSnapshot({
+      sourceInventoryHash: previous?.sourceInventoryHash ?? "startup-unscanned",
+      provider: providerCheck.provider,
+      diagnostics: providerCheck.diagnostics,
+    });
+  }
+  if (previous) {
+    const providerCurrent = semanticProvidersMatch(previous.provider, providerCheck.provider);
+    const status = previous.status === SemanticIndexStatus.Failed ? SemanticIndexStatus.Failed : SemanticIndexStatus.Stale;
+    return {
+      ...previous,
+      status,
+      staleChunkCount: status === SemanticIndexStatus.Failed ? previous.staleChunkCount : Math.max(previous.staleChunkCount, previous.chunkCount),
+      diagnostics: [
+        ...previous.diagnostics.filter((diagnostic) => diagnostic.code !== "semantic-index-unverified-on-startup"),
+        ...semanticProviderChangedDiagnostics(previous.provider, providerCheck.provider).filter(
+          (diagnostic) => !previous.diagnostics.some((existing) => existing.code === diagnostic.code),
+        ),
+        {
+          code: "semantic-index-unverified-on-startup",
+          message: providerCurrent
+            ? "Cached Project Context state was reused without a startup source scan. Run opencanon project index to verify Search and Ask freshness."
+            : "Cached Project Context state was built with a different embedding provider. Run opencanon project index to rebuild Search and Ask.",
+          severity: DiagnosticSeverity.Info,
+        },
+      ],
+    };
+  }
+  return missingSemanticIndexSnapshot("startup-unscanned", semanticEmbedding);
+}
+
+function missingSemanticIndexSnapshot(sourceInventoryHash: string, semanticEmbedding?: SemanticEmbeddingConfig | undefined): SemanticIndexSnapshot {
+  const providerCheck = configuredSemanticEmbeddingProvider(semanticEmbedding);
+  if (hasSemanticIndexError(providerCheck.diagnostics)) {
+    return failedSemanticIndexSnapshot({
+      sourceInventoryHash,
+      provider: providerCheck.provider,
+      diagnostics: providerCheck.diagnostics,
+    });
+  }
+  const provider = providerCheck.provider;
   const identityHash = semanticEmbeddingIdentityHash({
     providerId: provider.id,
     modelId: provider.modelId,
@@ -585,11 +775,11 @@ function cachedSemanticIndexSnapshot(input: {
   return {
     id: DefaultSemanticIndexId,
     version: SemanticIndexVersion,
-    status: "indexing",
+    status: "stale",
     provider,
     chunkerVersion: SemanticChunkerVersion,
     producerVersion: SemanticEmbeddingProducerVersion,
-    sourceInventoryHash: input.scan.inventoryHash,
+    sourceInventoryHash,
     chunkTreeHash: semanticChunkTreeHash([]),
     identityHash,
     chunkCount: 0,
@@ -603,12 +793,73 @@ function cachedSemanticIndexSnapshot(input: {
     indexedAt: new Date().toISOString(),
     diagnostics: [
       {
-        code: "semantic-index-starting",
-        message: "Project Context indexing is queued by the worker.",
+        code: "semantic-index-missing-on-startup",
+        message: "Project Context index has not been built yet. Run opencanon project index to build derived Search and Ask state.",
         severity: DiagnosticSeverity.Info,
       },
     ],
   };
+}
+
+function failedSemanticIndexSnapshot(input: {
+  sourceInventoryHash: string;
+  provider: SemanticEmbeddingProvider;
+  diagnostics: SemanticIndexDiagnostic[];
+}): SemanticIndexSnapshot {
+  const identityHash = semanticEmbeddingIdentityHash({
+    providerId: input.provider.id,
+    modelId: input.provider.modelId,
+    modelDigest: input.provider.modelDigest,
+    dimensions: input.provider.dimensions,
+    configHash: input.provider.configHash,
+    chunkerVersion: SemanticChunkerVersion,
+    producerVersion: SemanticEmbeddingProducerVersion,
+  });
+  return {
+    id: DefaultSemanticIndexId,
+    version: SemanticIndexVersion,
+    status: SemanticIndexStatus.Failed,
+    provider: input.provider,
+    chunkerVersion: SemanticChunkerVersion,
+    producerVersion: SemanticEmbeddingProducerVersion,
+    sourceInventoryHash: input.sourceInventoryHash,
+    chunkTreeHash: semanticChunkTreeHash([]),
+    identityHash,
+    chunkCount: 0,
+    vectorCount: 0,
+    staleChunkCount: 0,
+    embeddingStats: {
+      totalChunks: 0,
+      embeddedChunks: 0,
+      reusedChunks: 0,
+    },
+    indexedAt: new Date().toISOString(),
+    diagnostics: input.diagnostics,
+  };
+}
+
+function semanticProvidersMatch(left: SemanticEmbeddingProvider, right: SemanticEmbeddingProvider): boolean {
+  return (
+    left.id === right.id &&
+    left.kind === right.kind &&
+    left.modelId === right.modelId &&
+    left.modelDigest === right.modelDigest &&
+    left.dimensions === right.dimensions &&
+    left.configHash === right.configHash
+  );
+}
+
+function semanticProviderChangedDiagnostics(previous: SemanticEmbeddingProvider, configured: SemanticEmbeddingProvider): SemanticIndexDiagnostic[] {
+  if (semanticProvidersMatch(previous, configured)) return [];
+  return [{
+    code: "semantic-index-provider-changed",
+    message: `Project Context index uses ${previous.modelId}, but project config requires ${configured.modelId}. Run opencanon project index.`,
+    severity: DiagnosticSeverity.Info,
+  }];
+}
+
+function hasSemanticIndexError(diagnostics: SemanticIndexDiagnostic[]): boolean {
+  return diagnostics.some((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error);
 }
 
 function isRecoverableSemanticVectorWriteError(error: unknown): boolean {

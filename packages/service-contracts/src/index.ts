@@ -2,6 +2,7 @@
 // free of Node and framework imports so browser or native clients can consume it.
 
 export const ServiceProjectStatusValue = {
+  Busy: "busy",
   Current: "current",
   Discovered: "discovered",
   Recent: "recent",

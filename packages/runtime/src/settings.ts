@@ -303,9 +303,7 @@ function parseSemanticEmbeddingConfig(input: unknown): { ok: true; config: Seman
   if (semanticEmbeddingModel(modelId).providerKind !== mode) {
     diagnostics.push(
       settingsDiagnostic(
-        mode === SemanticEmbeddingProviderKind.Native
-          ? `${ConfigField.SemanticEmbedding}.modelId must be a native model such as "${DefaultNativeSemanticEmbeddingModelId}".`
-          : `${ConfigField.SemanticEmbedding}.modelId must be "${SemanticEmbeddingModelId.LocalHash128}" for local mode.`,
+        `${ConfigField.SemanticEmbedding}.modelId must be a native model such as "${DefaultNativeSemanticEmbeddingModelId}".`,
       ),
     );
   }
@@ -315,24 +313,24 @@ function parseSemanticEmbeddingConfig(input: unknown): { ok: true; config: Seman
 
 function parseSemanticEmbeddingMode(value: unknown, diagnostics: unknown[]): SemanticEmbeddingProviderKind {
   if (value === undefined) return DefaultSemanticEmbeddingConfig.mode;
-  if (value === SemanticEmbeddingProviderKind.Local || value === SemanticEmbeddingProviderKind.Native) return value;
-  diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.mode must be "${SemanticEmbeddingProviderKind.Local}" or "${SemanticEmbeddingProviderKind.Native}".`));
+  if (value === SemanticEmbeddingProviderKind.Native) return value;
+  diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.mode must be "${SemanticEmbeddingProviderKind.Native}".`));
   return DefaultSemanticEmbeddingConfig.mode;
 }
 
-function parseSemanticEmbeddingModelId(value: unknown, mode: SemanticEmbeddingProviderKind, diagnostics: unknown[]): SemanticEmbeddingModelId {
+function parseSemanticEmbeddingModelId(value: unknown, _mode: SemanticEmbeddingProviderKind, diagnostics: unknown[]): SemanticEmbeddingModelId {
   if (value === undefined) {
-    return mode === SemanticEmbeddingProviderKind.Native ? DefaultNativeSemanticEmbeddingModelId : SemanticEmbeddingModelId.LocalHash128;
+    return DefaultNativeSemanticEmbeddingModelId;
   }
   if (typeof value !== "string") {
     diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.modelId must be a string.`));
-    return mode === SemanticEmbeddingProviderKind.Native ? DefaultNativeSemanticEmbeddingModelId : SemanticEmbeddingModelId.LocalHash128;
+    return DefaultNativeSemanticEmbeddingModelId;
   }
   const modelId = value.trim();
   const ids = semanticEmbeddingModelIds();
   if (!ids.includes(modelId as SemanticEmbeddingModelId)) {
     diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.modelId must be one of: ${ids.join(", ")}.`));
-    return mode === SemanticEmbeddingProviderKind.Native ? DefaultNativeSemanticEmbeddingModelId : SemanticEmbeddingModelId.LocalHash128;
+    return DefaultNativeSemanticEmbeddingModelId;
   }
   return modelId as SemanticEmbeddingModelId;
 }

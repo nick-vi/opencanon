@@ -33,6 +33,7 @@ import {
   renderRuntimeListMarkdown,
   renderRuntimeStatusMarkdown,
   renderServiceStatusMarkdown,
+  reconcileProjectRuntimes,
   resolveRuntimeCliEntrypoint,
   runtimeIdentityForEntrypoint,
   startProjectRuntime,
@@ -393,6 +394,8 @@ test("project runtime readiness wait resolves no-wait starts", { timeout: 10000 
     assert.equal(started.status, "started");
     assert.equal(ready.status, "running");
     assert.equal(ready.entry.pid, started.entry.pid);
+    assert.equal(ready.entry.lifecycle.status, ProcessLifecycleStatus.Running);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, ProcessLifecycleStatus.Running);
   } finally {
     await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
     if (originalOverride === undefined) delete process.env.OPENCANON_CLI;
@@ -706,6 +709,27 @@ test("status commands render token-safe JSON", () => {
   }
 });
 
+test("service start supports token-safe JSON output", { timeout: 60000 }, () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-start-json-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const cli = path.join(process.cwd(), "packages/cli/src/index.ts");
+  const env = { ...process.env, OPENCANON_SERVICE_REGISTRY_PATH: registryPath };
+
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    const started = spawnSync(process.execPath, [cli, "service", "start", "--format", "json"], { cwd: rootDir, env, encoding: "utf8" });
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+    const payload = JSON.parse(started.stdout) as { service: { status: string; message: string; entry: Record<string, unknown> } };
+    assert(["started", "already-running"].includes(payload.service.status));
+    assert(payload.service.message.length > 0);
+    assert.equal(payload.service.entry.authToken, undefined);
+    assert.equal(payload.service.entry.pid, readServiceEntry(registryPath)?.pid);
+  } finally {
+    spawnSync(process.execPath, [cli, "service", "stop", "--format", "json"], { cwd: rootDir, env, encoding: "utf8" });
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime status renders explicit recovery when project refresh is stale", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-refresh-stale-"));
   const entry = {
@@ -988,6 +1012,51 @@ test("runtime stop waits for killed runtimes and removes inactive pipe endpoints
     assert.equal(existsSync(pipeEndpoint), false);
   } finally {
     if (child.pid && processIsRunning(child.pid)) process.kill(child.pid, "SIGKILL");
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("service reconciliation preserves runtimes busy with project work", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-busy-runtime-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const child = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], {
+    stdio: "ignore",
+  });
+
+  try {
+    const pid = await waitForSpawnedPid(child, "busy runtime");
+    const entry = {
+      rootDir,
+      host: "127.0.0.1",
+      port: 9,
+      url: "http://127.0.0.1:9",
+      pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
+      pid,
+      startedAt: "2026-05-01T00:00:00.000Z",
+      logPath: path.join(rootDir, ".opencanon", "runtime.log"),
+      authToken: "test-token",
+      leaseId: "busy-runtime-lease",
+      lifecycle: {
+        ...testLifecycle(ProcessLifecycleStatus.Busy),
+        updatedAt: new Date().toISOString(),
+        message: "Manual reindex is running.",
+      },
+      ...testRuntimeIdentity,
+    };
+    upsertRuntimeEntry(entry, registryPath);
+
+    const inspection = await inspectRuntimeEntry(entry, registryPath);
+    assert.equal(inspection.status, "busy");
+
+    const result = await reconcileProjectRuntimes({ registryPath });
+    assert.equal(result.busy, 1);
+    assert.equal(result.restarted, 0);
+    assert.equal(result.unhealthy, 0);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.pid, pid);
+    assert.equal(processIsRunning(pid), true);
+  } finally {
+    if (child.pid && processIsRunning(child.pid)) process.kill(child.pid, "SIGKILL");
+    forgetRuntimeEntry(rootDir, registryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

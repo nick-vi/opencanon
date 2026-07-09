@@ -24,9 +24,11 @@ import {
   readServiceEntry,
   serviceRegistryPath,
   sleep,
+  updateRuntimeLifecycle,
   writeRuntimeRegistry,
 } from "./service-storage.ts";
 import { retireRuntimeProcessLeases, runtimeProcessLeasesFromMalformedRegistryEntries } from "./service-process.ts";
+import { withLifecycle } from "./service-lifecycle.ts";
 
 export const RuntimeStartupHealthBudgetMs = 180_000;
 const RuntimeStartupHealthIntervalMs = 250;
@@ -37,11 +39,12 @@ const ServiceStartupHealthAttempts = Math.ceil(ServiceStartupHealthBudgetMs / Se
 const LocalHealthProbeTimeoutMs = 2_000;
 const ServiceReconcileIntervalMs = 30_000;
 export const RuntimeStartupGraceMs = RuntimeStartupHealthBudgetMs + ServiceReconcileIntervalMs;
+export const RuntimeBusyBudgetMs = 30 * 60_000;
 
 export async function inspectProjectRuntime(rootDir: string, registryPath = serviceRegistryPath()): Promise<RuntimeInspection | undefined> {
   const resolvedRoot = resolveRootDir(rootDir);
   const entry = readRuntimeRegistry(registryPath).find((item) => item.rootDir === resolvedRoot) ?? readProjectRuntimeEntry(resolvedRoot);
-  return entry ? inspectRuntimeEntry(entry) : undefined;
+  return entry ? inspectRuntimeEntry(entry, registryPath) : undefined;
 }
 
 export async function waitForProjectRuntimeReady(
@@ -79,26 +82,44 @@ export async function inspectAllRuntimes(registryPath = serviceRegistryPath()): 
   const malformedRuntimeLeases = runtimeProcessLeasesFromMalformedRegistryEntries(registryPath);
   await retireRuntimeProcessLeases(malformedRuntimeLeases, registryPath);
   const entries = registry.entries;
-  const inspections = await Promise.all(entries.map(inspectRuntimeEntry));
-  if (registry.diagnostics.length > 0 || malformedRuntimeLeases.length > 0) writeRuntimeRegistry(entries, registryPath);
+  const inspections = await Promise.all(entries.map((entry) => inspectRuntimeEntry(entry, registryPath)));
+  if (registry.diagnostics.length > 0 || malformedRuntimeLeases.length > 0) writeRuntimeRegistry(inspections.map((inspection) => inspection.entry), registryPath);
   return inspections;
 }
 
-export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry): Promise<RuntimeInspection> {
+export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryPath?: string | undefined): Promise<RuntimeInspection> {
   if (!isProcessRunning(entry.pid)) {
     return { entry, status: RuntimeStatus.Stale, message: "Registered process is not running." };
   }
+  const nowMs = Date.now();
   const runtime = await projectRuntimeStatus(entry);
+  const busyWithinBudget = runtimeBusyStillWithinBudget(entry, nowMs);
   if (runtime.ok) {
+    if (busyWithinBudget) {
+      return {
+        entry,
+        status: RuntimeStatus.Busy,
+        message: entry.lifecycle.message ?? "Runtime is busy with project work.",
+        health: runtime.health,
+        state: runtime.state,
+      };
+    }
+    const message = runtime.state ? "Runtime health and state endpoints are ready." : "Runtime health endpoint is ready.";
+    const lifecycleCurrent = entry.lifecycle.status === ProcessLifecycleStatus.Running && entry.lifecycle.message === message;
+    const normalizedEntry = lifecycleCurrent ? entry : withLifecycle(entry, ProcessLifecycleStatus.Running, message);
+    const inspectedEntry = registryPath && !lifecycleCurrent ? updateRuntimeLifecycle(entry, normalizedEntry.lifecycle, registryPath) : normalizedEntry;
     return {
-      entry,
+      entry: inspectedEntry,
       status: RuntimeStatus.Running,
-      message: runtime.state ? "Runtime health and state endpoints are ready." : "Runtime health endpoint is ready.",
+      message,
       health: runtime.health,
       state: runtime.state,
     };
   }
-  if (runtimeStartupStillWithinGrace(entry, Date.now())) {
+  if (busyWithinBudget) {
+    return { entry, status: RuntimeStatus.Busy, message: entry.lifecycle.message ?? "Runtime is busy with project work." };
+  }
+  if (runtimeStartupStillWithinGrace(entry, nowMs)) {
     return { entry, status: RuntimeStatus.Starting, message: "Runtime is still starting; waiting for health endpoint." };
   }
   return { entry, status: RuntimeStatus.Unhealthy, message: runtime.message };
@@ -108,6 +129,12 @@ export function runtimeStartupStillWithinGrace(entry: RuntimeRegistryEntry, nowM
   if (entry.lifecycle.status !== ProcessLifecycleStatus.Starting) return false;
   const startedAtMs = Date.parse(entry.startedAt || entry.lifecycle.updatedAt);
   return Number.isFinite(startedAtMs) && nowMs - startedAtMs < RuntimeStartupGraceMs;
+}
+
+export function runtimeBusyStillWithinBudget(entry: RuntimeRegistryEntry, nowMs: number): boolean {
+  if (entry.lifecycle.status !== ProcessLifecycleStatus.Busy) return false;
+  const updatedAtMs = Date.parse(entry.lifecycle.updatedAt);
+  return Number.isFinite(updatedAtMs) && nowMs - updatedAtMs < RuntimeBusyBudgetMs;
 }
 
 export async function waitForRuntimeHealth(entry: RuntimeRegistryEntry): Promise<boolean> {

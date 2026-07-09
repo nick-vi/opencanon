@@ -47,13 +47,11 @@ import {
   resolveRootDir,
   upsertCommitApproval,
   validateConfig,
-  DefaultSemanticEmbeddingConfig,
   ProjectRefreshModeValue,
   ProjectRefreshStatusValue,
   RuntimeWorkerJobKindValue,
   RuntimeWorkerJobStatusValue,
   TaskLeaseStatus,
-  BatchProducerPolicy,
   InteractiveProducerPolicy,
   ProducerRunProfile,
   type FeedbackHost,
@@ -68,7 +66,7 @@ import {
   type ValidationResultCache,
   type WatcherEventBatch,
 } from "@opencanon/core";
-import { buildRuntimeSnapshot, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
+import { buildRuntimeSnapshot, buildStartupRuntimeSnapshot, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent } from "./server-events.ts";
 import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
@@ -82,6 +80,9 @@ import { listProjects } from "./project-summary.ts";
 import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, validateRuntimeAuth, validateMethod, type RuntimeError } from "./routes.ts";
 import { localPipeEndpoint, serveLocalProtocolPipe, type LocalProtocolPipeServer } from "./local-protocol.ts";
 import { acquireProjectWorkerLease, stopService } from "./service.ts";
+import { createLifecycle } from "./service-lifecycle.ts";
+import { readProjectRuntimeEntry, readRuntimeRegistry, updateRuntimeLifecycle } from "./service-storage.ts";
+import { ProcessLifecycleStatus, type RuntimeRegistryEntry } from "./service-types.ts";
 import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
@@ -130,6 +131,7 @@ export type RuntimeServerOptions = {
   allowRemote?: boolean;
   idleTimeoutMs?: number;
   onIdle?: () => void | Promise<void>;
+  onStopped?: () => void | Promise<void>;
 };
 
 export type RuntimeServer = {
@@ -231,13 +233,10 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let snapshot: RuntimeSnapshot;
   try {
     snapshot = await tracer.span("runtime.snapshot.boot", { kind: SpanKind.TASK, attributes: { phase: "boot" } }, async (span) => {
-      const next = await buildRuntimeSnapshot({
+      const next = await buildStartupRuntimeSnapshot({
         cwd: rootDir,
         engine: prerequisites.engine,
         store,
-        semanticEmbedding: DefaultSemanticEmbeddingConfig,
-        semanticIndexMode: "reuse",
-        validationResultCache,
       });
       span.setOutput({
         files: next.files.length,
@@ -282,7 +281,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let coordinationDirectoryWatcher: FSWatcher | undefined;
   let coordinationSignalWatcher: FSWatcher | undefined;
   let coordinationRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-  let startupRebuildTimer: ReturnType<typeof setTimeout> | undefined;
   let coordinationSignature = "";
   const idleTimeoutMs = options.idleTimeoutMs && options.idleTimeoutMs > 0 ? options.idleTimeoutMs : undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -327,6 +325,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       store: () => store,
       resetIdleTimer,
       refreshCurrentSnapshot,
+      ensureIndexedSnapshot,
       restartStore,
     });
     server = await serveRuntime({ host, port, routeRequest });
@@ -340,17 +339,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       host: "opencanon.runtime",
       maxFrameBytes: MaxRequestBodyBytes,
     });
-    startupRebuildTimer = setTimeout(() => {
-      startupRebuildTimer = undefined;
-      stateManager.scheduleRebuild("Project Context refreshed after startup.");
-    }, 0);
-    if (typeof startupRebuildTimer === "object" && "unref" in startupRebuildTimer) {
-      (startupRebuildTimer as { unref: () => void }).unref();
-    }
     resetIdleTimer();
   } catch (error) {
-    if (startupRebuildTimer) clearTimeout(startupRebuildTimer);
-    startupRebuildTimer = undefined;
     await pipeServer?.stop(true).catch(() => undefined);
     await server?.stop(true).catch(() => undefined);
     stopStoreWatcher();
@@ -391,6 +381,17 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     if (!validatorGraphRuntime) return stateManager.currentSnapshot();
     const refreshed = await validatorGraphRuntime.refreshIfChanged(stateManager.currentSnapshot());
     return stateManager.setSnapshot(withProcessIdentity(refreshed));
+  }
+
+  async function ensureIndexedSnapshot(summary: string): Promise<RuntimeSnapshot> {
+    const snapshot = await refreshCurrentSnapshot();
+    if (!snapshotNeedsIndex(snapshot)) return snapshot;
+    return await stateManager.rebuildAndPublish(summary);
+  }
+
+  function snapshotNeedsIndex(snapshot: RuntimeSnapshot): boolean {
+    const semanticStatus = snapshot.state.semanticIndex?.status ?? snapshot.semanticIndex.status;
+    return snapshot.files.length === 0 || semanticStatus !== RuntimeHealthStatusValue.Ready;
   }
 
   function startStoreWatcher(): void {
@@ -524,7 +525,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       label: "Refreshing Project Context",
       message: summary,
     });
-    return tracer.span("runtime.snapshot.rebuild", { kind: SpanKind.TASK, attributes: { summary } }, async (span) => {
+    return withRuntimeBusyLifecycle("Project context refresh is running.", () => tracer.span("runtime.snapshot.rebuild", { kind: SpanKind.TASK, attributes: { summary } }, async (span) => {
       try {
         updateWorkerJob(jobId, {
           label: "Discovering project files",
@@ -581,7 +582,39 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         });
         throw error;
       }
-    });
+    }));
+  }
+
+  async function withRuntimeBusyLifecycle<T>(message: string, work: () => Promise<T>): Promise<T> {
+    const registryPath = process.env[RuntimeEnv.RegistryPath]?.trim();
+    if (!registryPath) return await work();
+    const activeRegistryPath: string = registryPath;
+    const entry = currentRuntimeRegistryEntry(activeRegistryPath);
+    if (!entry) return await work();
+    updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), activeRegistryPath);
+    try {
+      return await work();
+    } finally {
+      const latest = currentRuntimeRegistryEntry(activeRegistryPath);
+      if (latest?.lifecycle.status === ProcessLifecycleStatus.Busy) {
+        updateRuntimeLifecycle(latest, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", latest.lifecycle.restart), activeRegistryPath);
+      }
+    }
+  }
+
+  function currentRuntimeRegistryEntry(registryPath: string): RuntimeRegistryEntry | undefined {
+    return (
+      readRuntimeRegistry(registryPath).find(runtimeEntryMatchesCurrentProcess) ??
+      maybeCurrentRuntimeEntry(readProjectRuntimeEntry(rootDir))
+    );
+  }
+
+  function maybeCurrentRuntimeEntry(entry: RuntimeRegistryEntry | undefined): RuntimeRegistryEntry | undefined {
+    return entry && runtimeEntryMatchesCurrentProcess(entry) ? entry : undefined;
+  }
+
+  function runtimeEntryMatchesCurrentProcess(entry: RuntimeRegistryEntry): boolean {
+    return entry.rootDir === rootDir && entry.pid === process.pid && entry.leaseId === processIdentity.leaseId;
   }
 
   async function rebuildSnapshot(input: { cwd: string; store: ProjectStore }): Promise<RuntimeSnapshot> {
@@ -590,7 +623,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         cwd: rootDir,
         engine: prerequisites.engine,
         store: input.store,
-        semanticEmbedding: DefaultSemanticEmbeddingConfig,
+        producerPolicy: InteractiveProducerPolicy,
         validationResultCache: stateManager.validationResultCache(),
       }));
     } catch (error) {
@@ -680,8 +713,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   async function stopInternal(): Promise<void> {
     if (stopped) return;
     stopped = true;
-    if (startupRebuildTimer) clearTimeout(startupRebuildTimer);
-    startupRebuildTimer = undefined;
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = undefined;
     if (producerReadyDebounce) clearTimeout(producerReadyDebounce);
@@ -701,6 +732,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     await tracer.shutdown().catch(() => undefined);
     await storeResource.dispose();
     workerLease.release();
+    await options.onStopped?.();
   }
 }
 

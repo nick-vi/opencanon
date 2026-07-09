@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildProjectSemanticIndex, buildRuntimeSnapshot, createProjectStore, semanticSearchVector, semanticSearchVectorForProvider } from "@opencanon/runtime";
+import { buildProjectSemanticIndex, buildRuntimeSnapshot, createProjectStore, semanticSearchVectorForProvider } from "@opencanon/runtime";
 import { createEngine } from "@opencanon/engine";
-import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type WriteSemanticIndexRequest } from "@opencanon/core";
+import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
 
-test("runtime semantic index chunks files with deterministic local vectors", () => {
+test("runtime semantic index chunks files with native vectors", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -52,12 +52,14 @@ test("runtime semantic index chunks files with deterministic local vectors", () 
         staleFiles: 0,
       },
       facts,
+      project: nativeTestProject(),
+      semanticEmbedding: nativeEmbeddingConfig(),
     });
 
     assert.equal(build.index.id, "project");
     assert.equal(build.index.status, "ready");
-    assert.equal(build.index.provider.dimensions, 128);
-    assert.equal(build.index.provider.kind, "local");
+    assert.equal(build.index.provider.dimensions, 896);
+    assert.equal(build.index.provider.kind, "native");
     assert.equal(build.index.chunkTreeHash.length, 64);
     assert.equal(build.index.chunkCount, build.chunks.length);
     assert.deepEqual(build.index.embeddingStats, {
@@ -71,8 +73,106 @@ test("runtime semantic index chunks files with deterministic local vectors", () 
     assert.equal(build.chunks[0].metadata.symbol, "loadCompany");
     assert.equal(build.chunks[0].metadata.embeddingHash.length, 64);
     assert(build.chunks[0].text.includes("Exported function: loadCompany"));
-    assert.equal(build.chunks[0].vector.length, 128);
-    assert.equal(semanticSearchVector("active company").length, 128);
+    assert.equal(build.chunks[0].vector.length, 896);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime snapshot reports a missing reusable semantic index as stale", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-missing-"));
+  try {
+    createAuthoringProject(rootDir);
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
+    const statePath = path.join(rootDir, ".opencanon/state.sqlite");
+    const engine = createEngine({
+      versionJson: () =>
+        JSON.stringify({
+          packageVersion: "0.4.0-test",
+          engineVersion: "0.4.0-test",
+          napiVersion: "test",
+          schemaVersion: 6,
+        }),
+      openProjectJson: () => ({
+        statusJson: () =>
+          JSON.stringify({
+            rootDir,
+            statePath,
+            schemaVersion: 6,
+            migrationsApplied: [1],
+            refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+          }),
+        scanAndDiffJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { files: string[] };
+          return JSON.stringify({
+            statePath,
+            schemaVersion: 6,
+            inventoryHash: "inventory",
+            files: request.files.map((file) => ({ path: file, contentHash: `hash:${file}`, size: 1, stale: false })),
+            changedFiles: request.files,
+            unchangedFiles: [],
+            deletedFiles: [],
+            staleFiles: 0,
+          });
+        },
+        extractFactsJson: () => JSON.stringify({ files: [], diagnostics: [] }),
+        indexCodeGraphJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { files: Array<{ path: string }>; deletedFiles: string[]; parserVersion: string };
+          return JSON.stringify({
+            indexed: request.files.map((file) => ({ path: file.path, nodes: 0, unresolved: 0, supported: true })),
+            deleted: request.deletedFiles,
+            diagnostics: [],
+            parserVersion: request.parserVersion,
+            extractorVersion: "test",
+          });
+        },
+        buildRepoGraphJson: () =>
+          JSON.stringify({
+            graph: { rootDir, graphHash: "graph", files: [] },
+          }),
+        searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
+        searchReferencesJson: () => JSON.stringify({ references: [] }),
+        searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
+        writeProductModelProjectionJson: () => undefined,
+        readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        writeSemanticIndexJson: () => undefined,
+        readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),
+        listSemanticChunksJson: () => JSON.stringify({ index: null, chunks: [] }),
+        searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
+        embedSemanticTextsJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
+          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
+        },
+        generateTextJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { modelId: string };
+          return JSON.stringify({ modelId: request.modelId, text: "" });
+        },
+        startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
+        drainWatcherEventsJson: () => JSON.stringify([]),
+        stopWatcher: () => undefined,
+        writeEventJson: () => undefined,
+        listEventsJson: () => JSON.stringify([]),
+        writeObservabilityRecordsJson: () => undefined,
+        listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
+        close: () => undefined,
+      }),
+    });
+    const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine });
+
+    const snapshot = await buildRuntimeSnapshot({
+      cwd: rootDir,
+      engine,
+      store,
+      semanticIndexMode: "reuse",
+      validationResultCache: createEphemeralValidationResultCache(),
+    });
+
+    assert.equal(snapshot.semanticIndex.status, "stale");
+    assert.equal(snapshot.state.semanticIndex?.status, "stale");
+    assert.equal(snapshot.semanticIndex.chunkCount, 0);
+    assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-missing-on-startup"));
+    store.close();
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -124,6 +224,8 @@ test("runtime semantic index makes duplicate fact chunk ids unique", () => {
         duplicates: [],
         diagnostics: [],
       }],
+      project: nativeTestProject(),
+      semanticEmbedding: nativeEmbeddingConfig(),
     });
 
     assert.equal(build.index.status, "ready");
@@ -167,6 +269,8 @@ test("runtime semantic index skips historical markdown knowledge", () => {
         staleFiles: 0,
       },
       facts: [],
+      project: nativeTestProject(),
+      semanticEmbedding: nativeEmbeddingConfig(),
     });
 
     assert.equal(build.index.status, "ready");
@@ -234,6 +338,175 @@ test("runtime semantic index can use native engine embeddings when selected", ()
     });
     assert.equal(queryVector.length, 896);
     assert.equal(calls[1].task, "query");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime snapshot rebuild uses project semantic embedding config", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-config-"));
+  try {
+    createAuthoringProject(rootDir);
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify(
+        {
+          conventionsPath: "conventions/index.ts",
+          fixturesDir: "fixtures",
+          fileDiscovery: "filesystem",
+          projectFilePatterns: ["src/**/*.ts"],
+          ignore: ["node_modules/**", ".opencanon/**"],
+          semanticEmbedding: {
+            mode: "native",
+            modelId: "jina-code-v2",
+            showDownloadProgress: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
+    const scan: ScanAndDiffResult = {
+      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      schemaVersion: 6,
+      inventoryHash: "inventory",
+      files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
+      changedFiles: ["src/company.ts"],
+      unchangedFiles: [],
+      deletedFiles: [],
+      staleFiles: 0,
+    };
+    const facts: FileFacts[] = [{
+      path: "src/company.ts",
+      contentHash: "content",
+      language: "typescript",
+      parser: "oxc",
+      parserVersion: "test",
+      imports: [],
+      exports: [{ line: 1, column: 1, name: "loadCompany", kind: "function" }],
+      symbols: [{ line: 1, column: 17, name: "loadCompany", kind: "function", exported: true, endLine: 3, params: [] }],
+      declarations: [],
+      calls: [],
+      literals: [{ line: 2, column: 10, value: "active company", valueKind: "string", context: "return" }],
+      comments: [],
+      references: [],
+      annotations: [],
+      diagnosticFacts: [],
+      duplicates: [],
+      diagnostics: [],
+    }];
+    const writes: WriteSemanticIndexRequest[] = [];
+    const embedCalls: Array<{ modelId: string; texts: string[]; task?: string }> = [];
+    const engine = createEngine({
+      versionJson: () =>
+        JSON.stringify({
+          packageVersion: "0.4.0-test",
+          engineVersion: "0.4.0-test",
+          napiVersion: "test",
+          schemaVersion: 6,
+        }),
+      openProjectJson: () => ({
+        statusJson: () =>
+          JSON.stringify({
+            rootDir,
+            statePath: scan.statePath,
+            schemaVersion: 6,
+            migrationsApplied: [1],
+            refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+          }),
+        scanAndDiffJson: () => JSON.stringify(scan),
+        extractFactsJson: () => JSON.stringify({ files: facts, diagnostics: [] }),
+        buildRepoGraphJson: () =>
+          JSON.stringify({
+            graph: {
+              rootDir,
+              graphHash: "graph",
+              files: scan.files.map((file) => file.path),
+              packages: [],
+              importEdges: [],
+            },
+          }),
+        indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
+        searchReferencesJson: () => JSON.stringify({ references: [] }),
+        searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
+        writeProductModelProjectionJson: () => undefined,
+        readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        writeSemanticIndexJson: (requestJson: string) => {
+          writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
+        },
+        readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null }),
+        listSemanticChunksJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null, chunks: writes.at(-1)?.chunks.map((chunk) => chunk.metadata) ?? [] }),
+        searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
+        embedSemanticTextsJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { modelId: string; texts: string[]; task?: string };
+          embedCalls.push(request);
+          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
+        },
+        generateTextJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { modelId: string };
+          return JSON.stringify({ modelId: request.modelId, text: "" });
+        },
+        startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
+        drainWatcherEventsJson: () => JSON.stringify([]),
+        stopWatcher: () => undefined,
+        writeEventJson: () => undefined,
+        listEventsJson: () => JSON.stringify([]),
+        writeObservabilityRecordsJson: () => undefined,
+        listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
+        close: () => undefined,
+      }),
+    });
+    const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scan.statePath });
+
+    const snapshot = await buildRuntimeSnapshot({
+      cwd: rootDir,
+      engine,
+      store,
+      validationResultCache: createEphemeralValidationResultCache(),
+    });
+
+    assert.equal(writes.length, 1);
+    assert.equal(snapshot.semanticIndex.provider.kind, "native");
+    assert.equal(snapshot.semanticIndex.provider.modelId, "jina-code-v2");
+    assert.equal(writes[0].index.provider.modelId, "jina-code-v2");
+    assert.equal(embedCalls[0].modelId, "jina-code-v2");
+    store.close();
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("semantic index fails invalid embedding config without local vector output", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-invalid-config-"));
+  try {
+    writeFileSync(path.join(rootDir, "README.md"), "# Company\n\nThe company search surface.\n");
+    const build = buildProjectSemanticIndex({
+      rootDir,
+      scan: {
+        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        schemaVersion: 6,
+        inventoryHash: "inventory",
+        files: [{ path: "README.md", contentHash: "readme", size: 40, stale: false }],
+        changedFiles: ["README.md"],
+        unchangedFiles: [],
+        deletedFiles: [],
+        staleFiles: 0,
+      },
+      facts: [],
+      semanticEmbedding: {
+        mode: "remote" as never,
+        modelId: "jina-code-v2",
+        showDownloadProgress: false,
+      },
+    });
+
+    assert.equal(build.index.status, "failed");
+    assert.equal(build.chunks.length, 0);
+    assert(build.index.diagnostics.some((diagnostic) => diagnostic.code === "semantic-embedding-config-invalid" && diagnostic.severity === "error"));
+    assert(!build.index.diagnostics.some((diagnostic) => diagnostic.message.includes("using local")));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -378,7 +651,13 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         diagnostics: [],
       },
     ];
-    const previous = buildProjectSemanticIndex({ rootDir, scan: previousScan, facts });
+    const previous = buildProjectSemanticIndex({
+      rootDir,
+      scan: previousScan,
+      facts,
+      project: nativeTestProject(),
+      semanticEmbedding: nativeEmbeddingConfig(),
+    });
     const writes: WriteSemanticIndexRequest[] = [];
     const engine = createEngine({
       versionJson: () =>
@@ -423,7 +702,7 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
         embedSemanticTextsJson: (requestJson: string) => {
           const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
-          return JSON.stringify({ modelId: request.modelId, dimensions: 2, vectors: request.texts.map(() => [1, 0]) });
+          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
         },
         generateTextJson: (requestJson: string) => {
           const request = JSON.parse(requestJson) as { modelId: string };
@@ -455,6 +734,149 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
     assert.equal(snapshot.semanticIndex.chunkCount, previous.index.chunkCount);
     assert.equal(snapshot.semanticIndex.staleChunkCount, previous.index.chunkCount);
     assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-stale-on-startup"));
+    store.close();
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime snapshot marks cached semantic index stale after provider config changes", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-provider-change-"));
+  try {
+    createAuthoringProject(rootDir);
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
+    const scan: ScanAndDiffResult = {
+      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      schemaVersion: 6,
+      inventoryHash: "inventory",
+      files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
+      changedFiles: ["src/company.ts"],
+      unchangedFiles: [],
+      deletedFiles: [],
+      staleFiles: 0,
+    };
+    const facts: FileFacts[] = [{
+      path: "src/company.ts",
+      contentHash: "content",
+      language: "typescript",
+      parser: "oxc",
+      parserVersion: "test",
+      imports: [],
+      exports: [{ line: 1, column: 1, name: "loadCompany", kind: "function" }],
+      symbols: [{ line: 1, column: 17, name: "loadCompany", kind: "function", exported: true, endLine: 3, params: [] }],
+      declarations: [],
+      calls: [],
+      literals: [{ line: 2, column: 10, value: "active company", valueKind: "string", context: "return" }],
+      comments: [],
+      references: [],
+      annotations: [],
+      diagnosticFacts: [],
+      duplicates: [],
+      diagnostics: [],
+    }];
+    const previous = buildProjectSemanticIndex({
+      rootDir,
+      scan,
+      facts,
+      project: nativeTestProject({ dimensions: 1536 }),
+      semanticEmbedding: nativeEmbeddingConfig("jina-code-v2-large"),
+    });
+    assert.equal(previous.index.provider.kind, "native");
+    assert.equal(previous.index.provider.modelId, "jina-code-v2-large");
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify(
+        {
+          conventionsPath: "conventions/index.ts",
+          fixturesDir: "fixtures",
+          fileDiscovery: "filesystem",
+          projectFilePatterns: ["src/**/*.ts"],
+          ignore: ["node_modules/**", ".opencanon/**"],
+          semanticEmbedding: {
+            mode: "native",
+            modelId: "jina-code-v2",
+            showDownloadProgress: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const writes: WriteSemanticIndexRequest[] = [];
+    const engine = createEngine({
+      versionJson: () =>
+        JSON.stringify({
+          packageVersion: "0.4.0-test",
+          engineVersion: "0.4.0-test",
+          napiVersion: "test",
+          schemaVersion: 6,
+        }),
+      openProjectJson: () => ({
+        statusJson: () =>
+          JSON.stringify({
+            rootDir,
+            statePath: scan.statePath,
+            schemaVersion: 6,
+            migrationsApplied: [1],
+            refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+          }),
+        scanAndDiffJson: () => JSON.stringify(scan),
+        extractFactsJson: () => JSON.stringify({ files: facts, diagnostics: [] }),
+        buildRepoGraphJson: () =>
+          JSON.stringify({
+            graph: {
+              rootDir,
+              graphHash: "graph",
+              files: scan.files.map((file) => file.path),
+              packages: [],
+              importEdges: [],
+            },
+          }),
+        indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
+        searchReferencesJson: () => JSON.stringify({ references: [] }),
+        searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
+        writeProductModelProjectionJson: () => undefined,
+        readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        writeSemanticIndexJson: (requestJson: string) => {
+          writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
+        },
+        readSemanticIndexStatusJson: () => JSON.stringify({ index: previous.index }),
+        listSemanticChunksJson: () => JSON.stringify({ index: previous.index, chunks: previous.chunks.map((chunk) => chunk.metadata) }),
+        searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
+        embedSemanticTextsJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
+          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
+        },
+        generateTextJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { modelId: string };
+          return JSON.stringify({ modelId: request.modelId, text: "" });
+        },
+        startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
+        drainWatcherEventsJson: () => JSON.stringify([]),
+        stopWatcher: () => undefined,
+        writeEventJson: () => undefined,
+        listEventsJson: () => JSON.stringify([]),
+        writeObservabilityRecordsJson: () => undefined,
+        listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
+        close: () => undefined,
+      }),
+    });
+    const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scan.statePath });
+
+    const snapshot = await buildRuntimeSnapshot({
+      cwd: rootDir,
+      engine,
+      store,
+      semanticIndexMode: "reuse",
+      validationResultCache: createEphemeralValidationResultCache(),
+    });
+
+    assert.equal(writes.length, 0);
+    assert.equal(snapshot.semanticIndex.status, "stale");
+    assert.equal(snapshot.semanticIndex.staleChunkCount, previous.index.chunkCount);
+    assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-provider-changed"));
     store.close();
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -502,7 +924,13 @@ for (const scenario of [
           diagnostics: [],
         },
       ];
-      const previous = buildProjectSemanticIndex({ rootDir, scan, facts });
+      const previous = buildProjectSemanticIndex({
+        rootDir,
+        scan,
+        facts,
+        project: nativeTestProject(),
+        semanticEmbedding: nativeEmbeddingConfig(),
+      });
       const writes: WriteSemanticIndexRequest[] = [];
       const engine = createEngine({
         versionJson: () =>
@@ -559,7 +987,7 @@ for (const scenario of [
           searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
           embedSemanticTextsJson: (requestJson: string) => {
             const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
-            return JSON.stringify({ modelId: request.modelId, dimensions: 2, vectors: request.texts.map(() => [1, 0]) });
+            return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
           },
           generateTextJson: (requestJson: string) => {
             const request = JSON.parse(requestJson) as { modelId: string };
@@ -586,7 +1014,7 @@ for (const scenario of [
 
       assert.equal(writes.length, 2);
       assert(writes[0].chunks.some((chunk) => chunk.vector.length === 0));
-      assert(writes[1].chunks.every((chunk) => chunk.vector.length === 128));
+      assert(writes[1].chunks.every((chunk) => chunk.vector.length === 896));
       assert.equal(writes[0].index.embeddingStats?.reusedChunks, previous.chunks.length);
       assert.equal(writes[1].index.embeddingStats?.reusedChunks, 0);
       assert.equal(snapshot.semanticIndex.embeddingStats?.reusedChunks, 0);
@@ -597,6 +1025,28 @@ for (const scenario of [
   });
 }
 
-function nativeTestVector(seed: number): number[] {
-  return Array.from({ length: 896 }, (_, index) => (index === 0 ? seed : 0));
+function nativeEmbeddingConfig(modelId: SemanticEmbeddingConfig["modelId"] = "jina-code-v2"): SemanticEmbeddingConfig {
+  return {
+    mode: "native",
+    modelId,
+    showDownloadProgress: false,
+  };
+}
+
+function nativeTestProject(input: { dimensions?: number; calls?: Array<{ task: string; texts: string[]; modelId: string }> } = {}) {
+  const dimensions = input.dimensions ?? 896;
+  return {
+    embedSemanticTexts(request: { task?: string; texts: string[]; modelId: string }) {
+      input.calls?.push({ task: request.task ?? "document", texts: request.texts, modelId: request.modelId });
+      return {
+        modelId: request.modelId,
+        dimensions,
+        vectors: request.texts.map((_text, index) => nativeTestVector(index + 1, dimensions)),
+      };
+    },
+  } as never;
+}
+
+function nativeTestVector(seed: number, dimensions = 896): number[] {
+  return Array.from({ length: dimensions }, (_, index) => (index === 0 ? seed : 0));
 }

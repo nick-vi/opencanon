@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -14,7 +13,6 @@ import {
   semanticEmbeddingConfigHash,
   semanticEmbeddingIdentityHash,
   semanticEmbeddingRecordHash,
-  SemanticEmbeddingModelId,
   SemanticEmbeddingProviderKind,
   semanticEmbeddingModelIds,
   SemanticChunkerVersion,
@@ -27,6 +25,7 @@ import {
   type SemanticChunkEmbedding,
   type SemanticChunkMetadata,
   type SemanticEmbeddingConfig,
+  type SemanticEmbeddingModelId,
   type SemanticEmbeddingProvider,
   type SemanticIndexDiagnostic,
   type SemanticIndexSnapshot,
@@ -34,11 +33,9 @@ import {
 } from "@opencanon/core";
 import type { EngineProject } from "@opencanon/engine";
 
-const LocalEmbeddingDimensions = 128;
 const MaxChunkChars = 2_400;
 const MinChunkChars = 800;
 const HeadingPattern = /^\s{0,3}#{1,6}\s+(.+)$/u;
-const TokenPattern = /[a-z0-9_./:-]+/giu;
 const KnowledgeExcludePattern = /^\s*OpenCanon-Knowledge:\s*exclude\s*$/imu;
 const HistoricalStatusPattern = /^\s*Status:\s*historical\b/imu;
 
@@ -123,7 +120,7 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   const reusedChunkCount = chunksWithEmbeddingHash.length - chunksNeedingEmbedding.length;
   const vectorsByChunkId = new Map<string, number[]>();
   let vectors: number[][] = [];
-  if (chunksNeedingEmbedding.length > 0) {
+  if (chunksNeedingEmbedding.length > 0 && !hasSemanticIndexError(diagnostics)) {
     try {
       vectors = backend.embedDocuments(chunksNeedingEmbedding.map((chunk) => chunk.text));
     } catch (error) {
@@ -148,7 +145,7 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   }
 
   const chunks: SemanticChunkEmbedding[] =
-    diagnostics.some((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error)
+    hasSemanticIndexError(diagnostics)
       ? []
       : chunksWithEmbeddingHash.map((chunk) => {
         const canReuseVector = previousEmbeddingHashes.get(chunk.metadata.id) === chunk.metadata.embeddingHash;
@@ -170,7 +167,7 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   const index: SemanticIndexSnapshot = {
     id: DefaultSemanticIndexId,
     version: SemanticIndexVersion,
-    status: diagnostics.some((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error) ? "failed" : "ready",
+    status: hasSemanticIndexError(diagnostics) ? "failed" : "ready",
     provider,
     chunkerVersion: SemanticChunkerVersion,
     producerVersion: SemanticEmbeddingProducerVersion,
@@ -231,38 +228,22 @@ function uniquifySemanticChunkIds(chunks: RuntimeSemanticChunk[]): RuntimeSemant
   });
 }
 
-export function semanticSearchVector(query: string): number[] {
-  return embedSemanticText(query, LocalEmbeddingDimensions);
-}
-
 export function semanticSearchVectorForProvider(input: {
   query: string;
   provider?: SemanticEmbeddingProvider | null | undefined;
   project?: EngineProject | undefined;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
 }): number[] {
-  if (input.provider?.kind === "native" && input.project) {
+  if (!input.provider) {
+    throw new Error("Semantic search requires a ready Project Context index. Run opencanon project index.");
+  }
+  if (input.provider.kind === SemanticEmbeddingProviderKind.Native) {
+    if (!input.project) {
+      throw new Error(`Semantic search index uses ${input.provider.modelId}, but no native engine project is available.`);
+    }
     return nativeEmbeddingBackend(input.project, nativeSemanticEmbeddingConfig(input.provider, input.semanticEmbedding)).embedQuery(input.query);
   }
-  return semanticSearchVector(input.query);
-}
-
-export function localHashEmbeddingProvider(): SemanticEmbeddingProvider {
-  const model = semanticEmbeddingModel(SemanticEmbeddingModelId.LocalHash128);
-  const configHash = semanticEmbeddingConfigHash({
-    ...model.config,
-    tokenPattern: TokenPattern.source,
-  });
-  return {
-    id: "opencanon-local-hash",
-    kind: model.providerKind,
-    displayName: model.displayName,
-    modelId: model.id,
-    modelDigest: configHash,
-    dimensions: model.dimensions,
-    distance: model.distance,
-    configHash,
-  };
+  throw new Error(`Unsupported semantic search provider ${input.provider.kind}.`);
 }
 
 export type SemanticEmbeddingBackend = {
@@ -272,44 +253,37 @@ export type SemanticEmbeddingBackend = {
   embedQuery(text: string): number[];
 };
 
+export function configuredSemanticEmbeddingProvider(inputConfig?: SemanticEmbeddingConfig | undefined): {
+  provider: SemanticEmbeddingProvider;
+  diagnostics: SemanticIndexDiagnostic[];
+} {
+  const selection = resolveSemanticEmbeddingConfig(inputConfig);
+  if (!selection.ok) {
+    return { provider: nativeEmbeddingProvider(DefaultSemanticEmbeddingConfig), diagnostics: selection.diagnostics };
+  }
+  return { provider: nativeEmbeddingProvider(selection.config), diagnostics: selection.diagnostics };
+}
+
 export function createSemanticEmbeddingBackend(project?: EngineProject | undefined, inputConfig?: SemanticEmbeddingConfig | undefined): SemanticEmbeddingBackend {
   const selection = resolveSemanticEmbeddingConfig(inputConfig);
-  const modelId = selection.config.modelId;
-  if (modelId === SemanticEmbeddingModelId.LocalHash128) {
-    const backend = localHashEmbeddingBackend();
-    return { ...backend, diagnostics: [...selection.diagnostics, ...backend.diagnostics] };
+  if (!selection.ok) {
+    const provider = configuredSemanticEmbeddingProvider(inputConfig).provider;
+    return unavailableEmbeddingBackend(provider, selection.diagnostics);
   }
+  const modelId = selection.config.modelId;
   const model = semanticEmbeddingModel(modelId);
   if (model.providerKind === SemanticEmbeddingProviderKind.Native && project) {
     const backend = nativeEmbeddingBackend(project, selection.config);
     return { ...backend, diagnostics: selection.diagnostics };
   }
-  const local = localHashEmbeddingBackend();
-  return {
-    ...local,
-    diagnostics: [
-      ...selection.diagnostics,
-      {
-        code: "semantic-native-provider-unavailable",
-        message: `Semantic embedding model ${modelId} requires a native engine project; using local indexing is disabled for native selection.`,
-        severity: DiagnosticSeverity.Error,
-      },
-    ],
-  };
-}
-
-export function localHashEmbeddingBackend(): SemanticEmbeddingBackend {
-  const provider = localHashEmbeddingProvider();
-  return {
-    provider,
-    diagnostics: [],
-    embedDocuments(texts) {
-      return texts.map((text) => embedSemanticText(text, provider.dimensions));
+  return unavailableEmbeddingBackend(nativeEmbeddingProvider(selection.config), [
+    ...selection.diagnostics,
+    {
+      code: "semantic-native-provider-unavailable",
+      message: `Semantic embedding model ${modelId} requires a native engine project.`,
+      severity: DiagnosticSeverity.Error,
     },
-    embedQuery(text) {
-      return embedSemanticText(text, provider.dimensions);
-    },
-  };
+  ]);
 }
 
 function nativeEmbeddingBackend(project: EngineProject, config: SemanticEmbeddingConfig): SemanticEmbeddingBackend {
@@ -361,48 +335,63 @@ function nativeEmbeddingProvider(config: SemanticEmbeddingConfig): SemanticEmbed
   };
 }
 
-function resolveSemanticEmbeddingConfig(input?: SemanticEmbeddingConfig | undefined): { config: SemanticEmbeddingConfig; diagnostics: SemanticIndexDiagnostic[] } {
+function unavailableEmbeddingBackend(provider: SemanticEmbeddingProvider, diagnostics: SemanticIndexDiagnostic[]): SemanticEmbeddingBackend {
+  const message = diagnostics.map((diagnostic) => diagnostic.message).join(" ");
+  return {
+    provider,
+    diagnostics,
+    embedDocuments() {
+      throw new Error(message);
+    },
+    embedQuery() {
+      throw new Error(message);
+    },
+  };
+}
+
+function resolveSemanticEmbeddingConfig(input?: SemanticEmbeddingConfig | undefined): (
+  | { ok: true; config: SemanticEmbeddingConfig; diagnostics: SemanticIndexDiagnostic[] }
+  | { ok: false; diagnostics: SemanticIndexDiagnostic[] }
+) {
   const config = input ?? DefaultSemanticEmbeddingConfig;
   const ids = semanticEmbeddingModelIds();
   if (!ids.includes(config.modelId as SemanticEmbeddingModelId)) {
     return {
-      config: DefaultSemanticEmbeddingConfig,
+      ok: false,
       diagnostics: [{
         code: "semantic-embedding-config-invalid",
-        message: `Unknown semantic embedding model ${String(config.modelId)}; using local search indexing.`,
-        severity: DiagnosticSeverity.Warning,
+        message: `Unknown semantic embedding model ${String(config.modelId)}. Set semanticEmbedding.modelId to one of: ${ids.join(", ")}.`,
+        severity: DiagnosticSeverity.Error,
       }],
     };
   }
   const model = semanticEmbeddingModel(config.modelId);
   if (config.mode !== model.providerKind) {
     return {
-      config: DefaultSemanticEmbeddingConfig,
+      ok: false,
       diagnostics: [{
         code: "semantic-embedding-config-invalid",
-        message: `Semantic embedding mode ${config.mode} does not match model ${config.modelId}; using local search indexing.`,
-        severity: DiagnosticSeverity.Warning,
+        message: `Semantic embedding mode ${config.mode} does not match model ${config.modelId}.`,
+        severity: DiagnosticSeverity.Error,
       }],
     };
   }
-  return { config, diagnostics: [] };
+  return { ok: true, config, diagnostics: [] };
 }
 
 function nativeSemanticEmbeddingConfig(provider: SemanticEmbeddingProvider, input?: SemanticEmbeddingConfig | undefined): SemanticEmbeddingConfig {
-  const providerModelId = provider.modelId as SemanticEmbeddingModelId;
+  const config = input ?? DefaultSemanticEmbeddingConfig;
   const ids = semanticEmbeddingModelIds();
-  if (
-    input?.mode === SemanticEmbeddingProviderKind.Native &&
-    input.modelId === providerModelId &&
-    ids.includes(input.modelId)
-  ) {
-    return input;
+  if (config.mode !== SemanticEmbeddingProviderKind.Native) {
+    throw new Error(`Semantic search index uses native model ${provider.modelId}, but project semanticEmbedding is not native.`);
   }
-  return {
-    mode: SemanticEmbeddingProviderKind.Native,
-    modelId: ids.includes(providerModelId) ? providerModelId : SemanticEmbeddingModelId.JinaCodeV2,
-    showDownloadProgress: false,
-  };
+  if (!ids.includes(config.modelId)) {
+    throw new Error(`Unknown semantic embedding model ${config.modelId}.`);
+  }
+  if (config.modelId !== provider.modelId) {
+    throw new Error(`Semantic search index uses ${provider.modelId}, but project config requires ${config.modelId}. Run opencanon project index.`);
+  }
+  return config;
 }
 
 function nativeEmbeddingOptions(config: SemanticEmbeddingConfig): {
@@ -425,6 +414,10 @@ function assertEmbeddingResult(provider: SemanticEmbeddingProvider, vectors: num
       throw new Error(`Expected ${provider.dimensions} dimensions from ${provider.modelId}, got ${vector.length}.`);
     }
   }
+}
+
+function hasSemanticIndexError(diagnostics: SemanticIndexDiagnostic[]): boolean {
+  return diagnostics.some((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error);
 }
 
 type RuntimeSemanticChunk = {
@@ -748,26 +741,4 @@ function markdownExcludedFromProjectContext(content: string): boolean {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
-}
-
-function embedSemanticText(text: string, dimensions: number): number[] {
-  const vector = Array.from({ length: dimensions }, () => 0);
-  const tokens = normalizedTokens(text);
-  if (tokens.length === 0) return vector;
-  for (const token of tokens) addToken(vector, token, 1);
-  for (let index = 0; index < tokens.length - 1; index += 1) addToken(vector, `${tokens[index]} ${tokens[index + 1]}`, 0.65);
-  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-  if (norm === 0) return vector;
-  return vector.map((value) => Number((value / norm).toFixed(8)));
-}
-
-function normalizedTokens(text: string): string[] {
-  return [...text.toLowerCase().matchAll(TokenPattern)].map((match) => match[0]).filter((token) => token.length > 1);
-}
-
-function addToken(vector: number[], token: string, weight: number): void {
-  const digest = createHash("sha256").update(token).digest();
-  const slot = digest.readUInt32BE(0) % vector.length;
-  const sign = digest[4] % 2 === 0 ? 1 : -1;
-  vector[slot] += sign * weight;
 }
