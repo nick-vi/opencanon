@@ -82,6 +82,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
         semanticIndex = request.index;
         semanticResults = request.chunks.map((chunk) => ({ chunk: chunk.metadata, score: 1 }));
       },
+      writeSemanticIndexDeltaJson: () => undefined,
       readSemanticIndexStatusJson: () => JSON.stringify({ index: semanticIndex }),
       listSemanticChunksJson: () => JSON.stringify({ index: semanticIndex, chunks: (semanticResults as Array<{ chunk: unknown }>).map((result) => result.chunk) }),
       searchSemanticIndexJson: () => JSON.stringify({ index: semanticIndex, results: semanticResults }),

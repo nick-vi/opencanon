@@ -339,6 +339,8 @@ export type {
   SemanticDistance,
   SemanticEmbeddingProvider,
   SemanticIndexDiagnostic,
+  SemanticIndexNode,
+  SemanticIndexNodeKind,
   SemanticIndexSnapshot,
   SemanticIndexStatusValue,
   SemanticSearchResult,
@@ -346,6 +348,7 @@ export type {
   CodeReference,
   CodeSymbol,
   CodeSymbolKind,
+  WriteSemanticIndexDeltaRequest,
   WriteSemanticIndexRequest,
 } from "./contracts.ts";
 export {
@@ -454,6 +457,8 @@ export {
   SemanticEmbeddingTaskSchema,
   SemanticEmbeddingProviderSchema,
   SemanticIndexDiagnosticSchema,
+  SemanticIndexNodeSchema,
+  SemanticIndexNodeKindSchema,
   SemanticIndexSnapshotSchema,
   SemanticIndexStatusValueSchema,
   SemanticSearchResultSchema,
@@ -471,9 +476,11 @@ export {
   semanticChunkKindValues,
   semanticDistanceValues,
   semanticEmbeddingTaskValues,
+  semanticIndexNodeKindValues,
   semanticIndexStatusValues,
   validatorSeverityValues,
   validatorScopeValues,
+  WriteSemanticIndexDeltaRequestSchema,
   WriteSemanticIndexRequestSchema,
 } from "./contracts.ts";
 export {

@@ -68,12 +68,12 @@ test("runtime semantic index chunks files with native vectors", () => {
       reusedChunks: 0,
     });
     assert.equal(build.chunks.length, 1);
-    assert.equal(build.chunks[0].metadata.path, "src/company.ts");
-    assert.equal(build.chunks[0].metadata.kind, "symbol");
-    assert.equal(build.chunks[0].metadata.symbol, "loadCompany");
-    assert.equal(build.chunks[0].metadata.embeddingHash.length, 64);
-    assert(build.chunks[0].text.includes("Exported function: loadCompany"));
-    assert.equal(build.chunks[0].vector.length, 896);
+    const summary = build.chunks.find((chunk) => chunk.metadata.kind === "text");
+    assert(summary);
+    assert.equal(summary.metadata.path, "src/company.ts");
+    assert.equal(summary.metadata.embeddingHash.length, 64);
+    assert(summary.text.includes("Exports: function loadCompany"));
+    assert.equal(summary.vector.length, 896);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -137,6 +137,7 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         writeProductModelProjectionJson: () => undefined,
         readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
         writeSemanticIndexJson: () => undefined,
+        writeSemanticIndexDeltaJson: () => undefined,
         readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),
         listSemanticChunksJson: () => JSON.stringify({ index: null, chunks: [] }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
@@ -343,6 +344,107 @@ test("runtime semantic index can use native engine embeddings when selected", ()
   }
 });
 
+test("runtime semantic index batches native document embeddings", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-batches-"));
+  try {
+    mkdirSync(path.join(rootDir, "docs"), { recursive: true });
+    const files = Array.from({ length: 300 }, (_, index) => {
+      const file = `docs/topic-${index}.md`;
+      writeFileSync(path.join(rootDir, file), `# Topic ${index}\n\nThis topic documents billing search behavior ${index}.\n`);
+      return { path: file, contentHash: `topic-${index}`, size: 72, stale: false };
+    });
+    const calls: Array<{ task: string; texts: string[]; modelId: string }> = [];
+
+    const build = buildProjectSemanticIndex({
+      rootDir,
+      scan: {
+        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        schemaVersion: 6,
+        inventoryHash: "inventory",
+        files,
+        changedFiles: files.map((file) => file.path),
+        unchangedFiles: [],
+        deletedFiles: [],
+        staleFiles: 0,
+      },
+      facts: [],
+      project: nativeTestProject({ calls }),
+      semanticEmbedding: nativeEmbeddingConfig(),
+    });
+
+    assert.equal(build.index.status, "ready");
+    assert.equal(build.chunks.length, 300);
+    assert.equal(build.index.embeddingStats?.embeddedChunks, 300);
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls.map((call) => call.texts.length), [128, 128, 44]);
+    assert(build.chunks.every((chunk) => chunk.vector.length === 896));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime semantic index bounds code symbol chunks per file", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-code-cap-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const exportedNames = Array.from({ length: 24 }, (_, index) => `exported${index}`);
+    const internalNames = Array.from({ length: 24 }, (_, index) => `internal${index}`);
+    writeFileSync(
+      path.join(rootDir, "src/large.ts"),
+      [
+        ...exportedNames.map((name) => `export function ${name}() { return "${name}"; }`),
+        ...internalNames.map((name) => `function ${name}() { return "${name}"; }`),
+      ].join("\n"),
+    );
+    const symbols = [
+      ...exportedNames.map((name, index) => ({ line: index + 1, column: 17, name, kind: "function" as const, exported: true, endLine: index + 1, params: [] })),
+      ...internalNames.map((name, index) => ({ line: exportedNames.length + index + 1, column: 10, name, kind: "function" as const, exported: false, endLine: exportedNames.length + index + 1, params: [] })),
+    ];
+
+    const build = buildProjectSemanticIndex({
+      rootDir,
+      scan: {
+        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        schemaVersion: 6,
+        inventoryHash: "inventory",
+        files: [{ path: "src/large.ts", contentHash: "large", size: 2_000, stale: false }],
+        changedFiles: ["src/large.ts"],
+        unchangedFiles: [],
+        deletedFiles: [],
+        staleFiles: 0,
+      },
+      facts: [{
+        path: "src/large.ts",
+        contentHash: "large",
+        language: "typescript",
+        parser: "oxc",
+        parserVersion: "test",
+        imports: [],
+        exports: exportedNames.map((name, index) => ({ line: index + 1, column: 1, name, kind: "function" })),
+        symbols,
+        declarations: [],
+        calls: [],
+        literals: [],
+        comments: [],
+        references: [],
+        annotations: [],
+        diagnosticFacts: [],
+        duplicates: [],
+        diagnostics: [],
+      }],
+      project: nativeTestProject(),
+      semanticEmbedding: nativeEmbeddingConfig(),
+    });
+
+    assert.equal(build.index.status, "ready");
+    assert.equal(build.chunks.length, 1);
+    assert.equal(build.chunks.filter((chunk) => chunk.metadata.kind === "text").length, 1);
+    assert(build.chunks[0].text.includes("Exports: function exported0"));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime snapshot rebuild uses project semantic embedding config", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-config-"));
   try {
@@ -437,6 +539,7 @@ test("runtime snapshot rebuild uses project semantic embedding config", async ()
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
+        writeSemanticIndexDeltaJson: () => undefined,
         readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null }),
         listSemanticChunksJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null, chunks: writes.at(-1)?.chunks.map((chunk) => chunk.metadata) ?? [] }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
@@ -697,6 +800,7 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
+        writeSemanticIndexDeltaJson: () => undefined,
         readSemanticIndexStatusJson: () => JSON.stringify({ index: previous.index }),
         listSemanticChunksJson: () => JSON.stringify({ index: previous.index, chunks: previous.chunks.map((chunk) => chunk.metadata) }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
@@ -842,6 +946,7 @@ test("runtime snapshot resets cached semantic index after provider config change
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
+        writeSemanticIndexDeltaJson: () => undefined,
         readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? previous.index }),
         listSemanticChunksJson: () => {
           const latest = writes.at(-1);
@@ -981,6 +1086,7 @@ for (const scenario of [
               throw new Error(scenario.message);
             }
           },
+          writeSemanticIndexDeltaJson: () => undefined,
           readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? previous.index }),
           listSemanticChunksJson: (requestJson: string) => {
             const request = JSON.parse(requestJson) as { limit?: number; offset?: number };

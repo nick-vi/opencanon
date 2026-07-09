@@ -48,6 +48,7 @@ test("runtime store can use an isolated state path", () => {
         },
         readProductModelProjectionJson: () => JSON.stringify({ projection: productModelProjection }),
         writeSemanticIndexJson: () => undefined,
+        writeSemanticIndexDeltaJson: () => undefined,
         readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),
         listSemanticChunksJson: () => JSON.stringify({ index: null, chunks: [] }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),

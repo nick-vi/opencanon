@@ -35,6 +35,11 @@ import type { EngineProject } from "@opencanon/engine";
 
 const MaxChunkChars = 2_400;
 const MinChunkChars = 800;
+const MaxEmbeddingBatchTexts = 128;
+const MaxEmbeddingBatchChars = 256_000;
+// Code embeddings provide file-level navigation; exact declarations live in the symbol graph.
+const MaxCodeSymbolChunksPerFile = 0;
+const MaxInternalSymbolChunksPerFile = 4;
 const HeadingPattern = /^\s{0,3}#{1,6}\s+(.+)$/u;
 const KnowledgeExcludePattern = /^\s*OpenCanon-Knowledge:\s*exclude\s*$/imu;
 const HistoricalStatusPattern = /^\s*Status:\s*historical\b/imu;
@@ -122,7 +127,7 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   let vectors: number[][] = [];
   if (chunksNeedingEmbedding.length > 0 && !hasSemanticIndexError(diagnostics)) {
     try {
-      vectors = backend.embedDocuments(chunksNeedingEmbedding.map((chunk) => chunk.text));
+      vectors = embedDocumentsInBatches(backend, chunksNeedingEmbedding.map((chunk) => chunk.text));
     } catch (error) {
       diagnostics.push({
         code: "semantic-embedding-failed",
@@ -186,6 +191,26 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
     diagnostics,
   };
   return { index, chunks };
+}
+
+function embedDocumentsInBatches(backend: SemanticEmbeddingBackend, texts: string[]): number[][] {
+  const vectors: number[][] = [];
+  let batch: string[] = [];
+  let batchChars = 0;
+  for (const text of texts) {
+    const textChars = text.length;
+    const nextWouldExceedCount = batch.length >= MaxEmbeddingBatchTexts;
+    const nextWouldExceedChars = batch.length > 0 && batchChars + textChars > MaxEmbeddingBatchChars;
+    if (nextWouldExceedCount || nextWouldExceedChars) {
+      vectors.push(...backend.embedDocuments(batch));
+      batch = [];
+      batchChars = 0;
+    }
+    batch.push(text);
+    batchChars += textChars;
+  }
+  if (batch.length > 0) vectors.push(...backend.embedDocuments(batch));
+  return vectors;
 }
 
 function uniquifySemanticChunkIds(chunks: RuntimeSemanticChunk[]): RuntimeSemanticChunk[] {
@@ -440,38 +465,88 @@ function factChunksForFile(input: { path: string; content: string; contentHash: 
   const chunks: RuntimeSemanticChunk[] = [];
   const ranges = contentLineRanges(input.content);
   const imports = input.facts.imports.map((item) => item.source).slice(0, 16);
-  const emittedKeys = new Set<string>();
-
-  for (const declaration of input.facts.declarations) {
-    const startLine = clampLine(declaration.line, ranges);
-    const endLine = clampLine(Math.max(declaration.endLine, declaration.line), ranges);
-    const sourceText = linesForRange(input.content, ranges, startLine, endLine).trim() || declaration.text.trim();
-    const key = `declaration:${declaration.kind}:${declaration.name}:${declaration.line}`;
-    emittedKeys.add(`${declaration.name}:${declaration.line}:${declaration.endLine}`);
+  const summary = factSummaryText(input);
+  if (summary) {
     chunks.push(
       createRuntimeSemanticChunk({
         path: input.path,
         contentHash: input.contentHash,
         content: input.content,
         ranges,
-        key,
-        kind: "symbol",
-        ordinal: chunks.length,
-        startLine,
-        endLine,
-        symbol: declaration.name,
-        text: semanticCodeText({
-          path: input.path,
-          language: input.facts.language,
-          kind: declaration.kind,
-          name: declaration.name,
-          exported: declaration.exported,
-          params: [],
-          imports,
-          sourceText,
-        }),
+        key: "facts:summary",
+        kind: "text",
+        ordinal: 0,
+        startLine: 1,
+        endLine: Math.max(1, ranges.lines.length),
+        text: summary,
       }),
     );
+  }
+  const candidates = semanticCodeSymbolCandidates(input, ranges, imports);
+  const exported = candidates.filter((candidate) => candidate.exported).slice(0, MaxCodeSymbolChunksPerFile);
+  const fallbackSymbols = summary || exported.length > 0
+    ? []
+    : candidates.slice(0, MaxInternalSymbolChunksPerFile);
+  for (const candidate of [...exported, ...fallbackSymbols].sort((left, right) => left.startLine - right.startLine)) {
+    chunks.push(
+      createRuntimeSemanticChunk({
+        path: input.path,
+        contentHash: input.contentHash,
+        content: input.content,
+        ranges,
+        key: candidate.key,
+        kind: "symbol",
+        ordinal: chunks.length,
+        startLine: candidate.startLine,
+        endLine: candidate.endLine,
+        symbol: candidate.name,
+        text: candidate.text,
+      }),
+    );
+  }
+
+  return chunks;
+}
+
+type SemanticCodeSymbolCandidate = {
+  key: string;
+  name: string;
+  exported: boolean;
+  startLine: number;
+  endLine: number;
+  text: string;
+};
+
+function semanticCodeSymbolCandidates(
+  input: { path: string; content: string; facts: FileFacts },
+  ranges: ContentLineRanges,
+  imports: string[],
+): SemanticCodeSymbolCandidate[] {
+  const candidates: SemanticCodeSymbolCandidate[] = [];
+  const emittedKeys = new Set<string>();
+
+  for (const declaration of input.facts.declarations) {
+    const startLine = clampLine(declaration.line, ranges);
+    const endLine = clampLine(Math.max(declaration.endLine, declaration.line), ranges);
+    const sourceText = linesForRange(input.content, ranges, startLine, endLine).trim() || declaration.text.trim();
+    emittedKeys.add(`${declaration.name}:${declaration.line}:${declaration.endLine}`);
+    candidates.push({
+      key: `declaration:${declaration.kind}:${declaration.name}:${declaration.line}`,
+      name: declaration.name,
+      exported: declaration.exported === true,
+      startLine,
+      endLine,
+      text: semanticCodeText({
+        path: input.path,
+        language: input.facts.language,
+        kind: declaration.kind,
+        name: declaration.name,
+        exported: declaration.exported === true,
+        params: [],
+        imports,
+        sourceText,
+      }),
+    });
   }
 
   for (const symbol of input.facts.symbols) {
@@ -481,53 +556,26 @@ function factChunksForFile(input: { path: string; content: string; contentHash: 
     const startLine = clampLine(symbol.line, ranges);
     const sourceText = linesForRange(input.content, ranges, startLine, endLine).trim();
     if (!sourceText) continue;
-    chunks.push(
-      createRuntimeSemanticChunk({
+    candidates.push({
+      key: `symbol:${symbol.kind}:${symbol.name}:${symbol.line}`,
+      name: symbol.name,
+      exported: symbol.exported === true,
+      startLine,
+      endLine,
+      text: semanticCodeText({
         path: input.path,
-        contentHash: input.contentHash,
-        content: input.content,
-        ranges,
-        key: `symbol:${symbol.kind}:${symbol.name}:${symbol.line}`,
-        kind: "symbol",
-        ordinal: chunks.length,
-        startLine,
-        endLine,
-        symbol: symbol.name,
-        text: semanticCodeText({
-          path: input.path,
-          language: input.facts.language,
-          kind: symbol.kind,
-          name: symbol.name,
-          exported: symbol.exported,
-          params: symbol.params ?? [],
-          imports,
-          sourceText,
-        }),
+        language: input.facts.language,
+        kind: symbol.kind,
+        name: symbol.name,
+        exported: symbol.exported === true,
+        params: symbol.params ?? [],
+        imports,
+        sourceText,
       }),
-    );
+    });
   }
 
-  if (chunks.length === 0) {
-    const summary = factSummaryText(input);
-    if (summary) {
-      chunks.push(
-        createRuntimeSemanticChunk({
-          path: input.path,
-          contentHash: input.contentHash,
-          content: input.content,
-          ranges,
-          key: "facts:summary",
-          kind: "text",
-          ordinal: 0,
-          startLine: 1,
-          endLine: Math.max(1, ranges.lines.length),
-          text: summary,
-        }),
-      );
-    }
-  }
-
-  return chunks;
+  return candidates.sort((left, right) => Number(right.exported) - Number(left.exported) || left.startLine - right.startLine);
 }
 
 function markdownChunksForFile(input: { path: string; content: string; contentHash: string }): RuntimeSemanticChunk[] {

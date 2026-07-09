@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::contracts::{
     EmbedSemanticTextsRequest, GenerateTextRequest, ListSemanticChunksRequest,
     ReadSemanticIndexStatusRequest, SearchSemanticIndexRequest, SemanticChunkEmbeddingRequest,
-    WriteSemanticIndexRequest,
+    SemanticIndexNodeRequest, WriteSemanticIndexDeltaRequest, WriteSemanticIndexRequest,
 };
 use crate::json::{decode, encode, napi_error, sqlite_error};
 use crate::state::timestamp;
@@ -50,32 +50,7 @@ fn sanitize_state_segment(value: &str) -> String {
 pub(super) fn validate_semantic_index_request(
     request: &WriteSemanticIndexRequest,
 ) -> napi::Result<()> {
-    if request.index.id.trim().is_empty() {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Semantic index id is required.",
-        ));
-    }
-    if request.index.provider.dimensions == 0 {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Semantic index dimensions must be positive.",
-        ));
-    }
-    if request.index.provider.kind.trim().is_empty()
-        || request.index.chunk_tree_hash.trim().is_empty()
-    {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Semantic index provider kind and chunk tree hash are required.",
-        ));
-    }
-    if request.index.provider.distance != "cosine" {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Semantic index distance must be cosine.",
-        ));
-    }
+    validate_semantic_index_snapshot(&request.index)?;
     if request.index.chunk_count as usize != request.chunks.len()
         || request.index.vector_count as usize != request.chunks.len()
     {
@@ -89,16 +64,75 @@ pub(super) fn validate_semantic_index_request(
             ),
         ));
     }
-    for chunk in request.chunks.iter() {
-        if !chunk.vector.is_empty()
-            && chunk.vector.len() != request.index.provider.dimensions as usize
-        {
+    validate_semantic_chunks(&request.chunks, request.index.provider.dimensions)
+}
+
+pub(super) fn validate_semantic_index_delta_request(
+    request: &WriteSemanticIndexDeltaRequest,
+) -> napi::Result<()> {
+    validate_semantic_index_snapshot(&request.index)?;
+    validate_semantic_chunks(&request.chunks, request.index.provider.dimensions)?;
+    for path in request.removed_paths.iter() {
+        if path.trim().is_empty() {
+            return Err(napi_error(
+                "invalid-engine-payload",
+                "Semantic index removed paths must not be empty.",
+            ));
+        }
+    }
+    for key in request.removed_node_keys.iter() {
+        if key.trim().is_empty() {
+            return Err(napi_error(
+                "invalid-engine-payload",
+                "Semantic index removed node keys must not be empty.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_semantic_index_snapshot(
+    index: &crate::contracts::SemanticIndexSnapshotRequest,
+) -> napi::Result<()> {
+    if index.id.trim().is_empty() {
+        return Err(napi_error(
+            "invalid-engine-payload",
+            "Semantic index id is required.",
+        ));
+    }
+    if index.provider.dimensions == 0 {
+        return Err(napi_error(
+            "invalid-engine-payload",
+            "Semantic index dimensions must be positive.",
+        ));
+    }
+    if index.provider.kind.trim().is_empty() || index.chunk_tree_hash.trim().is_empty() {
+        return Err(napi_error(
+            "invalid-engine-payload",
+            "Semantic index provider kind and chunk tree hash are required.",
+        ));
+    }
+    if index.provider.distance != "cosine" {
+        return Err(napi_error(
+            "invalid-engine-payload",
+            "Semantic index distance must be cosine.",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_semantic_chunks(
+    chunks: &[SemanticChunkEmbeddingRequest],
+    dimensions: u32,
+) -> napi::Result<()> {
+    for chunk in chunks.iter() {
+        if !chunk.vector.is_empty() && chunk.vector.len() != dimensions as usize {
             return Err(napi_error(
                 "invalid-engine-payload",
                 &format!(
                     "Semantic chunk {} vector dimension mismatch: expected {}, got {}.",
                     chunk.metadata.id,
-                    request.index.provider.dimensions,
+                    dimensions,
                     chunk.vector.len()
                 ),
             ));
@@ -277,6 +311,34 @@ pub(super) fn write_semantic_vectors(
     Ok(())
 }
 
+pub(super) fn write_semantic_vector_delta(
+    vector_db: &mut EmbeddingDb,
+    existing_chunks: &HashMap<String, String>,
+    removed_ids: &[String],
+    chunks: &[SemanticChunkEmbeddingRequest],
+) -> Result<(), EmbedDbError> {
+    for removed_id in removed_ids {
+        vector_db.delete(removed_id)?;
+    }
+
+    let mut insert_ids = Vec::new();
+    let mut insert_vectors = Vec::new();
+    for chunk in chunks {
+        let existing_hash = existing_chunks.get(&chunk.metadata.id);
+        if existing_hash == Some(&chunk.metadata.embedding_hash) {
+            continue;
+        }
+        if existing_hash.is_some() {
+            vector_db.delete(&chunk.metadata.id)?;
+        }
+        insert_ids.push(chunk.metadata.id.clone());
+        insert_vectors.push(chunk.vector.clone());
+    }
+    vector_db.insert_batch(&insert_ids, &insert_vectors)?;
+    vector_db.flush()?;
+    Ok(())
+}
+
 pub(super) fn semantic_vector_error_is_recoverable(error: &EmbedDbError) -> bool {
     matches!(
         error,
@@ -422,6 +484,190 @@ pub(super) fn vector_error(error: EmbedDbError) -> napi::Error {
 
 pub(super) fn inference_error(error: InferenceError) -> napi::Error {
     napi_error("inference-error", &error.to_string())
+}
+
+fn replace_semantic_nodes(
+    tx: &rusqlite::Transaction<'_>,
+    root_dir: &str,
+    index_id: &str,
+    nodes: &[SemanticIndexNodeRequest],
+) -> napi::Result<()> {
+    tx.execute(
+        "delete from knowledge_nodes where root_dir = ?1 and index_id = ?2",
+        params![root_dir, index_id],
+    )
+    .map_err(|error| sqlite_error("Could not reset knowledge nodes", error))?;
+    upsert_semantic_nodes(tx, root_dir, index_id, nodes)
+}
+
+pub(super) fn delete_semantic_nodes(
+    tx: &rusqlite::Transaction<'_>,
+    root_dir: &str,
+    index_id: &str,
+    removed_paths: &[String],
+    removed_node_keys: &[String],
+) -> napi::Result<()> {
+    for key in removed_node_keys {
+        tx.execute(
+            "delete from knowledge_nodes where root_dir = ?1 and index_id = ?2 and key = ?3",
+            params![root_dir, index_id, key],
+        )
+        .map_err(|error| sqlite_error("Could not delete knowledge node", error))?;
+    }
+    for path in removed_paths {
+        let child_pattern = format!("{path}#%");
+        tx.execute(
+            "delete from knowledge_nodes where root_dir = ?1 and index_id = ?2 and (key = ?3 or key like ?4)",
+            params![root_dir, index_id, path, child_pattern],
+        )
+        .map_err(|error| sqlite_error("Could not delete knowledge nodes for removed path", error))?;
+    }
+    Ok(())
+}
+
+pub(super) fn upsert_semantic_nodes(
+    tx: &rusqlite::Transaction<'_>,
+    root_dir: &str,
+    index_id: &str,
+    nodes: &[SemanticIndexNodeRequest],
+) -> napi::Result<()> {
+    let updated_at = timestamp();
+    for node in nodes {
+        let children = serde_json::to_string(&node.children)
+            .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
+        tx.execute(
+            "insert into knowledge_nodes(root_dir, index_id, key, kind, hash, parent_key, children, updated_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             on conflict(root_dir, index_id, key) do update set
+               kind = excluded.kind,
+               hash = excluded.hash,
+               parent_key = excluded.parent_key,
+               children = excluded.children,
+               updated_at = excluded.updated_at",
+            params![
+                root_dir,
+                index_id,
+                node.key,
+                node.kind,
+                node.hash,
+                node.parent_key,
+                children,
+                updated_at,
+            ],
+        )
+        .map_err(|error| sqlite_error("Could not upsert knowledge node", error))?;
+    }
+    Ok(())
+}
+
+pub(super) fn assert_semantic_chunk_count(
+    tx: &rusqlite::Transaction<'_>,
+    root_dir: &str,
+    index_id: &str,
+    expected: u32,
+) -> napi::Result<()> {
+    let actual: i64 = tx
+        .query_row(
+            "select count(*) from semantic_chunks where root_dir = ?1 and index_id = ?2",
+            params![root_dir, index_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| sqlite_error("Could not verify semantic chunk count", error))?;
+    if actual != expected as i64 {
+        return Err(napi_error(
+            "invalid-engine-payload",
+            &format!(
+                "Semantic index chunkCount={} does not match stored chunk count {} after write.",
+                expected, actual
+            ),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn upsert_semantic_chunk_rows(
+    tx: &rusqlite::Transaction<'_>,
+    root_dir: &str,
+    index_id: &str,
+    indexed_at: &str,
+    chunks: &[SemanticChunkEmbeddingRequest],
+) -> napi::Result<()> {
+    for chunk in chunks.iter() {
+        let metadata = &chunk.metadata;
+        let payload = serde_json::to_string(metadata)
+            .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
+        tx.execute(
+                "insert into semantic_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
+                   embedding_hash, kind, language, ordinal, start_line, start_column, start_byte,
+                   end_line, end_column, end_byte, heading, symbol, token_estimate, preview, payload, indexed_at, text)
+                 values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+                 on conflict(root_dir, index_id, id) do update set
+                   path = excluded.path,
+                   content_hash = excluded.content_hash,
+                   chunk_hash = excluded.chunk_hash,
+                   embedding_hash = excluded.embedding_hash,
+                   kind = excluded.kind,
+                   language = excluded.language,
+                   ordinal = excluded.ordinal,
+                   start_line = excluded.start_line,
+                   start_column = excluded.start_column,
+                   start_byte = excluded.start_byte,
+                   end_line = excluded.end_line,
+                   end_column = excluded.end_column,
+                   end_byte = excluded.end_byte,
+                   heading = excluded.heading,
+                   symbol = excluded.symbol,
+                   token_estimate = excluded.token_estimate,
+                   preview = excluded.preview,
+                   payload = excluded.payload,
+                   indexed_at = excluded.indexed_at,
+                   text = excluded.text",
+                params![
+                    root_dir,
+                    index_id,
+                    metadata.id,
+                    metadata.path,
+                    metadata.content_hash,
+                    metadata.chunk_hash,
+                    metadata.embedding_hash,
+                    metadata.kind,
+                    metadata.language,
+                    metadata.ordinal,
+                    metadata.range.start.line,
+                    metadata.range.start.column,
+                    metadata.range.start.byte,
+                    metadata.range.end.line,
+                    metadata.range.end.column,
+                    metadata.range.end.byte,
+                    metadata.heading,
+                    metadata.symbol,
+                    metadata.token_estimate,
+                    metadata.preview,
+                    payload,
+                    indexed_at,
+                    chunk.text,
+                ],
+            )
+            .map_err(|error| sqlite_error("Could not write semantic chunk metadata", error))?;
+        tx.execute(
+                "insert into semantic_chunks_fts(root_dir, index_id, id, path, heading, symbol, language, kind, preview, text)
+                 values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    root_dir,
+                    index_id,
+                    metadata.id,
+                    metadata.path,
+                    metadata.heading,
+                    metadata.symbol,
+                    metadata.language,
+                    metadata.kind,
+                    metadata.preview,
+                    chunk.text,
+                ],
+            )
+            .map_err(|error| sqlite_error("Could not write semantic search text", error))?;
+    }
+    Ok(())
 }
 
 pub(super) fn write_semantic_index_json(
@@ -715,6 +961,14 @@ pub(super) fn write_semantic_index_json(
             )
             .map_err(|error| sqlite_error("Could not write semantic search text", error))?;
     }
+
+    replace_semantic_nodes(&tx, &handle.root_dir, &request.index.id, &request.nodes)?;
+    assert_semantic_chunk_count(
+        &tx,
+        &handle.root_dir,
+        &request.index.id,
+        request.index.chunk_count,
+    )?;
 
     tx.commit()
         .map_err(|error| sqlite_error("Could not commit semantic index transaction", error))?;

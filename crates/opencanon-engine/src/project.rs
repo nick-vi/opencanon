@@ -36,6 +36,7 @@ mod connection;
 mod json_fields;
 mod observability_store;
 mod product_model_store;
+mod semantic_delta_store;
 mod semantic_store;
 
 use connection::open_project_connection;
@@ -470,6 +471,11 @@ impl EngineProjectHandle {
     #[napi(js_name = "writeSemanticIndexJson")]
     pub fn write_semantic_index_json(&self, request: String) -> napi::Result<()> {
         semantic_store::write_semantic_index_json(self, request)
+    }
+
+    #[napi(js_name = "writeSemanticIndexDeltaJson")]
+    pub fn write_semantic_index_delta_json(&self, request: String) -> napi::Result<()> {
+        semantic_delta_store::write_semantic_index_delta_json(self, request)
     }
 
     #[napi(js_name = "readSemanticIndexStatusJson")]

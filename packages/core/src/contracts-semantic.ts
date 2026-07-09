@@ -99,6 +99,19 @@ export const SemanticIndexSnapshotSchema = z.object({
 });
 export type SemanticIndexSnapshot = z.infer<typeof SemanticIndexSnapshotSchema>;
 
+export const semanticIndexNodeKindValues = ["root", "dir", "file", "chunk"] as const;
+export const SemanticIndexNodeKindSchema = z.enum(semanticIndexNodeKindValues);
+export type SemanticIndexNodeKind = z.infer<typeof SemanticIndexNodeKindSchema>;
+
+export const SemanticIndexNodeSchema = z.object({
+  key: z.string().min(1),
+  kind: SemanticIndexNodeKindSchema,
+  hash: z.string().min(1),
+  parentKey: z.string().min(1).nullable(),
+  children: z.array(z.string().min(1)).default([]),
+});
+export type SemanticIndexNode = z.infer<typeof SemanticIndexNodeSchema>;
+
 export const SemanticChunkMetadataSchema = z.object({
   id: z.string().min(1),
   path: z.string().min(1),
@@ -126,8 +139,18 @@ export type SemanticChunkEmbedding = z.infer<typeof SemanticChunkEmbeddingSchema
 export const WriteSemanticIndexRequestSchema = z.object({
   index: SemanticIndexSnapshotSchema,
   chunks: z.array(SemanticChunkEmbeddingSchema),
+  nodes: z.array(SemanticIndexNodeSchema).optional(),
 });
 export type WriteSemanticIndexRequest = z.infer<typeof WriteSemanticIndexRequestSchema>;
+
+export const WriteSemanticIndexDeltaRequestSchema = z.object({
+  index: SemanticIndexSnapshotSchema,
+  chunks: z.array(SemanticChunkEmbeddingSchema).optional(),
+  removedPaths: z.array(z.string().min(1)).optional(),
+  removedNodeKeys: z.array(z.string().min(1)).optional(),
+  nodes: z.array(SemanticIndexNodeSchema).optional(),
+});
+export type WriteSemanticIndexDeltaRequest = z.infer<typeof WriteSemanticIndexDeltaRequestSchema>;
 
 export const ReadSemanticIndexStatusRequestSchema = z.object({
   indexId: z.string().min(1).default("project"),

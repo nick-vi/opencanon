@@ -60,6 +60,22 @@ pub(crate) struct WriteSemanticIndexRequest {
     pub(crate) index: SemanticIndexSnapshotRequest,
     #[serde(default)]
     pub(crate) chunks: Vec<SemanticChunkEmbeddingRequest>,
+    #[serde(default)]
+    pub(crate) nodes: Vec<SemanticIndexNodeRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WriteSemanticIndexDeltaRequest {
+    pub(crate) index: SemanticIndexSnapshotRequest,
+    #[serde(default)]
+    pub(crate) chunks: Vec<SemanticChunkEmbeddingRequest>,
+    #[serde(default)]
+    pub(crate) removed_paths: Vec<String>,
+    #[serde(default)]
+    pub(crate) removed_node_keys: Vec<String>,
+    #[serde(default)]
+    pub(crate) nodes: Vec<SemanticIndexNodeRequest>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,6 +105,17 @@ pub(crate) struct SemanticIndexEmbeddingStatsRequest {
     pub(crate) total_chunks: u32,
     pub(crate) embedded_chunks: u32,
     pub(crate) reused_chunks: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SemanticIndexNodeRequest {
+    pub(crate) key: String,
+    pub(crate) kind: String,
+    pub(crate) hash: String,
+    pub(crate) parent_key: Option<String>,
+    #[serde(default)]
+    pub(crate) children: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -38,6 +38,7 @@ import {
   WatcherStartRequestSchema,
   WatcherStartResultSchema,
   WriteProductModelProjectionRequestSchema,
+  WriteSemanticIndexDeltaRequestSchema,
   WriteSemanticIndexRequestSchema,
   createOpenCanonDiagnostic,
   type BuildRepoGraphRequest,
@@ -72,6 +73,7 @@ import {
   type WatcherEventBatch,
   type WatcherStartRequest,
   type WatcherStartResult,
+  type WriteSemanticIndexDeltaRequest,
   type WriteSemanticIndexRequest,
 } from "@opencanon/core";
 import type { SpanRecord, TraceEventRecord, TraceRecord } from "@opencanon/observability";
@@ -102,6 +104,7 @@ export type EngineProject = {
   writeProductModelProjection(projection: ProductModelProjection): void;
   readProductModelProjection(): ProductModelProjection | null;
   writeSemanticIndex(request: WriteSemanticIndexRequest): void;
+  writeSemanticIndexDelta(request: WriteSemanticIndexDeltaRequest): void;
   readSemanticIndexStatus(request?: ReadSemanticIndexStatusRequest): ReadSemanticIndexStatusResult;
   listSemanticChunks(request?: ListSemanticChunksRequest): ListSemanticChunksResult;
   searchSemanticIndex(request: SearchSemanticIndexRequest): SearchSemanticIndexResult;
@@ -151,6 +154,7 @@ type EngineProjectJsonBinding = {
   writeProductModelProjectionJson(request: string): void;
   readProductModelProjectionJson(): string;
   writeSemanticIndexJson(request: string): void;
+  writeSemanticIndexDeltaJson(request: string): void;
   readSemanticIndexStatusJson(request: string): string;
   listSemanticChunksJson(request: string): string;
   searchSemanticIndexJson(request: string): string;
@@ -265,6 +269,8 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     },
     writeSemanticIndex: (request) =>
       callEngine(() => project.writeSemanticIndexJson(JSON.stringify(WriteSemanticIndexRequestSchema.parse(request)))),
+    writeSemanticIndexDelta: (request) =>
+      callEngine(() => project.writeSemanticIndexDeltaJson(JSON.stringify(WriteSemanticIndexDeltaRequestSchema.parse(request)))),
     readSemanticIndexStatus: (request = {}) =>
       ReadSemanticIndexStatusResultSchema.parse(
         parseJson(callEngine(() => project.readSemanticIndexStatusJson(JSON.stringify(ReadSemanticIndexStatusRequestSchema.parse(request))))),
@@ -339,6 +345,7 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "writeProductModelProjectionJson",
     "readProductModelProjectionJson",
     "writeSemanticIndexJson",
+    "writeSemanticIndexDeltaJson",
     "readSemanticIndexStatusJson",
     "listSemanticChunksJson",
     "searchSemanticIndexJson",

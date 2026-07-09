@@ -16,6 +16,7 @@ import {
   type SearchSemanticIndexRequest,
   type SearchSemanticIndexResult,
   type SemanticIndexSnapshot,
+  type WriteSemanticIndexDeltaRequest,
   type WriteSemanticIndexRequest,
 } from "@opencanon/core";
 import {
@@ -38,6 +39,7 @@ export type ProjectStore = {
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
   listObservabilityRecords(query?: ObservabilityRecordQuery): ObservabilityRecordResult;
   writeSemanticIndex(request: WriteSemanticIndexRequest): void;
+  writeSemanticIndexDelta(request: WriteSemanticIndexDeltaRequest): void;
   readSemanticIndexStatus(request?: ReadSemanticIndexStatusRequest): ReadSemanticIndexStatusResult;
   listSemanticChunks(request?: ListSemanticChunksRequest): ListSemanticChunksResult;
   searchSemanticIndex(request: SearchSemanticIndexRequest): SearchSemanticIndexResult;
@@ -147,6 +149,10 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
     },
     writeSemanticIndex(request) {
       project.writeSemanticIndex(request);
+      state = { ...state, semanticIndex: request.index };
+    },
+    writeSemanticIndexDelta(request) {
+      project.writeSemanticIndexDelta(request);
       state = { ...state, semanticIndex: request.index };
     },
     readSemanticIndexStatus(request = {}) {

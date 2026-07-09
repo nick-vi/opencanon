@@ -41,6 +41,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "semantic_hybrid",
         sql: include_str!("migrations/006_semantic_hybrid.sql"),
     },
+    Migration {
+        version: 7,
+        name: "knowledge_nodes",
+        sql: include_str!("migrations/007_knowledge_nodes.sql"),
+    },
 ];
 
 pub(crate) fn schema_version() -> u32 {
@@ -158,10 +163,12 @@ fn repair_semantic_index_schema(conn: &Connection) -> napi::Result<()> {
     };
     let has_current_shape = snapshot_columns.contains("chunk_tree_hash")
         && chunk_columns.contains("text")
-        && table_exists(conn, "semantic_chunks_fts")?;
+        && table_exists(conn, "semantic_chunks_fts")?
+        && table_exists(conn, "knowledge_nodes")?;
     if !has_current_shape {
         conn.execute_batch(
-            "drop table if exists semantic_chunks_fts;
+            "drop table if exists knowledge_nodes;
+             drop table if exists semantic_chunks_fts;
              drop table if exists semantic_chunks;
              drop table if exists semantic_index_snapshots;",
         )
@@ -170,6 +177,8 @@ fn repair_semantic_index_schema(conn: &Connection) -> napi::Result<()> {
             .map_err(|error| sqlite_error("Could not recreate semantic index schema", error))?;
         conn.execute_batch(include_str!("migrations/006_semantic_hybrid.sql"))
             .map_err(|error| sqlite_error("Could not recreate semantic hybrid schema", error))?;
+        conn.execute_batch(include_str!("migrations/007_knowledge_nodes.sql"))
+            .map_err(|error| sqlite_error("Could not recreate knowledge node schema", error))?;
         return Ok(());
     }
 
@@ -182,7 +191,8 @@ fn repair_semantic_index_schema(conn: &Connection) -> napi::Result<()> {
         .map_err(|error| sqlite_error("Could not inspect semantic index payloads", error))?;
     if stale_payloads > 0 {
         conn.execute_batch(
-            "delete from semantic_chunks_fts;
+            "delete from knowledge_nodes;
+             delete from semantic_chunks_fts;
              delete from semantic_chunks;
              delete from semantic_index_snapshots;",
         )
@@ -200,7 +210,8 @@ fn repair_semantic_index_schema(conn: &Connection) -> napi::Result<()> {
         .map_err(|error| sqlite_error("Could not inspect semantic index providers", error))?;
     if unsupported_providers > 0 {
         conn.execute_batch(
-            "delete from semantic_chunks_fts;
+            "delete from knowledge_nodes;
+             delete from semantic_chunks_fts;
              delete from semantic_chunks;
              delete from semantic_index_snapshots;",
         )
