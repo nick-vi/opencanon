@@ -6,10 +6,10 @@ import { afterEach, beforeEach, test } from "vitest";
 import { createRuntimeUpdateSafetyGuard, renderRuntimeUpdateApplyMarkdown } from "../packages/cli/src/update.ts";
 import { currentEngineTarget, runtimeUpdateProjectRefreshAction } from "@opencanon/distribution";
 import {
-  LocalControlProtocolVersion,
-  LocalTransportKind,
   ProcessLifecycleStatus,
   localPipeEndpoint,
+  resolveRuntimeCliEntrypoint,
+  runtimeIdentityForEntrypoint,
   upsertRuntimeEntry,
   upsertServiceEntry,
 } from "@opencanon/runtime";
@@ -49,7 +49,7 @@ test("CLI update safety guard refuses while the global service is registered", a
           updatedAt: "2026-05-01T00:00:00.000Z",
           restart: { attempts: 0 },
         },
-        ...testRuntimeIdentity,
+        ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(process.cwd())),
       },
       registryPath,
     );
@@ -87,7 +87,7 @@ test("CLI update safety guard refuses while any project runtime is registered", 
           updatedAt: "2026-05-01T00:00:00.000Z",
           restart: { attempts: 0 },
         },
-        ...testRuntimeIdentity,
+        ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
       },
       registryPath,
     );
@@ -127,11 +127,3 @@ test("CLI update apply output includes managed project artifact refresh action",
   assert.match(markdown, /Refresh managed project artifacts/);
   assert.match(markdown, /`opencanon doctor --fix`/);
 });
-
-const testRuntimeIdentity = {
-  transport: LocalTransportKind.Pipe,
-  protocolVersion: LocalControlProtocolVersion,
-  runtimeVersion: "0.4.0-test",
-  runtimeFingerprint: "sha256:test-runtime",
-  cliPath: process.execPath,
-};

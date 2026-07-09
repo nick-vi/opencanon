@@ -17,10 +17,13 @@ import {
   discoverOpenCanonProjectsFromRoots,
   ProcessLifecycleStatus,
   ProcessLifecycleEventKind,
+  RuntimeStatus,
   RuntimeCliInvocationKind,
   chooseRuntimePort,
   inspectAllRuntimes,
+  inspectProjectRuntime,
   inspectRuntimeEntry,
+  inspectService,
   acquireProjectWorkerLease,
   readRuntimeLifecycleEvents,
   readRuntimeRegistry,
@@ -36,7 +39,9 @@ import {
   reconcileProjectRuntimes,
   resolveRuntimeCliEntrypoint,
   runtimeIdentityForEntrypoint,
+  serveLocalProtocolPipe,
   startProjectRuntime,
+  startService,
   startServiceServer,
   stopService,
   stopProjectRuntime,
@@ -47,6 +52,7 @@ import {
 } from "@opencanon/runtime";
 import {
   processIsRunning,
+  readyFakeServiceCliSource,
   readyFakeRuntimeCliSource,
   testLifecycle,
   testRuntimeIdentity,
@@ -135,6 +141,73 @@ test("runtime identity includes the invocation kind for node-script entrypoints"
 
     assert.notEqual(nodeScript.runtimeFingerprint, executable.runtimeFingerprint);
   } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("project runtime inspection reports live identity mismatch as stale", { timeout: 10000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-identity-stale-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const firstCli = path.join(rootDir, "first-opencanon.mjs");
+  const secondCli = path.join(rootDir, "second-opencanon.mjs");
+  const originalOverride = process.env.OPENCANON_CLI;
+  let pid: number | undefined;
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    writeFileSync(firstCli, readyFakeRuntimeCliSource());
+    writeFileSync(secondCli, readyFakeRuntimeCliSource());
+    process.env.OPENCANON_CLI = firstCli;
+    const started = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
+    pid = started.entry.pid;
+
+    process.env.OPENCANON_CLI = secondCli;
+    const inspection = await inspectProjectRuntime(rootDir, registryPath);
+
+    assert.equal(inspection?.status, RuntimeStatus.Stale);
+    assert.match(inspection?.message ?? "", /different OpenCanon runtime/);
+  } finally {
+    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
+    if (pid && processIsRunning(pid)) process.kill(pid, "SIGKILL");
+    if (originalOverride === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalOverride;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("service start replaces live service identity mismatch", { timeout: 10000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-identity-replace-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const firstCli = path.join(rootDir, "first-service-opencanon.mjs");
+  const secondCli = path.join(rootDir, "second-service-opencanon.mjs");
+  const originalOverride = process.env.OPENCANON_CLI;
+  let firstPid: number | undefined;
+  let secondPid: number | undefined;
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    writeFileSync(firstCli, readyFakeServiceCliSource());
+    writeFileSync(secondCli, readyFakeServiceCliSource());
+    process.env.OPENCANON_CLI = firstCli;
+    const first = await startService({ cwd: rootDir, registryPath });
+    firstPid = first.entry.pid;
+
+    process.env.OPENCANON_CLI = secondCli;
+    const stale = await inspectService(registryPath, rootDir);
+    assert.equal(stale?.status, RuntimeStatus.Stale);
+    assert.match(stale?.message ?? "", /different OpenCanon runtime/);
+
+    const second = await startService({ cwd: rootDir, registryPath });
+    secondPid = second.entry.pid;
+
+    assert.equal(second.status, "started");
+    assert.notEqual(secondPid, firstPid);
+    assert(firstPid !== undefined);
+    assert.equal(await waitUntilProcessStops(firstPid, 3000), true);
+  } finally {
+    await stopService(registryPath).catch(() => undefined);
+    if (firstPid && processIsRunning(firstPid)) process.kill(firstPid, "SIGKILL");
+    if (secondPid && processIsRunning(secondPid)) process.kill(secondPid, "SIGKILL");
+    if (originalOverride === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalOverride;
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -1041,7 +1114,7 @@ test("service reconciliation preserves runtimes busy with project work", async (
         updatedAt: new Date().toISOString(),
         message: "Manual reindex is running.",
       },
-      ...testRuntimeIdentity,
+      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
     };
     upsertRuntimeEntry(entry, registryPath);
 
@@ -1064,46 +1137,45 @@ test("service reconciliation preserves runtimes busy with project work", async (
 test("runtime inspection rejects health from a different process lease", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-lease-mismatch-"));
   const registryPath = path.join(rootDir, "global", "service.json");
-  const server = createServer((_request, response) => {
-    response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify({
-      ok: true,
-      data: {
-        status: "ready",
-        process: { kind: "runtime", pid: process.pid, leaseId: "wrong-lease" },
-        engine: { engineVersion: "0.4.0-test", packageVersion: "0.4.0-test", napiVersion: "test", schemaVersion: 1 },
-        refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
-        startedAt: new Date().toISOString(),
-      },
-    }));
+  const pipeEndpoint = testRuntimePipeEndpoint(rootDir, registryPath);
+  const pipeServer = await serveLocalProtocolPipe({
+    endpoint: pipeEndpoint,
+    async routeRequest() {
+      return new Response(JSON.stringify({
+        ok: true,
+        data: {
+          status: "ready",
+          process: { kind: "runtime", pid: process.pid, leaseId: "wrong-lease" },
+          engine: { engineVersion: "0.4.0-test", packageVersion: "0.4.0-test", napiVersion: "test", schemaVersion: 1 },
+          refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+          startedAt: new Date().toISOString(),
+        },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+    },
   });
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", resolve);
-    });
-    const address = server.address();
-    const port = typeof address === "object" && address ? address.port : 0;
     const inspection = await inspectRuntimeEntry({
       rootDir,
       host: "127.0.0.1",
-      port,
-      url: `http://127.0.0.1:${port}`,
+      port: 9,
+      url: "http://127.0.0.1:9",
       pid: process.pid,
       startedAt: "2026-05-01T00:00:00.000Z",
       logPath: path.join(rootDir, ".opencanon", "runtime.log"),
       authToken: "test-token",
       ...testRuntimeLease("expected-lease"),
-      ...testRuntimeIdentity,
-      transport: LocalTransportKind.Http,
-      pipeEndpoint: "",
+      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
+      pipeEndpoint,
     });
 
     assert.equal(inspection.status, "unhealthy");
     assert.equal(inspection.message, "Runtime health endpoint responded for a different process lease.");
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await pipeServer.stop(true).catch(() => undefined);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

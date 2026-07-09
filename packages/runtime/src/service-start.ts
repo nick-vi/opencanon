@@ -265,8 +265,10 @@ export async function startService(input: {
       keepPids: serviceRegistryKeepPids(registryPath),
       cleanupPipeMaxAgeMs: LocalPipeCleanupAgeMs,
     });
-    const existing = await inspectService(registryPath);
-    if (existing?.status === RuntimeStatus.Running && runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
+    const existing = await inspectService(registryPath, rootDir);
+    if (existing && !runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
+      await stopService(registryPath);
+    } else if (existing?.status === RuntimeStatus.Running && runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
       return {
         status: "already-running",
         entry: existing.entry,

@@ -29,6 +29,8 @@ import {
 } from "./service-storage.ts";
 import { retireRuntimeProcessLeases, runtimeProcessLeasesFromMalformedRegistryEntries } from "./service-process.ts";
 import { withLifecycle } from "./service-lifecycle.ts";
+import { resolveRuntimeCliEntrypoint } from "./service-entrypoint.ts";
+import { runtimeIdentityForEntrypoint, runtimeIdentityMatches } from "./service-identity.ts";
 
 export const RuntimeStartupHealthBudgetMs = 180_000;
 const RuntimeStartupHealthIntervalMs = 250;
@@ -68,10 +70,17 @@ export async function waitForProjectRuntimeReady(
   throw new Error(`Project runtime did not become ready within ${timeoutMs}ms: ${lastMessage}`);
 }
 
-export async function inspectService(registryPath = serviceRegistryPath()): Promise<ServiceInspection | undefined> {
+export async function inspectService(registryPath = serviceRegistryPath(), rootDir = process.cwd()): Promise<ServiceInspection | undefined> {
   const entry = readServiceEntry(registryPath);
   if (!entry) return undefined;
   if (!isProcessRunning(entry.pid)) return { entry, status: RuntimeStatus.Stale, message: "Registered service process is not running." };
+  if (!serviceRuntimeIdentityMatches(entry, rootDir)) {
+    return {
+      entry,
+      status: RuntimeStatus.Stale,
+      message: "Registered service was started by a different OpenCanon runtime. Run opencanon service start to recreate service state.",
+    };
+  }
   const service = await serviceStatus(entry);
   if (service.ok) return { entry, status: RuntimeStatus.Running, message: "OpenCanon service health endpoint is ready.", health: service.health };
   return { entry, status: RuntimeStatus.Unhealthy, message: service.message };
@@ -90,6 +99,13 @@ export async function inspectAllRuntimes(registryPath = serviceRegistryPath()): 
 export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryPath?: string | undefined): Promise<RuntimeInspection> {
   if (!isProcessRunning(entry.pid)) {
     return { entry, status: RuntimeStatus.Stale, message: "Registered process is not running." };
+  }
+  if (!projectRuntimeIdentityMatches(entry)) {
+    return {
+      entry,
+      status: RuntimeStatus.Stale,
+      message: "Registered project runtime was started by a different OpenCanon runtime. Run opencanon project start to recreate project runtime state.",
+    };
   }
   const nowMs = Date.now();
   const runtime = await projectRuntimeStatus(entry);
@@ -123,6 +139,14 @@ export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryP
     return { entry, status: RuntimeStatus.Starting, message: "Runtime is still starting; waiting for health endpoint." };
   }
   return { entry, status: RuntimeStatus.Unhealthy, message: runtime.message };
+}
+
+function projectRuntimeIdentityMatches(entry: RuntimeRegistryEntry): boolean {
+  return runtimeIdentityMatches(entry, runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(entry.rootDir)));
+}
+
+function serviceRuntimeIdentityMatches(entry: ServiceRegistryEntry, rootDir: string): boolean {
+  return runtimeIdentityMatches(entry, runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)));
 }
 
 export function runtimeStartupStillWithinGrace(entry: RuntimeRegistryEntry, nowMs: number): boolean {

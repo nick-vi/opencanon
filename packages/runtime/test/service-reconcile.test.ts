@@ -23,6 +23,8 @@ import {
   forgetRuntimeEntryForPid,
   forgetServiceEntryForPid,
   renderLifecycleEventsMarkdown,
+  resolveRuntimeCliEntrypoint,
+  runtimeIdentityForEntrypoint,
   startProjectRuntime,
   startService,
   stopProjectRuntime,
@@ -68,7 +70,7 @@ test("reconciler restarts a stale registered project runtime and records lifecyc
       logPath: path.join(rootDir, ".opencanon", "runtime.log"),
       authToken: "test-token",
       ...testRuntimeLease("stale-runtime-lease"),
-      ...testRuntimeIdentity,
+      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
     }, registryPath);
 
     const result = await reconcileProjectRuntimes({ registryPath, nowMs: Date.parse("2026-05-01T00:00:00.000Z") });
@@ -115,7 +117,7 @@ test("app overview reconciles stale registered project runtimes before listing p
       logPath: path.join(rootDir, ".opencanon", "runtime.log"),
       authToken: "test-token",
       ...testRuntimeLease("overview-stale-runtime-lease"),
-      ...testRuntimeIdentity,
+      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
     }, registryPath);
 
     const overview = await buildServiceOverview({ registryPath });
@@ -214,7 +216,7 @@ test("reconciler preserves starting project runtimes during startup grace", asyn
         message: "Waiting for runtime health endpoint.",
         restart: { attempts: 0 },
       },
-      ...testRuntimeIdentity,
+      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
     }, registryPath);
 
     const inspection = await inspectRuntimeEntry(readRuntimeRegistry(registryPath)[0]!);

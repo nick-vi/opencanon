@@ -36,10 +36,12 @@ test("init creates scaffold, package script, and requested hooks", () => {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(path.join(rootDir, "src/a.ts"), "export const a = 1;\n");
+    const env = { ...process.env, OPENCANON_SERVICE_REGISTRY_PATH: path.join(rootDir, ".opencanon", "test-service.json") };
 
     const result = spawnSync(process.execPath, [script, "init", "--yes", "--hooks", "opencode", "--file-discovery", "filesystem", "--no-runtime"], {
       cwd: rootDir,
       encoding: "utf8",
+      env,
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -85,12 +87,14 @@ test("init creates scaffold, package script, and requested hooks", () => {
     const check = spawnSync(process.execPath, [script, "context", "--check"], {
       cwd: rootDir,
       encoding: "utf8",
+      env,
     });
     assert.equal(check.status, 0, check.stderr || check.stdout);
 
     const doctor = spawnSync(process.execPath, [script, "doctor"], {
       cwd: rootDir,
       encoding: "utf8",
+      env,
     });
     assert.equal(doctor.status, 0, doctor.stderr || doctor.stdout);
     assert(doctor.stdout.includes("not applicable outside the OpenCanon framework workspace"));
