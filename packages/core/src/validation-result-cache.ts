@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { writeAtomicJsonFileSync } from "./atomic.ts";
 import type { ContextPaths } from "./context.ts";
@@ -7,7 +7,7 @@ import type { ProducerSnapshot } from "./type-facts-provider.ts";
 import type { CommitGate, Finding, Validator } from "./validator-types.ts";
 import type { ValidatorOutcome } from "./validation.ts";
 
-const cacheVersion = 1;
+const cacheVersion = 2;
 const maxEntries = 10_000;
 
 type ValidationResultCacheFile = {
@@ -165,19 +165,19 @@ function contextFiles(paths: ContextPaths): string[] {
     .map((file) => (path.isAbsolute(file) ? path.relative(paths.rootDir, file) : file));
 }
 
-function fingerprintFiles(rootDir: string, files: string[]): Array<{ path: string; exists: boolean; size?: number; mtimeMs?: number }> {
+function fingerprintFiles(rootDir: string, files: string[]): Array<{ path: string; exists: boolean; size?: number; sha256?: string }> {
   return [...new Set(files)]
     .sort()
     .map((file) => {
       const normalized = file.split(path.sep).join("/");
       const absolutePath = path.isAbsolute(normalized) ? normalized : path.join(rootDir, normalized);
       if (!existsSync(absolutePath)) return { path: normalized, exists: false };
-      const stats = statSync(absolutePath);
+      const bytes = readFileSync(absolutePath);
       return {
         path: normalized,
         exists: true,
-        size: stats.size,
-        mtimeMs: stats.mtimeMs,
+        size: bytes.byteLength,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
       };
     });
 }

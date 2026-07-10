@@ -9,6 +9,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
   tmpdir,
   path,
@@ -267,6 +268,54 @@ test("validation result cache reuses unchanged validator results", async () => {
     const third = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
     assert.equal(runs, 2, "changing project input must invalidate the cached validator result");
     assert.equal(third.findings.length, 0);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("validation result cache invalidates same-size content changes with preserved mtime", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validation-cache-content-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ fileDiscovery: "filesystem", projectFilePatterns: ["src/**/*.ts"], ignore: [] }));
+    const filePath = path.join(rootDir, "src/company.ts");
+    const firstText = "export const value = 'bad-a';\n";
+    const secondText = "export const value = 'bad-b';\n";
+    assert.equal(firstText.length, secondText.length);
+    writeFileSync(filePath, firstText);
+    const fixedTime = new Date("2026-01-01T00:00:00.000Z");
+    utimesSync(filePath, fixedTime, fixedTime);
+    const paths = createPaths(rootDir);
+    let runs = 0;
+
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "content-sensitive-validator",
+        applies: ["src/**/*.ts"],
+        severity: "error",
+        scope: "file",
+        validate({ ctx }) {
+          runs += 1;
+          return ctx.targetFiles.map((file) =>
+            file.report({
+              line: 1,
+              message: `${file.text.includes("bad-a") ? "first" : "second"} run ${runs}`,
+            }),
+          );
+        },
+      }),
+    ).validators;
+
+    const resultCache = createValidationResultCache(paths);
+    const first = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
+    assert.equal(runs, 1);
+    assert.equal(first.findings[0]?.message, "first run 1");
+
+    writeFileSync(filePath, secondText);
+    utimesSync(filePath, fixedTime, fixedTime);
+    const second = await runValidation({ rootDir, paths, conventions: [], validators, files: ["src/company.ts"], producerPolicy: BatchProducerPolicy, resultCache });
+    assert.equal(runs, 2, "same-size and same-mtime content changes must bypass cached results");
+    assert.equal(second.findings[0]?.message, "second run 2");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
