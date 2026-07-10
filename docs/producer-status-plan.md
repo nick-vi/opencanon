@@ -2,7 +2,7 @@
 
 OpenCanon-Knowledge: exclude
 
-Status: implemented (Phases 0–6) in the unreleased v0.4.0. Replaces the
+Status: implemented in the current producer-status model. Replaces the
 `confidence: checked | heuristic` tier introduced with typed literal facts.
 Pre-reset API shapes were deleted because only local builds used them.
 

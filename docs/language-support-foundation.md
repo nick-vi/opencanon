@@ -123,7 +123,7 @@ Core intersects `applies` with discovered languages, checks each required
 capability against the descriptor + provider readiness, and records
 `validatorOutcomes` (`ran` / `skipped` with reason / `error`). Unsupported coverage
 → skip; unknown language/capability → definition error; semantic-not-ready → reuse
-producer-status. (Reuses the v0.4.0 producer-status/outcomes machinery.)
+producer-status and validator-outcome machinery.
 
 ## Core-derived vs provider-required (the split that keeps it lean)
 - **Core-derived (free once facts/syntax exist):** file classification, naming

@@ -9,7 +9,7 @@
     SKILLS_INSTALL_COMMAND
   } from '$lib/site.config.js';
 
-  const releaseProducerCommand = `npm run release:publish -- 0.4.0`;
+  const releaseProducerCommand = `npm run release:publish -- <version>`;
 </script>
 
 <svelte:head><title>Install | OpenCanon</title></svelte:head>
