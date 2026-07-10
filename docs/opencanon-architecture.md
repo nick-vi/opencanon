@@ -447,8 +447,10 @@ watch_state
 observability_traces
 observability_spans
 observability_events
-semantic_index_snapshots
-semantic_chunks
+knowledge_snapshots
+knowledge_chunks
+knowledge_chunks_fts
+knowledge_nodes
 ```
 
 Rules:
@@ -483,8 +485,10 @@ jobs(id, type, status, payload, created_at, updated_at)
 observability_traces(root_dir, id, name, status, recording, sampled, started_at, ended_at, payload)
 observability_spans(root_dir, id, trace_id, parent_span_id, name, kind, status, started_at, ended_at, payload)
 observability_events(root_dir, id, trace_id, span_id, name, occurred_at, payload)
-semantic_index_snapshots(root_dir, id, status, identity_hash, payload, indexed_at)
-semantic_chunks(root_dir, index_id, id, path, content_hash, chunk_hash, payload, indexed_at)
+knowledge_snapshots(root_dir, id, status, identity_hash, payload, indexed_at)
+knowledge_chunks(root_dir, index_id, id, path, content_hash, chunk_hash, payload, indexed_at)
+knowledge_chunks_fts(root_dir, index_id, id, path, heading, symbol, language, kind, preview, text)
+knowledge_nodes(root_dir, index_id, key, kind, hash, parent_key, children, updated_at)
 ```
 
 ## JSON State

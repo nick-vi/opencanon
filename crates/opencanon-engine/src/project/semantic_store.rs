@@ -18,7 +18,7 @@ use crate::state::timestamp;
 use super::json_fields::{json_int_field, json_object_field};
 use super::EngineProjectHandle;
 
-pub(super) fn default_semantic_index_id() -> &'static str {
+pub(super) fn default_knowledge_index_id() -> &'static str {
     "project"
 }
 
@@ -41,16 +41,16 @@ fn sanitize_state_segment(value: &str) -> String {
         }
     }
     if output.is_empty() {
-        default_semantic_index_id().to_string()
+        default_knowledge_index_id().to_string()
     } else {
         output
     }
 }
 
-pub(super) fn validate_semantic_index_request(
+pub(super) fn validate_knowledge_index_request(
     request: &WriteSemanticIndexRequest,
 ) -> napi::Result<()> {
-    validate_semantic_index_snapshot(&request.index)?;
+    validate_knowledge_index_snapshot(&request.index)?;
     if request.index.chunk_count as usize != request.chunks.len()
         || request.index.vector_count as usize != request.chunks.len()
     {
@@ -64,14 +64,14 @@ pub(super) fn validate_semantic_index_request(
             ),
         ));
     }
-    validate_semantic_chunks(&request.chunks, request.index.provider.dimensions)
+    validate_knowledge_chunks(&request.chunks, request.index.provider.dimensions)
 }
 
-pub(super) fn validate_semantic_index_delta_request(
+pub(super) fn validate_knowledge_index_delta_request(
     request: &WriteSemanticIndexDeltaRequest,
 ) -> napi::Result<()> {
-    validate_semantic_index_snapshot(&request.index)?;
-    validate_semantic_chunks(&request.chunks, request.index.provider.dimensions)?;
+    validate_knowledge_index_snapshot(&request.index)?;
+    validate_knowledge_chunks(&request.chunks, request.index.provider.dimensions)?;
     for path in request.removed_paths.iter() {
         if path.trim().is_empty() {
             return Err(napi_error(
@@ -91,7 +91,7 @@ pub(super) fn validate_semantic_index_delta_request(
     Ok(())
 }
 
-fn validate_semantic_index_snapshot(
+fn validate_knowledge_index_snapshot(
     index: &crate::contracts::SemanticIndexSnapshotRequest,
 ) -> napi::Result<()> {
     if index.id.trim().is_empty() {
@@ -121,7 +121,7 @@ fn validate_semantic_index_snapshot(
     Ok(())
 }
 
-fn validate_semantic_chunks(
+fn validate_knowledge_chunks(
     chunks: &[SemanticChunkEmbeddingRequest],
     dimensions: u32,
 ) -> napi::Result<()> {
@@ -152,14 +152,14 @@ fn validate_semantic_chunks(
     Ok(())
 }
 
-pub(super) fn read_semantic_index_payload(
+pub(super) fn read_knowledge_index_payload(
     conn: &Connection,
     root_dir: &str,
     index_id: &str,
 ) -> napi::Result<Option<Value>> {
     let payload = conn
         .query_row(
-            "select payload from semantic_index_snapshots where root_dir = ?1 and id = ?2",
+            "select payload from knowledge_snapshots where root_dir = ?1 and id = ?2",
             params![root_dir, index_id],
             |row| row.get::<_, String>(0),
         )
@@ -181,7 +181,7 @@ pub(super) fn read_semantic_chunk_payload(
 ) -> napi::Result<Option<Value>> {
     let payload = conn
         .query_row(
-            "select payload from semantic_chunks where root_dir = ?1 and index_id = ?2 and id = ?3",
+            "select payload from knowledge_chunks where root_dir = ?1 and index_id = ?2 and id = ?3",
             params![root_dir, index_id, chunk_id],
             |row| row.get::<_, String>(0),
         )
@@ -206,7 +206,7 @@ pub(super) fn list_semantic_chunk_payloads(
     if paths.is_empty() {
         let mut statement = conn
             .prepare(
-                "select payload from semantic_chunks
+                "select payload from knowledge_chunks
                  where root_dir = ?1 and index_id = ?2
                  order by path, cast(json_extract(payload, '$.ordinal') as integer), id
                  limit ?3 offset ?4",
@@ -233,7 +233,7 @@ pub(super) fn list_semantic_chunk_payloads(
     let allowed_paths = paths.iter().cloned().collect::<HashSet<_>>();
     let mut statement = conn
         .prepare(
-            "select payload from semantic_chunks
+            "select payload from knowledge_chunks
              where root_dir = ?1 and index_id = ?2
              order by path, cast(json_extract(payload, '$.ordinal') as integer), id",
         )
@@ -264,7 +264,7 @@ pub(super) fn read_semantic_chunk_hashes(
 ) -> napi::Result<HashMap<String, String>> {
     let mut statement = conn
         .prepare(
-            "select id, embedding_hash from semantic_chunks where root_dir = ?1 and index_id = ?2",
+            "select id, embedding_hash from knowledge_chunks where root_dir = ?1 and index_id = ?2",
         )
         .map_err(|error| sqlite_error("Could not prepare semantic chunk hash read", error))?;
     let rows = statement
@@ -356,7 +356,7 @@ pub(super) fn semantic_chunk_ids_for_paths(
     for path in paths {
         let mut statement = conn
             .prepare(
-                "select id from semantic_chunks where root_dir = ?1 and index_id = ?2 and path = ?3",
+                "select id from knowledge_chunks where root_dir = ?1 and index_id = ?2 and path = ?3",
             )
             .map_err(|error| sqlite_error("Could not prepare semantic chunk filter", error))?;
         let rows = statement
@@ -385,9 +385,9 @@ pub(super) fn semantic_lexical_matches(
     };
     let mut statement = conn
         .prepare(
-            "select id, bm25(semantic_chunks_fts) as rank
-             from semantic_chunks_fts
-             where semantic_chunks_fts match ?1 and root_dir = ?2 and index_id = ?3
+            "select id, bm25(knowledge_chunks_fts) as rank
+             from knowledge_chunks_fts
+             where knowledge_chunks_fts match ?1 and root_dir = ?2 and index_id = ?3
              order by rank
              limit ?4",
         )
@@ -568,7 +568,7 @@ pub(super) fn assert_semantic_chunk_count(
 ) -> napi::Result<()> {
     let actual: i64 = tx
         .query_row(
-            "select count(*) from semantic_chunks where root_dir = ?1 and index_id = ?2",
+            "select count(*) from knowledge_chunks where root_dir = ?1 and index_id = ?2",
             params![root_dir, index_id],
             |row| row.get(0),
         )
@@ -597,7 +597,7 @@ pub(super) fn upsert_semantic_chunk_rows(
         let payload = serde_json::to_string(metadata)
             .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
         tx.execute(
-                "insert into semantic_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
+                "insert into knowledge_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
                    embedding_hash, kind, language, ordinal, start_line, start_column, start_byte,
                    end_line, end_column, end_byte, heading, symbol, token_estimate, preview, payload, indexed_at, text)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
@@ -650,7 +650,7 @@ pub(super) fn upsert_semantic_chunk_rows(
             )
             .map_err(|error| sqlite_error("Could not write semantic chunk metadata", error))?;
         tx.execute(
-                "insert into semantic_chunks_fts(root_dir, index_id, id, path, heading, symbol, language, kind, preview, text)
+                "insert into knowledge_chunks_fts(root_dir, index_id, id, path, heading, symbol, language, kind, preview, text)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     root_dir,
@@ -670,18 +670,18 @@ pub(super) fn upsert_semantic_chunk_rows(
     Ok(())
 }
 
-pub(super) fn write_semantic_index_json(
+pub(super) fn write_knowledge_index_json(
     handle: &EngineProjectHandle,
     request: String,
 ) -> napi::Result<()> {
     let request: WriteSemanticIndexRequest = decode(&request)?;
-    validate_semantic_index_request(&request)?;
+    validate_knowledge_index_request(&request)?;
 
     let mut conn = handle
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let previous_index = read_semantic_index_payload(&conn, &handle.root_dir, &request.index.id)?;
+    let previous_index = read_knowledge_index_payload(&conn, &handle.root_dir, &request.index.id)?;
     let previous_identity = previous_index
         .as_ref()
         .and_then(|index| index.get("identityHash"))
@@ -807,7 +807,7 @@ pub(super) fn write_semantic_index_json(
         .transaction()
         .map_err(|error| sqlite_error("Could not start semantic index transaction", error))?;
     tx.execute(
-            "insert into semantic_index_snapshots(root_dir, id, version, status, provider_id,
+            "insert into knowledge_snapshots(root_dir, id, version, status, provider_id,
                provider_display_name, model_id, model_digest, dimensions, distance, config_hash,
                chunker_version, producer_version, source_inventory_hash, identity_hash, chunk_count,
                vector_count, stale_chunk_count, diagnostics, payload, indexed_at, updated_at, chunk_tree_hash)
@@ -864,7 +864,7 @@ pub(super) fn write_semantic_index_json(
 
     if reset_sql_chunks {
         tx.execute(
-            "delete from semantic_chunks where root_dir = ?1 and index_id = ?2",
+            "delete from knowledge_chunks where root_dir = ?1 and index_id = ?2",
             params![handle.root_dir, request.index.id],
         )
         .map_err(|error| sqlite_error("Could not reset semantic chunks", error))?;
@@ -874,14 +874,14 @@ pub(super) fn write_semantic_index_json(
                 continue;
             }
             tx.execute(
-                "delete from semantic_chunks where root_dir = ?1 and index_id = ?2 and id = ?3",
+                "delete from knowledge_chunks where root_dir = ?1 and index_id = ?2 and id = ?3",
                 params![handle.root_dir, request.index.id, removed_id],
             )
             .map_err(|error| sqlite_error("Could not delete stale semantic chunk", error))?;
         }
     }
     tx.execute(
-        "delete from semantic_chunks_fts where root_dir = ?1 and index_id = ?2",
+        "delete from knowledge_chunks_fts where root_dir = ?1 and index_id = ?2",
         params![handle.root_dir, request.index.id],
     )
     .map_err(|error| sqlite_error("Could not clear semantic search text", error))?;
@@ -891,7 +891,7 @@ pub(super) fn write_semantic_index_json(
         let payload = serde_json::to_string(metadata)
             .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
         tx.execute(
-                "insert into semantic_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
+                "insert into knowledge_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
                    embedding_hash, kind, language, ordinal, start_line, start_column, start_byte,
                    end_line, end_column, end_byte, heading, symbol, token_estimate, preview, payload, indexed_at, text)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
@@ -944,7 +944,7 @@ pub(super) fn write_semantic_index_json(
             )
             .map_err(|error| sqlite_error("Could not write semantic chunk metadata", error))?;
         tx.execute(
-                "insert into semantic_chunks_fts(root_dir, index_id, id, path, heading, symbol, language, kind, preview, text)
+                "insert into knowledge_chunks_fts(root_dir, index_id, id, path, heading, symbol, language, kind, preview, text)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     handle.root_dir,
@@ -975,37 +975,37 @@ pub(super) fn write_semantic_index_json(
     Ok(())
 }
 
-pub(super) fn read_semantic_index_status_json(
+pub(super) fn read_knowledge_index_status_json(
     handle: &EngineProjectHandle,
     request: String,
 ) -> napi::Result<String> {
     let request: ReadSemanticIndexStatusRequest = decode(&request)?;
     let index_id = request
         .index_id
-        .unwrap_or_else(|| default_semantic_index_id().to_string());
+        .unwrap_or_else(|| default_knowledge_index_id().to_string());
     let conn = handle
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let index = read_semantic_index_payload(&conn, &handle.root_dir, &index_id)?;
+    let index = read_knowledge_index_payload(&conn, &handle.root_dir, &index_id)?;
     encode(&json!({ "index": index }))
 }
 
-pub(super) fn list_semantic_chunks_json(
+pub(super) fn list_knowledge_chunks_json(
     handle: &EngineProjectHandle,
     request: String,
 ) -> napi::Result<String> {
     let request: ListSemanticChunksRequest = decode(&request)?;
     let index_id = request
         .index_id
-        .unwrap_or_else(|| default_semantic_index_id().to_string());
+        .unwrap_or_else(|| default_knowledge_index_id().to_string());
     let limit = request.limit.unwrap_or(100).clamp(1, 500) as usize;
     let offset = request.offset.unwrap_or(0) as usize;
     let conn = handle
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let Some(index) = read_semantic_index_payload(&conn, &handle.root_dir, &index_id)? else {
+    let Some(index) = read_knowledge_index_payload(&conn, &handle.root_dir, &index_id)? else {
         return encode(&json!({ "index": null, "chunks": [] }));
     };
     let chunks = list_semantic_chunk_payloads(
@@ -1019,20 +1019,20 @@ pub(super) fn list_semantic_chunks_json(
     encode(&json!({ "index": index, "chunks": chunks }))
 }
 
-pub(super) fn search_semantic_index_json(
+pub(super) fn search_knowledge_index_json(
     handle: &EngineProjectHandle,
     request: String,
 ) -> napi::Result<String> {
     let request: SearchSemanticIndexRequest = decode(&request)?;
     let index_id = request
         .index_id
-        .unwrap_or_else(|| default_semantic_index_id().to_string());
+        .unwrap_or_else(|| default_knowledge_index_id().to_string());
     let limit = request.limit.unwrap_or(20).clamp(1, 100) as usize;
     let conn = handle
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let Some(index) = read_semantic_index_payload(&conn, &handle.root_dir, &index_id)? else {
+    let Some(index) = read_knowledge_index_payload(&conn, &handle.root_dir, &index_id)? else {
         return encode(&json!({ "index": null, "results": [] }));
     };
     let dimensions = json_object_field(&index, "provider")

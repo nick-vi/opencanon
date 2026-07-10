@@ -6,7 +6,7 @@ OpenCanon owns search, chunks, embeddings, vector storage, and related-code retr
 
 ## Ownership
 
-Files: packages/core/src/semantic-index.ts, packages/core/src/semantic-models.ts, packages/runtime/src/project-context.ts, packages/runtime/src/semantic-index.ts, packages/runtime/src/state.ts, packages/runtime/test/semantic-index.test.ts, crates/opencanon-engine/src/migrations/005_semantic_index.sql, crates/opencanon-engine/src/migrations/006_semantic_hybrid.sql, crates/opencanon-vector/**, crates/opencanon-inference/**
+Files: packages/core/src/semantic-index.ts, packages/core/src/semantic-models.ts, packages/runtime/src/project-context.ts, packages/runtime/src/semantic-index.ts, packages/runtime/src/state.ts, packages/runtime/test/semantic-index.test.ts, crates/opencanon-engine/src/migrations/005_knowledge_index.sql, crates/opencanon-engine/src/migrations/006_knowledge_hybrid.sql, crates/opencanon-vector/**, crates/opencanon-inference/**
 Endpoints: /api/context/status (runtime), /api/context/search (runtime), /api/context/ask (runtime), /api/context/chunks (runtime), /api/context/coverage (runtime), /api/context/backlinks (runtime)
 Docs: docs/opencanon-architecture.md
 Resources: semantic-index, semantic-chunks, vector-store

@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use super::support::*;
 
 #[test]
-fn semantic_index_round_trips_metadata_and_searches_vectors() {
+fn knowledge_index_round_trips_metadata_and_searches_vectors() {
     let root = test_root("semantic-index");
     let project = open_test_project(&root);
 
@@ -142,7 +142,7 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
 
     let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
     let chunk_count: i64 = conn
-        .query_row("select count(*) from semantic_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
         .unwrap();
     assert_eq!(chunk_count, 2);
 
@@ -311,7 +311,7 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
         .unwrap();
 
     let chunk_count: i64 = conn
-        .query_row("select count(*) from semantic_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
         .unwrap();
     assert_eq!(chunk_count, 1);
 
@@ -330,7 +330,7 @@ fn semantic_index_round_trips_metadata_and_searches_vectors() {
 }
 
 #[test]
-fn semantic_index_delta_updates_changed_paths_and_knowledge_nodes() {
+fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
     let root = test_root("semantic-index-delta");
     let project = open_test_project(&root);
 
@@ -505,12 +505,12 @@ fn semantic_index_delta_updates_changed_paths_and_knowledge_nodes() {
 
     let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
     let chunk_count: i64 = conn
-        .query_row("select count(*) from semantic_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
         .unwrap();
     assert_eq!(chunk_count, 1);
     let other_count: i64 = conn
         .query_row(
-            "select count(*) from semantic_chunks where path = 'src/other.ts'",
+            "select count(*) from knowledge_chunks where path = 'src/other.ts'",
             [],
             |row| row.get(0),
         )
@@ -584,7 +584,7 @@ fn semantic_index_delta_updates_changed_paths_and_knowledge_nodes() {
 }
 
 #[test]
-fn semantic_index_recovers_when_vector_store_has_stale_duplicate_id() {
+fn knowledge_index_recovers_when_vector_store_has_stale_duplicate_id() {
     let root = test_root("semantic-index-stale-vector-id");
     let project = open_test_project(&root);
     let request = json!({
@@ -645,10 +645,10 @@ fn semantic_index_recovers_when_vector_store_has_stale_duplicate_id() {
         .unwrap();
 
     let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
-    conn.execute("delete from semantic_chunks where id = 'chunk:stale'", [])
+    conn.execute("delete from knowledge_chunks where id = 'chunk:stale'", [])
         .unwrap();
     conn.execute(
-        "delete from semantic_chunks_fts where id = 'chunk:stale'",
+        "delete from knowledge_chunks_fts where id = 'chunk:stale'",
         [],
     )
     .unwrap();
@@ -673,7 +673,7 @@ fn semantic_index_recovers_when_vector_store_has_stale_duplicate_id() {
 }
 
 #[test]
-fn semantic_index_repair_clears_unsupported_provider_state() {
+fn knowledge_index_repair_clears_unsupported_provider_state() {
     let root = test_root("semantic-index-unsupported-provider");
     {
         let project = open_test_project(&root);
@@ -740,12 +740,12 @@ fn semantic_index_repair_clears_unsupported_provider_state() {
 
     let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
     let snapshot_count: i64 = conn
-        .query_row("select count(*) from semantic_index_snapshots", [], |row| {
+        .query_row("select count(*) from knowledge_snapshots", [], |row| {
             row.get(0)
         })
         .unwrap();
     let chunk_count: i64 = conn
-        .query_row("select count(*) from semantic_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
         .unwrap();
     assert_eq!(snapshot_count, 0);
     assert_eq!(chunk_count, 0);

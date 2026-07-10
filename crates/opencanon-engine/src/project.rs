@@ -470,27 +470,27 @@ impl EngineProjectHandle {
 
     #[napi(js_name = "writeSemanticIndexJson")]
     pub fn write_semantic_index_json(&self, request: String) -> napi::Result<()> {
-        semantic_store::write_semantic_index_json(self, request)
+        semantic_store::write_knowledge_index_json(self, request)
     }
 
     #[napi(js_name = "writeSemanticIndexDeltaJson")]
     pub fn write_semantic_index_delta_json(&self, request: String) -> napi::Result<()> {
-        semantic_delta_store::write_semantic_index_delta_json(self, request)
+        semantic_delta_store::write_knowledge_index_delta_json(self, request)
     }
 
     #[napi(js_name = "readSemanticIndexStatusJson")]
     pub fn read_semantic_index_status_json(&self, request: String) -> napi::Result<String> {
-        semantic_store::read_semantic_index_status_json(self, request)
+        semantic_store::read_knowledge_index_status_json(self, request)
     }
 
     #[napi(js_name = "listSemanticChunksJson")]
     pub fn list_semantic_chunks_json(&self, request: String) -> napi::Result<String> {
-        semantic_store::list_semantic_chunks_json(self, request)
+        semantic_store::list_knowledge_chunks_json(self, request)
     }
 
     #[napi(js_name = "searchSemanticIndexJson")]
     pub fn search_semantic_index_json(&self, request: String) -> napi::Result<String> {
-        semantic_store::search_semantic_index_json(self, request)
+        semantic_store::search_knowledge_index_json(self, request)
     }
 
     #[napi(js_name = "embedSemanticTextsJson")]

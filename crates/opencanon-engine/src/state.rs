@@ -33,13 +33,13 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 5,
-        name: "semantic_index",
-        sql: include_str!("migrations/005_semantic_index.sql"),
+        name: "knowledge_index",
+        sql: include_str!("migrations/005_knowledge_index.sql"),
     },
     Migration {
         version: 6,
-        name: "semantic_hybrid",
-        sql: include_str!("migrations/006_semantic_hybrid.sql"),
+        name: "knowledge_hybrid",
+        sql: include_str!("migrations/006_knowledge_hybrid.sql"),
     },
     Migration {
         version: 7,
@@ -101,7 +101,7 @@ pub(crate) fn migrate_state(conn: &Connection) -> napi::Result<Vec<u32>> {
         applied.push(migration.version);
     }
     repair_product_model_projection_schema(conn)?;
-    repair_semantic_index_schema(conn)?;
+    repair_knowledge_index_schema(conn)?;
     Ok(applied)
 }
 
@@ -151,72 +151,80 @@ fn repair_product_model_projection_schema(conn: &Connection) -> napi::Result<()>
     Ok(())
 }
 
-fn repair_semantic_index_schema(conn: &Connection) -> napi::Result<()> {
-    if !table_exists(conn, "semantic_index_snapshots")? {
+fn repair_knowledge_index_schema(conn: &Connection) -> napi::Result<()> {
+    if !table_exists(conn, "knowledge_snapshots")? {
+        recreate_knowledge_index_schema(conn)?;
         return Ok(());
     }
-    let snapshot_columns = table_columns(conn, "semantic_index_snapshots")?;
-    let chunk_columns = if table_exists(conn, "semantic_chunks")? {
-        table_columns(conn, "semantic_chunks")?
+    let snapshot_columns = table_columns(conn, "knowledge_snapshots")?;
+    let chunk_columns = if table_exists(conn, "knowledge_chunks")? {
+        table_columns(conn, "knowledge_chunks")?
     } else {
         std::collections::HashSet::new()
     };
     let has_current_shape = snapshot_columns.contains("chunk_tree_hash")
         && chunk_columns.contains("text")
-        && table_exists(conn, "semantic_chunks_fts")?
+        && table_exists(conn, "knowledge_chunks_fts")?
         && table_exists(conn, "knowledge_nodes")?;
     if !has_current_shape {
-        conn.execute_batch(
-            "drop table if exists knowledge_nodes;
-             drop table if exists semantic_chunks_fts;
-             drop table if exists semantic_chunks;
-             drop table if exists semantic_index_snapshots;",
-        )
-        .map_err(|error| sqlite_error("Could not reset stale semantic index schema", error))?;
-        conn.execute_batch(include_str!("migrations/005_semantic_index.sql"))
-            .map_err(|error| sqlite_error("Could not recreate semantic index schema", error))?;
-        conn.execute_batch(include_str!("migrations/006_semantic_hybrid.sql"))
-            .map_err(|error| sqlite_error("Could not recreate semantic hybrid schema", error))?;
-        conn.execute_batch(include_str!("migrations/007_knowledge_nodes.sql"))
-            .map_err(|error| sqlite_error("Could not recreate knowledge node schema", error))?;
+        recreate_knowledge_index_schema(conn)?;
         return Ok(());
     }
 
     let stale_payloads: i64 = conn
         .query_row(
-            "select count(*) from semantic_index_snapshots where json_extract(payload, '$.chunkTreeHash') is null",
+            "select count(*) from knowledge_snapshots where json_extract(payload, '$.chunkTreeHash') is null",
             [],
             |row| row.get(0),
         )
-        .map_err(|error| sqlite_error("Could not inspect semantic index payloads", error))?;
+        .map_err(|error| sqlite_error("Could not inspect Project Knowledge payloads", error))?;
     if stale_payloads > 0 {
-        conn.execute_batch(
-            "delete from knowledge_nodes;
-             delete from semantic_chunks_fts;
-             delete from semantic_chunks;
-             delete from semantic_index_snapshots;",
-        )
-        .map_err(|error| sqlite_error("Could not clear stale semantic index state", error))?;
+        clear_knowledge_index_state(conn, "Could not clear stale Project Knowledge state")?;
         return Ok(());
     }
 
     let unsupported_providers: i64 = conn
         .query_row(
-            "select count(*) from semantic_index_snapshots
+            "select count(*) from knowledge_snapshots
              where coalesce(json_extract(payload, '$.provider.kind'), '') not in ('native', 'remote')",
             [],
             |row| row.get(0),
         )
-        .map_err(|error| sqlite_error("Could not inspect semantic index providers", error))?;
+        .map_err(|error| sqlite_error("Could not inspect Project Knowledge providers", error))?;
     if unsupported_providers > 0 {
-        conn.execute_batch(
-            "delete from knowledge_nodes;
-             delete from semantic_chunks_fts;
-             delete from semantic_chunks;
-             delete from semantic_index_snapshots;",
-        )
-        .map_err(|error| sqlite_error("Could not clear unsupported semantic index state", error))?;
+        clear_knowledge_index_state(conn, "Could not clear unsupported Project Knowledge state")?;
     }
+    Ok(())
+}
+
+fn recreate_knowledge_index_schema(conn: &Connection) -> napi::Result<()> {
+    conn.execute_batch(
+        "drop table if exists knowledge_nodes;
+         drop table if exists knowledge_chunks_fts;
+         drop table if exists knowledge_chunks;
+         drop table if exists knowledge_snapshots;
+         drop table if exists semantic_chunks_fts;
+         drop table if exists semantic_chunks;
+         drop table if exists semantic_index_snapshots;",
+    )
+    .map_err(|error| sqlite_error("Could not reset Project Knowledge schema", error))?;
+    conn.execute_batch(include_str!("migrations/005_knowledge_index.sql"))
+        .map_err(|error| sqlite_error("Could not recreate Project Knowledge schema", error))?;
+    conn.execute_batch(include_str!("migrations/006_knowledge_hybrid.sql"))
+        .map_err(|error| sqlite_error("Could not recreate Project Knowledge hybrid schema", error))?;
+    conn.execute_batch(include_str!("migrations/007_knowledge_nodes.sql"))
+        .map_err(|error| sqlite_error("Could not recreate Project Knowledge node schema", error))?;
+    Ok(())
+}
+
+fn clear_knowledge_index_state(conn: &Connection, message: &str) -> napi::Result<()> {
+    conn.execute_batch(
+        "delete from knowledge_nodes;
+         delete from knowledge_chunks_fts;
+         delete from knowledge_chunks;
+         delete from knowledge_snapshots;",
+    )
+    .map_err(|error| sqlite_error(message, error))?;
     Ok(())
 }
 

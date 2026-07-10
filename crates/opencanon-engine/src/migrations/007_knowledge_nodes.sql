@@ -8,7 +8,7 @@ create table knowledge_nodes (
   children text not null default '[]',
   updated_at text not null,
   primary key(root_dir, index_id, key),
-  foreign key(root_dir, index_id) references semantic_index_snapshots(root_dir, id) on delete cascade
+  foreign key(root_dir, index_id) references knowledge_snapshots(root_dir, id) on delete cascade
 );
 
 create index idx_knowledge_nodes_parent on knowledge_nodes(root_dir, index_id, parent_key);

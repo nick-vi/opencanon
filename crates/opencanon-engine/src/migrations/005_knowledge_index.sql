@@ -1,4 +1,4 @@
-create table semantic_index_snapshots (
+create table knowledge_snapshots (
   root_dir text not null,
   id text not null,
   version text not null,
@@ -24,7 +24,7 @@ create table semantic_index_snapshots (
   primary key(root_dir, id)
 );
 
-create table semantic_chunks (
+create table knowledge_chunks (
   root_dir text not null,
   index_id text not null,
   id text not null,
@@ -48,9 +48,9 @@ create table semantic_chunks (
   payload text not null,
   indexed_at text not null,
   primary key(root_dir, index_id, id),
-  foreign key(root_dir, index_id) references semantic_index_snapshots(root_dir, id) on delete cascade
+  foreign key(root_dir, index_id) references knowledge_snapshots(root_dir, id) on delete cascade
 );
 
-create index idx_semantic_chunks_path on semantic_chunks(root_dir, index_id, path);
-create index idx_semantic_chunks_hash on semantic_chunks(root_dir, index_id, chunk_hash);
-create index idx_semantic_index_status on semantic_index_snapshots(root_dir, status);
+create index idx_knowledge_chunks_path on knowledge_chunks(root_dir, index_id, path);
+create index idx_knowledge_chunks_hash on knowledge_chunks(root_dir, index_id, chunk_hash);
+create index idx_knowledge_status on knowledge_snapshots(root_dir, status);

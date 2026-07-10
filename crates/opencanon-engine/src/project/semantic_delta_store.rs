@@ -10,24 +10,24 @@ use crate::state::timestamp;
 
 use super::semantic_store::{
     assert_semantic_chunk_count, delete_semantic_nodes, read_semantic_chunk_hashes,
-    read_semantic_index_payload, semantic_chunk_ids_for_paths, semantic_vector_dir,
-    upsert_semantic_chunk_rows, upsert_semantic_nodes, validate_semantic_index_delta_request,
+    read_knowledge_index_payload, semantic_chunk_ids_for_paths, semantic_vector_dir,
+    upsert_semantic_chunk_rows, upsert_semantic_nodes, validate_knowledge_index_delta_request,
     vector_error, write_semantic_vector_delta,
 };
 use super::EngineProjectHandle;
 
-pub(super) fn write_semantic_index_delta_json(
+pub(super) fn write_knowledge_index_delta_json(
     handle: &EngineProjectHandle,
     request: String,
 ) -> napi::Result<()> {
     let request: WriteSemanticIndexDeltaRequest = decode(&request)?;
-    validate_semantic_index_delta_request(&request)?;
+    validate_knowledge_index_delta_request(&request)?;
 
     let mut conn = handle
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let previous_index = read_semantic_index_payload(&conn, &handle.root_dir, &request.index.id)?;
+    let previous_index = read_knowledge_index_payload(&conn, &handle.root_dir, &request.index.id)?;
     let previous_identity = previous_index
         .as_ref()
         .and_then(|index| index.get("identityHash"))
@@ -115,7 +115,7 @@ pub(super) fn write_semantic_index_delta_json(
         .transaction()
         .map_err(|error| sqlite_error("Could not start semantic index delta transaction", error))?;
     tx.execute(
-            "insert into semantic_index_snapshots(root_dir, id, version, status, provider_id,
+            "insert into knowledge_snapshots(root_dir, id, version, status, provider_id,
                provider_display_name, model_id, model_digest, dimensions, distance, config_hash,
                chunker_version, producer_version, source_inventory_hash, identity_hash, chunk_count,
                vector_count, stale_chunk_count, diagnostics, payload, indexed_at, updated_at, chunk_tree_hash)
@@ -172,7 +172,7 @@ pub(super) fn write_semantic_index_delta_json(
 
     for path in request.removed_paths.iter() {
         tx.execute(
-            "delete from semantic_chunks_fts where root_dir = ?1 and index_id = ?2 and path = ?3",
+            "delete from knowledge_chunks_fts where root_dir = ?1 and index_id = ?2 and path = ?3",
             params![handle.root_dir, request.index.id, path],
         )
         .map_err(|error| {
@@ -182,7 +182,7 @@ pub(super) fn write_semantic_index_delta_json(
             )
         })?;
         tx.execute(
-            "delete from semantic_chunks where root_dir = ?1 and index_id = ?2 and path = ?3",
+            "delete from knowledge_chunks where root_dir = ?1 and index_id = ?2 and path = ?3",
             params![handle.root_dir, request.index.id, path],
         )
         .map_err(|error| {
@@ -191,7 +191,7 @@ pub(super) fn write_semantic_index_delta_json(
     }
     for chunk in request.chunks.iter() {
         tx.execute(
-            "delete from semantic_chunks_fts where root_dir = ?1 and index_id = ?2 and id = ?3",
+            "delete from knowledge_chunks_fts where root_dir = ?1 and index_id = ?2 and id = ?3",
             params![handle.root_dir, request.index.id, chunk.metadata.id],
         )
         .map_err(|error| sqlite_error("Could not replace semantic search text", error))?;
