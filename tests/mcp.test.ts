@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,6 +33,8 @@ test("opencanon mcp exposes project tools backed by the runtime", async () => {
 
   try {
     await client.connect(transport);
+    const cliPackage = JSON.parse(readFileSync(path.join(process.cwd(), "packages/cli/package.json"), "utf8")) as { version: string };
+    assert.deepEqual(client.getServerVersion(), { name: "opencanon", version: cliPackage.version });
     const tools = await client.listTools();
     assert(tools.tools.some((tool) => tool.name === "opencanon_status"));
     assert(tools.tools.some((tool) => tool.name === "opencanon_context_search"));

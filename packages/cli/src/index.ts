@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
 import { inspectProjectRuntime, inspectService, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, RuntimeStatus, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
@@ -31,6 +31,7 @@ import { runUpdateCommand } from "./update.ts";
 import { runAnalyzeCommand } from "./analyze.ts";
 import { runValidateCommand } from "./validate.ts";
 import { runWorktreeCommand } from "./worktree.ts";
+import { readCliPackageVersion } from "./package-version.ts";
 
 const DoctorProjectRuntimeReadyTimeoutMs = 60_000;
 
@@ -49,7 +50,7 @@ async function dispatchOpenCanonCli(args: string[], cwd: string): Promise<void> 
 
   if (command === "--version" || command === "-v" || command === "version") {
     if (rest.length > 0) fail(`Unexpected version arguments: ${rest.join(", ")}`);
-    console.log(readCliVersion());
+    console.log(readCliPackageVersion());
     return;
   }
 
@@ -375,26 +376,6 @@ Command groups:
 
 Run opencanon <command> --help for command-specific options.
 `);
-}
-
-function readCliVersion(): string {
-  for (const candidate of [
-    new URL("./package.json", import.meta.url),
-    new URL("../package.json", import.meta.url),
-    new URL("../../../package.json", import.meta.url),
-  ]) {
-    try {
-      const parsed = JSON.parse(readFileSync(candidate, "utf8")) as unknown;
-      if (isRecord(parsed) && typeof parsed.version === "string" && parsed.version.trim()) return parsed.version;
-    } catch {
-      // Source, workspace, and bundled runtime layouts use different package.json locations.
-    }
-  }
-  return "0.0.0-dev";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function runStateCommand(args: string[], cwd: string): void {

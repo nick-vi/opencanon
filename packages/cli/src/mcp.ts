@@ -13,6 +13,7 @@ import type {
 } from "@opencanon/core";
 import { fail, resolveRootDir } from "@opencanon/core";
 import { z } from "zod";
+import { readCliPackageVersion } from "./package-version.ts";
 import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 
 const McpTool = {
@@ -46,7 +47,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
 
   const server = new McpServer({
     name: "opencanon",
-    version: "0.4.0",
+    version: readCliPackageVersion(),
   });
 
   server.registerTool(
