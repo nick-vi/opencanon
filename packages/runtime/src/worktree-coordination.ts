@@ -204,8 +204,8 @@ export function listWorktreeOverview(rootDir: string): WorktreeOverview {
     markMissingWorktreesStale(db, repository);
     return {
       repository,
-      worktrees: listWorktreeRecords(db, repository.repoKey),
-      leases: listTaskLeasesForRepo(db, repository.repoKey),
+      worktrees: listWorktreeRecords(db, repository.repoKey).filter((record) => record.status === WorktreeRecordStatus.Active),
+      leases: listTaskLeasesForRepo(db, repository.repoKey).filter((lease) => lease.status === TaskLeaseStatus.Active),
     };
   } finally {
     db.close();

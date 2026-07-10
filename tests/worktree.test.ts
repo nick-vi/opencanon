@@ -118,6 +118,17 @@ test("worktree create claims a task and prevents duplicate agent pickup", () => 
     });
     assert.equal(removed.status, 0, removed.stderr || removed.stdout);
     assert.equal(existsSync(worktreePath), false);
+
+    const listedAfterRemove = spawnSync(process.execPath, [script, "worktree", "list", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env,
+      timeout: 60_000,
+    });
+    assert.equal(listedAfterRemove.status, 0, listedAfterRemove.stderr || listedAfterRemove.stdout);
+    const listedAfterRemovePayload = JSON.parse(listedAfterRemove.stdout) as { worktrees: unknown[]; leases: unknown[] };
+    assert.deepEqual(listedAfterRemovePayload.worktrees, []);
+    assert.deepEqual(listedAfterRemovePayload.leases, []);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
     rmSync(worktreePath, { recursive: true, force: true });
