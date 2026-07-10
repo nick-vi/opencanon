@@ -16,7 +16,7 @@ import { applyFindingFixes } from "./fixes.ts";
 import type { FixApplicationResult, FixMode } from "./fixes.ts";
 import { createProfiler } from "./profiler.ts";
 import type { ProfileEntry, Profiler } from "./profiler.ts";
-import { createEphemeralValidationResultCache, validationRuntimeFingerprint, validatorRunCacheKey, type ValidationResultCache } from "./validation-result-cache.ts";
+import { createEphemeralValidationResultCache, validationRuntimeFingerprint, validatorRunCacheKey, type ProjectFileFingerprint, type ValidationResultCache } from "./validation-result-cache.ts";
 import type { Finding, Validator } from "./validator.ts";
 import type { CommitGate } from "./validator.ts";
 import type { ProducerStatus, ProducerSnapshot } from "./type-facts-provider.ts";
@@ -62,6 +62,11 @@ export type ValidationInput = {
   /** Escalate every `requiresProducers` skip into an error finding (nonzero exit). */
   strictProducers?: boolean;
   producerPolicy: ProducerPolicy;
+  /**
+   * Optional runtime-owned content fingerprints for discovered project inventory.
+   * Validator target and analysis files are still byte-fingerprinted locally.
+   */
+  projectFileFingerprints?: ProjectFileFingerprint[];
   /**
    * Persistent caches are owned by the project runtime. Direct library callers
    * that omit this get an isolated in-memory cache for this validation call.
@@ -156,6 +161,7 @@ export async function runValidation(input: ValidationInput): Promise<ValidationR
     profiler,
     strictProducers: input.strictProducers ?? false,
     producerPolicy: input.producerPolicy,
+    projectFileFingerprints: input.projectFileFingerprints,
     resultCache,
   });
   let findings = validation.findings;
@@ -184,6 +190,7 @@ export async function runValidation(input: ValidationInput): Promise<ValidationR
         profiler,
         strictProducers: input.strictProducers ?? false,
         producerPolicy: input.producerPolicy,
+        projectFileFingerprints: input.projectFileFingerprints,
         resultCache,
       });
       findings = validation.findings;
@@ -311,6 +318,7 @@ async function runValidators(params: {
   profiler: Profiler;
   strictProducers: boolean;
   producerPolicy: ProducerPolicy;
+  projectFileFingerprints?: ProjectFileFingerprint[];
   resultCache: ValidationResultCache;
 }): Promise<ValidationRunResult> {
   const findings: Finding[] = [];
@@ -492,6 +500,7 @@ async function runValidators(params: {
           rootDir: params.rootDir,
           paths: params.paths,
           projectFiles,
+          projectFileFingerprints: params.projectFileFingerprints,
           targetFiles: job.targetFiles,
           analysisFiles: job.analysisFiles,
           project: params.project,

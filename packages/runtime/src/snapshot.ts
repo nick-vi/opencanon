@@ -467,6 +467,12 @@ export async function buildRuntimeSnapshot(input: {
     validators: project.validators,
     project: true,
     producerPolicy: input.producerPolicy ?? BatchProducerPolicy,
+    projectFileFingerprints: scan.files.map((file) => ({
+      path: file.path,
+      exists: true,
+      size: file.size,
+      contentHash: file.contentHash,
+    })),
     resultCache: input.validationResultCache,
   });
 

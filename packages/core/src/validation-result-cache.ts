@@ -32,6 +32,7 @@ export type ValidatorRunCacheKeyInput = {
   rootDir: string;
   paths: ContextPaths;
   projectFiles: string[];
+  projectFileFingerprints?: ProjectFileFingerprint[];
   targetFiles: string[];
   analysisFiles: string[];
   project: boolean;
@@ -39,6 +40,13 @@ export type ValidatorRunCacheKeyInput = {
   validator: Validator;
   producerSnapshot: ProducerSnapshot;
   runtimeFingerprint: string;
+};
+
+export type ProjectFileFingerprint = {
+  path: string;
+  exists: true;
+  size: number;
+  contentHash: string;
 };
 
 export type ValidationResultCache = {
@@ -117,7 +125,11 @@ export function validatorRunCacheKey(input: ValidatorRunCacheKeyInput): string {
     strictProducers: input.strictProducers,
     targetFiles: [...input.targetFiles].sort(),
     analysisFiles: [...input.analysisFiles].sort(),
-    projectFiles: fingerprintFiles(input.rootDir, input.projectFiles),
+    projectFiles: fingerprintFiles(input.rootDir, input.projectFiles, input.projectFileFingerprints),
+    validatorReadFiles:
+      input.projectFileFingerprints && input.projectFileFingerprints.length > 0
+        ? fingerprintFiles(input.rootDir, unique([...input.targetFiles, ...input.analysisFiles]))
+        : [],
     contextFiles: fingerprintFiles(input.rootDir, contextFiles(input.paths)),
     validator: validatorFingerprint(input.validator),
     producerSnapshot: input.producerSnapshot,
@@ -165,11 +177,25 @@ function contextFiles(paths: ContextPaths): string[] {
     .map((file) => (path.isAbsolute(file) ? path.relative(paths.rootDir, file) : file));
 }
 
-function fingerprintFiles(rootDir: string, files: string[]): Array<{ path: string; exists: boolean; size?: number; sha256?: string }> {
+function fingerprintFiles(
+  rootDir: string,
+  files: string[],
+  suppliedFingerprints: ProjectFileFingerprint[] = [],
+): Array<{ path: string; exists: boolean; size?: number; contentHash?: string }> {
+  const supplied = new Map(suppliedFingerprints.map((file) => [normalizePath(file.path), { ...file, path: normalizePath(file.path) }]));
   return [...new Set(files)]
     .sort()
     .map((file) => {
-      const normalized = file.split(path.sep).join("/");
+      const normalized = normalizePath(file);
+      const suppliedFile = supplied.get(normalized);
+      if (suppliedFile) {
+        return {
+          path: normalized,
+          exists: true,
+          size: suppliedFile.size,
+          contentHash: suppliedFile.contentHash,
+        };
+      }
       const absolutePath = path.isAbsolute(normalized) ? normalized : path.join(rootDir, normalized);
       if (!existsSync(absolutePath)) return { path: normalized, exists: false };
       const bytes = readFileSync(absolutePath);
@@ -177,9 +203,17 @@ function fingerprintFiles(rootDir: string, files: string[]): Array<{ path: strin
         path: normalized,
         exists: true,
         size: bytes.byteLength,
-        sha256: createHash("sha256").update(bytes).digest("hex"),
+        contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
       };
     });
+}
+
+function normalizePath(file: string): string {
+  return file.split(path.sep).join("/");
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function readCacheFile(cachePath: string): ValidationResultCacheFile {

@@ -321,6 +321,59 @@ test("validation result cache invalidates same-size content changes with preserv
   }
 });
 
+test("validation result cache uses supplied project file fingerprints", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validation-cache-fingerprints-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ fileDiscovery: "filesystem", projectFilePatterns: ["src/**/*.ts"], ignore: [] }));
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const value = 'same-file';\n");
+    const paths = createPaths(rootDir);
+    let runs = 0;
+
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "supplied-fingerprint-validator",
+        applies: ["src/**/*.ts"],
+        severity: "error",
+        scope: "file",
+        validate({ ctx }) {
+          runs += 1;
+          return ctx.targetFiles.map((file) => file.report({ line: 1, message: `${file.path} run ${runs}` }));
+        },
+      }),
+    ).validators;
+
+    const resultCache = createValidationResultCache(paths);
+    const first = await runValidation({
+      rootDir,
+      paths,
+      conventions: [],
+      validators,
+      files: ["src/company.ts"],
+      projectFileFingerprints: [{ path: "src/company.ts", exists: true, size: 32, contentHash: "runtime-content-one" }],
+      producerPolicy: BatchProducerPolicy,
+      resultCache,
+    });
+    assert.equal(runs, 1);
+    assert.equal(first.findings[0]?.message, "src/company.ts run 1");
+
+    const second = await runValidation({
+      rootDir,
+      paths,
+      conventions: [],
+      validators,
+      files: ["src/company.ts"],
+      projectFileFingerprints: [{ path: "src/company.ts", exists: true, size: 32, contentHash: "runtime-content-two" }],
+      producerPolicy: BatchProducerPolicy,
+      resultCache,
+    });
+    assert.equal(runs, 2, "runtime-owned content fingerprint changes must invalidate cached results even when file bytes are unchanged");
+    assert.equal(second.findings[0]?.message, "src/company.ts run 2");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("validation result cache invalidates when validator source changes", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validation-cache-source-"));
   try {
