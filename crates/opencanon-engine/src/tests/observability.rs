@@ -1,6 +1,8 @@
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
+use crate::state::schema_version;
+
 use super::support::*;
 
 #[test]
@@ -14,7 +16,11 @@ fn migration_004_applies_and_creates_observability_tables() {
     assert!(migrations.iter().any(|version| version.as_u64() == Some(4)));
     assert!(migrations.iter().any(|version| version.as_u64() == Some(5)));
     assert!(migrations.iter().any(|version| version.as_u64() == Some(6)));
-    assert_eq!(parsed["schemaVersion"].as_u64(), Some(6));
+    assert!(migrations.iter().any(|version| version.as_u64() == Some(7)));
+    assert_eq!(
+        parsed["schemaVersion"].as_u64(),
+        Some(u64::from(schema_version()))
+    );
 }
 
 #[test]
