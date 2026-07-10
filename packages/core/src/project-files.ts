@@ -69,6 +69,13 @@ export function getProjectAstFactsProvider(rootDir: string): ProjectAstFactsProv
   return projectAstFactsProviderFactory?.(rootDir);
 }
 
+export type ProjectFileSnapshot = {
+  path: string;
+  content: string;
+  size: number;
+  contentHash: string;
+};
+
 export function loadProjectFiles(
   rootDir: string,
   files: string[] | undefined,
@@ -76,13 +83,18 @@ export function loadProjectFiles(
   paths?: ContextPaths,
   cache?: AnalysisCache,
   profiler?: Profiler,
+  snapshots: ProjectFileSnapshot[] = [],
 ): ProjectFile[] {
   const sourceFiles = files ?? (paths ? listProjectFiles(paths) : listFiles(rootDir, isSupportedSourceFile).map((file) => relative(rootDir, file)));
+  const snapshotsByPath = new Map(snapshots.map((snapshot) => [normalizeProjectPath(snapshot.path), snapshot]));
   return sourceFiles
     .filter((file) => isSupportedSourceFile(file))
     .filter((file) => !file.includes("node_modules/") && !file.includes(".git/"))
-    .filter((file) => existsSync(path.join(rootDir, file)))
-    .map((file) => createProjectFile({ rootDir, file, validator, cache, profiler }));
+    .filter((file) => snapshotsByPath.has(normalizeProjectPath(file)) || existsSync(path.join(rootDir, file)))
+    .map((file) => {
+      const snapshot = snapshotsByPath.get(normalizeProjectPath(file));
+      return snapshot ? createProjectFileFromSnapshot({ rootDir, snapshot, validator, cache, profiler }) : createProjectFile({ rootDir, file, validator, cache, profiler });
+    });
 }
 
 export function createProjectFile(params: {
@@ -104,6 +116,25 @@ export function createProjectFile(params: {
   });
 }
 
+export function createProjectFileFromSnapshot(params: {
+  rootDir: string;
+  snapshot: ProjectFileSnapshot;
+  validator: Pick<Validator, "id" | "severity">;
+  cache?: AnalysisCache;
+  profiler?: Profiler;
+}): ProjectFile {
+  const filePath = normalizeProjectPath(params.snapshot.path);
+  return createProjectFileFromDisk({
+    absolutePath: path.join(params.rootDir, filePath),
+    path: filePath,
+    rootDir: params.rootDir,
+    validator: params.validator,
+    cache: params.cache,
+    profiler: params.profiler,
+    content: params.snapshot.content,
+  });
+}
+
 export function createProjectFileFromDisk(params: {
   absolutePath: string;
   path: string;
@@ -114,6 +145,7 @@ export function createProjectFileFromDisk(params: {
   validator: Pick<Validator, "id" | "severity">;
   cache?: AnalysisCache;
   profiler?: Profiler;
+  content?: string;
 }): ProjectFile {
   let textCache: string | undefined;
   let linesCache: string[] | undefined;
@@ -136,7 +168,7 @@ export function createProjectFileFromDisk(params: {
   let diagnosticsCache: ProjectDiagnosticFact[] | undefined;
 
   function readText(): string {
-    textCache ??= params.profiler?.measure("file.read", () => readFileSync(params.absolutePath, "utf8")) ?? readFileSync(params.absolutePath, "utf8");
+    textCache ??= params.content ?? (params.profiler?.measure("file.read", () => readFileSync(params.absolutePath, "utf8")) ?? readFileSync(params.absolutePath, "utf8"));
     return textCache;
   }
 
@@ -310,6 +342,10 @@ export function createProjectFileFromDisk(params: {
       },
     },
   };
+}
+
+function normalizeProjectPath(file: string): string {
+  return file.split(path.sep).join("/");
 }
 
 

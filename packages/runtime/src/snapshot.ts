@@ -400,20 +400,19 @@ export async function buildRuntimeSnapshot(input: {
   }
 
   const scan = input.store.scanAndDiff(discovery.files);
-  // Read each AST-fact source ONCE here and pass its content + hash to the engine, so the
-  // facts are parsed from and labelled with the exact same bytes (no scan→extract
-  // disk-reread TOCTOU). A file deleted/unreadable since discovery is skipped.
-  const factFiles = scan.files
-    .filter((file) => isEngineExtractableFile(file.path))
+  const fileSnapshots = scan.files
     .map((file) => {
       try {
         const content = readFileSync(path.join(project.paths.rootDir, file.path), "utf8");
-        return { path: file.path, contentHash: createHash("sha256").update(content).digest("hex"), language: engineSourceLanguage(file.path), content };
+        return { path: file.path, contentHash: `sha256:${createHash("sha256").update(content).digest("hex")}`, size: Buffer.byteLength(content), content };
       } catch {
         return undefined;
       }
     })
     .filter((file): file is NonNullable<typeof file> => file !== undefined);
+  const factFiles = fileSnapshots
+    .filter((file) => isEngineExtractableFile(file.path))
+    .map((file) => ({ path: file.path, contentHash: file.contentHash, language: engineSourceLanguage(file.path), content: file.content }));
   const facts = input.store.project.extractFacts({
     files: factFiles,
     facts: allFactKinds,
@@ -467,12 +466,7 @@ export async function buildRuntimeSnapshot(input: {
     validators: project.validators,
     project: true,
     producerPolicy: input.producerPolicy ?? BatchProducerPolicy,
-    projectFileFingerprints: scan.files.map((file) => ({
-      path: file.path,
-      exists: true,
-      size: file.size,
-      contentHash: file.contentHash,
-    })),
+    projectFileSnapshots: fileSnapshots,
     resultCache: input.validationResultCache,
   });
 

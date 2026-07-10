@@ -321,12 +321,13 @@ test("validation result cache invalidates same-size content changes with preserv
   }
 });
 
-test("validation result cache uses supplied project file fingerprints", async () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validation-cache-fingerprints-"));
+test("validation result cache and file reads use supplied project file snapshots", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validation-cache-snapshots-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ fileDiscovery: "filesystem", projectFilePatterns: ["src/**/*.ts"], ignore: [] }));
-    writeFileSync(path.join(rootDir, "src/company.ts"), "export const value = 'same-file';\n");
+    const filePath = path.join(rootDir, "src/company.ts");
+    writeFileSync(filePath, "export const value = 'disk-before';\n");
     const paths = createPaths(rootDir);
     let runs = 0;
 
@@ -338,24 +339,25 @@ test("validation result cache uses supplied project file fingerprints", async ()
         scope: "file",
         validate({ ctx }) {
           runs += 1;
-          return ctx.targetFiles.map((file) => file.report({ line: 1, message: `${file.path} run ${runs}` }));
+          return ctx.targetFiles.map((file) => file.report({ line: 1, message: `${file.text.trim()} run ${runs}` }));
         },
       }),
     ).validators;
 
     const resultCache = createValidationResultCache(paths);
+    writeFileSync(filePath, "export const value = 'disk-after';\n");
     const first = await runValidation({
       rootDir,
       paths,
       conventions: [],
       validators,
       files: ["src/company.ts"],
-      projectFileFingerprints: [{ path: "src/company.ts", exists: true, size: 32, contentHash: "runtime-content-one" }],
+      projectFileSnapshots: [{ path: "src/company.ts", content: "export const value = 'snapshot-one';\n", size: 36, contentHash: "runtime-content-one" }],
       producerPolicy: BatchProducerPolicy,
       resultCache,
     });
     assert.equal(runs, 1);
-    assert.equal(first.findings[0]?.message, "src/company.ts run 1");
+    assert.equal(first.findings[0]?.message, "export const value = 'snapshot-one'; run 1");
 
     const second = await runValidation({
       rootDir,
@@ -363,12 +365,12 @@ test("validation result cache uses supplied project file fingerprints", async ()
       conventions: [],
       validators,
       files: ["src/company.ts"],
-      projectFileFingerprints: [{ path: "src/company.ts", exists: true, size: 32, contentHash: "runtime-content-two" }],
+      projectFileSnapshots: [{ path: "src/company.ts", content: "export const value = 'snapshot-two';\n", size: 36, contentHash: "runtime-content-two" }],
       producerPolicy: BatchProducerPolicy,
       resultCache,
     });
-    assert.equal(runs, 2, "runtime-owned content fingerprint changes must invalidate cached results even when file bytes are unchanged");
-    assert.equal(second.findings[0]?.message, "src/company.ts run 2");
+    assert.equal(runs, 2, "runtime-owned snapshot changes must invalidate cached results even when disk bytes are unchanged");
+    assert.equal(second.findings[0]?.message, "export const value = 'snapshot-two'; run 2");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

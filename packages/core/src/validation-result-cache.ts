@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { writeAtomicJsonFileSync } from "./atomic.ts";
 import type { ContextPaths } from "./context.ts";
+import type { ProjectFileSnapshot } from "./project-files.ts";
 import type { ProducerSnapshot } from "./type-facts-provider.ts";
 import type { CommitGate, Finding, Validator } from "./validator-types.ts";
 import type { ValidatorOutcome } from "./validation.ts";
@@ -32,7 +33,7 @@ export type ValidatorRunCacheKeyInput = {
   rootDir: string;
   paths: ContextPaths;
   projectFiles: string[];
-  projectFileFingerprints?: ProjectFileFingerprint[];
+  projectFileSnapshots?: ProjectFileSnapshot[];
   targetFiles: string[];
   analysisFiles: string[];
   project: boolean;
@@ -40,13 +41,6 @@ export type ValidatorRunCacheKeyInput = {
   validator: Validator;
   producerSnapshot: ProducerSnapshot;
   runtimeFingerprint: string;
-};
-
-export type ProjectFileFingerprint = {
-  path: string;
-  exists: true;
-  size: number;
-  contentHash: string;
 };
 
 export type ValidationResultCache = {
@@ -125,10 +119,10 @@ export function validatorRunCacheKey(input: ValidatorRunCacheKeyInput): string {
     strictProducers: input.strictProducers,
     targetFiles: [...input.targetFiles].sort(),
     analysisFiles: [...input.analysisFiles].sort(),
-    projectFiles: fingerprintFiles(input.rootDir, input.projectFiles, input.projectFileFingerprints),
+    projectFiles: fingerprintFiles(input.rootDir, input.projectFiles, input.projectFileSnapshots),
     validatorReadFiles:
-      input.projectFileFingerprints && input.projectFileFingerprints.length > 0
-        ? fingerprintFiles(input.rootDir, unique([...input.targetFiles, ...input.analysisFiles]))
+      input.projectFileSnapshots && input.projectFileSnapshots.length > 0
+        ? fingerprintFiles(input.rootDir, unique([...input.targetFiles, ...input.analysisFiles]), input.projectFileSnapshots)
         : [],
     contextFiles: fingerprintFiles(input.rootDir, contextFiles(input.paths)),
     validator: validatorFingerprint(input.validator),
@@ -180,9 +174,9 @@ function contextFiles(paths: ContextPaths): string[] {
 function fingerprintFiles(
   rootDir: string,
   files: string[],
-  suppliedFingerprints: ProjectFileFingerprint[] = [],
+  snapshots: ProjectFileSnapshot[] = [],
 ): Array<{ path: string; exists: boolean; size?: number; contentHash?: string }> {
-  const supplied = new Map(suppliedFingerprints.map((file) => [normalizePath(file.path), { ...file, path: normalizePath(file.path) }]));
+  const supplied = new Map(snapshots.map((file) => [normalizePath(file.path), { ...file, path: normalizePath(file.path) }]));
   return [...new Set(files)]
     .sort()
     .map((file) => {

@@ -9,7 +9,7 @@ import { loadBaseline, loadImpactSurfaces, loadProposedImpactNotes } from "./cor
 import { createRuntime } from "./validator-runtime.ts";
 export { createRuntime } from "./validator-runtime.ts";
 import type { Profiler } from "./profiler.ts";
-import { createProjectFile, loadProjectFiles } from "./project-files.ts";
+import { createProjectFile, createProjectFileFromSnapshot, loadProjectFiles, type ProjectFileSnapshot } from "./project-files.ts";
 import { isSupportedSourceFile } from "./discovery.ts";
 import { ProjectFileLanguage } from "./language-registry.ts";
 import { listKnownContextFiles, readContextJson, readContextText } from "./context-readers.ts";
@@ -270,19 +270,24 @@ export function createValidationContext(params: {
   directories?: string[];
   targetFiles?: string[];
   analysisFiles?: string[];
+  projectFileSnapshots?: ProjectFileSnapshot[];
   project?: boolean;
   validator: Pick<Validator, "id" | "severity">;
   cache?: AnalysisCache | null;
   profiler?: Profiler;
 }): ValidationContext {
   const cache = params.cache === null ? undefined : (params.cache ?? (params.paths ? getAnalysisCache(params.paths) : undefined));
-  const projectFiles = loadProjectFiles(params.rootDir, params.files, params.validator, params.paths, cache, params.profiler);
+  const snapshotsByPath = new Map((params.projectFileSnapshots ?? []).map((snapshot) => [normalizePath(snapshot.path), snapshot]));
+  const projectFiles = loadProjectFiles(params.rootDir, params.files, params.validator, params.paths, cache, params.profiler, params.projectFileSnapshots);
   const knownFiles = new Set(projectFiles.map((file) => file.path));
   for (const targetFile of params.targetFiles ?? []) {
     if (knownFiles.has(normalizePath(targetFile))) continue;
     if (!isSupportedSourceFile(targetFile)) continue;
-    if (!existsSync(path.join(params.rootDir, targetFile))) continue;
-    const file = createProjectFile({ rootDir: params.rootDir, file: targetFile, validator: params.validator, cache, profiler: params.profiler });
+    const snapshot = snapshotsByPath.get(normalizePath(targetFile));
+    if (!snapshot && !existsSync(path.join(params.rootDir, targetFile))) continue;
+    const file = snapshot
+      ? createProjectFileFromSnapshot({ rootDir: params.rootDir, snapshot, validator: params.validator, cache, profiler: params.profiler })
+      : createProjectFile({ rootDir: params.rootDir, file: targetFile, validator: params.validator, cache, profiler: params.profiler });
     projectFiles.push(file);
     knownFiles.add(file.path);
   }
