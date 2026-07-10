@@ -34,7 +34,15 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
                     "embeddingStats": {
                         "totalChunks": 2,
                         "embeddedChunks": 2,
-                        "reusedChunks": 0
+                        "reusedChunks": 0,
+                        "filesScanned": 2,
+                        "filesChanged": 2,
+                        "filesDeleted": 0,
+                        "chunksAdded": 2,
+                        "chunksChanged": 0,
+                        "chunksRemoved": 0,
+                        "vectorsWritten": 2,
+                        "vectorsReused": 0
                     },
                     "indexedAt": "2026-06-06T00:00:00.000Z",
                     "diagnostics": []
@@ -93,6 +101,10 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
     assert_eq!(status["index"]["chunkCount"], 2);
     assert_eq!(status["index"]["embeddingStats"]["embeddedChunks"], 2);
     assert_eq!(status["index"]["embeddingStats"]["reusedChunks"], 0);
+    assert_eq!(status["index"]["embeddingStats"]["filesScanned"], 2);
+    assert_eq!(status["index"]["embeddingStats"]["filesChanged"], 2);
+    assert_eq!(status["index"]["embeddingStats"]["chunksAdded"], 2);
+    assert_eq!(status["index"]["embeddingStats"]["vectorsWritten"], 2);
     assert_eq!(
         status["index"]["provider"]["modelId"],
         "test-native-embedding-2"
@@ -142,7 +154,9 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
 
     let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
     let chunk_count: i64 = conn
-        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(chunk_count, 2);
 
@@ -311,7 +325,9 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
         .unwrap();
 
     let chunk_count: i64 = conn
-        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(chunk_count, 1);
 
@@ -445,7 +461,15 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
                     "embeddingStats": {
                         "totalChunks": 1,
                         "embeddedChunks": 1,
-                        "reusedChunks": 0
+                        "reusedChunks": 0,
+                        "filesScanned": 1,
+                        "filesChanged": 1,
+                        "filesDeleted": 1,
+                        "chunksAdded": 0,
+                        "chunksChanged": 1,
+                        "chunksRemoved": 1,
+                        "vectorsWritten": 1,
+                        "vectorsReused": 0
                     },
                     "indexedAt": "2026-06-06T00:00:01.000Z",
                     "diagnostics": []
@@ -489,6 +513,10 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
     let status: Value = serde_json::from_str(&status).unwrap();
     assert_eq!(status["index"]["chunkCount"], 1);
     assert_eq!(status["index"]["chunkTreeHash"], "tree-two");
+    assert_eq!(status["index"]["embeddingStats"]["filesDeleted"], 1);
+    assert_eq!(status["index"]["embeddingStats"]["chunksChanged"], 1);
+    assert_eq!(status["index"]["embeddingStats"]["chunksRemoved"], 1);
+    assert_eq!(status["index"]["embeddingStats"]["vectorsWritten"], 1);
 
     let search = project
         .search_semantic_index_json(
@@ -505,7 +533,9 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
 
     let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
     let chunk_count: i64 = conn
-        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(chunk_count, 1);
     let other_count: i64 = conn
@@ -745,7 +775,9 @@ fn knowledge_index_repair_clears_unsupported_provider_state() {
         })
         .unwrap();
     let chunk_count: i64 = conn
-        .query_row("select count(*) from knowledge_chunks", [], |row| row.get(0))
+        .query_row("select count(*) from knowledge_chunks", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(snapshot_count, 0);
     assert_eq!(chunk_count, 0);

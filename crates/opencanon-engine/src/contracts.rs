@@ -105,6 +105,14 @@ pub(crate) struct SemanticIndexEmbeddingStatsRequest {
     pub(crate) total_chunks: u32,
     pub(crate) embedded_chunks: u32,
     pub(crate) reused_chunks: u32,
+    pub(crate) files_scanned: Option<u32>,
+    pub(crate) files_changed: Option<u32>,
+    pub(crate) files_deleted: Option<u32>,
+    pub(crate) chunks_added: Option<u32>,
+    pub(crate) chunks_changed: Option<u32>,
+    pub(crate) chunks_removed: Option<u32>,
+    pub(crate) vectors_written: Option<u32>,
+    pub(crate) vectors_reused: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

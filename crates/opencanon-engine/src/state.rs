@@ -211,7 +211,9 @@ fn recreate_knowledge_index_schema(conn: &Connection) -> napi::Result<()> {
     conn.execute_batch(include_str!("migrations/005_knowledge_index.sql"))
         .map_err(|error| sqlite_error("Could not recreate Project Knowledge schema", error))?;
     conn.execute_batch(include_str!("migrations/006_knowledge_hybrid.sql"))
-        .map_err(|error| sqlite_error("Could not recreate Project Knowledge hybrid schema", error))?;
+        .map_err(|error| {
+            sqlite_error("Could not recreate Project Knowledge hybrid schema", error)
+        })?;
     conn.execute_batch(include_str!("migrations/007_knowledge_nodes.sql"))
         .map_err(|error| sqlite_error("Could not recreate Project Knowledge node schema", error))?;
     Ok(())

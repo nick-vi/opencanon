@@ -9,8 +9,8 @@ use crate::json::{decode, napi_error, sqlite_error};
 use crate::state::timestamp;
 
 use super::semantic_store::{
-    assert_semantic_chunk_count, delete_semantic_nodes, read_semantic_chunk_hashes,
-    read_knowledge_index_payload, semantic_chunk_ids_for_paths, semantic_vector_dir,
+    assert_semantic_chunk_count, delete_semantic_nodes, read_knowledge_index_payload,
+    read_semantic_chunk_hashes, semantic_chunk_ids_for_paths, semantic_vector_dir,
     upsert_semantic_chunk_rows, upsert_semantic_nodes, validate_knowledge_index_delta_request,
     vector_error, write_semantic_vector_delta,
 };
