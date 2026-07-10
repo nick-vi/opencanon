@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "vitest";
 import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticIndexProducerVersion, semanticSearchVectorForProvider } from "@opencanon/runtime";
 import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity } from "../src/knowledge-producers.ts";
-import { captureRuntimeSourceSnapshot } from "../src/project-source-snapshot.ts";
+import { captureRuntimeSourceSnapshot, snapshotFiles } from "../src/project-source-snapshot.ts";
 import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapshot.ts";
 import { createEngine } from "@opencanon/engine";
 import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
@@ -49,6 +49,27 @@ test("runtime source snapshots feed captured bytes into fact extraction", () => 
     assert.equal(extracted[0]?.path, "src/company.ts");
     assert.equal(extracted[0]?.content, source.content);
     assert.equal(extracted[0]?.contentHash, source.contentHash);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime source snapshot capture handles large file inventories deterministically", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-large-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const files = Array.from({ length: 1_200 }, (_value, index) => {
+      const file = `src/file-${String(index).padStart(4, "0")}.ts`;
+      writeFileSync(path.join(rootDir, file), `export const value${index} = ${index};\n`);
+      return file;
+    });
+
+    const snapshots = snapshotFiles(rootDir, files.toReversed());
+
+    assert.equal(snapshots.length, files.length);
+    assert.deepEqual(snapshots.map((file) => file.path), files);
+    assert(snapshots.every((file) => file.contentHash.startsWith("sha256:")));
+    assert.equal(snapshots.reduce((total, file) => total + file.size, 0), files.reduce((total, file, index) => total + Buffer.byteLength(`export const value${index} = ${index};\n`), 0));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

@@ -3,7 +3,7 @@ import path from "node:path";
 import type { AnalysisCache } from "./cache.ts";
 import { matchesAny, normalizePath } from "./core.ts";
 import type { Profiler } from "./profiler.ts";
-import { createProjectFile, parseJsonRead } from "./project-files.ts";
+import { createProjectFile, createProjectFileFromSnapshot, parseJsonRead, type ProjectFileSnapshot } from "./project-files.ts";
 import { isSupportedSourceFile } from "./discovery.ts";
 import type { FileRead, JsonRead, ProjectFile, Validator } from "./validator-types.ts";
 
@@ -14,6 +14,7 @@ export function readContextText(params: {
   validator: Pick<Validator, "id" | "severity">;
   cache?: AnalysisCache;
   profiler?: Profiler;
+  snapshotsByPath?: Map<string, ProjectFileSnapshot>;
 }): FileRead {
   const filePath = normalizePath(params.filePath);
   const existing = params.filesByPath.get(filePath);
@@ -26,21 +27,30 @@ export function readContextText(params: {
     };
   }
 
+  const snapshot = params.snapshotsByPath?.get(filePath);
   const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(params.rootDir, filePath);
-  if (!existsSync(absolutePath)) {
+  if (!snapshot && !existsSync(absolutePath)) {
     return {
       path: filePath,
       diagnostics: [`File not found: ${filePath}`],
     };
   }
 
-  const file = createProjectFile({
-    rootDir: params.rootDir,
-    file: filePath,
-    validator: params.validator,
-    cache: params.cache,
-    profiler: params.profiler,
-  });
+  const file = snapshot
+    ? createProjectFileFromSnapshot({
+      rootDir: params.rootDir,
+      snapshot,
+      validator: params.validator,
+      cache: params.cache,
+      profiler: params.profiler,
+    })
+    : createProjectFile({
+      rootDir: params.rootDir,
+      file: filePath,
+      validator: params.validator,
+      cache: params.cache,
+      profiler: params.profiler,
+    });
   return {
     path: file.path,
     file,
@@ -56,6 +66,7 @@ export function readContextJson<T>(params: {
   validator: Pick<Validator, "id" | "severity">;
   cache?: AnalysisCache;
   profiler?: Profiler;
+  snapshotsByPath?: Map<string, ProjectFileSnapshot>;
 }): JsonRead<T> {
   const file = readContextText(params);
   if (!file.text) {
@@ -93,5 +104,4 @@ export function rootContextFiles(rootDir: string): string[] {
     return [];
   }
 }
-
 

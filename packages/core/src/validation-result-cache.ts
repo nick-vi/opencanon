@@ -124,7 +124,7 @@ export function validatorRunCacheKey(input: ValidatorRunCacheKeyInput): string {
       input.projectFileSnapshots && input.projectFileSnapshots.length > 0
         ? fingerprintFiles(input.rootDir, unique([...input.targetFiles, ...input.analysisFiles]), input.projectFileSnapshots)
         : [],
-    contextFiles: fingerprintFiles(input.rootDir, contextFiles(input.paths)),
+    contextFiles: fingerprintFiles(input.rootDir, validationContextFiles(input.paths), input.projectFileSnapshots),
     validator: validatorFingerprint(input.validator),
     producerSnapshot: input.producerSnapshot,
     runtime: input.runtimeFingerprint,
@@ -155,7 +155,7 @@ function validatorFingerprint(validator: Validator): string {
   });
 }
 
-function contextFiles(paths: ContextPaths): string[] {
+export function validationContextFiles(paths: ContextPaths): string[] {
   const files = [
     paths.configPath,
     paths.conventionsPath,

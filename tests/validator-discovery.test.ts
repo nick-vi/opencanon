@@ -376,6 +376,66 @@ test("validation result cache and file reads use supplied project file snapshots
   }
 });
 
+test("validation context reads and cache keys use supplied context file snapshots", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validation-cache-context-snapshot-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ marker: "disk-before" }));
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const value = true;\n");
+    const paths = createPaths(rootDir);
+    let runs = 0;
+
+    const validators = resolveTestValidators(
+      testValidatorDefinition({
+        id: "context-snapshot-validator",
+        applies: ["src/**/*.ts"],
+        severity: "error",
+        scope: "file",
+        validate({ ctx }) {
+          runs += 1;
+          const config = ctx.json<{ marker: string }>("opencanon.config.json");
+          return ctx.targetFiles.map((file) => file.report({ line: 1, message: `${config.data?.marker ?? "missing"} run ${runs}` }));
+        },
+      }),
+    ).validators;
+
+    const resultCache = createValidationResultCache(paths);
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ marker: "disk-after" }));
+    const first = await runValidation({
+      rootDir,
+      paths,
+      conventions: [],
+      validators,
+      files: ["src/company.ts"],
+      projectFileSnapshots: [
+        { path: "src/company.ts", content: "export const value = true;\n", size: 27, contentHash: "source-one" },
+        { path: "opencanon.config.json", content: JSON.stringify({ marker: "snapshot-one" }), size: 25, contentHash: "context-one" },
+      ],
+      producerPolicy: BatchProducerPolicy,
+      resultCache,
+    });
+    assert.equal(first.findings[0]?.message, "snapshot-one run 1");
+
+    const second = await runValidation({
+      rootDir,
+      paths,
+      conventions: [],
+      validators,
+      files: ["src/company.ts"],
+      projectFileSnapshots: [
+        { path: "src/company.ts", content: "export const value = true;\n", size: 27, contentHash: "source-one" },
+        { path: "opencanon.config.json", content: JSON.stringify({ marker: "snapshot-two" }), size: 25, contentHash: "context-two" },
+      ],
+      producerPolicy: BatchProducerPolicy,
+      resultCache,
+    });
+    assert.equal(runs, 2, "context snapshot changes must invalidate cached validator results");
+    assert.equal(second.findings[0]?.message, "snapshot-two run 2");
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("validation result cache invalidates when validator source changes", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validation-cache-source-"));
   try {

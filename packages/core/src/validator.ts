@@ -507,6 +507,7 @@ export function createValidationContext(params: {
         validator: params.validator,
         cache,
         profiler: params.profiler,
+        snapshotsByPath,
       });
     },
     json(filePath) {
@@ -517,6 +518,7 @@ export function createValidationContext(params: {
         validator: params.validator,
         cache,
         profiler: params.profiler,
+        snapshotsByPath,
       });
     },
     jsonFiles(patterns) {
@@ -528,6 +530,7 @@ export function createValidationContext(params: {
           validator: params.validator,
           cache,
           profiler: params.profiler,
+          snapshotsByPath,
         }),
       );
     },

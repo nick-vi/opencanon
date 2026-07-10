@@ -7,6 +7,7 @@ import {
   engineSourceLanguage,
   isCodeGraphIndexableFile,
   isEngineExtractableFile,
+  validationContextFiles,
   type FactDiagnostic,
   type FactKind,
   type FileFacts,
@@ -21,6 +22,8 @@ const allFactKinds: FactKind[] = ["imports", "exports", "symbols", "calls", "lit
 export type RuntimeSourceSnapshot = {
   discovery: ReturnType<typeof discoverProjectFiles>;
   scan: ScanAndDiffResult;
+  sourceFileSnapshots: ProjectFileSnapshot[];
+  contextFileSnapshots: ProjectFileSnapshot[];
   fileSnapshots: ProjectFileSnapshot[];
   factFiles: RuntimeFactFile[];
   facts: FileFacts[];
@@ -43,13 +46,21 @@ export function captureRuntimeSourceSnapshot(input: {
   if (discovery.failed) throw new Error(discovery.diagnostics.join("\n"));
 
   const scan = applyChangeHint(input.store.scanAndDiff(discovery.files), input.changedPaths);
-  const fileSnapshots = snapshotScanFiles(input.rootDir, scan);
-  const factFiles = factFilesFromSnapshots(fileSnapshots);
+  const sourceFileSnapshots = snapshotScanFiles(input.rootDir, scan);
+  const sourceSnapshotPaths = new Set(sourceFileSnapshots.map((file) => file.path));
+  const contextFileSnapshots = snapshotFiles(
+    input.rootDir,
+    validationContextFiles(input.paths).filter((file) => !sourceSnapshotPaths.has(file)),
+  );
+  const fileSnapshots = [...sourceFileSnapshots, ...contextFileSnapshots];
+  const factFiles = factFilesFromSnapshots(sourceFileSnapshots);
   const extracted = extractRuntimeFacts({ store: input.store, factFiles });
 
   return {
     discovery,
     scan,
+    sourceFileSnapshots,
+    contextFileSnapshots,
     fileSnapshots,
     factFiles,
     facts: extracted.files,
@@ -57,12 +68,17 @@ export function captureRuntimeSourceSnapshot(input: {
 }
 
 export function snapshotScanFiles(rootDir: string, scan: ScanAndDiffResult): ProjectFileSnapshot[] {
-  return scan.files
+  return snapshotFiles(rootDir, scan.files.map((file) => file.path));
+}
+
+export function snapshotFiles(rootDir: string, files: string[]): ProjectFileSnapshot[] {
+  return [...new Set(files)]
+    .sort()
     .map((file) => {
       try {
-        const content = readFileSync(path.join(rootDir, file.path), "utf8");
+        const content = readFileSync(path.join(rootDir, file), "utf8");
         return {
-          path: file.path,
+          path: file,
           contentHash: sourceContentHash(content),
           size: Buffer.byteLength(content),
           content,

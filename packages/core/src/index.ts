@@ -743,5 +743,5 @@ export type { ProjectFileSnapshot } from "./project-files.ts";
 export type { ValidationInput, ValidationResult, ValidatorOutcome } from "./validation.ts";
 export { runValidation, selectValidators, sortFindings, validatorGraphHash, ValidatorOutcomeStatus } from "./validation.ts";
 export type { ValidationResultCache } from "./validation-result-cache.ts";
-export { createEphemeralValidationResultCache, createValidationResultCache, validationRuntimeFingerprint, validatorRunCacheKey } from "./validation-result-cache.ts";
+export { createEphemeralValidationResultCache, createValidationResultCache, validationContextFiles, validationRuntimeFingerprint, validatorRunCacheKey } from "./validation-result-cache.ts";
 export * from "./worktree.ts";
