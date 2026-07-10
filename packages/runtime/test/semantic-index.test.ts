@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "vitest";
 import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticIndexProducerVersion, semanticSearchVectorForProvider } from "@opencanon/runtime";
 import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity } from "../src/knowledge-producers.ts";
+import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapshot.ts";
 import { createEngine } from "@opencanon/engine";
 import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
@@ -240,6 +241,62 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
     assert.equal(snapshot.semanticIndex.chunkCount, 0);
     assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-missing-on-startup"));
     store.close();
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("startup Project Knowledge status is explicit about cached but unverified state", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-startup-status-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
+    const previous = buildProjectSemanticIndex({
+      rootDir,
+      scan: {
+        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        schemaVersion: 6,
+        inventoryHash: "inventory",
+        files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
+        changedFiles: ["src/company.ts"],
+        unchangedFiles: [],
+        deletedFiles: [],
+        staleFiles: 0,
+      },
+      facts: [{
+        path: "src/company.ts",
+        contentHash: "content",
+        language: "typescript",
+        parser: "oxc",
+        parserVersion: "test",
+        imports: [],
+        exports: [{ line: 1, column: 1, name: "loadCompany", kind: "function" }],
+        symbols: [{ line: 1, column: 17, name: "loadCompany", kind: "function", exported: true, endLine: 3, params: [] }],
+        declarations: [],
+        calls: [],
+        literals: [{ line: 2, column: 10, value: "active company", valueKind: "string", context: "return" }],
+        comments: [],
+        references: [],
+        annotations: [],
+        diagnosticFacts: [],
+        duplicates: [],
+        diagnostics: [],
+      }],
+      project: nativeTestProject(),
+      semanticEmbedding: nativeEmbeddingConfig(),
+    }).index;
+    const store = {
+      readSemanticIndexStatus: () => ({ index: previous }),
+    } as Pick<Parameters<typeof cachedStartupSemanticIndexSnapshot>[0], "readSemanticIndexStatus"> as Parameters<typeof cachedStartupSemanticIndexSnapshot>[0];
+    const snapshot = cachedStartupSemanticIndexSnapshot(store, nativeEmbeddingConfig());
+
+    assert.equal(snapshot.status, "stale");
+    assert.equal(snapshot.staleChunkCount, previous.chunkCount);
+    assert(snapshot.diagnostics.some((diagnostic) =>
+      diagnostic.code === "semantic-index-unverified-on-startup" &&
+      diagnostic.message.includes("available but has not been verified") &&
+      diagnostic.message.includes("before relying on Search or Ask"),
+    ));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

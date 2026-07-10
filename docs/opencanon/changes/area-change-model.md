@@ -176,9 +176,6 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 Plan `board-state`: Derive Change board columns from change-level events and task aggregate state
 Checks: `runtime-tests`
 
-Plan `knowledge-index-recovery`: Reset incompatible Knowledge index cache to current provider state
-Checks: `semantic-index-tests`
-
 Plan `cli-and-copy`: Remove stale command aliases and keep CLI and README examples on current surfaces
 Checks: `service-lifecycle-tests`
 
@@ -203,11 +200,6 @@ Task `board-state`: Prove task events cannot close whole Changes in the board pr
 Files: `packages/core/src/change-state.ts`, `tests/change-state.test.ts`, `packages/runtime/test/client.test.ts`
 Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `runtime-tests`
-
-Task `knowledge-index-recovery`: Reset incompatible Knowledge index cache to current provider state
-Files: `packages/core/src/semantic-index.ts`, `packages/runtime/src/snapshot.ts`, `packages/runtime/src/semantic-index-snapshot.ts`, `packages/runtime/test/semantic-index.test.ts`, `packages/runtime/test/engine.test.ts`, `tests/contracts.test.ts`, `crates/opencanon-engine/src/tests/semantic_index.rs`
-Impact surfaces: [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)
-Checks: `semantic-index-tests`
 
 Task `cli-copy-cleanup`: Remove stale Change check alias and refresh current command copy
 Files: `packages/cli/src/changes.ts`, `packages/cli/src/context.ts`, `README.md`, `crates/opencanon-engine/src/state.rs`, `packages/runtime/test/service.test.ts`

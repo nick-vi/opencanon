@@ -157,7 +157,6 @@ export default [
     },
     plan: [
       { id: "board-state", title: "Derive Change board columns from change-level events and task aggregate state", checks: ["runtime-tests"] },
-      { id: "knowledge-index-recovery", title: "Reset incompatible Knowledge index cache to current provider state", checks: ["semantic-index-tests"] },
       { id: "cli-and-copy", title: "Remove stale command aliases and keep CLI and README examples on current surfaces", checks: ["service-lifecycle-tests"] },
       { id: "examples-and-hooks", title: "Refresh example projects and hooks so they teach the current runtime-owned workflow", checks: ["project-doctor", "typecheck"] },
       { id: "canon-dogfood", title: "Keep active Change tasks scoped to current work instead of completed historical migrations", checks: ["project-doctor"] },
@@ -172,21 +171,6 @@ export default [
         files: ["packages/core/src/change-state.ts", "tests/change-state.test.ts", "packages/runtime/test/client.test.ts"],
         surfaces: ["project-canon-model"],
         checks: ["runtime-tests"],
-      },
-      {
-        id: "knowledge-index-recovery",
-        title: "Reset incompatible Knowledge index cache to current provider state",
-        files: [
-          "packages/core/src/semantic-index.ts",
-          "packages/runtime/src/snapshot.ts",
-          "packages/runtime/src/semantic-index-snapshot.ts",
-          "packages/runtime/test/semantic-index.test.ts",
-          "packages/runtime/test/engine.test.ts",
-          "tests/contracts.test.ts",
-          "crates/opencanon-engine/src/tests/semantic_index.rs",
-        ],
-        surfaces: ["project-knowledge-index"],
-        checks: ["semantic-index-tests"],
       },
       {
         id: "cli-copy-cleanup",

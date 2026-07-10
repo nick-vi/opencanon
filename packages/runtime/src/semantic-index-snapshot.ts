@@ -115,7 +115,8 @@ export function cachedStartupSemanticIndexSnapshot(
         ),
         {
           code: "semantic-index-unverified-on-startup",
-        message: "Cached Project Knowledge was reused without a startup source scan. Run opencanon project index to verify Search and Ask freshness.",
+          message:
+            "Cached Project Knowledge is available but has not been verified against the current source tree since startup. Run opencanon project index before relying on Search or Ask.",
           severity: DiagnosticSeverity.Info,
         },
       ],
