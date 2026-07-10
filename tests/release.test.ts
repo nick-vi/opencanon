@@ -201,6 +201,16 @@ test("native embedding smoke is required unless explicitly optional", () => {
   assert(!source.includes("OPENCANON_NATIVE_EMBEDDING_SMOKE"));
 });
 
+test("CI relies on doctor for managed skill drift instead of retired launcher paths", () => {
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  const releaseCheck = readFileSync("scripts/check-release-consistency.ts", "utf8");
+
+  assert.match(workflow, /npm run check:ci/);
+  assert(!workflow.includes("opencanon.mjs"));
+  assert(!workflow.includes(".agents/skills/opencanon/scripts/opencanon.mjs"));
+  assert.match(releaseCheck, /build:skill-runtime/);
+});
+
 test("release manifest requires a generated OpenCanon runtime", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-release-runtime-"));
   const assetDir = path.join(rootDir, "assets");

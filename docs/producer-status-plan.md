@@ -63,10 +63,10 @@ Keep: `declarationSourceId` (syntactic, always-on); `asFiniteLiteralSet` /
 `finiteLiteralIncludes`; sidecar as the headless/CI producer (reports ready/stale,
 not a fallback).
 
-## Phase 3 — validator-declared producers + gates
+## Phase 3 — convention runtime declared producers + gates
 
-- `defineValidator({ requiresProducers: ["typescript"], ... })`.
-- Unmet required producer -> validator skips, one per-run diagnostic.
+- A convention runtime declares `requiresProducers: ["typescript"]` when it needs live typed facts.
+- Unmet required producer -> convention runtime skips, one per-run diagnostic.
 - `validate --require-producer <langs>` exits nonzero if any named producer != ready.
 - `--strict-producers` escalates all skips to errors.
 - `validateContext`/validator-graph track `requiresProducers`.
@@ -95,7 +95,7 @@ REMOVE  typedIndexStatus, liveProducerCapable, --require-typed-index, OPENCANON_
 ADD     ProducerStatus, ProducerWarning
 ADD     TypeFactsProvider.status(), ProducerRegistry
 ADD     ctx.typed.producerStatus(lang), producerStatuses()
-ADD     defineValidator({ requiresProducers })
+ADD     convention runtime { requiresProducers }
 ADD     validate --require-producer <langs>, --strict-producers
 KEEP    declarationSourceId, asFiniteLiteralSet, finiteLiteralIncludes, sidecar (as producer), live producer
 ```

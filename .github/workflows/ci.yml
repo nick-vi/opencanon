@@ -34,9 +34,3 @@ jobs:
 
       - name: Run checks
         run: npm run check:ci
-
-      - name: Verify committed launcher is in sync with its source
-        # check:ci rebuilds the shipped launcher (opencanon.mjs) from opencanon.ts. If the
-        # committed artifact drifted from its source, fail so a stale/hand-edited bundle
-        # (which ships the security-critical fetch + signature-verify code) can't slip out.
-        run: git diff --exit-code -- .agents/skills/opencanon/scripts/opencanon.mjs
