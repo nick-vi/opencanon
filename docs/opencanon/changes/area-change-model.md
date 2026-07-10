@@ -90,6 +90,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Files: `packages/cli/src/changes-definition.ts`
 - Files: `packages/cli/src/conventions.ts`
 - Files: `packages/cli/src/context.ts`
+- Files: `packages/cli/src/search.ts`
 - Files: `packages/cli/src/analyze.ts`
 - Files: `packages/cli/src/baseline.ts`
 - Files: `packages/cli/src/feedback.ts`
@@ -202,7 +203,7 @@ Impact surfaces: [Project Canon model](../areas/project-map-governance.md#projec
 Checks: `runtime-tests`
 
 Task `cli-copy-cleanup`: Remove stale Change check alias and refresh current command copy
-Files: `packages/cli/src/changes.ts`, `packages/cli/src/context.ts`, `README.md`, `crates/opencanon-engine/src/state.rs`, `packages/runtime/test/service.test.ts`
+Files: `packages/cli/src/changes.ts`, `packages/cli/src/context.ts`, `packages/cli/src/search.ts`, `README.md`, `crates/opencanon-engine/src/state.rs`, `packages/runtime/test/service.test.ts`
 Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `service-lifecycle-tests`
 

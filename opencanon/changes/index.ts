@@ -86,6 +86,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/changes-definition.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/conventions.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/context.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/cli/src/search.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/analyze.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/baseline.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/feedback.ts" },
@@ -178,6 +179,7 @@ export default [
         files: [
           "packages/cli/src/changes.ts",
           "packages/cli/src/context.ts",
+          "packages/cli/src/search.ts",
           "README.md",
           "crates/opencanon-engine/src/state.rs",
           "packages/runtime/test/service.test.ts",

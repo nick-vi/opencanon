@@ -323,7 +323,7 @@ Options:
   --symbol-kind    Restrict symbol results to a graph symbol kind.
   --scope <glob>   Restrict result paths to matching file globs. Repeatable.
   --limit <n>      Maximum results to return (default 50, max 500).
-  --index          Build Project Knowledge before context search.
+  --index          Build Project Knowledge before semantic search.
   --format <fmt>   markdown or json.
 `);
 }

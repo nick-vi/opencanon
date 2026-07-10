@@ -53,6 +53,22 @@ test("repo tracks managed OpenCanon skill artifacts required by doctor", () => {
   assert.deepEqual(untracked, []);
 });
 
+test("example projects do not track generated OpenCanon runtime or skill internals", () => {
+  const tracked = spawnSync("git", ["ls-files", "--", "examples/projects"], { encoding: "utf8" });
+  assert.equal(tracked.status, 0, tracked.stderr);
+  const stale = tracked.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .filter((filePath) =>
+      filePath.includes("/.opencanon/") ||
+      filePath.includes("/.agents/skills/opencanon/fixtures/") ||
+      filePath.includes("/.agents/skills/opencanon/validators/") ||
+      filePath.endsWith("/.agents/skills/opencanon/.gitignore"),
+    );
+
+  assert.deepEqual(stale, []);
+});
+
 test("release manifest emits one bundle per available engine target", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-release-"));
   const assetDir = path.join(rootDir, "assets");
