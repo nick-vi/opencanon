@@ -227,8 +227,8 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
       validationResultCache: createEphemeralValidationResultCache(),
     });
 
-    assert.equal(snapshot.semanticIndex.status, "stale");
-    assert.equal(snapshot.state.semanticIndex?.status, "stale");
+    assert.equal(snapshot.semanticIndex.status, "missing");
+    assert.equal(snapshot.state.semanticIndex?.status, "missing");
     assert.equal(snapshot.semanticIndex.chunkCount, 0);
     assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-missing-on-startup"));
     store.close();
@@ -631,7 +631,7 @@ test("runtime snapshot reports missing semantic index with project embedding con
 
     assert.equal(writes.length, 0);
     assert.equal(embedCalls.length, 0);
-    assert.equal(snapshot.semanticIndex.status, "stale");
+    assert.equal(snapshot.semanticIndex.status, "missing");
     assert.equal(snapshot.semanticIndex.provider.kind, "native");
     assert.equal(snapshot.semanticIndex.provider.modelId, "jina-code-v2");
     assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-missing-on-startup"));
@@ -1039,7 +1039,7 @@ test("runtime snapshot marks cached semantic index stale after provider config c
     });
 
     assert.equal(writes.length, 0);
-    assert.equal(snapshot.semanticIndex.status, "stale");
+    assert.equal(snapshot.semanticIndex.status, "missing");
     assert.equal(snapshot.semanticIndex.provider.modelId, "jina-code-v2");
     assert.equal(snapshot.semanticIndex.chunkCount, 0);
     assert.equal(snapshot.semanticIndex.vectorCount, 0);

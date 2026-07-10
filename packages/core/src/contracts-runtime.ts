@@ -60,7 +60,7 @@ export const RuntimeWorkerJobSchema = z.object({
 export type RuntimeWorkerJob = z.infer<typeof RuntimeWorkerJobSchema>;
 
 export const RuntimeHealthSchema = z.object({
-  status: z.enum(["ready", "indexing", "stale", "failed"]),
+  status: z.enum(["ready", "missing", "indexing", "stale", "failed"]),
   process: z
     .object({
       kind: z.literal("runtime"),

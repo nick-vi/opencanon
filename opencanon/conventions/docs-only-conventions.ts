@@ -119,7 +119,7 @@ const docsOnlyConventions = [
     rule: "Project Knowledge belongs to OpenCanon runtime state; authored definitions stay in repo source, and semantic results remain advisory unless backed by checks or convention runtimes.",
     examples: [{"note":"A chunk can backlink to an area, spec, change item, convention, finding, and impact surface, but the chunk itself is regenerated state."},{"note":"Use search to discover likely related code, then enforce behavior through validators, checks, gates, or tests."}],
     impactSurfaces: ["project-knowledge-index"],
-    applies: { kind: "files", globs: ["packages/core/src/semantic-index.ts","packages/runtime/src/semantic-index.ts","packages/runtime/src/snapshot.ts","packages/runtime/src/server*.ts","crates/opencanon-vector/**","crates/opencanon-inference/**","docs/opencanon/canon/architecture.md"] },
+    applies: { kind: "files", globs: ["packages/core/src/semantic-index.ts","packages/runtime/src/knowledge-producers.ts","packages/runtime/src/semantic-index.ts","packages/runtime/src/snapshot.ts","packages/runtime/src/server*.ts","crates/opencanon-vector/**","crates/opencanon-inference/**","docs/opencanon/canon/architecture.md"] },
     render: { kind: "generated", docs: "docs/opencanon/canon/project-knowledge-boundary-current.md", style: "reference" },
     runtime: { kind: "none" },
   }),

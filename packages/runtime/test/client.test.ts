@@ -675,7 +675,7 @@ function projectContextRouteCheckSource(): string {
     }
     try {
       const initialStatus = await get("/api/context/status");
-      assert.equal(initialStatus.index.status, "stale");
+      assert.equal(initialStatus.index.status, "missing");
       const staleSearchResponse = await fetch(server.url + "/api/context/search?query=invoice%20search%20term&limit=5", { headers });
       const staleSearchText = await staleSearchResponse.text();
       assert.equal(staleSearchResponse.status, 409, staleSearchText);

@@ -100,6 +100,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/semantic-index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/semantic-models.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/project-context.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/knowledge-producers.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/semantic-index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/state.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/semantic-index.test.ts" },

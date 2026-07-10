@@ -174,7 +174,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextSearch,
     {
       title: "OpenCanon Project Knowledge Search",
-      description: "Read-only. Search ready Project Knowledge and return grounded evidence, backlinks, freshness, and citations. If Knowledge is stale, run `opencanon project index` outside MCP first.",
+      description: "Read-only. Search ready Project Knowledge and return grounded evidence, backlinks, freshness, and citations. If Knowledge is missing, stale, failed, or indexing, run `opencanon project index` outside MCP first.",
       inputSchema: {
         query: z.string().min(1).describe("Search text."),
         limit: z.number().int().min(1).max(100).optional().describe("Maximum results. Defaults to 20."),
@@ -195,7 +195,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextAsk,
     {
       title: "OpenCanon Project Knowledge Ask",
-      description: "Read-only. Ask a grounded project question against ready Project Knowledge. Answers are deterministic navigation evidence, not enforcement. If Knowledge is stale, run `opencanon project index` outside MCP first.",
+      description: "Read-only. Ask a grounded project question against ready Project Knowledge. Answers are deterministic navigation evidence, not enforcement. If Knowledge is missing, stale, failed, or indexing, run `opencanon project index` outside MCP first.",
       inputSchema: {
         question: z.string().min(1).describe("Project question."),
       },
@@ -212,7 +212,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextChunks,
     {
       title: "OpenCanon Project Knowledge Chunks",
-      description: "Read-only. List chunks from ready Project Knowledge by optional file path or definition id. If Knowledge is stale, run `opencanon project index` outside MCP first.",
+      description: "Read-only. List chunks from ready Project Knowledge by optional file path or definition id. If Knowledge is missing, stale, failed, or indexing, run `opencanon project index` outside MCP first.",
       inputSchema: {
         paths: z.array(z.string().min(1)).optional().describe("Optional repository-relative paths."),
         definitions: z.array(z.string().min(1)).optional().describe("Optional definition ids whose covered files should provide chunks."),
@@ -235,7 +235,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.ContextCoverage,
     {
       title: "OpenCanon Project Knowledge Coverage",
-      description: "Read-only. Return coverage from ready Project Knowledge across indexed, governed, stale, and orphan files. If Knowledge is stale, run `opencanon project index` outside MCP first.",
+      description: "Read-only. Return coverage from ready Project Knowledge across indexed, governed, stale, and orphan files. If Knowledge is missing, stale, failed, or indexing, run `opencanon project index` outside MCP first.",
       inputSchema: {},
     },
     async () => {

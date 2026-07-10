@@ -18,6 +18,7 @@ const SemanticChunkMetadataPageSize = 500;
 
 const SemanticIndexStatus = {
   Failed: "failed",
+  Missing: "missing",
   Stale: "stale",
 } as const;
 
@@ -146,7 +147,7 @@ function missingSemanticIndexSnapshot(sourceInventoryHash: string, semanticEmbed
   return {
     id: DefaultSemanticIndexId,
     version: SemanticIndexVersion,
-    status: "stale",
+    status: SemanticIndexStatus.Missing,
     provider,
     chunkerVersion: SemanticChunkerVersion,
     producerVersion,

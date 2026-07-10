@@ -18,8 +18,8 @@ import {
 } from "./service.ts";
 
 const SemanticIndexStatus = {
-  Disabled: "disabled",
   Indexing: "indexing",
+  Missing: "missing",
   Ready: "ready",
   Stale: "stale",
   Failed: "failed",
@@ -131,7 +131,7 @@ export function renderSemanticIndexLines(index: SemanticIndexSnapshot): string[]
 function semanticIndexAction(index: SemanticIndexSnapshot): string | undefined {
   if (index.status === SemanticIndexStatus.Ready && index.staleChunkCount === 0) return undefined;
   if (index.status === SemanticIndexStatus.Indexing) return "Wait for the current project index rebuild to finish, then rerun opencanon project status.";
-  if (index.status === SemanticIndexStatus.Disabled) return "Enable project knowledge indexing in opencanon.config.json before using Search or Ask.";
+  if (index.status === SemanticIndexStatus.Missing) return "Run opencanon project index to build Search, Ask, and Knowledge retrieval.";
   if (index.status === SemanticIndexStatus.Failed) return "Fix the listed diagnostics, then run opencanon project index.";
   return "Run opencanon project index to rebuild Search, Ask, and Knowledge retrieval.";
 }

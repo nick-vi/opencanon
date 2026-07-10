@@ -123,8 +123,8 @@ const CoordinationRefreshDebounceMs = 150;
 const KnowledgeWatchDebounceMs = 1_000;
 const MaxQueuedWatchRebuilds = 32;
 const KnowledgeIndexStatus = {
-  Disabled: "disabled",
   Failed: "failed",
+  Missing: "missing",
 } as const;
 
 export type RuntimeServerOptions = {
@@ -433,7 +433,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   function scheduleKnowledgeRefreshForWatch(batch: WatcherEventBatch, summary: string | undefined): void {
     if (stopped || !summary) return;
     const existingIndex = store.readSemanticIndexStatus({ indexId: "project" }).index;
-    if (!existingIndex || existingIndex.status === KnowledgeIndexStatus.Disabled || existingIndex.status === KnowledgeIndexStatus.Failed) return;
+    if (!existingIndex || existingIndex.status === KnowledgeIndexStatus.Missing || existingIndex.status === KnowledgeIndexStatus.Failed) return;
     pendingKnowledgeWatchSummary = batch.stale
       ? "Project Knowledge source inventory changed; refreshing index."
       : knowledgeWatchSummary(batch.paths);
@@ -448,7 +448,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         .then(async () => {
           if (stopped) return;
           const currentIndex = store.readSemanticIndexStatus({ indexId: "project" }).index;
-          if (!currentIndex || currentIndex.status === KnowledgeIndexStatus.Disabled || currentIndex.status === KnowledgeIndexStatus.Failed) return;
+          if (!currentIndex || currentIndex.status === KnowledgeIndexStatus.Missing || currentIndex.status === KnowledgeIndexStatus.Failed) return;
           await buildIndexedSnapshot(queuedSummary);
         })
         .catch((error) => {

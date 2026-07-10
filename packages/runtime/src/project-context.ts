@@ -16,6 +16,10 @@ import type { RuntimeSnapshot } from "./snapshot.ts";
 import { semanticSearchVectorForProvider } from "./semantic-index.ts";
 
 const ContextIndexId = "project";
+const SemanticIndexStatus = {
+  Missing: "missing",
+  Stale: "stale",
+} as const;
 const ChunkPageSize = 500;
 const ContextIndexStatus = {
   Ready: "ready",
@@ -148,7 +152,9 @@ export function projectContextCoverage(input: { store: ProjectStore; snapshot: R
     if (!fileIsGoverned(file)) gaps.push({ kind: "ungoverned-file", file: file.file, message: `${file.file} has no governing Project Map backlinks.` });
     if (file.indexedChunks === 0) gaps.push({ kind: "unindexed-file", file: file.file, message: `${file.file} has no context chunks.` });
   }
-  if (index?.status === "stale" || index?.staleChunkCount) {
+  if (!index || index.status === SemanticIndexStatus.Missing) {
+    gaps.push({ kind: "stale-index", message: "Project Knowledge is missing and should be built before using Search or Ask." });
+  } else if (index.status === SemanticIndexStatus.Stale || index.staleChunkCount) {
     gaps.push({ kind: "stale-index", message: "Project Knowledge is stale and should be rebuilt before trusting Search or Ask." });
   }
   return {

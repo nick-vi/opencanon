@@ -2,7 +2,7 @@ import { z } from "zod";
 import { DiagnosticSeverity, diagnosticSeverityValues } from "./contracts-facts.ts";
 import { SymbolRangeSchema } from "./contracts-code-graph.ts";
 
-export const semanticIndexStatusValues = ["disabled", "indexing", "ready", "stale", "failed"] as const;
+export const semanticIndexStatusValues = ["missing", "indexing", "ready", "stale", "failed"] as const;
 export const SemanticIndexStatusValueSchema = z.enum(semanticIndexStatusValues);
 export type SemanticIndexStatusValue = z.infer<typeof SemanticIndexStatusValueSchema>;
 

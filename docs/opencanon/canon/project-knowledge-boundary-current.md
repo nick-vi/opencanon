@@ -7,6 +7,7 @@ Project Knowledge belongs to OpenCanon runtime state; authored definitions stay 
 ## Applies to
 
 - `packages/core/src/semantic-index.ts`
+- `packages/runtime/src/knowledge-producers.ts`
 - `packages/runtime/src/semantic-index.ts`
 - `packages/runtime/src/snapshot.ts`
 - `packages/runtime/src/server*.ts`

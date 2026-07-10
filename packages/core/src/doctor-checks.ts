@@ -33,6 +33,7 @@ import { ValidatorDomain } from "./validator-types.ts";
 
 const SemanticIndexDoctorStatus = {
   Failed: "failed",
+  Missing: "missing",
   Stale: "stale",
 } as const;
 
@@ -321,9 +322,11 @@ export function validateSemanticIndex(index: SemanticIndexSnapshot | null | unde
   if (index.status === SemanticIndexDoctorStatus.Failed) details.push(...index.diagnostics.map((diagnostic) => diagnostic.message));
 
   return {
-    status: details.length > 0 ? DoctorStatus.Fail : index.status === SemanticIndexDoctorStatus.Stale ? DoctorStatus.Warn : DoctorStatus.Pass,
+    status: details.length > 0 ? DoctorStatus.Fail : index.status === SemanticIndexDoctorStatus.Stale || index.status === SemanticIndexDoctorStatus.Missing ? DoctorStatus.Warn : DoctorStatus.Pass,
     message: details.length > 0
       ? "Project Knowledge identity or freshness metadata is invalid."
+      : index.status === SemanticIndexDoctorStatus.Missing
+        ? "Project Knowledge has not been built yet."
       : index.status === SemanticIndexDoctorStatus.Stale
         ? "Project Knowledge exists but is stale."
         : `Project Knowledge is ${index.status} (${index.chunkCount} chunks).`,
