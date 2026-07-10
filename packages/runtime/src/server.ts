@@ -120,7 +120,12 @@ const RuntimeHealthStatusValue = {
 } as const;
 
 const CoordinationRefreshDebounceMs = 150;
+const KnowledgeWatchDebounceMs = 1_000;
 const MaxQueuedWatchRebuilds = 32;
+const KnowledgeIndexStatus = {
+  Disabled: "disabled",
+  Failed: "failed",
+} as const;
 
 export type RuntimeServerOptions = {
   cwd?: string;
@@ -283,6 +288,9 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let coordinationSignalWatcher: FSWatcher | undefined;
   let coordinationRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   let coordinationSignature = "";
+  let knowledgeWatchTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingKnowledgeWatchSummary: string | undefined;
+  let knowledgeWatchQueue: Promise<void> = Promise.resolve();
   const idleTimeoutMs = options.idleTimeoutMs && options.idleTimeoutMs > 0 ? options.idleTimeoutMs : undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   // Producer warming->ready refresh state. `latestReadyGeneration` is the newest
@@ -422,6 +430,36 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     return await stateManager.rebuildAndPublish(summary);
   }
 
+  function scheduleKnowledgeRefreshForWatch(batch: WatcherEventBatch, summary: string | undefined): void {
+    if (stopped || !summary) return;
+    const existingIndex = store.readSemanticIndexStatus({ indexId: "project" }).index;
+    if (!existingIndex || existingIndex.status === KnowledgeIndexStatus.Disabled || existingIndex.status === KnowledgeIndexStatus.Failed) return;
+    pendingKnowledgeWatchSummary = batch.stale
+      ? "Project Knowledge source inventory changed; refreshing index."
+      : knowledgeWatchSummary(batch.paths);
+    if (knowledgeWatchTimer) clearTimeout(knowledgeWatchTimer);
+    knowledgeWatchTimer = setTimeout(() => {
+      knowledgeWatchTimer = undefined;
+      const queuedSummary = pendingKnowledgeWatchSummary;
+      pendingKnowledgeWatchSummary = undefined;
+      if (!queuedSummary || stopped) return;
+      knowledgeWatchQueue = knowledgeWatchQueue
+        .catch(() => undefined)
+        .then(async () => {
+          if (stopped) return;
+          const currentIndex = store.readSemanticIndexStatus({ indexId: "project" }).index;
+          if (!currentIndex || currentIndex.status === KnowledgeIndexStatus.Disabled || currentIndex.status === KnowledgeIndexStatus.Failed) return;
+          await buildIndexedSnapshot(queuedSummary);
+        })
+        .catch((error) => {
+          events.broadcast(streamErrorEvent(`Project Knowledge update failed: ${errorMessage(error)}`));
+        });
+    }, KnowledgeWatchDebounceMs);
+    if (typeof knowledgeWatchTimer === "object" && "unref" in knowledgeWatchTimer) {
+      knowledgeWatchTimer.unref();
+    }
+  }
+
   function publishKnowledgeIndexProgress(jobId: string, progress: KnowledgeIndexProgress): void {
     updateWorkerJob(jobId, {
       label: progress.label,
@@ -463,6 +501,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         if (stopped) return;
         const summary = watcherBatchSummary(batch);
         projectTypesRuntime.scheduleForFiles(batch.paths, "Project authoring types updated after indexed files changed.");
+        scheduleKnowledgeRefreshForWatch(batch, summary);
         if (summary) stateManager.scheduleRebuild(summary);
       });
       stateManager.setSnapshot(refreshSnapshotRefreshStatus(stateManager.currentSnapshot(), store));
@@ -779,6 +818,9 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     idleTimer = undefined;
     if (producerReadyDebounce) clearTimeout(producerReadyDebounce);
     producerReadyDebounce = undefined;
+    if (knowledgeWatchTimer) clearTimeout(knowledgeWatchTimer);
+    knowledgeWatchTimer = undefined;
+    pendingKnowledgeWatchSummary = undefined;
     stopStoreWatcher();
     stopCoordinationWatcher();
     projectTypesRuntime.stop();
@@ -786,6 +828,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     setProjectAstFactsProviderFactory(undefined);
     fixtureAst.dispose();
     await typeProducerRuntime?.stop();
+    await knowledgeWatchQueue.catch(() => undefined);
     await stateManager.waitForIdle();
     stateManager.stop();
     events.close();
@@ -802,6 +845,11 @@ function watcherBatchSummary(batch: WatcherEventBatch): string | undefined {
   if (batch.stale) return batch.reason ?? "Engine watcher requested a full reindex.";
   if (batch.paths.length === 0) return undefined;
   return batch.paths.length === 1 ? `Indexed changed file ${batch.paths[0]}.` : `Indexed ${batch.paths.length} changed files.`;
+}
+
+function knowledgeWatchSummary(paths: string[]): string {
+  if (paths.length === 0) return "Project Knowledge source changed; refreshing index.";
+  return paths.length === 1 ? `Project Knowledge source changed: ${paths[0]}.` : `Project Knowledge source changed in ${paths.length} files.`;
 }
 
 function errorMessage(error: unknown): string {

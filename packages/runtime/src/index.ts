@@ -8,6 +8,7 @@ export {
   buildProjectSemanticIndex,
   buildProjectSemanticIndexDelta,
   createSemanticEmbeddingBackend,
+  semanticIndexProducerVersion,
   semanticSearchVectorForProvider,
 } from "./semantic-index.ts";
 export type { ProjectSemanticIndexDeltaInput, SemanticEmbeddingBackend } from "./semantic-index.ts";

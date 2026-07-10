@@ -2,7 +2,6 @@ import {
   DefaultSemanticIndexId,
   DiagnosticSeverity,
   SemanticChunkerVersion,
-  SemanticEmbeddingProducerVersion,
   SemanticIndexVersion,
   semanticChunkTreeHash,
   semanticEmbeddingIdentityHash,
@@ -13,7 +12,7 @@ import {
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
 import type { ProjectStore } from "./state.ts";
-import { configuredSemanticEmbeddingProvider } from "./semantic-index.ts";
+import { configuredSemanticEmbeddingProvider, semanticIndexProducerVersion } from "./semantic-index.ts";
 
 const SemanticChunkMetadataPageSize = 500;
 
@@ -134,6 +133,7 @@ function missingSemanticIndexSnapshot(sourceInventoryHash: string, semanticEmbed
     });
   }
   const provider = providerCheck.provider;
+  const producerVersion = semanticIndexProducerVersion();
   const identityHash = semanticEmbeddingIdentityHash({
     providerId: provider.id,
     modelId: provider.modelId,
@@ -141,7 +141,7 @@ function missingSemanticIndexSnapshot(sourceInventoryHash: string, semanticEmbed
     dimensions: provider.dimensions,
     configHash: provider.configHash,
     chunkerVersion: SemanticChunkerVersion,
-    producerVersion: SemanticEmbeddingProducerVersion,
+    producerVersion,
   });
   return {
     id: DefaultSemanticIndexId,
@@ -149,7 +149,7 @@ function missingSemanticIndexSnapshot(sourceInventoryHash: string, semanticEmbed
     status: "stale",
     provider,
     chunkerVersion: SemanticChunkerVersion,
-    producerVersion: SemanticEmbeddingProducerVersion,
+    producerVersion,
     sourceInventoryHash,
     chunkTreeHash: semanticChunkTreeHash([]),
     identityHash,
@@ -192,6 +192,7 @@ function failedSemanticIndexSnapshot(input: {
   provider: SemanticEmbeddingProvider;
   diagnostics: SemanticIndexDiagnostic[];
 }): SemanticIndexSnapshot {
+  const producerVersion = semanticIndexProducerVersion();
   const identityHash = semanticEmbeddingIdentityHash({
     providerId: input.provider.id,
     modelId: input.provider.modelId,
@@ -199,7 +200,7 @@ function failedSemanticIndexSnapshot(input: {
     dimensions: input.provider.dimensions,
     configHash: input.provider.configHash,
     chunkerVersion: SemanticChunkerVersion,
-    producerVersion: SemanticEmbeddingProducerVersion,
+    producerVersion,
   });
   return {
     id: DefaultSemanticIndexId,
@@ -207,7 +208,7 @@ function failedSemanticIndexSnapshot(input: {
     status: SemanticIndexStatus.Failed,
     provider: input.provider,
     chunkerVersion: SemanticChunkerVersion,
-    producerVersion: SemanticEmbeddingProducerVersion,
+    producerVersion,
     sourceInventoryHash: input.sourceInventoryHash,
     chunkTreeHash: semanticChunkTreeHash([]),
     identityHash,
@@ -228,7 +229,7 @@ function semanticIndexCacheCompatible(index: SemanticIndexSnapshot, provider: Se
   return (
     index.version === SemanticIndexVersion &&
     index.chunkerVersion === SemanticChunkerVersion &&
-    index.producerVersion === SemanticEmbeddingProducerVersion &&
+    index.producerVersion === semanticIndexProducerVersion() &&
     semanticProvidersMatch(index.provider, provider)
   );
 }
@@ -253,7 +254,7 @@ function semanticIndexCacheResetDiagnostics(previous: SemanticIndexSnapshot, cur
       severity: DiagnosticSeverity.Info,
     });
   }
-  if (previous.chunkerVersion !== SemanticChunkerVersion || previous.producerVersion !== SemanticEmbeddingProducerVersion) {
+  if (previous.chunkerVersion !== SemanticChunkerVersion || previous.producerVersion !== semanticIndexProducerVersion()) {
     diagnostics.push({
       code: "semantic-index-pipeline-changed",
       message: "Project Knowledge indexing pipeline changed. Run opencanon project index --force to rebuild derived retrieval state.",

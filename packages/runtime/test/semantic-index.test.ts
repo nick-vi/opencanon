@@ -3,9 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticSearchVectorForProvider } from "@opencanon/runtime";
+import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticIndexProducerVersion, semanticSearchVectorForProvider } from "@opencanon/runtime";
+import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity } from "../src/knowledge-producers.ts";
 import { createEngine } from "@opencanon/engine";
-import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type WriteSemanticIndexRequest } from "@opencanon/core";
+import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
 
 test("runtime semantic index chunks files with native vectors", () => {
@@ -60,6 +61,8 @@ test("runtime semantic index chunks files with native vectors", () => {
     assert.equal(build.index.status, "ready");
     assert.equal(build.index.provider.dimensions, 896);
     assert.equal(build.index.provider.kind, "native");
+    assert.equal(build.index.producerVersion, semanticIndexProducerVersion());
+    assert.match(build.index.identityHash, /^[a-f0-9]{64}$/u);
     assert.equal(build.index.chunkTreeHash.length, 64);
     assert.equal(build.index.chunkCount, build.chunks.length);
     assert.deepEqual(build.index.embeddingStats, {
@@ -74,6 +77,62 @@ test("runtime semantic index chunks files with native vectors", () => {
     assert.equal(summary.metadata.embeddingHash.length, 64);
     assert(summary.text.includes("Exports: function loadCompany"));
     assert.equal(summary.vector.length, 896);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("Project Knowledge producers own markdown and typed fact chunking", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-producers-"));
+  try {
+    mkdirSync(path.join(rootDir, "docs"), { recursive: true });
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "docs/guide.md"), "# Guide\n\nThis explains invoices and billing workflows.\n");
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = 'Acme';\n");
+    const facts: FileFacts[] = [{
+      path: "src/company.ts",
+      contentHash: "ts-content",
+      language: "typescript",
+      parser: "oxc",
+      parserVersion: "test",
+      imports: [],
+      exports: [{ line: 1, column: 1, name: "company", kind: "const" }],
+      symbols: [{ line: 1, column: 14, name: "company", kind: "variable", exported: true, endLine: 1, params: [] }],
+      declarations: [],
+      calls: [],
+      literals: [{ line: 1, column: 24, value: "Acme", valueKind: "string", context: "initializer" }],
+      comments: [],
+      references: [],
+      annotations: [],
+      diagnosticFacts: [],
+      duplicates: [],
+      diagnostics: [],
+    }];
+    const diagnostics: SemanticIndexDiagnostic[] = [];
+    const chunks = collectRuntimeKnowledgeChunks({
+      rootDir,
+      scan: {
+        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        schemaVersion: 6,
+        inventoryHash: "inventory",
+        files: [
+          { path: "docs/guide.md", contentHash: "md-content", size: 52, stale: false },
+          { path: "src/company.ts", contentHash: "ts-content", size: 31, stale: false },
+          { path: "src/missing.ts", contentHash: "missing", size: 1, stale: false },
+        ],
+        changedFiles: ["docs/guide.md", "src/company.ts", "src/missing.ts"],
+        unchangedFiles: [],
+        deletedFiles: [],
+        staleFiles: 0,
+      },
+      facts,
+    }, diagnostics);
+
+    assert(knowledgeProducerIdentity().includes("markdown:"));
+    assert(knowledgeProducerIdentity().includes("typescript:"));
+    assert(chunks.some((chunk) => chunk.metadata.path === "docs/guide.md" && chunk.metadata.kind === "section"));
+    assert(chunks.some((chunk) => chunk.metadata.path === "src/company.ts" && chunk.text.includes("Exports: const company")));
+    assert(diagnostics.some((diagnostic) => diagnostic.code === "semantic-no-structured-chunks" && diagnostic.path === "src/missing.ts"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
