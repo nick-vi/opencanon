@@ -112,7 +112,7 @@ oldApi();`
         },
         {
           label: 'Fix',
-          command: 'opencanon changes check area-change-model --task examples-current-canon --all',
+          command: 'opencanon validate --changed',
           output: 'Declared checks passed after merging duplicate surface and extracting CompanyTable.'
         }
       ],

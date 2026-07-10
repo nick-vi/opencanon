@@ -285,7 +285,7 @@ test("context validation rejects documented test-only conventions", () => {
 test("Project Knowledge definition bundle loading is safe under concurrent reads", { timeout: 60000 }, async () => {
   const contexts = await Promise.all(Array.from({ length: 4 }, () => loadProjectContext(process.cwd())));
   assert(contexts.every((context) => context.areas.some((area) => area.id === "local-service-and-runtimes")));
-  assert(contexts.every((context) => context.changes.some((change) => change.id === "area-change-model")));
+  assert(contexts.every((context) => context.specs.some((spec) => spec.id === "release-integrity-spec")));
   assert(contexts.every((context) => context.conventions.length > 0));
 });
 

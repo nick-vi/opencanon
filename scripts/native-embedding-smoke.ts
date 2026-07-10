@@ -5,12 +5,11 @@ import { DefaultNativeSemanticEmbeddingModelId, createPaths } from "@opencanon/c
 import { openProjectStore } from "@opencanon/runtime";
 
 const SmokeEnv = {
-  Enabled: "OPENCANON_NATIVE_EMBEDDING_SMOKE",
   Model: "OPENCANON_NATIVE_EMBEDDING_MODEL",
 } as const;
 
-if (process.env[SmokeEnv.Enabled] !== "1") {
-  console.log(`Skipping native embedding smoke. Set ${SmokeEnv.Enabled}=1 to download/load the model.`);
+if (process.argv.includes("--optional")) {
+  console.log("Skipping native embedding smoke because --optional was provided.");
   process.exit(0);
 }
 

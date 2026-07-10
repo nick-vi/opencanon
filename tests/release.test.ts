@@ -178,6 +178,29 @@ test("release publish watches the tag workflow by commit with backoff", () => {
   assert(!source.includes('"--branch",\n    tagName'));
 });
 
+test("release workflow runs the full gate before publishing assets", () => {
+  const workflow = readFileSync(".github/workflows/release.yml", "utf8");
+
+  assert.match(workflow, /preflight:/);
+  assert.match(workflow, /name: Release Preflight/);
+  assert.match(workflow, /run: npm run check:ci/);
+  assert.match(workflow, /build-engine:[\s\S]*needs:[\s\S]*- preflight/);
+  assert.match(workflow, /publish-release:[\s\S]*needs:[\s\S]*- preflight[\s\S]*- build-engine/);
+});
+
+test("native embedding smoke is required unless explicitly optional", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const source = readFileSync("scripts/native-embedding-smoke.ts", "utf8");
+
+  assert.match(packageJson.scripts?.["check:ci"] ?? "", /npm run smoke:native-embedding/);
+  assert.equal(packageJson.scripts?.["smoke:native-embedding"], "node scripts/native-embedding-smoke.ts");
+  assert.equal(packageJson.scripts?.["smoke:native-embedding:optional"], "node scripts/native-embedding-smoke.ts --optional");
+  assert.match(source, /process\.argv\.includes\("--optional"\)/);
+  assert(!source.includes("OPENCANON_NATIVE_EMBEDDING_SMOKE"));
+});
+
 test("release manifest requires a generated OpenCanon runtime", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-release-runtime-"));
   const assetDir = path.join(rootDir, "assets");

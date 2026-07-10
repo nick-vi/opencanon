@@ -2,6 +2,68 @@ import { DefinitionTargetKind, defineSpec } from "@opencanon/core";
 
 export default [
   defineSpec({
+    id: "release-integrity-spec",
+    title: "Release Integrity Spec",
+    summary: "Release publication is gated by the same proof path used for local readiness, including runtime build, validation, doctor, install rehearsal, and native embedding smoke coverage.",
+    surfaces: ["release-update", "project-knowledge-index"],
+    scope: [
+      { kind: DefinitionTargetKind.File, path: ".github/workflows/release.yml" },
+      { kind: DefinitionTargetKind.File, path: ".github/workflows/ci.yml" },
+      { kind: DefinitionTargetKind.File, path: "package.json" },
+      { kind: DefinitionTargetKind.File, path: "scripts/native-embedding-smoke.ts" },
+      { kind: DefinitionTargetKind.File, path: "scripts/publish-opencanon-release.ts" },
+      { kind: DefinitionTargetKind.File, path: "scripts/check-release-consistency.ts" },
+      { kind: DefinitionTargetKind.File, path: "scripts/create-opencanon-release.ts" },
+      { kind: DefinitionTargetKind.File, path: "scripts/rehearse-opencanon-install.ts" },
+      { kind: DefinitionTargetKind.File, path: "tests/release.test.ts" },
+      { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/specs/release-integrity-spec.md" },
+    ],
+    areas: ["runtime-release-update", "project-knowledge-index"],
+    rules: [
+      {
+        id: "release-workflow-runs-proof",
+        statement: "A tag or manual release workflow must run the full release gate before it can publish runtime assets.",
+        acceptance: ["release.yml has a preflight job", "publish-release depends on preflight", "engine builds depend on preflight"],
+        checks: ["release-tests", "release-check"],
+      },
+      {
+        id: "release-helper-runs-same-proof",
+        statement: "The local release helper must run the same check:ci proof before creating and pushing a release tag.",
+        acceptance: ["release publish runs check:ci before commit and tag", "release publish watches the tag workflow by commit"],
+        checks: ["release-tests"],
+      },
+      {
+        id: "native-embedding-smoke-is-explicit",
+        statement: "Native embedding smoke coverage must either run and fail on error or be invoked through an explicitly optional command.",
+        acceptance: ["check:ci invokes the required native embedding smoke", "the smoke script does not silently skip", "optional smoke uses an explicit optional flag"],
+        checks: ["release-tests", "native-embedding-smoke"],
+      },
+    ],
+    scenarios: [
+      {
+        id: "manual-release-cannot-bypass-proof",
+        given: ["a maintainer starts the Release workflow manually for an existing tag"],
+        when: "the release job runs",
+        then: ["the preflight job checks the tagged commit", "asset publication waits for preflight success"],
+        checks: ["release-tests", "release-check"],
+      },
+      {
+        id: "embedding-config-regression-is-caught",
+        given: ["Project Knowledge uses a configured native embedding model"],
+        when: "the release gate runs",
+        then: ["native embedding code loads the configured model path", "invalid vectors or loading failures fail the gate"],
+        checks: ["native-embedding-smoke"],
+      },
+    ],
+    checks: [
+      { id: "release-tests", kind: "test", target: "tests/release.test.ts" },
+      { id: "release-check", kind: "command", command: "npm run release:check" },
+      { id: "native-embedding-smoke", kind: "command", command: "npm run smoke:native-embedding" },
+    ],
+    governedBy: { inferFromScope: true, conventions: ["state-ownership-current", "tests-follow-risk"] },
+    render: { kind: "generated", docs: "docs/opencanon/specs/release-integrity-spec.md", style: "reference" },
+  }),
+  defineSpec({
     id: "spec-governance-model",
     title: "Spec Governance Model",
     summary:
