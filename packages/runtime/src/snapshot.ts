@@ -1,16 +1,11 @@
 import path from "node:path";
-import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import {
   createValidationContext,
   buildDefinitionGraph,
   FixSafety,
   BatchProducerPolicy,
-  discoverProjectFiles,
   loadProjectContext,
-  isEngineExtractableFile,
-  isCodeGraphIndexableFile,
-  engineSourceLanguage,
   resolveDocsReferences,
   runValidation,
   type CanonFinding,
@@ -25,12 +20,10 @@ import {
   type RuntimeHealth,
   type RuntimeState,
   type DocSnippet,
-  type FactDiagnostic,
-  type FileFacts,
-  type FactKind,
   type ImpactSurface,
   type RuntimeProjectSummary,
   type ChangeTaskState,
+  type FileFacts,
   type RepoGraph,
   type SemanticEmbeddingConfig,
   type SemanticIndexSnapshot,
@@ -42,7 +35,6 @@ import {
 } from "@opencanon/core";
 import type { Engine } from "@opencanon/engine";
 import type { ProjectStore } from "./state.ts";
-import { ENGINE_PARSER_VERSION } from "./ast-facts-provider.ts";
 import { cachedSemanticIndexSnapshot, cachedStartupSemanticIndexSnapshot } from "./semantic-index-snapshot.ts";
 import { activeTaskLeaseSummaries, listGlobalCanonEvents, mergeCanonEvents } from "./worktree-coordination.ts";
 import {
@@ -58,8 +50,7 @@ import {
   unique,
 } from "./snapshot-projection.ts";
 import { findingSnapshotId } from "./snapshot-related.ts";
-
-const allFactKinds: FactKind[] = ["imports", "exports", "symbols", "calls", "literals", "comments"];
+import { captureRuntimeSourceSnapshot, indexRuntimeCodeGraph } from "./project-source-snapshot.ts";
 
 const FindingSeverity = {
   Error: "error",
@@ -394,45 +385,12 @@ export async function buildRuntimeSnapshot(input: {
   validationResultCache: ValidationResultCache;
 }): Promise<RuntimeSnapshot> {
   const project = await loadProjectContext(input.cwd);
-  const discovery = discoverProjectFiles(project.paths);
-  if (discovery.failed) {
-    throw new Error(discovery.diagnostics.join("\n"));
-  }
-
-  const scan = input.store.scanAndDiff(discovery.files);
-  const fileSnapshots = scan.files
-    .map((file) => {
-      try {
-        const content = readFileSync(path.join(project.paths.rootDir, file.path), "utf8");
-        return { path: file.path, contentHash: `sha256:${createHash("sha256").update(content).digest("hex")}`, size: Buffer.byteLength(content), content };
-      } catch {
-        return undefined;
-      }
-    })
-    .filter((file): file is NonNullable<typeof file> => file !== undefined);
-  const factFiles = fileSnapshots
-    .filter((file) => isEngineExtractableFile(file.path))
-    .map((file) => ({ path: file.path, contentHash: file.contentHash, language: engineSourceLanguage(file.path), content: file.content }));
-  const facts = input.store.project.extractFacts({
-    files: factFiles,
-    facts: allFactKinds,
-    parserVersion: ENGINE_PARSER_VERSION,
-  });
-  input.store.project.indexCodeGraph({
-    files: factFiles.filter((file) => isCodeGraphIndexableFile(file.path)),
-    deletedFiles: scan.deletedFiles.filter(isCodeGraphIndexableFile),
-    parserVersion: ENGINE_PARSER_VERSION,
-  });
-  const factDiagnostics = [
-    ...facts.diagnostics,
-    ...facts.files.flatMap((file) => file.diagnostics.map((diagnostic) => ({ ...diagnostic, message: `${file.path}: ${diagnostic.message}` }))),
-  ] satisfies FactDiagnostic[];
-  if (factDiagnostics.some((diagnostic) => diagnostic.severity === FindingSeverity.Error)) {
-    throw new Error(factDiagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-  }
+  const sourceSnapshot = captureRuntimeSourceSnapshot({ rootDir: project.paths.rootDir, paths: project.paths, store: input.store });
+  const { discovery, scan, fileSnapshots, factFiles, facts } = sourceSnapshot;
+  indexRuntimeCodeGraph({ store: input.store, factFiles, deletedFiles: scan.deletedFiles });
 
   const engineGraph = input.store.project.buildRepoGraph({
-    facts: facts.files,
+    facts,
     packageManifests: discovery.files.filter((file) => path.basename(file) === "package.json"),
   }).graph;
   const validationContext = createValidationContext({
@@ -440,6 +398,7 @@ export async function buildRuntimeSnapshot(input: {
     paths: project.paths,
     files: discovery.files,
     analysisFiles: discovery.files,
+    projectFileSnapshots: fileSnapshots,
     validator: {
       id: SnapshotValidator.Id,
       severity: SnapshotValidator.Severity,
@@ -598,7 +557,7 @@ export async function buildRuntimeSnapshot(input: {
     conventions,
     docs: resolveDocsReferences(project.paths, [...conventionDocsByReference.keys()], conventionDocsByReference),
     graph,
-    facts: facts.files.map((file) => ({
+    facts: facts.map((file) => ({
       path: file.path,
       imports: file.imports,
       exports: file.exports,

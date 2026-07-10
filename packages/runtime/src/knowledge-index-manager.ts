@@ -1,24 +1,13 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import {
   DefaultSemanticIndexId,
-  discoverProjectFiles,
-  engineSourceLanguage,
-  isEngineExtractableFile,
   loadProjectContext,
-  type FactDiagnostic,
-  type FactKind,
   type ScanAndDiffResult,
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
-import { ENGINE_PARSER_VERSION } from "./ast-facts-provider.ts";
 import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, semanticSearchVectorForProvider } from "./semantic-index.ts";
 import { listPreviousSemanticChunks } from "./semantic-index-snapshot.ts";
+import { captureRuntimeSourceSnapshot } from "./project-source-snapshot.ts";
 import type { ProjectStore } from "./state.ts";
-
-const allFactKinds: FactKind[] = ["imports", "exports", "symbols", "calls", "literals", "comments"];
-const ErrorSeverity = "error";
 
 export const KnowledgeIndexPhase = {
   Scan: "scan",
@@ -64,11 +53,8 @@ export function createKnowledgeIndexManager(input: {
       const emit = options.onProgress ?? (() => undefined);
       emit({ phase: KnowledgeIndexPhase.Scan, label: "Scanning project files" });
       const project = await loadProjectContext(input.rootDir);
-      const discovery = discoverProjectFiles(project.paths);
-      if (discovery.failed) {
-        throw new Error(discovery.diagnostics.join("\n"));
-      }
-      const scan = applyKnowledgeChangeHint(input.store.scanAndDiff(discovery.files), options.changedPaths);
+      const sourceSnapshot = captureRuntimeSourceSnapshot({ rootDir: project.paths.rootDir, paths: project.paths, store: input.store, changedPaths: options.changedPaths });
+      const { scan, facts } = sourceSnapshot;
       emit({
         phase: KnowledgeIndexPhase.Diff,
         label: "Diffing Project Knowledge inventory",
@@ -76,7 +62,6 @@ export function createKnowledgeIndexManager(input: {
         total: scan.files.length,
         unit: "files",
       });
-      const facts = extractKnowledgeFacts(input.store, project.paths.rootDir, scan);
       emit({
         phase: KnowledgeIndexPhase.Chunk,
         label: "Chunking changed Knowledge sources",
@@ -132,47 +117,4 @@ export function createKnowledgeIndexManager(input: {
       return { index, scan, mode };
     },
   };
-}
-
-function applyKnowledgeChangeHint(scan: ScanAndDiffResult, changedPaths: string[] | undefined): ScanAndDiffResult {
-  if (!changedPaths || changedPaths.length === 0) return scan;
-  const filesByPath = new Set(scan.files.map((file) => file.path));
-  const hintedChanged = changedPaths.filter((file) => filesByPath.has(file));
-  const hintedDeleted = changedPaths.filter((file) => !filesByPath.has(file));
-  if (hintedChanged.length === 0 && hintedDeleted.length === 0) return scan;
-  const changed = new Set([...scan.changedFiles, ...hintedChanged]);
-  const deleted = new Set([...scan.deletedFiles, ...hintedDeleted]);
-  return {
-    ...scan,
-    changedFiles: [...changed].sort(),
-    unchangedFiles: scan.unchangedFiles.filter((file) => !changed.has(file) && !deleted.has(file)),
-    deletedFiles: [...deleted].sort(),
-  };
-}
-
-function extractKnowledgeFacts(store: ProjectStore, rootDir: string, scan: ScanAndDiffResult) {
-  const factFiles = scan.files
-    .filter((file) => isEngineExtractableFile(file.path))
-    .map((file) => {
-      try {
-        const content = readFileSync(path.join(rootDir, file.path), "utf8");
-        return { path: file.path, contentHash: createHash("sha256").update(content).digest("hex"), language: engineSourceLanguage(file.path), content };
-      } catch {
-        return undefined;
-      }
-    })
-    .filter((file): file is NonNullable<typeof file> => file !== undefined);
-  const facts = store.project.extractFacts({
-    files: factFiles,
-    facts: allFactKinds,
-    parserVersion: ENGINE_PARSER_VERSION,
-  });
-  const diagnostics = [
-    ...facts.diagnostics,
-    ...facts.files.flatMap((file) => file.diagnostics.map((diagnostic) => ({ ...diagnostic, message: `${file.path}: ${diagnostic.message}` }))),
-  ] satisfies FactDiagnostic[];
-  if (diagnostics.some((diagnostic) => diagnostic.severity === ErrorSeverity)) {
-    throw new Error(diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-  }
-  return facts.files;
 }

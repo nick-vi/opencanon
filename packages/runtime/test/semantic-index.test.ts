@@ -5,10 +5,54 @@ import path from "node:path";
 import { test } from "vitest";
 import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticIndexProducerVersion, semanticSearchVectorForProvider } from "@opencanon/runtime";
 import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity } from "../src/knowledge-producers.ts";
+import { captureRuntimeSourceSnapshot } from "../src/project-source-snapshot.ts";
 import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapshot.ts";
 import { createEngine } from "@opencanon/engine";
 import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
+
+test("runtime source snapshots feed captured bytes into fact extraction", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ fileDiscovery: "filesystem", projectFilePatterns: ["src/**/*.ts"], ignore: [] }));
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = 'snapshot';\n");
+    const paths = createPaths(rootDir);
+    const extracted: Array<{ path: string; contentHash: string; content?: string }> = [];
+    const store = {
+      scanAndDiff(files: string[]) {
+        return {
+          statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+          schemaVersion: 6,
+          inventoryHash: "inventory",
+          files: files.map((file) => ({ path: file, contentHash: `scan:${file}`, size: 1, stale: false })),
+          changedFiles: files,
+          unchangedFiles: [],
+          deletedFiles: [],
+          staleFiles: 0,
+        };
+      },
+      project: {
+        extractFacts(request: { files: Array<{ path: string; contentHash: string; content?: string }> }) {
+          extracted.push(...request.files);
+          return { files: [], diagnostics: [] };
+        },
+      },
+    };
+
+    const snapshot = captureRuntimeSourceSnapshot({ rootDir, paths, store: store as never });
+
+    const source = snapshot.fileSnapshots.find((file) => file.path === "src/company.ts");
+    assert(source);
+    assert.equal(source.content, "export const company = 'snapshot';\n");
+    assert.match(source.contentHash, /^sha256:[a-f0-9]{64}$/u);
+    assert.equal(extracted[0]?.path, "src/company.ts");
+    assert.equal(extracted[0]?.content, source.content);
+    assert.equal(extracted[0]?.contentHash, source.contentHash);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
 
 test("runtime semantic index chunks files with native vectors", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-"));
