@@ -248,7 +248,7 @@ test("runtime health contract exposes explicit worker jobs", () => {
         id: "semantic-index:test",
         kind: RuntimeWorkerJobKindValue.SemanticIndex,
         status: RuntimeWorkerJobStatusValue.Running,
-        label: "Refreshing Project Context",
+        label: "Refreshing Project Knowledge",
         current: 2,
         total: 5,
         unit: "files",

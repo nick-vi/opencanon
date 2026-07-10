@@ -36,8 +36,8 @@
     "conventionIds": ["explicit-error-contracts", "state-ownership-current", "service-events-current"]
   },
   {
-    "id": "project-context-index",
-    "title": "Project context index",
+    "id": "project-knowledge-index",
+    "title": "Project Knowledge",
     "applies": [
       "packages/core/src/semantic-index.ts",
       "packages/core/src/semantic-models.ts",
@@ -53,11 +53,11 @@
     "risks": ["stale-knowledge", "search-quality", "derived-state"],
     "changePolicy": {
       "requiresTests": ["packages/runtime/test/semantic-index.test.ts", "crates/opencanon-engine/src/tests.rs"],
-      "requiresDocs": ["docs/opencanon/areas/project-context-index.md#project-context-index"],
+      "requiresDocs": ["docs/opencanon/areas/project-knowledge-index.md#project-knowledge"],
       "requiresApproval": false
     },
-    "docs": ["docs/opencanon/areas/project-context-index.md#project-context-index"],
-    "conventionIds": ["context-index-boundary-current", "state-ownership-current"]
+    "docs": ["docs/opencanon/areas/project-knowledge-index.md#project-knowledge"],
+    "conventionIds": ["project-knowledge-boundary-current", "state-ownership-current"]
   },
   {
     "id": "project-canon-model",

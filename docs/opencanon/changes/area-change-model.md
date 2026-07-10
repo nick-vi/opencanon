@@ -13,7 +13,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 
 - Areas: [Example Company Read Model](../areas/company-read-model.md)
 - Areas: [Project Map Governance](../areas/project-map-governance.md)
-- Areas: [Project Context Index](../areas/project-context-index.md)
+- Areas: [Project Knowledge](../areas/project-knowledge-index.md)
 - Areas: [Local Service and Project Runtimes](../areas/local-service-and-runtimes.md)
 - Areas: [Living Conventions](../areas/living-conventions.md)
 - Areas: [Product Docs and Agent Guidance](../areas/product-docs-and-guidance.md)
@@ -25,14 +25,14 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Impact surfaces: [Company read model](../canon/impact.md#impact-surfaces)
 - Impact surfaces: [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 - Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
-- Impact surfaces: [Project context index](../areas/project-context-index.md#project-context-index)
+- Impact surfaces: [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)
 - Impact surfaces: [Release and update path](../areas/runtime-release-update.md#runtime-updates)
 - Docs: [docs/opencanon/canon/architecture.md](../canon/architecture.md)
 - Docs: [docs/opencanon/canon/service-events-current.md](../canon/service-events-current.md)
 - Docs: [docs/opencanon/areas/company-read-model.md](../areas/company-read-model.md)
 - Docs: [docs/opencanon/areas/definition-authoring-flow.md](../areas/definition-authoring-flow.md)
 - Docs: [docs/opencanon/areas/project-map-governance.md](../areas/project-map-governance.md)
-- Docs: [docs/opencanon/areas/project-context-index.md](../areas/project-context-index.md)
+- Docs: [docs/opencanon/areas/project-knowledge-index.md](../areas/project-knowledge-index.md)
 - Docs: [docs/opencanon/areas/local-service-and-runtimes.md](../areas/local-service-and-runtimes.md)
 - Docs: [docs/opencanon/areas/living-conventions.md](../areas/living-conventions.md)
 - Docs: [docs/opencanon/areas/agent-feedback-and-gates.md](../areas/agent-feedback-and-gates.md)
@@ -144,7 +144,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 - Docs: `docs/opencanon/areas/company-read-model.md`
 - Docs: `docs/opencanon/areas/definition-authoring-flow.md`
 - Docs: `docs/opencanon/areas/project-map-governance.md`
-- Docs: `docs/opencanon/areas/project-context-index.md`
+- Docs: `docs/opencanon/areas/project-knowledge-index.md`
 - Docs: `docs/opencanon/areas/local-service-and-runtimes.md`
 - Docs: `docs/opencanon/areas/living-conventions.md`
 - Docs: `docs/opencanon/areas/agent-feedback-and-gates.md`
@@ -176,7 +176,7 @@ Summary: OpenCanon can define permanent areas, active changes, and cross-definit
 Plan `board-state`: Derive Change board columns from change-level events and task aggregate state
 Checks: `runtime-tests`
 
-Plan `context-index-recovery`: Reset incompatible semantic index cache to current provider state
+Plan `knowledge-index-recovery`: Reset incompatible Knowledge index cache to current provider state
 Checks: `semantic-index-tests`
 
 Plan `cli-and-copy`: Remove stale command aliases and keep CLI and README examples on current surfaces
@@ -204,9 +204,9 @@ Files: `packages/core/src/change-state.ts`, `tests/change-state.test.ts`, `packa
 Impact surfaces: [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 Checks: `runtime-tests`
 
-Task `context-index-recovery`: Reset incompatible semantic index cache to current provider state
+Task `knowledge-index-recovery`: Reset incompatible Knowledge index cache to current provider state
 Files: `packages/core/src/semantic-index.ts`, `packages/runtime/src/snapshot.ts`, `packages/runtime/src/semantic-index-snapshot.ts`, `packages/runtime/test/semantic-index.test.ts`, `packages/runtime/test/engine.test.ts`, `tests/contracts.test.ts`, `crates/opencanon-engine/src/tests/semantic_index.rs`
-Impact surfaces: [Project context index](../areas/project-context-index.md#project-context-index)
+Impact surfaces: [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)
 Checks: `semantic-index-tests`
 
 Task `cli-copy-cleanup`: Remove stale Change check alias and refresh current command copy

@@ -64,6 +64,29 @@ test("review command produces a deterministic local CI report", () => {
   }
 });
 
+test("search fails when Project Knowledge is not ready", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-search-knowledge-"));
+  try {
+    createAuthoringProject(rootDir);
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = 'active';\n");
+
+    const result = spawnSync(process.execPath, [script, "search", "company", "--kind", "context", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+
+    assert.equal(result.error, undefined, result.error ? result.error.message : "spawn failed");
+    assert.notEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stderr, /Project Knowledge search failed:/);
+  } finally {
+    removeTestRoot(rootDir);
+  }
+}, CliSpawnTimeoutMs);
+
 test("changes ready and brief expose agent-ready task work", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-cli-changes-"));
   try {

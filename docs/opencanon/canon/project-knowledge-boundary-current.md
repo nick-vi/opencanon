@@ -1,8 +1,8 @@
-# Context indexing is derived OpenCanon runtime state
+# Project Knowledge is derived OpenCanon runtime state
 
 ## Rule
 
-Project context indexing belongs to OpenCanon runtime state; authored definitions stay in repo source, and semantic results remain advisory unless backed by checks or convention runtimes.
+Project Knowledge belongs to OpenCanon runtime state; authored definitions stay in repo source, and semantic results remain advisory unless backed by checks or convention runtimes.
 
 ## Applies to
 
@@ -26,4 +26,4 @@ Search, chunks, embeddings, and related-code retrieval are valuable only when th
 
 ## Related impact surfaces
 
-- [Project context index](../areas/project-context-index.md#project-context-index)
+- [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)

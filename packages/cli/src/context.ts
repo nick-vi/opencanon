@@ -215,7 +215,7 @@ async function runProjectContextChunks(args: string[], cwd: string): Promise<voi
   cli.option("--definition <id>", "Definition id whose covered files should provide chunks.");
   cli.option("--limit <n>", "Maximum chunks.");
   cli.option("--offset <n>", "Chunk offset.");
-  cli.option("--index", "Build Project Context before listing chunks.");
+  cli.option("--index", "Build Project Knowledge before listing chunks.");
   cli.option("--format <format>", "Output format.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
@@ -232,7 +232,7 @@ async function runProjectContextChunks(args: string[], cwd: string): Promise<voi
     writeJson(result);
     return;
   }
-  console.log("# Project Context Chunks\n");
+  console.log("# Project Knowledge Chunks\n");
   if (result.chunks.length === 0) {
     console.log("No chunks found.");
     return;
@@ -254,7 +254,7 @@ async function runProjectContextAsk(args: string[], cwd: string, command: string
     writeJson(result);
     return;
   }
-  console.log(`# Project Context Ask\n\nQuestion: ${result.question}\n`);
+  console.log(`# Project Knowledge Ask\n\nQuestion: ${result.question}\n`);
   if (result.warnings.length > 0) {
     console.log(result.warnings.map((warning) => `Warning: ${warning}`).join("\n"));
     console.log("");
@@ -284,7 +284,7 @@ async function runProjectContextCoverage(args: string[], cwd: string): Promise<v
     writeJson(result);
     return;
   }
-  console.log("# Project Context Coverage\n");
+  console.log("# Project Knowledge Coverage\n");
   console.log(`Files: ${result.totals.files}`);
   console.log(`Governed: ${result.totals.governedFiles}`);
   console.log(`Ungoverned: ${result.totals.ungovernedFiles}`);
@@ -308,7 +308,7 @@ async function runProjectContextBacklinks(args: string[], cwd: string): Promise<
     writeJson(result);
     return;
   }
-  console.log(`# Project Context Backlinks\n\nQuery: ${result.query}`);
+  console.log(`# Project Knowledge Backlinks\n\nQuery: ${result.query}`);
   if (result.links.length > 0) {
     console.log("\nDefinitions:");
     for (const link of result.links) console.log(`- ${link.kind}:${link.id}${link.title ? ` ${link.title}` : ""}`);
@@ -329,7 +329,7 @@ function parseProjectContextQueryArgs(command: string, args: string[], input: { 
   cli.option("--limit <n>", "Maximum results.");
   cli.option("--path <path>", "Repository-relative path filter.");
   cli.option("--file <path>", "Alias for --path.");
-  if (input.allowIndex) cli.option("--index", "Build Project Context before querying.");
+  if (input.allowIndex) cli.option("--index", "Build Project Knowledge before querying.");
   cli.option("--format <format>", "Output format.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
@@ -348,7 +348,7 @@ function parseProjectContextQueryArgs(command: string, args: string[], input: { 
 function parseContextCoverageArgs(args: string[]): { help: true } | { help?: false; format: Format; index: boolean } {
   const cli = cac("opencanon context coverage");
   cli.option("-h, --help", "Show help.");
-  cli.option("--index", "Build Project Context before computing coverage.");
+  cli.option("--index", "Build Project Knowledge before computing coverage.");
   cli.option("--format <format>", "Output format.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
@@ -743,9 +743,9 @@ function writeJson(value: unknown): void {
 }
 
 function renderProjectContextStatusMarkdown(result: ReadSemanticIndexStatusResult): string {
-  const lines = ["# Project Context Status", ""];
+  const lines = ["# Project Knowledge Status", ""];
   if (!result.index) {
-    lines.push("Status: missing", "", "Action: Run opencanon project index to build Search, Ask, Chunks, and Coverage.");
+    lines.push("Status: missing", "", "Action: Run opencanon project index to build Project Knowledge for Search, Ask, Chunks, and Coverage.");
     return lines.join("\n");
   }
   lines.push(`Status: ${result.index.status}`);
@@ -762,7 +762,7 @@ function renderProjectContextStatusMarkdown(result: ReadSemanticIndexStatusResul
     for (const diagnostic of result.index.diagnostics) lines.push(`- ${diagnostic.severity}: ${diagnostic.message}`);
   }
   if (result.index.status !== SemanticIndexReadinessStatus.Ready || result.index.staleChunkCount > 0) {
-    lines.push("", "Action: Run opencanon project index to build Search, Ask, Chunks, and Coverage.");
+    lines.push("", "Action: Run opencanon project index to build Project Knowledge for Search, Ask, Chunks, and Coverage.");
   }
   return lines.join("\n");
 }
@@ -780,9 +780,9 @@ function printHelp(): void {
   opencanon context --check
   opencanon context status
   opencanon context chunks --file src/auth.ts
-  opencanon context chunks --definition project-context-index
+  opencanon context chunks --definition project-knowledge-index
   opencanon context coverage
-  opencanon context backlinks project-context-index
+  opencanon context backlinks project-knowledge-index
 
 Options:
   --format markdown|json   Output format. Default: markdown.
@@ -815,13 +815,13 @@ function printContextCoverageHelp(): void {
   opencanon context coverage --format json
 
 Options:
-  --index                  Build Project Context before computing coverage.
+  --index                  Build Project Knowledge before computing coverage.
   --format markdown|json   Output format. Default: markdown.
 `);
 }
 
 function printProjectContextQueryHelp(command: string, input: { allowIndex: boolean }): void {
-  const indexLine = input.allowIndex ? "  --index                  Build Project Context before querying.\n" : "";
+  const indexLine = input.allowIndex ? "  --index                  Build Project Knowledge before querying.\n" : "";
   console.log(`Usage:
   ${command} <query>
   ${command} <query> --path src/auth.ts

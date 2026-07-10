@@ -76,16 +76,16 @@ export async function renderProjectIndexStatusMarkdown(entry: {
   runtimeVersion?: string;
   runtimeFingerprint?: string;
 }): Promise<string> {
-  const lines = ["## Project Index", ""];
+  const lines = ["## Project Knowledge", ""];
   const result = await readProjectIndexStatus(entry);
   if ("error" in result) {
-    lines.push(`Could not read project index status: ${result.error}`);
+    lines.push(`Could not read Project Knowledge status: ${result.error}`);
     return lines.join("\n");
   }
   if (!result.index) {
-    lines.push("No context index snapshot has been written.");
+    lines.push("No Project Knowledge snapshot has been written.");
     lines.push("");
-    lines.push("Action: Run opencanon project index to build Search, Ask, and Context knowledge.");
+    lines.push("Action: Run opencanon project index to build Search, Ask, and Knowledge retrieval.");
     return lines.join("\n");
   }
   lines.push(...renderSemanticIndexLines(result.index));
@@ -133,7 +133,7 @@ function semanticIndexAction(index: SemanticIndexSnapshot): string | undefined {
   if (index.status === SemanticIndexStatus.Indexing) return "Wait for the current project index rebuild to finish, then rerun opencanon project status.";
   if (index.status === SemanticIndexStatus.Disabled) return "Enable project knowledge indexing in opencanon.config.json before using Search or Ask.";
   if (index.status === SemanticIndexStatus.Failed) return "Fix the listed diagnostics, then run opencanon project index.";
-  return "Run opencanon project index to rebuild Search, Ask, and Context knowledge.";
+  return "Run opencanon project index to rebuild Search, Ask, and Knowledge retrieval.";
 }
 
 export function runtimeInspectionJson(inspection: RuntimeInspection | undefined, cwd: string): Record<string, unknown> {

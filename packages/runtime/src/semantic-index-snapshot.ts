@@ -73,7 +73,7 @@ export function cachedSemanticIndexSnapshot(input: {
             ),
             {
               code: "semantic-index-stale-on-startup",
-              message: "The cached Project Context index is being refreshed by the worker.",
+              message: "Project Knowledge is stale and needs an index run.",
               severity: DiagnosticSeverity.Info,
             },
           ],
@@ -115,7 +115,7 @@ export function cachedStartupSemanticIndexSnapshot(
         ),
         {
           code: "semantic-index-unverified-on-startup",
-          message: "Cached Project Context state was reused without a startup source scan. Run opencanon project index to verify Search and Ask freshness.",
+        message: "Cached Project Knowledge was reused without a startup source scan. Run opencanon project index to verify Search and Ask freshness.",
           severity: DiagnosticSeverity.Info,
         },
       ],
@@ -165,7 +165,7 @@ function missingSemanticIndexSnapshot(sourceInventoryHash: string, semanticEmbed
     diagnostics: [
       {
         code: "semantic-index-missing-on-startup",
-        message: "Project Context index has not been built yet. Run opencanon project index to build derived Search and Ask state.",
+        message: "Project Knowledge has not been built yet. Run opencanon project index to build Search and Ask retrieval.",
         severity: DiagnosticSeverity.Info,
       },
     ],
@@ -249,14 +249,14 @@ function semanticIndexCacheResetDiagnostics(previous: SemanticIndexSnapshot, cur
   if (previous.version !== SemanticIndexVersion) {
     diagnostics.push({
       code: "semantic-index-version-changed",
-      message: `Project Context index version changed from ${previous.version} to ${SemanticIndexVersion}. The old derived cache was reset.`,
+      message: `Project Knowledge version changed from ${previous.version} to ${SemanticIndexVersion}. Run opencanon project index --force to rebuild derived retrieval state.`,
       severity: DiagnosticSeverity.Info,
     });
   }
   if (previous.chunkerVersion !== SemanticChunkerVersion || previous.producerVersion !== SemanticEmbeddingProducerVersion) {
     diagnostics.push({
       code: "semantic-index-pipeline-changed",
-      message: "Project Context indexing pipeline changed. The old derived cache was reset.",
+      message: "Project Knowledge indexing pipeline changed. Run opencanon project index --force to rebuild derived retrieval state.",
       severity: DiagnosticSeverity.Info,
     });
   }
@@ -268,7 +268,7 @@ function semanticProviderChangedDiagnostics(previous: SemanticEmbeddingProvider,
   if (semanticProvidersMatch(previous, configured)) return [];
   return [{
     code: "semantic-index-provider-changed",
-    message: `Project Context index used ${previous.modelId}, but project config requires ${configured.modelId}. The old derived cache was reset.`,
+    message: `Project Knowledge used ${previous.modelId}, but project config requires ${configured.modelId}. Run opencanon project index --force to rebuild derived retrieval state.`,
     severity: DiagnosticSeverity.Info,
   }];
 }

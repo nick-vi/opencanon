@@ -6,7 +6,7 @@ export default [
     title: "Spec Governance Model",
     summary:
       "Specs describe durable behavior as typed definitions with generated docs, governing conventions, implementation scope, impact links, and executable checks.",
-    surfaces: ["project-canon-model", "project-context-index"],
+    surfaces: ["project-canon-model", "project-knowledge-index"],
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/spec.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/spec-loader.ts" },

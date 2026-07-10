@@ -11,7 +11,7 @@ export default [
       areas: [
         "company-read-model",
         "project-map-governance",
-        "project-context-index",
+        "project-knowledge-index",
         "local-service-and-runtimes",
         "living-conventions",
         "product-docs-and-guidance",
@@ -21,14 +21,14 @@ export default [
       ],
       specs: ["spec-governance-model"],
       conventions: ["service-events-current"],
-      surfaces: ["company-read-model", "local-service-control", "project-canon-model", "project-context-index", "release-update"],
+      surfaces: ["company-read-model", "local-service-control", "project-canon-model", "project-knowledge-index", "release-update"],
       docs: [
         "docs/opencanon/canon/architecture.md",
         "docs/opencanon/canon/service-events-current.md",
         "docs/opencanon/areas/company-read-model.md",
         "docs/opencanon/areas/definition-authoring-flow.md",
         "docs/opencanon/areas/project-map-governance.md",
-        "docs/opencanon/areas/project-context-index.md",
+        "docs/opencanon/areas/project-knowledge-index.md",
         "docs/opencanon/areas/local-service-and-runtimes.md",
         "docs/opencanon/areas/living-conventions.md",
         "docs/opencanon/areas/agent-feedback-and-gates.md",
@@ -140,7 +140,7 @@ export default [
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/company-read-model.md" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/definition-authoring-flow.md" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/project-map-governance.md" },
-      { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/project-context-index.md" },
+      { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/project-knowledge-index.md" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/local-service-and-runtimes.md" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/living-conventions.md" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/agent-feedback-and-gates.md" },
@@ -157,7 +157,7 @@ export default [
     },
     plan: [
       { id: "board-state", title: "Derive Change board columns from change-level events and task aggregate state", checks: ["runtime-tests"] },
-      { id: "context-index-recovery", title: "Reset incompatible semantic index cache to current provider state", checks: ["semantic-index-tests"] },
+      { id: "knowledge-index-recovery", title: "Reset incompatible Knowledge index cache to current provider state", checks: ["semantic-index-tests"] },
       { id: "cli-and-copy", title: "Remove stale command aliases and keep CLI and README examples on current surfaces", checks: ["service-lifecycle-tests"] },
       { id: "examples-and-hooks", title: "Refresh example projects and hooks so they teach the current runtime-owned workflow", checks: ["project-doctor", "typecheck"] },
       { id: "canon-dogfood", title: "Keep active Change tasks scoped to current work instead of completed historical migrations", checks: ["project-doctor"] },
@@ -174,8 +174,8 @@ export default [
         checks: ["runtime-tests"],
       },
       {
-        id: "context-index-recovery",
-        title: "Reset incompatible semantic index cache to current provider state",
+        id: "knowledge-index-recovery",
+        title: "Reset incompatible Knowledge index cache to current provider state",
         files: [
           "packages/core/src/semantic-index.ts",
           "packages/runtime/src/snapshot.ts",
@@ -185,7 +185,7 @@ export default [
           "tests/contracts.test.ts",
           "crates/opencanon-engine/src/tests/semantic_index.rs",
         ],
-        surfaces: ["project-context-index"],
+        surfaces: ["project-knowledge-index"],
         checks: ["semantic-index-tests"],
       },
       {

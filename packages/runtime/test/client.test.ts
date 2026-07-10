@@ -123,7 +123,7 @@ test("Code graph routes expose runtime-owned symbol and edge search", () => {
   }
 });
 
-test("Project Context routes expose search, ask, chunks, coverage, and backlinks", () => {
+test("Project Knowledge routes expose search, ask, chunks, coverage, and backlinks", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-context-routes-"));
   createAuthoringProject(rootDir);
   writeFileSync(
@@ -156,7 +156,7 @@ test("Project Context routes expose search, ask, chunks, coverage, and backlinks
       "export default defineArea({",
       "  id: \"billing-context\",",
       "  title: \"Billing Context\",",
-      "  summary: \"Billing source is indexed for Project Context.\",",
+      "  summary: \"Billing source is indexed for Project Knowledge.\",",
       "  owns: [{ kind: \"file\", path: \"src/company.ts\" }],",
       "  render: { kind: \"none\" },",
       "});",

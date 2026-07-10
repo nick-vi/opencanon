@@ -45,7 +45,7 @@ Specs describe durable behavior as typed definitions with generated docs, govern
 ## Impact surfaces
 
 - [Project Canon model](../areas/project-map-governance.md#project-map-governance)
-- [Project context index](../areas/project-context-index.md#project-context-index)
+- [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)
 
 ## Areas
 

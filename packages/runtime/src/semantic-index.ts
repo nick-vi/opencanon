@@ -320,7 +320,7 @@ function collectRuntimeSemanticChunks(
     if (isMarkdownFile(file.path) && markdownExcludedFromProjectContext(content)) {
       diagnostics.push({
         code: "semantic-markdown-excluded",
-        message: `Skipped ${file.path}: markdown declares itself historical or excluded from Project Context.`,
+        message: `Skipped ${file.path}: markdown declares itself historical or excluded from Project Knowledge.`,
         severity: DiagnosticSeverity.Info,
         path: file.path,
       });
@@ -335,7 +335,7 @@ function collectRuntimeSemanticChunks(
     if (fileChunks.length === 0 && isEngineExtractableFile(file.path)) {
       diagnostics.push({
         code: "semantic-no-structured-chunks",
-        message: `No structured facts were available for ${file.path}; semantic indexing skipped whole-file fallback.`,
+        message: `No structured facts were available for ${file.path}; Project Knowledge skipped unstructured whole-file chunking.`,
         severity: DiagnosticSeverity.Info,
         path: file.path,
       });
@@ -374,7 +374,7 @@ export function semanticSearchVectorForProvider(input: {
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
 }): number[] {
   if (!input.provider) {
-    throw new Error("Semantic search requires a ready Project Context index. Run opencanon project index.");
+    throw new Error("Semantic search requires ready Project Knowledge. Run opencanon project index.");
   }
   if (input.provider.kind === SemanticEmbeddingProviderKind.Native) {
     if (!input.project) {

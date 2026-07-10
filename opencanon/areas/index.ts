@@ -43,7 +43,7 @@ export default [
     id: "project-map-governance",
     title: "Project Map Governance",
     summary: "OpenCanon derives the Project Map across areas, changes, conventions, surfaces, checks, validators, and owned targets.",
-    surfaces: ["project-canon-model", "project-context-index"],
+    surfaces: ["project-canon-model", "project-knowledge-index"],
     owns: [
       { kind: DefinitionTargetKind.File, path: "opencanon/**/*.ts" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/**/*.md" },
@@ -92,10 +92,10 @@ export default [
     render: { kind: "generated", docs: "docs/opencanon/areas/project-map-governance.md", style: "reference" },
   }),
   defineArea({
-    id: "project-context-index",
-    title: "Project Context Index",
+    id: "project-knowledge-index",
+    title: "Project Knowledge",
     summary: "OpenCanon owns search, chunks, embeddings, vector storage, and related-code retrieval as derived project runtime state tied back to definitions.",
-    surfaces: ["project-context-index"],
+    surfaces: ["project-knowledge-index"],
     owns: [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/semantic-index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/semantic-models.ts" },
@@ -107,7 +107,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "crates/opencanon-engine/src/migrations/006_semantic_hybrid.sql" },
       { kind: DefinitionTargetKind.File, path: "crates/opencanon-vector/**" },
       { kind: DefinitionTargetKind.File, path: "crates/opencanon-inference/**" },
-      { kind: DefinitionTargetKind.Doc, path: "docs/project-context-implementation-plan.md" },
+      { kind: DefinitionTargetKind.Doc, path: "docs/opencanon-architecture.md" },
       { kind: DefinitionTargetKind.Endpoint, path: "/api/context/status", protocol: "http", adapter: "runtime" },
       { kind: DefinitionTargetKind.Endpoint, path: "/api/context/search", protocol: "http", adapter: "runtime" },
       { kind: DefinitionTargetKind.Endpoint, path: "/api/context/ask", protocol: "http", adapter: "runtime" },
@@ -124,7 +124,7 @@ export default [
         as: "developer",
         want: "search and related-code results to point back to definitions, checks, and surfaces",
         so: "search helps agents and humans navigate without becoming a separate source of truth",
-        acceptance: ["context chunks are derived from project files and facts", "search results can be scoped by paths", "doctor reports context-index health"],
+        acceptance: ["Knowledge chunks are derived from project files and facts", "search results can be scoped by paths", "doctor reports Knowledge health"],
         checks: ["semantic-index-tests", "project-doctor"],
       },
       {
@@ -154,7 +154,7 @@ export default [
       {
         id: "deterministic-validator-context",
         actor: "validator runtime",
-        action: "queries project context",
+        action: "queries Project Knowledge",
         outcome: "blocking findings depend on deterministic files, facts, definitions, surfaces, chunks, freshness, coverage, or backlinks",
         checks: ["project-doctor"],
       },
@@ -164,8 +164,8 @@ export default [
       { id: "engine-semantic-index-tests", kind: "test", target: "crates/opencanon-engine/src/tests.rs" },
       { id: "project-doctor", kind: "doctor" },
     ],
-    governedBy: { inferFromScope: true, conventions: ["context-index-boundary-current", "state-ownership-current", "product-language-current"] },
-    render: { kind: "generated", docs: "docs/opencanon/areas/project-context-index.md", style: "reference" },
+    governedBy: { inferFromScope: true, conventions: ["project-knowledge-boundary-current", "state-ownership-current", "product-language-current"] },
+    render: { kind: "generated", docs: "docs/opencanon/areas/project-knowledge-index.md", style: "reference" },
   }),
   defineArea({
     id: "local-service-and-runtimes",

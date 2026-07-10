@@ -43,7 +43,7 @@ export function buildContextPacket(input: {
     ...input.files.map((file) => `    <file path="${xmlAttr(file)}" />`),
     ...input.changeIds.map((id) => `    <change id="${xmlAttr(id)}" />`),
     `  </filters>`,
-    `  <search-index status="${xmlAttr(semanticIndex?.status ?? "unknown")}" chunks="${semanticIndex?.chunkCount ?? 0}" stale="${semanticIndex?.staleChunkCount ?? 0}" embedded="${semanticIndex?.embeddingStats?.embeddedChunks ?? 0}" reused="${semanticIndex?.embeddingStats?.reusedChunks ?? 0}" model="${xmlAttr(semanticIndex?.provider.modelId ?? "unknown")}" />`,
+    `  <knowledge-index status="${xmlAttr(semanticIndex?.status ?? "unknown")}" chunks="${semanticIndex?.chunkCount ?? 0}" stale="${semanticIndex?.staleChunkCount ?? 0}" embedded="${semanticIndex?.embeddingStats?.embeddedChunks ?? 0}" reused="${semanticIndex?.embeddingStats?.reusedChunks ?? 0}" model="${xmlAttr(semanticIndex?.provider.modelId ?? "unknown")}" />`,
     `  <definitions areas="${areas.length}" specs="${specs.length}" changes="${changes.length}" conventions="${conventions.length}" />`,
     `  <areas>`,
     ...areas.map((item) => `    <area id="${xmlAttr(item.id)}" title="${xmlAttr(item.title)}" checks="${item.checks.length}">${xmlText(item.summary)}</area>`),
@@ -149,4 +149,3 @@ function xmlAttr(value: string): string {
 function xmlText(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-

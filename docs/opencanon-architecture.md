@@ -141,10 +141,10 @@ crates/opencanon-engine
   watcher, SQLite migrations/state, file inventory, hashing, glob matching, fact extraction, graph construction, affected calculation
 
 crates/opencanon-vector
-  mmap-backed vector storage and HNSW search for the project context index
+  mmap-backed vector storage and HNSW search for Project Knowledge
 
 crates/opencanon-inference
-  native GGUF embedding and generation runtime for project-local context indexing
+  native GGUF embedding and generation runtime for project-local Knowledge indexing
 ```
 
 Runtime unification removes duplicate validation paths from the CLI. Normal commands use a project runtime managed by the OpenCanon service; tests and explicit one-shot callers can force an isolated in-process runtime.
@@ -163,10 +163,7 @@ Source-of-truth rules:
 
 This keeps OpenCanon definition-first. Search helps agents and humans find evidence, but it does not become the system of record.
 
-The full Project Context implementation contract is tracked in
-`docs/project-context-implementation-plan.md`. It covers chunking, embeddings,
-vector storage, deterministic validator APIs, CLI/MCP surfaces, Search
-and Ask, Project Map coverage, doctor, observability, security, and dogfooding.
+The Project Knowledge implementation contract is tracked by the Project Knowledge area, the Project Knowledge boundary convention, runtime tests, and engine tests. Together they cover chunking, embeddings, vector storage, deterministic validator APIs, CLI/MCP surfaces, Search and Ask, Project Map coverage, doctor, observability, security, and dogfooding.
 
 ## Runtime Modes
 
@@ -671,12 +668,12 @@ opencanon project open
 opencanon project start --foreground
 ```
 
-`project start` opens the supervised local API and reuses cached Project Context
+`project start` opens the supervised local API and reads cached Project Knowledge
 state. It does not perform a hidden Search/Ask/Chunks/Coverage vector rebuild on
 the startup path. Runtime reads may refresh deterministic inventory, graph,
-validation, and Project Map state with `semanticIndexMode: "reuse"`; only
-`project index`, `POST /api/index`, or semantic Project Context routes called
-with `index=1` build native vectors. Semantic Project Context routes fail fast
+validation, and Project Map state; only
+`project index`, `POST /api/index`, or semantic retrieval routes called
+with `index=1` build native vectors. Semantic retrieval routes fail fast
 with `semantic-index-not-ready` when the index is missing, stale, failed, or
 still indexing.
 

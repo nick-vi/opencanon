@@ -53,7 +53,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.Status,
     {
       title: "OpenCanon Status",
-      description: `Read-only. Return the current project snapshot summary, runtime health, and Project Context index status. ${McpPermissionModel}`,
+      description: `Read-only. Return the current project snapshot summary, runtime health, and Project Knowledge status. ${McpPermissionModel}`,
       inputSchema: {
         includeSnapshot: z.boolean().optional().describe("Include the full runtime snapshot. Defaults to false."),
       },
@@ -173,8 +173,8 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
   server.registerTool(
     McpTool.ContextSearch,
     {
-      title: "OpenCanon Project Context Search",
-      description: "Read-only. Search ready Project Context and return grounded evidence, backlinks, freshness, and citations. If the index is stale, run `opencanon project index` outside MCP first.",
+      title: "OpenCanon Project Knowledge Search",
+      description: "Read-only. Search ready Project Knowledge and return grounded evidence, backlinks, freshness, and citations. If Knowledge is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {
         query: z.string().min(1).describe("Search text."),
         limit: z.number().int().min(1).max(100).optional().describe("Maximum results. Defaults to 20."),
@@ -194,8 +194,8 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
   server.registerTool(
     McpTool.ContextAsk,
     {
-      title: "OpenCanon Project Context Ask",
-      description: "Read-only. Ask a grounded project question against a ready Project Context index. Answers are deterministic navigation evidence, not enforcement. If the index is stale, run `opencanon project index` outside MCP first.",
+      title: "OpenCanon Project Knowledge Ask",
+      description: "Read-only. Ask a grounded project question against ready Project Knowledge. Answers are deterministic navigation evidence, not enforcement. If Knowledge is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {
         question: z.string().min(1).describe("Project question."),
       },
@@ -211,8 +211,8 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
   server.registerTool(
     McpTool.ContextChunks,
     {
-      title: "OpenCanon Project Context Chunks",
-      description: "Read-only. List chunks from a ready Project Context index by optional file path or definition id. If the index is stale, run `opencanon project index` outside MCP first.",
+      title: "OpenCanon Project Knowledge Chunks",
+      description: "Read-only. List chunks from ready Project Knowledge by optional file path or definition id. If Knowledge is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {
         paths: z.array(z.string().min(1)).optional().describe("Optional repository-relative paths."),
         definitions: z.array(z.string().min(1)).optional().describe("Optional definition ids whose covered files should provide chunks."),
@@ -234,8 +234,8 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
   server.registerTool(
     McpTool.ContextCoverage,
     {
-      title: "OpenCanon Project Context Coverage",
-      description: "Read-only. Return coverage from a ready Project Context index across indexed, governed, stale, and orphan files. If the index is stale, run `opencanon project index` outside MCP first.",
+      title: "OpenCanon Project Knowledge Coverage",
+      description: "Read-only. Return coverage from ready Project Knowledge across indexed, governed, stale, and orphan files. If Knowledge is stale, run `opencanon project index` outside MCP first.",
       inputSchema: {},
     },
     async () => {
@@ -247,7 +247,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
   server.registerTool(
     McpTool.ContextBacklinks,
     {
-      title: "OpenCanon Project Context Backlinks",
+      title: "OpenCanon Project Knowledge Backlinks",
       description: "Read-only. Find definition and file backlinks for a definition id, file path, or text query.",
       inputSchema: {
         query: z.string().min(1).describe("Definition id, file path, or text query."),
@@ -321,13 +321,13 @@ Options:
 ${McpPermissionModel}
 
 Tools:
-  ${McpTool.Status}           Project health, counts, and Project Context index status.
+  ${McpTool.Status}           Project health, counts, and Project Knowledge status.
   ${McpTool.RelatedContext}  Related docs, conventions, validators, specs, changes, and surfaces.
   ${McpTool.Validate}         Runtime convention validation.
-  ${McpTool.ContextSearch}  Project Context search with evidence.
-  ${McpTool.ContextAsk}     Grounded Project Context question answering.
+  ${McpTool.ContextSearch}  Project Knowledge search with evidence.
+  ${McpTool.ContextAsk}     Grounded Project Knowledge question answering.
   ${McpTool.ContextChunks}  Indexed chunk listing.
-  ${McpTool.ContextCoverage} Project Context coverage.
+  ${McpTool.ContextCoverage} Project Knowledge coverage.
   ${McpTool.ContextBacklinks} Definition and file backlinks.
   ${McpTool.Doctor}           Project doctor checks.
 `);

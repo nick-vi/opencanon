@@ -294,39 +294,39 @@ export function validateSemanticIndex(index: SemanticIndexSnapshot | null | unde
   if (index === undefined) {
     return {
       status: DoctorStatus.Pass,
-      message: "Context index status is verified by the project runtime when available.",
+      message: "Project Knowledge status is verified by the project runtime when available.",
       details: [],
     };
   }
   if (index === null) {
     return {
       status: DoctorStatus.Warn,
-      message: "No context index snapshot has been written yet.",
-      details: ["Run a project reindex from the app or `opencanon project index` to build generated search state."],
+      message: "No Project Knowledge snapshot has been written yet.",
+      details: ["Run `opencanon project index` to build generated Search and Ask state."],
     };
   }
 
   const details: string[] = [];
-  if (!index.version.trim()) details.push("Context index version is missing.");
-  if (!index.chunkerVersion.trim()) details.push("Context index chunker version is missing.");
-  if (!index.producerVersion.trim()) details.push("Context index producer version is missing.");
-  if (!index.sourceInventoryHash.trim()) details.push("Context index source inventory hash is missing.");
-  if (!index.chunkTreeHash.trim()) details.push("Context index chunk tree hash is missing.");
-  if (!index.identityHash.trim()) details.push("Context index identity hash is missing.");
-  if (!index.provider.id.trim()) details.push("Context index provider id is missing.");
-  if (!index.provider.modelId.trim()) details.push("Context index model id is missing.");
-  if (!index.provider.configHash.trim()) details.push("Context index provider config hash is missing.");
-  if (index.provider.dimensions < 1) details.push("Context index provider dimensions must be positive.");
-  if (index.chunkCount !== index.vectorCount) details.push(`Context index chunk/vector counts differ (${index.chunkCount} chunks, ${index.vectorCount} vectors).`);
+  if (!index.version.trim()) details.push("Project Knowledge version is missing.");
+  if (!index.chunkerVersion.trim()) details.push("Project Knowledge chunker version is missing.");
+  if (!index.producerVersion.trim()) details.push("Project Knowledge producer version is missing.");
+  if (!index.sourceInventoryHash.trim()) details.push("Project Knowledge source inventory hash is missing.");
+  if (!index.chunkTreeHash.trim()) details.push("Project Knowledge chunk tree hash is missing.");
+  if (!index.identityHash.trim()) details.push("Project Knowledge identity hash is missing.");
+  if (!index.provider.id.trim()) details.push("Project Knowledge provider id is missing.");
+  if (!index.provider.modelId.trim()) details.push("Project Knowledge model id is missing.");
+  if (!index.provider.configHash.trim()) details.push("Project Knowledge provider config hash is missing.");
+  if (index.provider.dimensions < 1) details.push("Project Knowledge provider dimensions must be positive.");
+  if (index.chunkCount !== index.vectorCount) details.push(`Project Knowledge chunk/vector counts differ (${index.chunkCount} chunks, ${index.vectorCount} vectors).`);
   if (index.status === SemanticIndexDoctorStatus.Failed) details.push(...index.diagnostics.map((diagnostic) => diagnostic.message));
 
   return {
     status: details.length > 0 ? DoctorStatus.Fail : index.status === SemanticIndexDoctorStatus.Stale ? DoctorStatus.Warn : DoctorStatus.Pass,
     message: details.length > 0
-      ? "Context index identity or freshness metadata is invalid."
+      ? "Project Knowledge identity or freshness metadata is invalid."
       : index.status === SemanticIndexDoctorStatus.Stale
-        ? "Context index exists but is stale."
-        : `Context index is ${index.status} (${index.chunkCount} chunks).`,
+        ? "Project Knowledge exists but is stale."
+        : `Project Knowledge is ${index.status} (${index.chunkCount} chunks).`,
     details,
   };
 }

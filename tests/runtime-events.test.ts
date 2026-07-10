@@ -28,10 +28,10 @@ test("runtime indexing events carry structured optional progress", () => {
 });
 
 test("runtime error events use the error channel and failure progress phase", () => {
-  const event = streamErrorEvent("Could not rebuild project context.");
+  const event = streamErrorEvent("Could not rebuild Project Knowledge.");
 
   assert.equal(event.type, "error");
-  assert.equal(event.summary, "Could not rebuild project context.");
+  assert.equal(event.summary, "Could not rebuild Project Knowledge.");
   assert.equal(event.progress?.phase, "failure");
 });
 

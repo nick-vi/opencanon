@@ -50,11 +50,11 @@ opencanon mcp --root .
 - `canon` lists, renders, drafts, and inspects Project Canon definitions across conventions, areas, specs, and changes.
 - `changes` is the CLI command for Change definitions: it lists active planned changes, renders generated change docs, records SQLite-backed events, and runs declared checks.
 - `rules` lists convention summaries, scopes, render targets, runtime checks, and fixture coverage.
-- `search` searches symbols, conventions, checks, docs, and ready indexed context. `ask` queries the local Project Context index with cited evidence. Use `opencanon context status` to inspect readiness and `opencanon project index` to build or refresh Search, Ask, Chunks, and Coverage.
+- `search` searches symbols, conventions, checks, docs, and ready Project Knowledge. `ask` queries Project Knowledge with cited evidence. Use `opencanon context status` to inspect readiness and `opencanon project index` to build or refresh Search, Ask, Chunks, and Coverage.
 - `symbols` and `graph` inspect the local TS/JS code graph before edits or refactors.
 - `validate` runs convention runtimes against files, changed files, fixtures, or the whole project.
 - `feedback` renders concise findings plus related changes, affected areas, impact surfaces, and scope drift.
-- `doctor` checks setup, effective config, Project Canon, generated docs, dependency pins, hooks, runtime prerequisites, generated artifact ignores, the context index, and external tool declarations.
+- `doctor` checks setup, effective config, Project Canon, generated docs, dependency pins, hooks, runtime prerequisites, generated artifact ignores, Project Knowledge, and external tool declarations.
 - `mcp` starts a stdio MCP server over the same runtime-backed model for agent clients.
 
 Run `npm run opencanon -- <command> --help` for command-specific options.
@@ -85,7 +85,7 @@ OpenCanon uses one lightweight global service registered in `~/.opencanon/servic
 
 `opencanon service open` opens the local service API URL. `opencanon project open` opens the current project's runtime API URL.
 
-Normal `context`, `search`, `ask`, `validate`, `feedback`, hook, and workbench commands reuse a running project runtime or ask the service to start one. Project start is intentionally cheap: it opens the local API, refreshes deterministic project state on demand, and reuses cached Project Context state. Search, Ask, Chunks, and Coverage fail fast when the Project Context index is missing, stale, failed, or still indexing; run `opencanon project index` to explicitly build native semantic vectors. Programmatic API callers can opt into that cost with `index=1` on semantic Project Context routes. Project-local generated state remains under `.opencanon/` and is ignored by Git, including SQLite state and context-index vector files. `project start --foreground` runs this project runtime in the foreground for local runtime debugging.
+Normal `context`, `search`, `ask`, `validate`, `feedback`, hook, and workbench commands reuse a running project runtime or ask the service to start one. Project start is intentionally cheap: it opens the local API, refreshes deterministic project state on demand, and reads cached Project Knowledge state. Search, Ask, Chunks, and Coverage fail fast when Project Knowledge is missing, stale, failed, or still indexing; run `opencanon project index` to explicitly build native semantic vectors. Programmatic API callers can opt into that cost with `index=1` on semantic retrieval routes. Project-local generated state remains under `.opencanon/` and is ignored by Git, including SQLite state and Knowledge vector files. `project start --foreground` runs this project runtime in the foreground for local runtime debugging.
 
 ## Runtime Updates
 

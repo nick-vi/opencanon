@@ -119,7 +119,7 @@ test("validator runtime context exposes deterministic project coverage", () => {
     const area = defineArea({
       id: "billing-context",
       title: "Billing Context",
-      summary: "Billing source is covered by Project Context.",
+      summary: "Billing source is covered by Project Knowledge.",
       surfaces: ["billing-surface"],
       owns: [{ kind: "file", path: "src/billing.ts" }],
       checks: [{ id: "billing-test", kind: "test", target: "tests/billing.test.ts" }],
@@ -943,7 +943,7 @@ export default defineConvention({
   }
 });
 
-test("project context skips broken symlinks in ignored directories", () => {
+test("Project Knowledge skips broken symlinks in ignored directories", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-project-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });

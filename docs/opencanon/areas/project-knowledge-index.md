@@ -1,4 +1,4 @@
-# Project Context Index
+# Project Knowledge
 
 ## Summary
 
@@ -8,12 +8,12 @@ OpenCanon owns search, chunks, embeddings, vector storage, and related-code retr
 
 Files: packages/core/src/semantic-index.ts, packages/core/src/semantic-models.ts, packages/runtime/src/project-context.ts, packages/runtime/src/semantic-index.ts, packages/runtime/src/state.ts, packages/runtime/test/semantic-index.test.ts, crates/opencanon-engine/src/migrations/005_semantic_index.sql, crates/opencanon-engine/src/migrations/006_semantic_hybrid.sql, crates/opencanon-vector/**, crates/opencanon-inference/**
 Endpoints: /api/context/status (runtime), /api/context/search (runtime), /api/context/ask (runtime), /api/context/chunks (runtime), /api/context/coverage (runtime), /api/context/backlinks (runtime)
-Docs: docs/project-context-implementation-plan.md
+Docs: docs/opencanon-architecture.md
 Resources: semantic-index, semantic-chunks, vector-store
 
 ## Impact surfaces
 
-- [Project context index](project-context-index.md#project-context-index)
+- [Project Knowledge](project-knowledge-index.md#project-knowledge)
 
 ## Checks
 
@@ -24,9 +24,9 @@ Resources: semantic-index, semantic-chunks, vector-store
 ## Stories
 
 Story `search-related-code-through-definitions`: as developer, I want search and related-code results to point back to definitions, checks, and surfaces, so search helps agents and humans navigate without becoming a separate source of truth.
-- context chunks are derived from project files and facts
+- Knowledge chunks are derived from project files and facts
 - search results can be scoped by paths
-- doctor reports context-index health
+- doctor reports Knowledge health
 Checks: `semantic-index-tests`, `project-doctor`
 
 Story `grounded-search-and-ask`: as developer, I want Search and Ask to show evidence, citations, freshness, and backlinks, so I can understand project behavior without treating generated answers as enforcement.
@@ -43,12 +43,12 @@ Checks: `semantic-index-tests`
 Behavior `advisory-search-results`: OpenCanon search returns semantic or lexical matches; results are treated as context until a deterministic check, gate, validator, or test enforces the claim.
 Checks: `project-doctor`
 
-Behavior `deterministic-validator-context`: validator runtime queries project context; blocking findings depend on deterministic files, facts, definitions, surfaces, chunks, freshness, coverage, or backlinks.
+Behavior `deterministic-validator-context`: validator runtime queries Project Knowledge; blocking findings depend on deterministic files, facts, definitions, surfaces, chunks, freshness, coverage, or backlinks.
 Checks: `project-doctor`
 
 ## Governance
 
 - infer governing conventions from owned scope
-- convention [Context indexing is derived OpenCanon runtime state](../canon/context-index-boundary-current.md)
+- convention [Project Knowledge is derived OpenCanon runtime state](../canon/project-knowledge-boundary-current.md)
 - convention [Repo definitions own truth; generated state stays derived](../canon/state-ownership-current.md)
 - convention [Product-facing language stays simple](../canon/product-language-current.md)

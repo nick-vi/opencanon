@@ -109,10 +109,10 @@ export function askProjectContext(input: {
     return {
       index: search.index,
       question,
-      answer: "No indexed project context matched this question. Rebuild the context index or ask with more specific file, definition, or surface terms.",
+      answer: "No Project Knowledge matched this question. Rebuild Project Knowledge or ask with more specific file, definition, or surface terms.",
       deterministic: true,
       evidence: [],
-      suggestions: ["Run Project Context search with narrower terms.", "Check Health for stale or missing context index state."],
+      suggestions: ["Run Project Knowledge search with narrower terms.", "Check Health for stale or missing Project Knowledge state."],
       warnings,
     };
   }
@@ -149,7 +149,7 @@ export function projectContextCoverage(input: { store: ProjectStore; snapshot: R
     if (file.indexedChunks === 0) gaps.push({ kind: "unindexed-file", file: file.file, message: `${file.file} has no context chunks.` });
   }
   if (index?.status === "stale" || index?.staleChunkCount) {
-    gaps.push({ kind: "stale-index", message: "The context index is stale and should be rebuilt before trusting Search or Ask." });
+    gaps.push({ kind: "stale-index", message: "Project Knowledge is stale and should be rebuilt before trusting Search or Ask." });
   }
   return {
     index,
@@ -433,9 +433,9 @@ function missingLinkSuggestions(evidence: ProjectContextEvidence[]): string[] {
 }
 
 function freshnessWarnings(index: ProjectContextSearchResult["index"]): string[] {
-  if (!index) return ["No context index snapshot is available."];
-  if (index.status !== ContextIndexStatus.Ready) return [`Context index status is ${index.status}.`];
-  if (index.staleChunkCount > 0) return [`Context index has ${index.staleChunkCount} stale chunks.`];
+  if (!index) return ["No Project Knowledge snapshot is available."];
+  if (index.status !== ContextIndexStatus.Ready) return [`Project Knowledge status is ${index.status}.`];
+  if (index.staleChunkCount > 0) return [`Project Knowledge has ${index.staleChunkCount} stale chunks.`];
   return [];
 }
 

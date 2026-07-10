@@ -13,7 +13,7 @@ Resources: definition-graph, product-model-projection
 ## Impact surfaces
 
 - [Project Canon model](project-map-governance.md#project-map-governance)
-- [Project context index](project-context-index.md#project-context-index)
+- [Project Knowledge](project-knowledge-index.md#project-knowledge)
 
 ## Checks
 

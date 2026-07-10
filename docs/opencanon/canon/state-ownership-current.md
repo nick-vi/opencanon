@@ -26,5 +26,5 @@ A local service introduces global state, project-local state, and committed defi
 ## Related impact surfaces
 
 - [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
-- [Project context index](../areas/project-context-index.md#project-context-index)
+- [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)
 - [Project Canon model](../areas/project-map-governance.md#project-map-governance)

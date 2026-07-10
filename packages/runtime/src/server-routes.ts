@@ -107,9 +107,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       diagnosticsFailure([
         createOpenCanonDiagnostic({
           code: diagnosticCodes.semanticIndexNotReady,
-          message: "Project Context index is not ready. Run opencanon project index before using Search, Ask, Chunks, or Coverage.",
+          message: "Project Knowledge is not ready. Run opencanon project index before using Search, Ask, Chunks, or Coverage.",
           details,
-          action: "Run opencanon project index, or call this API with index=1 when you intentionally want the request to build the index first.",
+          action: "Run opencanon project index, or call this API with index=1 when you intentionally want the request to build Project Knowledge first.",
         }),
       ], diagnosticCodes.semanticIndexNotReady),
       409,
@@ -200,7 +200,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { sourceFiles: snapshot.files.filter(isCodeGraphIndexableFile).length, edges: result.edges } });
       }
       if (url.pathname === ApiRoute.ContextChunks) {
-        const snapshot = await semanticContextSnapshot(url, "Project Context chunks requested current index.");
+        const snapshot = await semanticContextSnapshot(url, "Project Knowledge chunks requested current index.");
         const notReady = semanticIndexNotReadyResponse(snapshot);
         if (notReady) return notReady;
         const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
@@ -219,7 +219,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextSearch) {
         return await tracer.span("project-context.search", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await semanticContextSnapshot(url, "Project Context search requested current index.");
+          const snapshot = await semanticContextSnapshot(url, "Project Knowledge search requested current index.");
           const notReady = semanticIndexNotReadyResponse(snapshot);
           if (notReady) return notReady;
           const query = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
@@ -240,7 +240,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
               diagnosticsFailure([
                 createOpenCanonDiagnostic({
                   code: diagnosticCodes.inferenceError,
-                  message: `Could not search Project Context: ${error instanceof Error ? error.message : String(error)}`,
+                  message: `Could not search Project Knowledge: ${error instanceof Error ? error.message : String(error)}`,
                 }),
               ], diagnosticCodes.inferenceError),
               500,
@@ -250,11 +250,11 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextAsk) {
         return await tracer.span("project-context.ask", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await semanticContextSnapshot(url, "Project Context Ask requested current index.");
+          const snapshot = await semanticContextSnapshot(url, "Project Knowledge Ask requested current index.");
           const notReady = semanticIndexNotReadyResponse(snapshot);
           if (notReady) return notReady;
           const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
-          if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context Ask requires a query."), 400);
+          if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Knowledge Ask requires a query."), 400);
           try {
             const result = askProjectContext({ store: currentStore(), snapshot, question, semanticEmbedding: paths.semanticEmbedding });
             span.setOutput({ evidence: result.evidence.length, indexed: Boolean(result.index) });
@@ -264,7 +264,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
               diagnosticsFailure([
                 createOpenCanonDiagnostic({
                   code: diagnosticCodes.inferenceError,
-                  message: `Could not ask Project Context: ${error instanceof Error ? error.message : String(error)}`,
+                  message: `Could not ask Project Knowledge: ${error instanceof Error ? error.message : String(error)}`,
                 }),
               ], diagnosticCodes.inferenceError),
               500,
@@ -273,7 +273,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextCoverage) {
-        const snapshot = await semanticContextSnapshot(url, "Project Context coverage requested current index.");
+        const snapshot = await semanticContextSnapshot(url, "Project Knowledge coverage requested current index.");
         const notReady = semanticIndexNotReadyResponse(snapshot);
         if (notReady) return notReady;
         return json({ ok: true, data: projectContextCoverage({ store: currentStore(), snapshot }) });
@@ -311,9 +311,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextBacklinks) {
-        const snapshot = await ensureProjectSnapshot("Project Context backlinks requested current project state.");
+        const snapshot = await ensureProjectSnapshot("Project Knowledge backlinks requested current project state.");
         const query = (url.searchParams.get(UrlSearchParam.Query) ?? url.searchParams.get(UrlSearchParam.Id) ?? url.searchParams.get(UrlSearchParam.Path) ?? "").trim();
-        if (!query) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Context backlinks requires query, id, or path."), 400);
+        if (!query) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Knowledge backlinks requires query, id, or path."), 400);
         return json({ ok: true, data: projectContextBacklinks({ snapshot, query }) });
       }
       if (url.pathname === ApiRoute.Changes) {
@@ -617,9 +617,9 @@ function semanticIndexReady(index: SemanticIndexSnapshot | undefined): boolean {
 }
 
 function semanticIndexDiagnosticDetails(index: SemanticIndexSnapshot | undefined): string[] {
-  if (!index) return ["Project Context index: missing"];
+  if (!index) return ["Project Knowledge: missing"];
   return [
-    `Project Context index status: ${index.status}`,
+    `Project Knowledge status: ${index.status}`,
     `Stale chunks: ${index.staleChunkCount}`,
     `Provider: ${index.provider.displayName ?? index.provider.id} (${index.provider.modelId})`,
     ...index.diagnostics.map((diagnostic) => `${diagnostic.severity}: ${diagnostic.message}`),

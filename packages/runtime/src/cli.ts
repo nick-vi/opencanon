@@ -640,7 +640,7 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
   await ensureProjectRuntimeViaService({ cwd });
   const inspection = await waitForProjectRuntimeReady(cwd, { timeoutMs: ProjectRuntimeReadyTimeoutMs });
   if (format !== Format.Json) {
-    console.log("# OpenCanon Project Index");
+    console.log("# OpenCanon Project Knowledge");
     console.log("");
     console.log(options.force === true ? "Rebuilding Project Knowledge..." : "Indexing Project Knowledge...");
     console.log("");
@@ -655,7 +655,7 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
     return;
   }
   if (!index) {
-    console.log("Reindex requested; no context index snapshot is available yet.");
+    console.log("Index requested; no Project Knowledge snapshot is available yet.");
     return;
   }
   for (const line of renderSemanticIndexLines(index)) console.log(line);

@@ -73,15 +73,15 @@ Terminology contract:
 - Internal/source: `Definition`, `Change`, `DefinitionGraph`, `ImpactSurface`, `Validator`, `CommitGate`, `Semantic Index`, `SemanticChunk`, `Embedding`, `Local Service`, `Project Runtime`, `projection`.
 - Generated docs may expose ids and source names, but titles, summaries, and first-read prose should use public terms first.
 
-## Context Index
+## Project Knowledge
 
-OpenCanon owns project context indexing as derived runtime state, not as a separate product.
+OpenCanon owns Project Knowledge as derived runtime state, not as a separate product.
 
 Rules:
 
 - The installed OpenCanon runtime owns Search, chunking, embeddings, vector storage, related-code retrieval, lineage signals, and ranking.
 - Chunks are generated from files, facts, docs, and definitions. They are not hand-authored definitions and are never the source of truth.
-- Context index state lives in `.opencanon/` SQLite/vector storage and can be rebuilt from committed definitions plus project files.
+- Project Knowledge state lives in `.opencanon/` SQLite/vector storage and can be rebuilt from committed definitions plus project files.
 - Chunks can backlink to conventions, checks, findings, specs, areas, change, impact surfaces, docs, files, and symbols.
 - Embedding and LLM-derived results are advisory context unless a deterministic convention runtime, check, gate, or test enforces the claim.
 - Do not expose implementation substrate names as separate user-facing products inside OpenCanon. Use OpenCanon product terms and keep implementation names in architecture/source contexts.
