@@ -71,7 +71,7 @@ import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, t
 import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
 import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
 import { createRuntimeRouteHandler } from "./server-routes.ts";
-import { assertRuntimePrerequisites, formatHttpBaseUrl, renderPrerequisiteFailure, requiredNodeRequirement } from "./runtime.ts";
+import { assertRuntimePrerequisites, formatHttpBaseUrl, renderPrerequisiteFailure, requiredNodeRequirement, type RuntimePrerequisites } from "./runtime.ts";
 import { createProjectStore, type ProjectStore } from "./state.ts";
 import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
@@ -138,6 +138,7 @@ export type RuntimeServerOptions = {
   idleTimeoutMs?: number;
   onIdle?: () => void | Promise<void>;
   onStopped?: () => void | Promise<void>;
+  runtime?: RuntimePrerequisites;
 };
 
 export type RuntimeServer = {
@@ -170,7 +171,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   if (configDiagnostics.length > 0) {
     throw new Error(`Invalid OpenCanon config:\n${configDiagnostics.map((diagnostic) => `- ${diagnostic}`).join("\n")}`);
   }
-  const prerequisites = assertRuntimePrerequisites();
+  const prerequisites = options.runtime ?? assertRuntimePrerequisites();
   const workerLease = acquireProjectWorkerLease({
     rootDir,
     leaseId: processIdentity.leaseId,
@@ -290,6 +291,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let coordinationSignature = "";
   let knowledgeWatchTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingKnowledgeWatchSummary: string | undefined;
+  let pendingKnowledgeWatchPaths: string[] = [];
   let knowledgeWatchQueue: Promise<void> = Promise.resolve();
   const idleTimeoutMs = options.idleTimeoutMs && options.idleTimeoutMs > 0 ? options.idleTimeoutMs : undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -399,7 +401,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     return await stateManager.rebuildAndPublish(summary);
   }
 
-  async function buildIndexedSnapshot(summary: string, options: { force?: boolean } = {}): Promise<RuntimeSnapshot> {
+  async function buildIndexedSnapshot(summary: string, options: { force?: boolean; changedPaths?: string[] } = {}): Promise<RuntimeSnapshot> {
     const jobId = beginWorkerJob({
       kind: RuntimeWorkerJobKindValue.SemanticIndex,
       label: options.force ? "Rebuilding Project Knowledge" : "Indexing Project Knowledge",
@@ -409,6 +411,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       const manager = createKnowledgeIndexManager({ rootDir, store });
       await manager.index({
         force: options.force,
+        changedPaths: options.changedPaths,
         onProgress(progress) {
           publishKnowledgeIndexProgress(jobId, progress);
         },
@@ -437,11 +440,14 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     pendingKnowledgeWatchSummary = batch.stale
       ? "Project Knowledge source inventory changed; refreshing index."
       : knowledgeWatchSummary(batch.paths);
+    pendingKnowledgeWatchPaths = batch.stale ? [] : [...new Set([...pendingKnowledgeWatchPaths, ...batch.paths])].sort();
     if (knowledgeWatchTimer) clearTimeout(knowledgeWatchTimer);
     knowledgeWatchTimer = setTimeout(() => {
       knowledgeWatchTimer = undefined;
       const queuedSummary = pendingKnowledgeWatchSummary;
+      const queuedPaths = pendingKnowledgeWatchPaths;
       pendingKnowledgeWatchSummary = undefined;
+      pendingKnowledgeWatchPaths = [];
       if (!queuedSummary || stopped) return;
       knowledgeWatchQueue = knowledgeWatchQueue
         .catch(() => undefined)
@@ -449,7 +455,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           if (stopped) return;
           const currentIndex = store.readSemanticIndexStatus({ indexId: "project" }).index;
           if (!currentIndex || currentIndex.status === KnowledgeIndexStatus.Missing || currentIndex.status === KnowledgeIndexStatus.Failed) return;
-          await buildIndexedSnapshot(queuedSummary);
+          await buildIndexedSnapshot(queuedSummary, { changedPaths: queuedPaths });
         })
         .catch((error) => {
           events.broadcast(streamErrorEvent(`Project Knowledge update failed: ${errorMessage(error)}`));
@@ -821,6 +827,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     if (knowledgeWatchTimer) clearTimeout(knowledgeWatchTimer);
     knowledgeWatchTimer = undefined;
     pendingKnowledgeWatchSummary = undefined;
+    pendingKnowledgeWatchPaths = [];
     stopStoreWatcher();
     stopCoordinationWatcher();
     projectTypesRuntime.stop();

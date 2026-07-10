@@ -83,7 +83,7 @@ export type RuntimeRouteHandlerInput = {
   resetIdleTimer(): void;
   refreshCurrentSnapshot(): Promise<RuntimeSnapshot>;
   ensureProjectSnapshot(summary: string): Promise<RuntimeSnapshot>;
-  buildIndexedSnapshot(summary: string, options?: { force?: boolean }): Promise<RuntimeSnapshot>;
+  buildIndexedSnapshot(summary: string, options?: { force?: boolean; changedPaths?: string[] }): Promise<RuntimeSnapshot>;
   restartStore(): Promise<void>;
 };
 

@@ -41,6 +41,7 @@ export type KnowledgeIndexProgress = {
 
 export type KnowledgeIndexRunOptions = {
   force?: boolean;
+  changedPaths?: string[];
   onProgress?: (progress: KnowledgeIndexProgress) => void;
 };
 
@@ -67,7 +68,7 @@ export function createKnowledgeIndexManager(input: {
       if (discovery.failed) {
         throw new Error(discovery.diagnostics.join("\n"));
       }
-      const scan = input.store.scanAndDiff(discovery.files);
+      const scan = applyKnowledgeChangeHint(input.store.scanAndDiff(discovery.files), options.changedPaths);
       emit({
         phase: KnowledgeIndexPhase.Diff,
         label: "Diffing Project Knowledge inventory",
@@ -130,6 +131,22 @@ export function createKnowledgeIndexManager(input: {
       emit({ phase: KnowledgeIndexPhase.Ready, label: "Project Knowledge ready", current: index.chunkCount, total: index.chunkCount, unit: "chunks" });
       return { index, scan, mode };
     },
+  };
+}
+
+function applyKnowledgeChangeHint(scan: ScanAndDiffResult, changedPaths: string[] | undefined): ScanAndDiffResult {
+  if (!changedPaths || changedPaths.length === 0) return scan;
+  const filesByPath = new Set(scan.files.map((file) => file.path));
+  const hintedChanged = changedPaths.filter((file) => filesByPath.has(file));
+  const hintedDeleted = changedPaths.filter((file) => !filesByPath.has(file));
+  if (hintedChanged.length === 0 && hintedDeleted.length === 0) return scan;
+  const changed = new Set([...scan.changedFiles, ...hintedChanged]);
+  const deleted = new Set([...scan.deletedFiles, ...hintedDeleted]);
+  return {
+    ...scan,
+    changedFiles: [...changed].sort(),
+    unchangedFiles: scan.unchangedFiles.filter((file) => !changed.has(file) && !deleted.has(file)),
+    deletedFiles: [...deleted].sort(),
   };
 }
 

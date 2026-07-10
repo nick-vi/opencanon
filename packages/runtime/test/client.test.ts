@@ -1,16 +1,51 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "vitest";
-import { inspectProjectRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
+import { createEngine } from "@opencanon/engine";
+import { inspectProjectRuntime, runtimeAuthHeaders, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 
 const HeavyRouteIntegrationTestTimeoutMs = 120_000;
 const HeavyRouteSubprocessTimeoutMs = 90_000;
 const RuntimeWatcherPropagationTimeoutMs = 30_000;
+
+type KnowledgeStatusForTest = {
+  status?: string;
+  embeddingStats?: {
+    filesChanged?: number;
+    vectorsWritten?: number;
+    chunksChanged?: number;
+    chunksRemoved?: number;
+  };
+};
+
+async function waitForKnowledgeStatus(
+  serverUrl: string,
+  headers: Record<string, string>,
+  predicate: (index: KnowledgeStatusForTest | undefined) => boolean,
+): Promise<KnowledgeStatusForTest> {
+  const deadline = Date.now() + RuntimeWatcherPropagationTimeoutMs;
+  let last: KnowledgeStatusForTest | undefined;
+  while (Date.now() < deadline) {
+    const response = await fetch(serverUrl + "/api/context/status", { headers });
+    const text = await response.text();
+    assert.equal(response.status, 200, text);
+    const body = JSON.parse(text) as { data?: { index?: KnowledgeStatusForTest } };
+    last = body.data?.index;
+    if (last && predicate(last)) return last;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for Project Knowledge watcher refresh. Last status: ${JSON.stringify(last)}`);
+}
+
+function runtimeTestVector(seed: number): number[] {
+  return Array.from({ length: 896 }, (_item, index) => (index === 0 ? seed : 0));
+}
 
 test("runtime client does not expose an env-driven in-process transport path", () => {
   const source = readFileSync(path.join(process.cwd(), "packages/cli/src/runtime-client.ts"), "utf8");
@@ -171,6 +206,177 @@ test("Project Knowledge routes expose search, ask, chunks, coverage, and backlin
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("Project Knowledge watcher refreshes an existing index after file changes", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-watch-"));
+  const registryPath = path.join(rootDir, ".opencanon/test-service-registry.json");
+  const previousRegistryPath = process.env.OPENCANON_SERVICE_REGISTRY_PATH;
+  try {
+    process.env.OPENCANON_SERVICE_REGISTRY_PATH = registryPath;
+    createAuthoringProject(rootDir);
+    mkdirSync(path.join(rootDir, "docs"), { recursive: true });
+    writeFileSync(path.join(rootDir, "docs/guide.md"), "# Guide\n\nInitial billing knowledge.\n");
+    writeFileSync(
+      path.join(rootDir, "opencanon.config.json"),
+      JSON.stringify(
+        {
+          conventionsPath: "conventions/index.ts",
+          fixturesDir: "fixtures",
+          fileDiscovery: "filesystem",
+          projectFilePatterns: ["docs/**/*.md"],
+          ignore: ["node_modules/**", ".opencanon/**"],
+          semanticEmbedding: {
+            mode: "native",
+            modelId: "jina-code-v2",
+            showDownloadProgress: false,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    let semanticIndex: unknown = null;
+    let semanticChunks: Array<{ metadata: Record<string, unknown>; text: string; vector?: number[] }> = [];
+    let watcherCallback: ((error: unknown, batchJson?: string) => void) | undefined;
+    const previousHashes = new Map<string, string>();
+    const embedCalls: Array<{ task?: string; texts: string[] }> = [];
+    const engine = createEngine({
+      versionJson: () =>
+        JSON.stringify({
+          packageVersion: "0.4.0-test",
+          engineVersion: "0.4.0-test",
+          napiVersion: "test",
+          schemaVersion: 6,
+        }),
+      openProjectJson: () => ({
+        statusJson: () =>
+          JSON.stringify({
+            rootDir,
+            statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+            schemaVersion: 6,
+            migrationsApplied: [1],
+            refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+          }),
+        scanAndDiffJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { files?: Array<string | { path: string }> };
+          const paths = (request.files ?? []).map((file) => typeof file === "string" ? file : file.path).sort();
+          const files = paths.map((filePath) => {
+            const content = readFileSync(path.join(rootDir, filePath), "utf8");
+            return {
+              path: filePath,
+              contentHash: createHash("sha256").update(content).digest("hex"),
+              size: Buffer.byteLength(content),
+              stale: false,
+            };
+          });
+          const current = new Map(files.map((file) => [file.path, file.contentHash]));
+          const changedFiles = files.filter((file) => previousHashes.get(file.path) !== file.contentHash).map((file) => file.path);
+          const unchangedFiles = files.filter((file) => previousHashes.get(file.path) === file.contentHash).map((file) => file.path);
+          const deletedFiles = [...previousHashes.keys()].filter((filePath) => !current.has(filePath));
+          previousHashes.clear();
+          for (const file of files) previousHashes.set(file.path, file.contentHash);
+          return JSON.stringify({
+            statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+            schemaVersion: 6,
+            inventoryHash: createHash("sha256").update(JSON.stringify(files.map((file) => [file.path, file.contentHash]))).digest("hex"),
+            files,
+            changedFiles,
+            unchangedFiles,
+            deletedFiles,
+            staleFiles: 0,
+          });
+        },
+        extractFactsJson: () => JSON.stringify({ files: [], diagnostics: [] }),
+        buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: ["docs/guide.md"], packages: [], importEdges: [] } }),
+        indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
+        searchReferencesJson: () => JSON.stringify({ references: [] }),
+        searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
+        writeProductModelProjectionJson: () => undefined,
+        readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        writeSemanticIndexJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { index: unknown; chunks: Array<{ metadata: Record<string, unknown>; text: string; vector: number[] }> };
+          semanticIndex = request.index;
+          semanticChunks = request.chunks;
+        },
+        writeSemanticIndexDeltaJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as {
+            index: unknown;
+            chunks?: Array<{ metadata: Record<string, unknown>; text: string; vector: number[] }>;
+            removedPaths?: string[];
+          };
+          const removed = new Set(request.removedPaths ?? []);
+          semanticIndex = request.index;
+          semanticChunks = [
+            ...semanticChunks.filter((chunk) => !removed.has(String(chunk.metadata.path))),
+            ...(request.chunks ?? []),
+          ];
+        },
+        readSemanticIndexStatusJson: () => JSON.stringify({ index: semanticIndex }),
+        listSemanticChunksJson: () => JSON.stringify({ index: semanticIndex, chunks: semanticChunks.map((chunk) => chunk.metadata) }),
+        searchSemanticIndexJson: () => JSON.stringify({ index: semanticIndex, results: semanticChunks.map((chunk) => ({ chunk: chunk.metadata, score: 1 })) }),
+        embedSemanticTextsJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { task?: string; texts: string[]; modelId: string };
+          embedCalls.push({ task: request.task, texts: request.texts });
+          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => runtimeTestVector(index + 1)) });
+        },
+        generateTextJson: (requestJson: string) => {
+          const request = JSON.parse(requestJson) as { modelId: string };
+          return JSON.stringify({ modelId: request.modelId, text: "" });
+        },
+        startWatcherJson: (_requestJson: string, callback: (error: unknown, batchJson?: string) => void) => {
+          watcherCallback = callback;
+          return JSON.stringify({ running: true, debounceMs: 250, bufferCapacity: 128 });
+        },
+        drainWatcherEventsJson: () => JSON.stringify([]),
+        stopWatcher: () => undefined,
+        writeEventJson: () => undefined,
+        listEventsJson: () => JSON.stringify([]),
+        writeObservabilityRecordsJson: () => undefined,
+        listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
+        close: () => undefined,
+      }),
+    });
+
+    const server = await startOpenCanonRuntime({
+      cwd: rootDir,
+      port: 0,
+      runtime: { nodeVersion: process.versions.node, engine },
+    });
+    try {
+      const headers = runtimeAuthHeaders(server.authToken);
+      const initial = await fetch(server.url + "/api/index", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ response: "semantic-index" }),
+      });
+      const initialText = await initial.text();
+      assert.equal(initial.status, 200, initialText);
+      const initialEmbedCount = embedCalls.filter((call) => call.task === "document").length;
+      assert(initialEmbedCount >= 1);
+
+      writeFileSync(path.join(rootDir, "docs/guide.md"), "# Guide\n\nUpdated billing knowledge with supplier review.\n");
+      assert(watcherCallback, "runtime watcher callback was not registered");
+      watcherCallback(null, JSON.stringify({ rootDir, paths: ["docs/guide.md"], stale: false, timestamp: new Date().toISOString() }));
+
+      const refreshed = await waitForKnowledgeStatus(server.url, headers, (index) =>
+        index?.status === "ready" &&
+        index.embeddingStats?.filesChanged === 1 &&
+        index.embeddingStats?.vectorsWritten === 1 &&
+        embedCalls.filter((call) => call.task === "document").length > initialEmbedCount
+      );
+      assert.equal(refreshed.embeddingStats?.chunksChanged, 1);
+      assert.equal(refreshed.embeddingStats?.chunksRemoved, 1);
+    } finally {
+      await server.stop();
+    }
+  } finally {
+    if (previousRegistryPath === undefined) delete process.env.OPENCANON_SERVICE_REGISTRY_PATH;
+    else process.env.OPENCANON_SERVICE_REGISTRY_PATH = previousRegistryPath;
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
