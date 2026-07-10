@@ -356,7 +356,7 @@ Advanced and operations:
   opencanon graph callers <symbol>
   opencanon refactor rename-symbol <from> <to>
   opencanon state status
-  opencanon benchmark --sizes 1000,10000
+  opencanon benchmark --sizes 1000,10000 --source-snapshot
 
 Command groups:
   status     Show global service and current project runtime status.

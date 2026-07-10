@@ -9,12 +9,33 @@ import { Format } from "@opencanon/core";
 import { createProfiler } from "@opencanon/core";
 import type { ProfileEntry } from "@opencanon/core";
 import { createRuntime, createValidationContext, flushValidationContextCache } from "@opencanon/core";
+import { snapshotFiles } from "@opencanon/runtime";
 
 type BenchmarkQuery = {
   sizes: number[];
   format: Format;
   keep: boolean;
+  sourceSnapshot: boolean;
   help: boolean;
+};
+
+type MemorySample = {
+  rss: number;
+  heapUsed: number;
+  heapTotal: number;
+  external: number;
+  arrayBuffers: number;
+};
+
+type SourceSnapshotBenchmark = {
+  snapshots: number;
+  bytes: number;
+  elapsedMs: number;
+  memoryBefore: MemorySample;
+  memoryAfter: MemorySample;
+  memoryDelta: MemorySample;
+  bytesPerSnapshot: number;
+  heapDeltaPerSnapshot: number;
 };
 
 type BenchmarkResult = {
@@ -24,6 +45,7 @@ type BenchmarkResult = {
   discoverySource: string;
   diagnostics: string[];
   profile: ProfileEntry[];
+  sourceSnapshot?: SourceSnapshotBenchmark;
 };
 
 export async function runBenchmarkCommand(args = process.argv.slice(2)): Promise<void> {
@@ -34,7 +56,7 @@ export async function runBenchmarkCommand(args = process.argv.slice(2)): Promise
   }
 
   const results: BenchmarkResult[] = [];
-  for (const size of query.sizes) results.push(await runBenchmark(size, query.keep));
+  for (const size of query.sizes) results.push(await runBenchmark(size, query.keep, query.sourceSnapshot));
 
   if (query.format === Format.Json) {
     console.log(JSON.stringify({ results }, null, 2));
@@ -49,20 +71,22 @@ function parseArgs(args: string[]): BenchmarkQuery {
   cli.option("--sizes <sizes>", "Comma-separated file counts.");
   cli.option("--format <format>", "Output format.");
   cli.option("--keep", "Keep generated benchmark repos.");
+  cli.option("--source-snapshot", "Measure runtime source snapshot capture time and memory.");
 
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["help", "h", "sizes", "format", "keep"]);
+  rejectUnknownOptions(options, ["help", "h", "sizes", "format", "keep", "sourceSnapshot"]);
 
   return {
     sizes: parseSizes(optionValues(options.sizes)),
     format: formatOption(options.format),
     keep: booleanOption(options.keep),
+    sourceSnapshot: booleanOption(options.sourceSnapshot),
     help: booleanOption(options.help) || booleanOption(options.h),
   };
 }
 
-async function runBenchmark(size: number, keep: boolean): Promise<BenchmarkResult> {
+async function runBenchmark(size: number, keep: boolean, sourceSnapshot: boolean): Promise<BenchmarkResult> {
   const rootDir = mkdtempSync(path.join(tmpdir(), `opencanon-bench-${size}-`));
   const profiler = createProfiler(true);
 
@@ -85,6 +109,7 @@ async function runBenchmark(size: number, keep: boolean): Promise<BenchmarkResul
     profiler.measure("context.facts.comments", () => ctx.facts.comments());
     flushValidationContextCache(ctx);
     createRuntime(paths, []);
+    const sourceSnapshotBenchmark = sourceSnapshot ? runSourceSnapshotBenchmark(rootDir, discovery.files) : undefined;
 
     return {
       size,
@@ -93,6 +118,7 @@ async function runBenchmark(size: number, keep: boolean): Promise<BenchmarkResul
       discoverySource: discovery.source,
       diagnostics: discovery.diagnostics,
       profile: profiler.entries(),
+      ...(sourceSnapshotBenchmark ? { sourceSnapshot: sourceSnapshotBenchmark } : {}),
     };
   } finally {
     if (!keep) rmSync(rootDir, { recursive: true, force: true });
@@ -153,11 +179,76 @@ function renderBenchmarkMarkdown(results: BenchmarkResult[]): string {
     lines.push(`Files discovered: ${result.files}`);
     lines.push(`Discovery source: ${result.discoverySource}`);
     for (const diagnostic of result.diagnostics) lines.push(`- ${diagnostic}`);
+    if (result.sourceSnapshot) {
+      lines.push("");
+      lines.push("Source snapshot:");
+      lines.push(`- Snapshots: ${result.sourceSnapshot.snapshots}`);
+      lines.push(`- Captured bytes: ${formatBytes(result.sourceSnapshot.bytes)}`);
+      lines.push(`- Capture time: ${result.sourceSnapshot.elapsedMs.toFixed(3)}ms`);
+      lines.push(`- Heap delta: ${formatBytes(result.sourceSnapshot.memoryDelta.heapUsed)}`);
+      lines.push(`- RSS delta: ${formatBytes(result.sourceSnapshot.memoryDelta.rss)}`);
+      lines.push(`- Heap delta per snapshot: ${formatBytes(result.sourceSnapshot.heapDeltaPerSnapshot)}`);
+    }
     lines.push("");
     for (const entry of result.profile) lines.push(`- ${entry.name}: ${entry.ms.toFixed(3)}ms (${entry.count})`);
     lines.push("");
   }
   return lines.join("\n").trimEnd();
+}
+
+function runSourceSnapshotBenchmark(rootDir: string, files: string[]): SourceSnapshotBenchmark {
+  maybeGc();
+  const memoryBefore = memorySample();
+  const startedAt = performance.now();
+  const snapshots = snapshotFiles(rootDir, files);
+  const elapsedMs = performance.now() - startedAt;
+  const memoryAfter = memorySample();
+  const memoryDelta = subtractMemory(memoryAfter, memoryBefore);
+  const bytes = snapshots.reduce((total, snapshot) => total + snapshot.size, 0);
+  return {
+    snapshots: snapshots.length,
+    bytes,
+    elapsedMs,
+    memoryBefore,
+    memoryAfter,
+    memoryDelta,
+    bytesPerSnapshot: snapshots.length === 0 ? 0 : bytes / snapshots.length,
+    heapDeltaPerSnapshot: snapshots.length === 0 ? 0 : memoryDelta.heapUsed / snapshots.length,
+  };
+}
+
+function memorySample(): MemorySample {
+  const memory = process.memoryUsage();
+  return {
+    rss: memory.rss,
+    heapUsed: memory.heapUsed,
+    heapTotal: memory.heapTotal,
+    external: memory.external,
+    arrayBuffers: memory.arrayBuffers,
+  };
+}
+
+function subtractMemory(after: MemorySample, before: MemorySample): MemorySample {
+  return {
+    rss: after.rss - before.rss,
+    heapUsed: after.heapUsed - before.heapUsed,
+    heapTotal: after.heapTotal - before.heapTotal,
+    external: after.external - before.external,
+    arrayBuffers: after.arrayBuffers - before.arrayBuffers,
+  };
+}
+
+function maybeGc(): void {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (typeof gc === "function") gc();
+}
+
+function formatBytes(value: number): string {
+  const sign = value < 0 ? "-" : "";
+  const absolute = Math.abs(value);
+  if (absolute < 1024) return `${sign}${absolute.toFixed(0)}B`;
+  if (absolute < 1024 * 1024) return `${sign}${(absolute / 1024).toFixed(2)}KiB`;
+  return `${sign}${(absolute / (1024 * 1024)).toFixed(2)}MiB`;
 }
 
 function printHelp(): void {
@@ -169,5 +260,6 @@ Options:
   --sizes <sizes>          Comma-separated file counts. Default: 1000.
   --format markdown|json   Output format. Default: markdown.
   --keep                   Keep generated benchmark repos.
+  --source-snapshot        Measure runtime source snapshot capture time and memory.
 `);
 }
