@@ -6,10 +6,13 @@ export { createProjectStore, openProjectStore } from "./state.ts";
 export { createProjectObservabilityExporter } from "./observability.ts";
 export {
   buildProjectSemanticIndex,
+  buildProjectSemanticIndexDelta,
   createSemanticEmbeddingBackend,
   semanticSearchVectorForProvider,
 } from "./semantic-index.ts";
-export type { SemanticEmbeddingBackend } from "./semantic-index.ts";
+export type { ProjectSemanticIndexDeltaInput, SemanticEmbeddingBackend } from "./semantic-index.ts";
+export { createKnowledgeIndexManager } from "./knowledge-index-manager.ts";
+export type { KnowledgeIndexManager, KnowledgeIndexProgress, KnowledgeIndexRunOptions, KnowledgeIndexRunResult } from "./knowledge-index-manager.ts";
 export {
   askProjectContext,
   listProjectContextChunks,

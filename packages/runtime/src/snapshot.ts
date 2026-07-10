@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import {
   createValidationContext,
-  DefaultSemanticIndexId,
   buildDefinitionGraph,
   FixSafety,
   BatchProducerPolicy,
@@ -44,8 +43,7 @@ import {
 import type { Engine } from "@opencanon/engine";
 import type { ProjectStore } from "./state.ts";
 import { ENGINE_PARSER_VERSION } from "./ast-facts-provider.ts";
-import { buildProjectSemanticIndex } from "./semantic-index.ts";
-import { cachedSemanticIndexSnapshot, cachedStartupSemanticIndexSnapshot, listPreviousSemanticChunks } from "./semantic-index-snapshot.ts";
+import { cachedSemanticIndexSnapshot, cachedStartupSemanticIndexSnapshot } from "./semantic-index-snapshot.ts";
 import { activeTaskLeaseSummaries, listGlobalCanonEvents, mergeCanonEvents } from "./worktree-coordination.ts";
 import {
   buildProductModelProjection,
@@ -392,7 +390,6 @@ export async function buildRuntimeSnapshot(input: {
   engine: Engine;
   store: ProjectStore;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
-  semanticIndexMode?: "build" | "reuse";
   producerPolicy?: ProducerPolicy;
   validationResultCache: ValidationResultCache;
 }): Promise<RuntimeSnapshot> {
@@ -574,41 +571,11 @@ export async function buildRuntimeSnapshot(input: {
     validators,
     definitionGraph,
   });
-  let semanticIndexSnapshot: SemanticIndexSnapshot;
-  if (input.semanticIndexMode === "reuse") {
-    semanticIndexSnapshot = cachedSemanticIndexSnapshot({
-      scan,
-      store: input.store,
-      semanticEmbedding: project.paths.semanticEmbedding,
-    });
-  } else {
-    let semanticIndex = buildProjectSemanticIndex({
-      rootDir: project.paths.rootDir,
-      scan,
-      facts: facts.files,
-      project: input.store.project,
-      semanticEmbedding: input.semanticEmbedding ?? project.paths.semanticEmbedding,
-      previousChunks: listPreviousSemanticChunks(input.store),
-    });
-
-    try {
-      input.store.writeSemanticIndex(semanticIndex);
-    } catch (error) {
-      if (!isRecoverableSemanticVectorWriteError(error)) {
-        throw error;
-      }
-      semanticIndex = buildProjectSemanticIndex({
-        rootDir: project.paths.rootDir,
-        scan,
-        facts: facts.files,
-        project: input.store.project,
-        semanticEmbedding: input.semanticEmbedding ?? project.paths.semanticEmbedding,
-        previousChunks: [],
-      });
-      input.store.writeSemanticIndex(semanticIndex);
-    }
-    semanticIndexSnapshot = input.store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index ?? semanticIndex.index;
-  }
+  const semanticIndexSnapshot = cachedSemanticIndexSnapshot({
+    scan,
+    store: input.store,
+    semanticEmbedding: input.semanticEmbedding ?? project.paths.semanticEmbedding,
+  });
   input.store.writeSnapshot({ health, files: discovery.files, graph, findings, productModel });
   const storeState = input.store.readState();
 
@@ -645,17 +612,6 @@ export async function buildRuntimeSnapshot(input: {
     impactSurfaces,
     validators,
   };
-}
-
-function isRecoverableSemanticVectorWriteError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message.includes("Database corrupted") ||
-    message.includes("ID already exists") ||
-    message.includes("cannot reuse a missing or changed vector") ||
-    message.includes("WAL serialization error") ||
-    message.includes("semantic vector store")
-  );
 }
 
 export { buildRelatedCanon, findingSnapshotId, gitDiffSnapshot, gitHistorySnapshot, runtimeSnapshotFailure } from "./snapshot-related.ts";

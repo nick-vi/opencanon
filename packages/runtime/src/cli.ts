@@ -628,9 +628,10 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
   const cli = cac("opencanon project index");
   cli.option("-h, --help", "Show help.");
   cli.option("--format <format>", "Output format.");
+  cli.option("--force", "Clear Project Knowledge state and rebuild it from source.");
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnexpectedCommandInput(parsed.args, "opencanon project index", options, ["help", "h", "format"]);
+  rejectUnexpectedCommandInput(parsed.args, "opencanon project index", options, ["help", "h", "format", "force"]);
   if (options.help || options.h) {
     printProjectHelp();
     return;
@@ -641,12 +642,12 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
   if (format !== Format.Json) {
     console.log("# OpenCanon Project Index");
     console.log("");
-    console.log("Indexing Project Context...");
+    console.log(options.force === true ? "Rebuilding Project Knowledge..." : "Indexing Project Knowledge...");
     console.log("");
   }
   const snapshot = await requestLocalJson<{ state?: { semanticIndex?: SemanticIndexSnapshot }; semanticIndex?: SemanticIndexSnapshot | null }>(
     localProtocolEndpointFromEntry(inspection.entry),
-    { method: "POST", path: ApiRoute.Index, body: { response: ProjectIndexResponseMode.SemanticIndex } },
+    { method: "POST", path: ApiRoute.Index, body: { response: ProjectIndexResponseMode.SemanticIndex, force: options.force === true } },
   );
   const index = snapshot.state?.semanticIndex ?? snapshot.semanticIndex;
   if (format === Format.Json) {
@@ -778,6 +779,7 @@ function printProjectHelp(): void {
   opencanon project start --format json
   opencanon project start --foreground
   opencanon project index
+  opencanon project index --force
   opencanon project index --format json
   opencanon project logs --tail 200
   opencanon project logs --path

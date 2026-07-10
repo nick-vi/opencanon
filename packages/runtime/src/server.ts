@@ -68,7 +68,7 @@ import {
 } from "@opencanon/core";
 import { buildRuntimeSnapshot, buildStartupRuntimeSnapshot, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
-import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent } from "./server-events.ts";
+import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
 import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
 import { createRuntimeRouteHandler } from "./server-routes.ts";
 import { assertRuntimePrerequisites, formatHttpBaseUrl, renderPrerequisiteFailure, requiredNodeRequirement } from "./runtime.ts";
@@ -87,7 +87,8 @@ import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
-import { createRuntimeStateManager, RuntimeSemanticIndexMode, type RuntimeRebuildOptions } from "./state-manager.ts";
+import { createRuntimeStateManager, type RuntimeRebuildOptions } from "./state-manager.ts";
+import { createKnowledgeIndexManager, type KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
 import { ProjectFileLanguage, setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
 import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-facts-provider.ts";
 import { createProjectObservabilityExporter } from "./observability.ts";
@@ -387,11 +388,73 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   async function ensureProjectSnapshot(summary: string): Promise<RuntimeSnapshot> {
     const snapshot = await refreshCurrentSnapshot();
     if (snapshot.files.length > 0) return snapshot;
-    return await stateManager.rebuildAndPublish(summary, { semanticIndexMode: RuntimeSemanticIndexMode.Reuse });
+    return await stateManager.rebuildAndPublish(summary);
   }
 
-  async function buildIndexedSnapshot(summary: string): Promise<RuntimeSnapshot> {
-    return await stateManager.rebuildAndPublish(summary, { semanticIndexMode: RuntimeSemanticIndexMode.Build });
+  async function buildIndexedSnapshot(summary: string, options: { force?: boolean } = {}): Promise<RuntimeSnapshot> {
+    const jobId = beginWorkerJob({
+      kind: RuntimeWorkerJobKindValue.SemanticIndex,
+      label: options.force ? "Rebuilding Project Knowledge" : "Indexing Project Knowledge",
+      message: summary,
+    });
+    await withRuntimeBusyLifecycle(options.force ? "Project Knowledge rebuild is running." : "Project Knowledge indexing is running.", async () => {
+      const manager = createKnowledgeIndexManager({ rootDir, store });
+      await manager.index({
+        force: options.force,
+        onProgress(progress) {
+          publishKnowledgeIndexProgress(jobId, progress);
+        },
+      });
+    }).then(
+      () =>
+        finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
+          label: "Project Knowledge ready",
+          message: summary,
+        }),
+      (error) => {
+        finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
+          label: "Project Knowledge indexing failed",
+          message: errorMessage(error),
+        });
+        throw error;
+      },
+    );
+    return await stateManager.rebuildAndPublish(summary);
+  }
+
+  function publishKnowledgeIndexProgress(jobId: string, progress: KnowledgeIndexProgress): void {
+    updateWorkerJob(jobId, {
+      label: progress.label,
+      current: progress.current,
+      total: progress.total,
+      unit: progress.unit,
+      message: progress.label,
+    });
+    events.broadcast(indexingEvent(progress.label, {
+      phase: runtimeStreamPhaseForKnowledge(progress.phase),
+      label: progress.label,
+      current: progress.current,
+      total: progress.total,
+      unit: progress.unit,
+      indeterminate: progress.current === undefined || progress.total === undefined,
+    }));
+  }
+
+  function runtimeStreamPhaseForKnowledge(phase: KnowledgeIndexProgress["phase"]): RuntimeStreamProgress["phase"] {
+    switch (phase) {
+      case "scan":
+      case "diff":
+        return "file-discovery";
+      case "chunk":
+        return "chunking";
+      case "embed":
+        return "embedding";
+      case "write":
+      case "prewarm":
+        return "product-graph";
+      case "ready":
+        return "ready";
+    }
   }
 
   function startStoreWatcher(): void {
@@ -519,16 +582,15 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     startStoreWatcher();
   }
 
-  async function rebuildAndPublishNow(summary: string, options: Required<RuntimeRebuildOptions>): Promise<RuntimeSnapshot> {
-    const buildsSemanticIndex = options.semanticIndexMode === RuntimeSemanticIndexMode.Build;
+  async function rebuildAndPublishNow(summary: string, _options: RuntimeRebuildOptions): Promise<RuntimeSnapshot> {
     const jobId = beginWorkerJob({
       kind: RuntimeWorkerJobKindValue.SemanticIndex,
-      label: buildsSemanticIndex ? "Building Project Context" : "Refreshing Project State",
+      label: "Refreshing Project State",
       message: summary,
     });
     return withRuntimeBusyLifecycle(
-      buildsSemanticIndex ? "Project context indexing is running." : "Project state refresh is running.",
-      () => tracer.span("runtime.snapshot.rebuild", { kind: SpanKind.TASK, attributes: { summary, semanticIndexMode: options.semanticIndexMode } }, async (span) => {
+      "Project state refresh is running.",
+      () => tracer.span("runtime.snapshot.rebuild", { kind: SpanKind.TASK, attributes: { summary } }, async (span) => {
         try {
           updateWorkerJob(jobId, {
             label: "Discovering project files",
@@ -539,15 +601,15 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
             label: "Discovering project files",
             indeterminate: true,
           }));
-          const next = await rebuildSnapshot({ cwd: rootDir, store, semanticIndexMode: options.semanticIndexMode });
+          const next = await rebuildSnapshot({ cwd: rootDir, store });
           updateWorkerJob(jobId, {
             label: "Linking definitions and context",
             current: next.definitionGraph.nodes.length,
             total: next.definitionGraph.nodes.length,
             unit: "nodes",
-            message: buildsSemanticIndex ? "Building project map and semantic index." : "Building project map and reusing semantic index state.",
+            message: "Building project map and reading Project Knowledge state.",
           });
-          events.broadcast(indexingEvent(buildsSemanticIndex ? "Building project map and semantic index." : "Building project map and reusing semantic index state.", {
+          events.broadcast(indexingEvent("Building project map and reading Project Knowledge state.", {
             phase: "product-graph",
             label: "Linking definitions and context",
             current: next.definitionGraph.nodes.length,
@@ -557,7 +619,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           validatorGraphRuntime?.recordCurrentSourceSignature();
           store.writeEvent(indexedEvent(next, summary));
           finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
-            label: buildsSemanticIndex ? "Project context ready" : "Project state ready",
+            label: "Project state ready",
             current: next.files.length,
             total: next.files.length,
             unit: "files",
@@ -566,7 +628,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           const publishedSnapshot = withProcessIdentity(next);
           events.broadcast(indexingEvent(summary, {
             phase: "ready",
-            label: buildsSemanticIndex ? "Project context ready" : "Project state ready",
+            label: "Project state ready",
             current: next.files.length,
             total: next.files.length,
             unit: "files",
@@ -580,7 +642,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           return publishedSnapshot;
         } catch (error) {
           finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
-            label: buildsSemanticIndex ? "Project context refresh failed" : "Project state refresh failed",
+            label: "Project state refresh failed",
             message: errorMessage(error),
           });
           throw error;
@@ -621,13 +683,12 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     return entry.rootDir === rootDir && entry.pid === process.pid && entry.leaseId === processIdentity.leaseId;
   }
 
-  async function rebuildSnapshot(input: { cwd: string; store: ProjectStore; semanticIndexMode: RuntimeSemanticIndexMode }): Promise<RuntimeSnapshot> {
+  async function rebuildSnapshot(input: { cwd: string; store: ProjectStore }): Promise<RuntimeSnapshot> {
     try {
       return withProcessIdentity(await buildRuntimeSnapshot({
         cwd: rootDir,
         engine: prerequisites.engine,
         store: input.store,
-        semanticIndexMode: input.semanticIndexMode,
         producerPolicy: InteractiveProducerPolicy,
         validationResultCache: stateManager.validationResultCache(),
       }));

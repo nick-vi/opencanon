@@ -14,14 +14,7 @@ export type RuntimeStateManager = {
   stop(): void;
 };
 
-export const RuntimeSemanticIndexMode = {
-  Build: "build",
-  Reuse: "reuse",
-} as const;
-export type RuntimeSemanticIndexMode = (typeof RuntimeSemanticIndexMode)[keyof typeof RuntimeSemanticIndexMode];
-export type RuntimeRebuildOptions = {
-  semanticIndexMode?: RuntimeSemanticIndexMode;
-};
+export type RuntimeRebuildOptions = Record<string, never>;
 
 export type RuntimeStateManagerOptions = {
   initialSnapshot: RuntimeSnapshot;
@@ -29,7 +22,7 @@ export type RuntimeStateManagerOptions = {
   initialValidationResultCache: ValidationResultCache;
   maxQueuedRebuilds: number;
   isStopped(): boolean;
-  rebuildNow(summary: string, options: Required<RuntimeRebuildOptions>): Promise<RuntimeSnapshot>;
+  rebuildNow(summary: string, options: RuntimeRebuildOptions): Promise<RuntimeSnapshot>;
   readProjectInventory(): ProjectInventory;
   onRebuildError(error: unknown): void;
 };
@@ -40,7 +33,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   let validationResultCache = options.initialValidationResultCache;
   let rebuildInFlight: Promise<RuntimeSnapshot> | undefined;
   let watchRebuildInFlight: Promise<void> | undefined;
-  const queuedWatchRebuilds: Array<{ summary: string; options: Required<RuntimeRebuildOptions> }> = [];
+  const queuedWatchRebuilds: Array<{ summary: string; options: RuntimeRebuildOptions }> = [];
   const queuedWatchSummarySet = new Set<string>();
 
   async function rebuildAndPublish(summary: string, inputOptions?: RuntimeRebuildOptions): Promise<RuntimeSnapshot> {
@@ -66,7 +59,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     startWatchRebuildLoop();
   }
 
-  function queueWatchRebuild(summary: string, rebuildOptions: Required<RuntimeRebuildOptions>): void {
+  function queueWatchRebuild(summary: string, rebuildOptions: RuntimeRebuildOptions): void {
     if (queuedWatchSummarySet.has(summary)) return;
     if (queuedWatchRebuilds.length >= options.maxQueuedRebuilds) {
       const removed = queuedWatchRebuilds.shift();
@@ -128,7 +121,5 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
 }
 
 function normalizeRebuildOptions(options: RuntimeRebuildOptions | undefined): Required<RuntimeRebuildOptions> {
-  return {
-    semanticIndexMode: options?.semanticIndexMode ?? RuntimeSemanticIndexMode.Reuse,
-  };
+  return options ?? {};
 }

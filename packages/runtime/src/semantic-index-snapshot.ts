@@ -53,7 +53,6 @@ export function cachedSemanticIndexSnapshot(input: {
     if (!semanticIndexCacheCompatible(previous, providerCheck.provider)) {
       return resetIncompatibleSemanticIndexSnapshot({
         sourceInventoryHash: input.scan.inventoryHash,
-        store: input.store,
         semanticEmbedding: input.semanticEmbedding,
         previous,
       });
@@ -100,7 +99,6 @@ export function cachedStartupSemanticIndexSnapshot(
     if (!semanticIndexCacheCompatible(previous, providerCheck.provider)) {
       return resetIncompatibleSemanticIndexSnapshot({
         sourceInventoryHash: "startup-unscanned",
-        store,
         semanticEmbedding,
         previous,
       });
@@ -176,7 +174,6 @@ function missingSemanticIndexSnapshot(sourceInventoryHash: string, semanticEmbed
 
 function resetIncompatibleSemanticIndexSnapshot(input: {
   sourceInventoryHash: string;
-  store: ProjectStore;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
   previous: SemanticIndexSnapshot;
 }): SemanticIndexSnapshot {
@@ -187,9 +184,7 @@ function resetIncompatibleSemanticIndexSnapshot(input: {
     ...next.diagnostics,
     ...semanticIndexCacheResetDiagnostics(input.previous, next),
   ];
-  const index = { ...next, diagnostics };
-  input.store.writeSemanticIndex({ index, chunks: [] });
-  return input.store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index ?? index;
+  return { ...next, diagnostics };
 }
 
 function failedSemanticIndexSnapshot(input: {

@@ -29,9 +29,11 @@ import {
   type SemanticEmbeddingProvider,
   type SemanticIndexDiagnostic,
   type SemanticIndexSnapshot,
+  type WriteSemanticIndexDeltaRequest,
   type WriteSemanticIndexRequest,
 } from "@opencanon/core";
 import type { EngineProject } from "@opencanon/engine";
+import { semanticIndexAncestorNodeKeys, semanticIndexNodesForChunks } from "./semantic-index-nodes.ts";
 
 const MaxChunkChars = 2_400;
 const MinChunkChars = 800;
@@ -53,73 +55,19 @@ export type ProjectSemanticIndexBuildInput = {
   previousChunks?: SemanticChunkMetadata[] | undefined;
 };
 
+export type ProjectSemanticIndexDeltaInput = ProjectSemanticIndexBuildInput & {
+  previousIndex: SemanticIndexSnapshot;
+  previousChunks: SemanticChunkMetadata[];
+};
+
 export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput): WriteSemanticIndexRequest {
   const backend = createSemanticEmbeddingBackend(input.project, input.semanticEmbedding);
   const provider = backend.provider;
   const diagnostics: SemanticIndexDiagnostic[] = [];
   diagnostics.push(...backend.diagnostics);
-  const runtimeChunks: RuntimeSemanticChunk[] = [];
-  const factsByPath = new Map(input.facts.map((file) => [file.path, file]));
-  for (const file of input.scan.files) {
-    const fileFacts = factsByPath.get(file.path);
-    if (!isSemanticIndexableFile(file.path, fileFacts)) continue;
-    const absolutePath = path.join(input.rootDir, file.path);
-    let content: string;
-    try {
-      content = readFileSync(absolutePath, "utf8");
-    } catch (error) {
-      diagnostics.push({
-        code: "semantic-read-failed",
-        message: `Could not read ${file.path}: ${error instanceof Error ? error.message : String(error)}`,
-        severity: DiagnosticSeverity.Warning,
-        path: file.path,
-      });
-      continue;
-    }
-    if (isMarkdownFile(file.path) && markdownExcludedFromProjectContext(content)) {
-      diagnostics.push({
-        code: "semantic-markdown-excluded",
-        message: `Skipped ${file.path}: markdown declares itself historical or excluded from Project Context.`,
-        severity: DiagnosticSeverity.Info,
-        path: file.path,
-      });
-      continue;
-    }
-    const fileChunks = semanticChunksForFile({
-      path: file.path,
-      content,
-      contentHash: file.contentHash,
-      facts: fileFacts,
-    });
-    if (fileChunks.length === 0 && isEngineExtractableFile(file.path)) {
-      diagnostics.push({
-        code: "semantic-no-structured-chunks",
-        message: `No structured facts were available for ${file.path}; semantic indexing skipped whole-file fallback.`,
-        severity: DiagnosticSeverity.Info,
-        path: file.path,
-      });
-    }
-    for (const chunk of fileChunks) {
-      runtimeChunks.push(chunk);
-    }
-  }
+  const runtimeChunks = collectRuntimeSemanticChunks(input, diagnostics);
 
-  const chunksWithEmbeddingHash = uniquifySemanticChunkIds(runtimeChunks).map((chunk) => ({
-    metadata: {
-      ...chunk.metadata,
-      embeddingHash: semanticEmbeddingRecordHash({
-        chunkHash: chunk.metadata.chunkHash,
-        providerId: provider.id,
-        modelId: provider.modelId,
-        modelDigest: provider.modelDigest,
-        dimensions: provider.dimensions,
-        configHash: provider.configHash,
-        chunkerVersion: SemanticChunkerVersion,
-        producerVersion: SemanticEmbeddingProducerVersion,
-      }),
-    },
-    text: chunk.text,
-  }));
+  const chunksWithEmbeddingHash = runtimeChunksWithEmbeddingHash(runtimeChunks, provider);
   const previousEmbeddingHashes = new Map((input.previousChunks ?? []).map((chunk) => [chunk.id, chunk.embeddingHash]));
   const chunksNeedingEmbedding = chunksWithEmbeddingHash.filter((chunk) => previousEmbeddingHashes.get(chunk.metadata.id) !== chunk.metadata.embeddingHash);
   const reusedChunkCount = chunksWithEmbeddingHash.length - chunksNeedingEmbedding.length;
@@ -190,7 +138,99 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
     indexedAt: new Date().toISOString(),
     diagnostics,
   };
-  return { index, chunks };
+  return { index, chunks, nodes: semanticIndexNodesForChunks(chunks.map((chunk) => chunk.metadata)) };
+}
+
+export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaInput): WriteSemanticIndexDeltaRequest {
+  const backend = createSemanticEmbeddingBackend(input.project, input.semanticEmbedding);
+  const provider = backend.provider;
+  const diagnostics: SemanticIndexDiagnostic[] = [];
+  diagnostics.push(...backend.diagnostics);
+  const identityHash = semanticEmbeddingIdentityHash({
+    providerId: provider.id,
+    modelId: provider.modelId,
+    modelDigest: provider.modelDigest,
+    dimensions: provider.dimensions,
+    configHash: provider.configHash,
+    chunkerVersion: SemanticChunkerVersion,
+    producerVersion: SemanticEmbeddingProducerVersion,
+  });
+  if (input.previousIndex.identityHash !== identityHash) {
+    diagnostics.push({
+      code: "semantic-index-identity-changed",
+      message: "Project Knowledge provider identity changed. Run opencanon project index --force to rebuild vectors with the configured model.",
+      severity: DiagnosticSeverity.Error,
+    });
+  }
+
+  const changedPaths = new Set(input.scan.changedFiles);
+  const deletedPaths = new Set(input.scan.deletedFiles);
+  const changedRuntimeChunks = collectRuntimeSemanticChunks(input, diagnostics, changedPaths);
+  const changedChunksWithEmbeddingHash = runtimeChunksWithEmbeddingHash(changedRuntimeChunks, provider);
+  const previousRetainedChunks = input.previousChunks.filter((chunk) => !changedPaths.has(chunk.path) && !deletedPaths.has(chunk.path));
+  const finalMetadata = [...previousRetainedChunks, ...changedChunksWithEmbeddingHash.map((chunk) => chunk.metadata)]
+    .sort((left, right) => left.path.localeCompare(right.path) || left.id.localeCompare(right.id));
+  const vectorsByChunkId = new Map<string, number[]>();
+  let vectors: number[][] = [];
+  if (changedChunksWithEmbeddingHash.length > 0 && !hasSemanticIndexError(diagnostics)) {
+    try {
+      vectors = embedDocumentsInBatches(backend, changedChunksWithEmbeddingHash.map((chunk) => chunk.text));
+    } catch (error) {
+      diagnostics.push({
+        code: "semantic-embedding-failed",
+        message: `Could not embed semantic chunks with ${provider.modelId}: ${error instanceof Error ? error.message : String(error)}`,
+        severity: DiagnosticSeverity.Error,
+      });
+    }
+  }
+  if (changedChunksWithEmbeddingHash.length > 0 && vectors.length !== changedChunksWithEmbeddingHash.length) {
+    diagnostics.push({
+      code: "semantic-vector-count-mismatch",
+      message: `Semantic embedding provider returned ${vectors.length} vectors for ${changedChunksWithEmbeddingHash.length} changed chunks.`,
+      severity: DiagnosticSeverity.Error,
+    });
+    vectors = [];
+  }
+  for (const [index, chunk] of changedChunksWithEmbeddingHash.entries()) {
+    const vector = vectors[index];
+    if (vector) vectorsByChunkId.set(chunk.metadata.id, vector);
+  }
+  const chunks: SemanticChunkEmbedding[] = hasSemanticIndexError(diagnostics)
+    ? []
+    : changedChunksWithEmbeddingHash.map((chunk) => ({
+      metadata: chunk.metadata,
+      text: chunk.text,
+      vector: vectorsByChunkId.get(chunk.metadata.id) ?? [],
+    }));
+  const embeddedChunks = hasSemanticIndexError(diagnostics) ? 0 : changedChunksWithEmbeddingHash.length;
+  const index: SemanticIndexSnapshot = {
+    id: DefaultSemanticIndexId,
+    version: SemanticIndexVersion,
+    status: hasSemanticIndexError(diagnostics) ? "failed" : "ready",
+    provider,
+    chunkerVersion: SemanticChunkerVersion,
+    producerVersion: SemanticEmbeddingProducerVersion,
+    sourceInventoryHash: input.scan.inventoryHash,
+    chunkTreeHash: semanticChunkTreeHash(finalMetadata.map((metadata) => ({ metadata }))),
+    identityHash,
+    chunkCount: finalMetadata.length,
+    vectorCount: finalMetadata.length,
+    staleChunkCount: hasSemanticIndexError(diagnostics) ? finalMetadata.length : 0,
+    embeddingStats: {
+      totalChunks: finalMetadata.length,
+      embeddedChunks,
+      reusedChunks: Math.max(0, finalMetadata.length - embeddedChunks),
+    },
+    indexedAt: new Date().toISOString(),
+    diagnostics,
+  };
+  return {
+    index,
+    chunks,
+    removedPaths: [...new Set([...input.scan.deletedFiles, ...input.scan.changedFiles])],
+    removedNodeKeys: semanticIndexAncestorNodeKeys([...input.scan.deletedFiles, ...input.scan.changedFiles]),
+    nodes: semanticIndexNodesForChunks(finalMetadata),
+  };
 }
 
 function embedDocumentsInBatches(backend: SemanticEmbeddingBackend, texts: string[]): number[][] {
@@ -251,6 +291,80 @@ function uniquifySemanticChunkIds(chunks: RuntimeSemanticChunk[]): RuntimeSemant
       },
     };
   });
+}
+
+function collectRuntimeSemanticChunks(
+  input: Pick<ProjectSemanticIndexBuildInput, "rootDir" | "scan" | "facts">,
+  diagnostics: SemanticIndexDiagnostic[],
+  onlyPaths?: Set<string> | undefined,
+): RuntimeSemanticChunk[] {
+  const runtimeChunks: RuntimeSemanticChunk[] = [];
+  const factsByPath = new Map(input.facts.map((file) => [file.path, file]));
+  for (const file of input.scan.files) {
+    if (onlyPaths && !onlyPaths.has(file.path)) continue;
+    const fileFacts = factsByPath.get(file.path);
+    if (!isSemanticIndexableFile(file.path, fileFacts)) continue;
+    const absolutePath = path.join(input.rootDir, file.path);
+    let content: string;
+    try {
+      content = readFileSync(absolutePath, "utf8");
+    } catch (error) {
+      diagnostics.push({
+        code: "semantic-read-failed",
+        message: `Could not read ${file.path}: ${error instanceof Error ? error.message : String(error)}`,
+        severity: DiagnosticSeverity.Warning,
+        path: file.path,
+      });
+      continue;
+    }
+    if (isMarkdownFile(file.path) && markdownExcludedFromProjectContext(content)) {
+      diagnostics.push({
+        code: "semantic-markdown-excluded",
+        message: `Skipped ${file.path}: markdown declares itself historical or excluded from Project Context.`,
+        severity: DiagnosticSeverity.Info,
+        path: file.path,
+      });
+      continue;
+    }
+    const fileChunks = semanticChunksForFile({
+      path: file.path,
+      content,
+      contentHash: file.contentHash,
+      facts: fileFacts,
+    });
+    if (fileChunks.length === 0 && isEngineExtractableFile(file.path)) {
+      diagnostics.push({
+        code: "semantic-no-structured-chunks",
+        message: `No structured facts were available for ${file.path}; semantic indexing skipped whole-file fallback.`,
+        severity: DiagnosticSeverity.Info,
+        path: file.path,
+      });
+    }
+    runtimeChunks.push(...fileChunks);
+  }
+  return runtimeChunks;
+}
+
+function runtimeChunksWithEmbeddingHash(runtimeChunks: RuntimeSemanticChunk[], provider: SemanticEmbeddingProvider): Array<{
+  metadata: SemanticChunkMetadata;
+  text: string;
+}> {
+  return uniquifySemanticChunkIds(runtimeChunks).map((chunk) => ({
+    metadata: {
+      ...chunk.metadata,
+      embeddingHash: semanticEmbeddingRecordHash({
+        chunkHash: chunk.metadata.chunkHash,
+        providerId: provider.id,
+        modelId: provider.modelId,
+        modelDigest: provider.modelDigest,
+        dimensions: provider.dimensions,
+        configHash: provider.configHash,
+        chunkerVersion: SemanticChunkerVersion,
+        producerVersion: SemanticEmbeddingProducerVersion,
+      }),
+    },
+    text: chunk.text,
+  }));
 }
 
 export function semanticSearchVectorForProvider(input: {

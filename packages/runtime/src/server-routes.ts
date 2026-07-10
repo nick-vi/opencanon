@@ -83,7 +83,7 @@ export type RuntimeRouteHandlerInput = {
   resetIdleTimer(): void;
   refreshCurrentSnapshot(): Promise<RuntimeSnapshot>;
   ensureProjectSnapshot(summary: string): Promise<RuntimeSnapshot>;
-  buildIndexedSnapshot(summary: string): Promise<RuntimeSnapshot>;
+  buildIndexedSnapshot(summary: string, options?: { force?: boolean }): Promise<RuntimeSnapshot>;
   restartStore(): Promise<void>;
 };
 
@@ -515,7 +515,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.Index && request.method === "POST") {
         const body = await readJsonBody(request);
-        const snapshot = await buildIndexedSnapshot("Manual reindex completed.");
+        const snapshot = await buildIndexedSnapshot("Manual reindex completed.", { force: body.force === true });
         if (body.response === ProjectIndexResponseMode.SemanticIndex) {
           return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
         }
