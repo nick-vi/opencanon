@@ -756,6 +756,9 @@ function renderProjectContextStatusMarkdown(result: ReadSemanticIndexStatusResul
   lines.push(`Indexed: ${result.index.indexedAt}`);
   if (result.index.embeddingStats) {
     lines.push(`Embeddings: ${result.index.embeddingStats.embeddedChunks} embedded, ${result.index.embeddingStats.reusedChunks} reused of ${result.index.embeddingStats.totalChunks}`);
+    lines.push(`Files: ${result.index.embeddingStats.filesScanned ?? 0} scanned, ${result.index.embeddingStats.filesChanged ?? 0} changed, ${result.index.embeddingStats.filesDeleted ?? 0} deleted`);
+    lines.push(`Chunks: ${result.index.embeddingStats.chunksAdded ?? 0} added, ${result.index.embeddingStats.chunksChanged ?? 0} changed, ${result.index.embeddingStats.chunksRemoved ?? 0} removed`);
+    lines.push(`Vectors: ${result.index.embeddingStats.vectorsWritten ?? result.index.embeddingStats.embeddedChunks} written, ${result.index.embeddingStats.vectorsReused ?? result.index.embeddingStats.reusedChunks} reused`);
   }
   if (result.index.diagnostics.length > 0) {
     lines.push("", "Diagnostics:");

@@ -681,6 +681,11 @@ with `index=1` build native vectors. Semantic retrieval routes fail fast
 with `semantic-index-not-ready` when the index is missing, stale, failed, or
 still indexing.
 
+Project Knowledge status is explicit: `missing`, `indexing`, `ready`, `stale`,
+or `failed`. Index snapshots expose file, chunk, and vector counters so agents
+and humans can tell whether a run scanned, changed, deleted, embedded, reused,
+or removed derived Knowledge state.
+
 Validation:
 
 ```bash

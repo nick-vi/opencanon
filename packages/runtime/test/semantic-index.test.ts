@@ -69,6 +69,14 @@ test("runtime semantic index chunks files with native vectors", () => {
       totalChunks: 1,
       embeddedChunks: 1,
       reusedChunks: 0,
+      filesScanned: 2,
+      filesChanged: 1,
+      filesDeleted: 0,
+      chunksAdded: 1,
+      chunksChanged: 0,
+      chunksRemoved: 0,
+      vectorsWritten: 1,
+      vectorsReused: 0,
     });
     assert.equal(build.chunks.length, 1);
     const summary = build.chunks.find((chunk) => chunk.metadata.kind === "text");
@@ -722,6 +730,14 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
       totalChunks: 2,
       embeddedChunks: 2,
       reusedChunks: 0,
+      filesScanned: 2,
+      filesChanged: 2,
+      filesDeleted: 0,
+      chunksAdded: 2,
+      chunksChanged: 0,
+      chunksRemoved: 0,
+      vectorsWritten: 2,
+      vectorsReused: 0,
     });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].texts.length, 2);
@@ -755,6 +771,14 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
       totalChunks: 2,
       embeddedChunks: 1,
       reusedChunks: 1,
+      filesScanned: 2,
+      filesChanged: 1,
+      filesDeleted: 0,
+      chunksAdded: 2,
+      chunksChanged: 0,
+      chunksRemoved: 0,
+      vectorsWritten: 1,
+      vectorsReused: 1,
     });
     assert.equal(calls.length, 2);
     assert.equal(calls[1].texts.length, 1);
@@ -1091,6 +1115,13 @@ test("semantic index delta embeds zero chunks for a warm no-op inventory", () =>
     assert.equal(delta.chunks?.length ?? 0, 0);
     assert.equal(delta.index.embeddingStats?.embeddedChunks, 0);
     assert.equal(delta.index.embeddingStats?.reusedChunks, previous.chunks.length);
+    assert.equal(delta.index.embeddingStats?.filesScanned, 1);
+    assert.equal(delta.index.embeddingStats?.filesChanged, 0);
+    assert.equal(delta.index.embeddingStats?.filesDeleted, 0);
+    assert.equal(delta.index.embeddingStats?.chunksChanged, 0);
+    assert.equal(delta.index.embeddingStats?.chunksRemoved, 0);
+    assert.equal(delta.index.embeddingStats?.vectorsWritten, 0);
+    assert.equal(delta.index.embeddingStats?.vectorsReused, previous.chunks.length);
     assert.deepEqual(delta.removedPaths ?? [], []);
     assert.equal(calls.length, 0);
   } finally {
@@ -1151,6 +1182,14 @@ test("semantic index delta embeds only changed file chunks", () => {
     assert.deepEqual(delta.removedPaths ?? [], ["docs/inventory.md"]);
     assert.equal(delta.index.embeddingStats?.embeddedChunks, 1);
     assert.equal(delta.index.embeddingStats?.reusedChunks, previous.chunks.length - 1);
+    assert.equal(delta.index.embeddingStats?.filesScanned, 2);
+    assert.equal(delta.index.embeddingStats?.filesChanged, 1);
+    assert.equal(delta.index.embeddingStats?.filesDeleted, 0);
+    assert.equal(delta.index.embeddingStats?.chunksAdded, 0);
+    assert.equal(delta.index.embeddingStats?.chunksChanged, 1);
+    assert.equal(delta.index.embeddingStats?.chunksRemoved, 1);
+    assert.equal(delta.index.embeddingStats?.vectorsWritten, 1);
+    assert.equal(delta.index.embeddingStats?.vectorsReused, previous.chunks.length - 1);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].texts.length, 1);
     assert(calls[0].texts[0].includes("supplier review"));

@@ -121,6 +121,14 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
       totalChunks: chunksWithEmbeddingHash.length,
       embeddedChunks: chunksNeedingEmbedding.length,
       reusedChunks: reusedChunkCount,
+      filesScanned: input.scan.files.length,
+      filesChanged: input.scan.changedFiles.length,
+      filesDeleted: input.scan.deletedFiles.length,
+      chunksAdded: chunksWithEmbeddingHash.length,
+      chunksChanged: 0,
+      chunksRemoved: 0,
+      vectorsWritten: chunksNeedingEmbedding.length,
+      vectorsReused: reusedChunkCount,
     },
     indexedAt: new Date().toISOString(),
     diagnostics,
@@ -155,6 +163,7 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
   const deletedPaths = new Set(input.scan.deletedFiles);
   const changedRuntimeChunks = collectRuntimeSemanticChunks(input, diagnostics, changedPaths);
   const changedChunksWithEmbeddingHash = runtimeChunksWithEmbeddingHash(changedRuntimeChunks, provider);
+  const previousRemovedChunks = input.previousChunks.filter((chunk) => changedPaths.has(chunk.path) || deletedPaths.has(chunk.path));
   const previousRetainedChunks = input.previousChunks.filter((chunk) => !changedPaths.has(chunk.path) && !deletedPaths.has(chunk.path));
   const finalMetadata = [...previousRetainedChunks, ...changedChunksWithEmbeddingHash.map((chunk) => chunk.metadata)]
     .sort((left, right) => left.path.localeCompare(right.path) || left.id.localeCompare(right.id));
@@ -208,6 +217,14 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
       totalChunks: finalMetadata.length,
       embeddedChunks,
       reusedChunks: Math.max(0, finalMetadata.length - embeddedChunks),
+      filesScanned: input.scan.files.length,
+      filesChanged: input.scan.changedFiles.length,
+      filesDeleted: input.scan.deletedFiles.length,
+      chunksAdded: Math.max(0, changedChunksWithEmbeddingHash.length - previousRemovedChunks.length),
+      chunksChanged: changedChunksWithEmbeddingHash.length,
+      chunksRemoved: previousRemovedChunks.length,
+      vectorsWritten: embeddedChunks,
+      vectorsReused: Math.max(0, finalMetadata.length - embeddedChunks),
     },
     indexedAt: new Date().toISOString(),
     diagnostics,

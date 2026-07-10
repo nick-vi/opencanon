@@ -118,6 +118,9 @@ export function renderSemanticIndexLines(index: SemanticIndexSnapshot): string[]
   ];
   if (index.embeddingStats) {
     lines.push(`Embeddings: ${index.embeddingStats.embeddedChunks} embedded, ${index.embeddingStats.reusedChunks} reused of ${index.embeddingStats.totalChunks}`);
+    lines.push(`Files: ${index.embeddingStats.filesScanned ?? 0} scanned, ${index.embeddingStats.filesChanged ?? 0} changed, ${index.embeddingStats.filesDeleted ?? 0} deleted`);
+    lines.push(`Chunks: ${index.embeddingStats.chunksAdded ?? 0} added, ${index.embeddingStats.chunksChanged ?? 0} changed, ${index.embeddingStats.chunksRemoved ?? 0} removed`);
+    lines.push(`Vectors: ${index.embeddingStats.vectorsWritten ?? index.embeddingStats.embeddedChunks} written, ${index.embeddingStats.vectorsReused ?? index.embeddingStats.reusedChunks} reused`);
   }
   if (index.diagnostics.length > 0) {
     lines.push("", "Diagnostics:");
