@@ -357,6 +357,34 @@ test("feedback auto-loads governing conventions and renders advisory-only missin
   }
 });
 
+test("feedback --changed succeeds with empty feedback when no files changed", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-feedback-empty-"));
+  try {
+    const gitInit = spawnSync("git", ["init", "--initial-branch", "main"], { cwd: rootDir, encoding: "utf8" });
+    assert.equal(gitInit.status, 0, gitInit.stderr);
+    const result = spawnSync(process.execPath, [path.join(process.cwd(), "packages/cli/src/index.ts"), "feedback", "--changed", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout) as {
+      files: string[];
+      diagnostics: string[];
+      findingCount: number;
+      suppressedCount: number;
+      findings: unknown[];
+    };
+    assert.deepEqual(payload.files, []);
+    assert.deepEqual(payload.diagnostics, []);
+    assert.equal(payload.findingCount, 0);
+    assert.equal(payload.suppressedCount, 0);
+    assert.deepEqual(payload.findings, []);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("feedback includes related change context and scope drift", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-feedback-change-"));
   try {

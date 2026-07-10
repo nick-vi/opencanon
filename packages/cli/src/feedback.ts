@@ -50,6 +50,20 @@ export async function runFeedbackCommand(args = process.argv.slice(2), cwd = pro
     files = unique([...files, ...changed.files.filter((file) => matchesProjectFileScope(paths, file))]);
   }
 
+  const format = formatOption(options.format);
+  if (files.length === 0 && booleanOption(options.changed)) {
+    const result: FeedbackResult = {
+      host: "manual",
+      files: [],
+      diagnostics: [],
+      findingCount: 0,
+      suppressedCount: 0,
+      findings: [],
+    };
+    console.log(formatFeedbackResult(result, format, { emptyMessage: true }));
+    return;
+  }
+
   if (files.length === 0) {
     printFeedbackHelp();
     process.exit(1);
@@ -62,7 +76,6 @@ export async function runFeedbackCommand(args = process.argv.slice(2), cwd = pro
       dedupeScope: dedupeScopeOption(options.dedupeScope),
     }),
   );
-  const format = formatOption(options.format);
   console.log(formatFeedbackResult(result, format, { emptyMessage: true }));
   process.exit(feedbackExitCode(result, booleanOption(options.strictWarnings)));
 }
