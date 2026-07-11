@@ -31,7 +31,7 @@ opencanon project index
 opencanon project logs --tail 200
 opencanon project stop`;
   const diagnosticCommands = `opencanon doctor
-opencanon benchmark --sizes 1000,10000,50000 --source-snapshot`;
+opencanon benchmark --sizes 1000,10000,50000 --file-kb 8 --source-snapshot-only`;
   const updateCommands = `opencanon update check --manifest ./opencanon-runtime-manifest.json
 opencanon update apply --manifest ./opencanon-runtime-manifest.json --dry-run`;
   const baselineCommands = `opencanon baseline check

@@ -13,9 +13,11 @@ import { snapshotFiles } from "@opencanon/runtime";
 
 type BenchmarkQuery = {
   sizes: number[];
+  fileKb: number;
   format: Format;
   keep: boolean;
   sourceSnapshot: boolean;
+  sourceSnapshotOnly: boolean;
   help: boolean;
 };
 
@@ -56,7 +58,17 @@ export async function runBenchmarkCommand(args = process.argv.slice(2)): Promise
   }
 
   const results: BenchmarkResult[] = [];
-  for (const size of query.sizes) results.push(await runBenchmark(size, query.keep, query.sourceSnapshot));
+  for (const size of query.sizes) {
+    results.push(
+      await runBenchmark({
+        size,
+        fileKb: query.fileKb,
+        keep: query.keep,
+        sourceSnapshot: query.sourceSnapshot || query.sourceSnapshotOnly,
+        sourceSnapshotOnly: query.sourceSnapshotOnly,
+      }),
+    );
+  }
 
   if (query.format === Format.Json) {
     console.log(JSON.stringify({ results }, null, 2));
@@ -69,46 +81,59 @@ function parseArgs(args: string[]): BenchmarkQuery {
   const cli = cac("opencanon benchmark");
   cli.option("-h, --help", "Show help.");
   cli.option("--sizes <sizes>", "Comma-separated file counts.");
+  cli.option("--file-kb <kb>", "Approximate generated TypeScript file size in KiB.");
   cli.option("--format <format>", "Output format.");
   cli.option("--keep", "Keep generated benchmark repos.");
   cli.option("--source-snapshot", "Measure runtime source snapshot capture time and memory.");
+  cli.option("--source-snapshot-only", "Measure source snapshot capture without validation context parsing.");
 
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["help", "h", "sizes", "format", "keep", "sourceSnapshot"]);
+  rejectUnknownOptions(options, ["help", "h", "sizes", "fileKb", "format", "keep", "sourceSnapshot", "sourceSnapshotOnly"]);
 
   return {
     sizes: parseSizes(optionValues(options.sizes)),
+    fileKb: parseFileKb(options.fileKb),
     format: formatOption(options.format),
     keep: booleanOption(options.keep),
     sourceSnapshot: booleanOption(options.sourceSnapshot),
+    sourceSnapshotOnly: booleanOption(options.sourceSnapshotOnly),
     help: booleanOption(options.help) || booleanOption(options.h),
   };
 }
 
-async function runBenchmark(size: number, keep: boolean, sourceSnapshot: boolean): Promise<BenchmarkResult> {
+async function runBenchmark(input: {
+  size: number;
+  fileKb: number;
+  keep: boolean;
+  sourceSnapshot: boolean;
+  sourceSnapshotOnly: boolean;
+}): Promise<BenchmarkResult> {
+  const { size, fileKb, keep, sourceSnapshot, sourceSnapshotOnly } = input;
   const rootDir = mkdtempSync(path.join(tmpdir(), `opencanon-bench-${size}-`));
   const profiler = createProfiler(true);
 
   try {
-    profiler.measure("benchmark.generate", () => generateBenchmarkRepo(rootDir, size));
+    profiler.measure("benchmark.generate", () => generateBenchmarkRepo(rootDir, size, fileKb));
     const paths = createPaths(rootDir);
     const discovery = profiler.measure("discover.project", () => discoverProjectFiles(paths));
-    const ctx = profiler.measure("context.create", () =>
-      createValidationContext({
-        rootDir,
-        paths,
-        files: discovery.files,
-        targetFiles: discovery.files,
-        analysisFiles: discovery.files,
-        validator: { id: "benchmark", severity: "warning" },
-        profiler,
-      }),
-    );
-    profiler.measure("context.facts.imports", () => ctx.facts.imports());
-    profiler.measure("context.facts.comments", () => ctx.facts.comments());
-    flushValidationContextCache(ctx);
-    createRuntime(paths, []);
+    if (!sourceSnapshotOnly) {
+      const ctx = profiler.measure("context.create", () =>
+        createValidationContext({
+          rootDir,
+          paths,
+          files: discovery.files,
+          targetFiles: discovery.files,
+          analysisFiles: discovery.files,
+          validator: { id: "benchmark", severity: "warning" },
+          profiler,
+        }),
+      );
+      profiler.measure("context.facts.imports", () => ctx.facts.imports());
+      profiler.measure("context.facts.comments", () => ctx.facts.comments());
+      flushValidationContextCache(ctx);
+      createRuntime(paths, []);
+    }
     const sourceSnapshotBenchmark = sourceSnapshot ? runSourceSnapshotBenchmark(rootDir, discovery.files) : undefined;
 
     return {
@@ -125,7 +150,7 @@ async function runBenchmark(size: number, keep: boolean, sourceSnapshot: boolean
   }
 }
 
-function generateBenchmarkRepo(rootDir: string, size: number): void {
+function generateBenchmarkRepo(rootDir: string, size: number, fileKb: number): void {
   mkdirSync(path.join(rootDir, "src/services"), { recursive: true });
   mkdirSync(path.join(rootDir, "src/shared"), { recursive: true });
   writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ name: "opencanon-benchmark", type: "module" }, null, 2));
@@ -146,13 +171,22 @@ function generateBenchmarkRepo(rootDir: string, size: number): void {
   );
   writeFileSync(path.join(rootDir, ".gitignore"), "dist/\ncoverage/\n");
   writeFileSync(path.join(rootDir, "src/shared/util.ts"), "export function util(value: string) { return value.trim(); }\n");
+  const padding = benchmarkFilePadding(fileKb);
   for (let index = 0; index < size; index += 1) {
     writeFileSync(
       path.join(rootDir, "src/services", `company-${index}.service.ts`),
-      `import { util } from "../shared/util";\n\nexport function company${index}() {\n  return util("${index}");\n}\n`,
+      `import { util } from "../shared/util";\n\n${padding}export function company${index}() {\n  return util("${index}");\n}\n`,
     );
   }
   spawnSync("git", ["init"], { cwd: rootDir, stdio: "ignore" });
+}
+
+function benchmarkFilePadding(fileKb: number): string {
+  if (fileKb <= 1) return "";
+  const targetBytes = fileKb * 1024;
+  const line = "const benchmarkPayload = \"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\";\n";
+  const lines = Math.ceil(targetBytes / Buffer.byteLength(line));
+  return line.repeat(lines);
 }
 
 function parseSizes(values: string[]): number[] {
@@ -160,6 +194,14 @@ function parseSizes(values: string[]): number[] {
   const sizes = raw.map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0);
   if (sizes.length === 0) fail("--sizes must contain positive integers.");
   return sizes;
+}
+
+function parseFileKb(value: unknown): number {
+  if (value === undefined) return 1;
+  const raw = Array.isArray(value) ? value.at(-1) : value;
+  const parsed = Number(String(raw).trim());
+  if (!Number.isInteger(parsed) || parsed <= 0) fail("--file-kb must be a positive integer.");
+  return parsed;
 }
 
 function optionValues(value: unknown): string[] {
@@ -258,8 +300,10 @@ function printHelp(): void {
 
 Options:
   --sizes <sizes>          Comma-separated file counts. Default: 1000.
+  --file-kb <kb>           Approximate generated TypeScript file size in KiB. Default: 1.
   --format markdown|json   Output format. Default: markdown.
   --keep                   Keep generated benchmark repos.
   --source-snapshot        Measure runtime source snapshot capture time and memory.
+  --source-snapshot-only   Measure source snapshot capture without validation context parsing.
 `);
 }
