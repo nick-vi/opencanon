@@ -1,5 +1,6 @@
 mod support;
 
+mod activity;
 mod code_graph;
 mod jobs;
 mod observability;

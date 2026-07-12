@@ -200,6 +200,19 @@ export const CanonEventSchema = z.object({
 });
 export type CanonEvent = z.infer<typeof CanonEventSchema>;
 
+export type CanonEventQuery =
+  | {
+      mode: "recent";
+      limit: number;
+      changeId?: string;
+      taskId?: string;
+      checkId?: string;
+    }
+  | {
+      mode: "change-history";
+      changeId: string;
+    };
+
 export const EngineVersionSchema = z.object({
   packageVersion: z.string().min(1),
   engineVersion: z.string().min(1),

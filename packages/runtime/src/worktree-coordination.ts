@@ -14,6 +14,7 @@ import {
   WorktreeVcsKind,
   createOpenCanonDiagnostic,
   type CanonEvent,
+  type CanonEventQuery,
   type RepositoryIdentity,
   type TaskLease,
   type TaskLeaseClaimResult,
@@ -22,7 +23,7 @@ import {
   type WorktreeRecord,
 } from "@opencanon/core";
 
-const CoordinationSchemaVersion = 1;
+const CoordinationSchemaVersion = 2;
 const DefaultLeaseTtlMs = 12 * 60 * 60 * 1000;
 const WorktreeDbEnv = "OPENCANON_WORKTREE_DB";
 
@@ -89,6 +90,31 @@ const SqlText = {
       event_json text not null,
       created_at text not null
     ) strict;
+
+    create table if not exists activity_event_links (
+      repo_key text not null,
+      event_id text not null,
+      kind text not null check (kind in ('change', 'task', 'check')),
+      value text not null,
+      primary key(repo_key, event_id, kind, value),
+      foreign key(event_id) references activity_events(id) on delete cascade
+    ) strict;
+
+    create index if not exists activity_event_links_lookup
+      on activity_event_links(repo_key, kind, value, event_id);
+  `,
+  BackfillEventLinks: `
+    insert or ignore into activity_event_links(repo_key, event_id, kind, value)
+    select activity_events.repo_key, activity_events.id, 'change', json_each.value
+    from activity_events, json_each(activity_events.event_json, '$.changeIds');
+
+    insert or ignore into activity_event_links(repo_key, event_id, kind, value)
+    select activity_events.repo_key, activity_events.id, 'task', json_each.value
+    from activity_events, json_each(activity_events.event_json, '$.taskIds');
+
+    insert or ignore into activity_event_links(repo_key, event_id, kind, value)
+    select activity_events.repo_key, activity_events.id, 'check', json_each.value
+    from activity_events, json_each(activity_events.event_json, '$.checkIds');
   `,
 } as const;
 
@@ -261,25 +287,62 @@ export function writeGlobalCanonEvent(rootDir: string, event: CanonEvent): void 
   let shouldSignal = false;
   try {
     upsertRepository(db, repository);
+    db.exec("begin immediate");
     db.prepare(
-      `insert or ignore into activity_events(id, repo_key, timestamp, event_json, created_at)
-       values (?, ?, ?, ?, ?)`,
+      `insert into activity_events(id, repo_key, timestamp, event_json, created_at)
+       values (?, ?, ?, ?, ?)
+       on conflict(id) do update set
+         repo_key = excluded.repo_key,
+         timestamp = excluded.timestamp,
+         event_json = excluded.event_json`,
     ).run(event.id, repository.repoKey, event.timestamp, JSON.stringify(event), nowIso());
+    db.prepare("delete from activity_event_links where event_id = ?").run(event.id);
+    const insertLink = db.prepare("insert into activity_event_links(repo_key, event_id, kind, value) values (?, ?, ?, ?)");
+    for (const [kind, values] of canonEventLinks(event)) {
+      for (const value of values) insertLink.run(repository.repoKey, event.id, kind, value);
+    }
+    db.exec("commit");
     shouldSignal = true;
+  } catch (error) {
+    rollbackQuietly(db);
+    throw error;
   } finally {
     db.close();
     if (shouldSignal) touchWorktreeCoordinationSignal();
   }
 }
 
-export function listGlobalCanonEvents(rootDir: string, limit = 50): CanonEvent[] {
+export function listGlobalCanonEvents(rootDir: string, query: CanonEventQuery): CanonEvent[] {
   const repository = resolveRepositoryIdentity(rootDir);
   const db = openCoordinationDb();
   try {
     upsertRepository(db, repository);
+    const completeHistory = query.mode === "change-history";
+    const changeId = completeHistory ? query.changeId : query.changeId ?? null;
+    const taskId = completeHistory ? null : query.taskId ?? null;
+    const checkId = completeHistory ? null : query.checkId ?? null;
+    const limit = completeHistory ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.min(500, query.limit));
     return db
-      .prepare("select event_json from activity_events where repo_key = ? order by timestamp desc, id desc limit ?")
-      .all(repository.repoKey, limit)
+      .prepare(
+        `select event.event_json
+         from activity_events event
+         where event.repo_key = ?
+           and (? is null or exists (
+             select 1 from activity_event_links link
+             where link.repo_key = event.repo_key and link.event_id = event.id and link.kind = 'change' and link.value = ?
+           ))
+           and (? is null or exists (
+             select 1 from activity_event_links link
+             where link.repo_key = event.repo_key and link.event_id = event.id and link.kind = 'task' and link.value = ?
+           ))
+           and (? is null or exists (
+             select 1 from activity_event_links link
+             where link.repo_key = event.repo_key and link.event_id = event.id and link.kind = 'check' and link.value = ?
+           ))
+         order by event.timestamp desc, event.id desc
+         limit ?`,
+      )
+      .all(repository.repoKey, changeId, changeId, taskId, taskId, checkId, checkId, limit)
       .map((row) => CanonEventSchema.parse(JSON.parse(String((row as { event_json: unknown }).event_json))));
   } finally {
     db.close();
@@ -585,9 +648,35 @@ function openCoordinationDb(): DatabaseSync {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec("pragma busy_timeout = 5000");
+  db.exec("pragma foreign_keys = on");
   db.exec(SqlText.CreateTables);
-  db.prepare("insert or replace into metadata(key, value) values ('schema_version', ?)").run(String(CoordinationSchemaVersion));
+  const schemaRow = db.prepare("select value from metadata where key = 'schema_version'").get() as { value?: unknown } | undefined;
+  const schemaVersion = schemaRow ? Number(schemaRow.value) : 0;
+  if (!Number.isInteger(schemaVersion) || schemaVersion < 0 || schemaVersion > CoordinationSchemaVersion) {
+    db.close();
+    throw new Error(`Unsupported OpenCanon coordination schema version: ${String(schemaRow?.value ?? "missing")}.`);
+  }
+  if (schemaVersion < 2) {
+    db.exec("begin immediate");
+    try {
+      db.exec(SqlText.BackfillEventLinks);
+      db.prepare("insert or replace into metadata(key, value) values ('schema_version', ?)").run(String(CoordinationSchemaVersion));
+      db.exec("commit");
+    } catch (error) {
+      rollbackQuietly(db);
+      db.close();
+      throw error;
+    }
+  }
   return db;
+}
+
+function canonEventLinks(event: CanonEvent): Array<["change" | "task" | "check", string[]]> {
+  return [
+    ["change", event.changeIds],
+    ["task", event.taskIds],
+    ["check", event.checkIds],
+  ];
 }
 
 function touchWorktreeCoordinationSignal(): void {

@@ -38,6 +38,7 @@ import type { Engine } from "@opencanon/engine";
 import type { ProjectStore } from "./state.ts";
 import { cachedSemanticIndexSnapshot, cachedStartupSemanticIndexSnapshot } from "./semantic-index-snapshot.ts";
 import { activeTaskLeaseSummaries, listGlobalCanonEvents, mergeCanonEvents } from "./worktree-coordination.ts";
+import { listCompleteChangeHistory } from "./server-canon-events.ts";
 import {
   buildProductModelProjection,
   buildSnapshotFileCoverage,
@@ -103,7 +104,8 @@ export type RuntimeSnapshot = {
 
 export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeSnapshot; store: ProjectStore }): RuntimeProjectSummary {
   const storeState = input.store.readState();
-  const latestEvent = mergeCanonEvents([...input.store.listEvents(1), ...listGlobalCanonEvents(input.rootDir, 1)], 1)[0];
+  const latestQuery = { mode: "recent", limit: 1 } as const;
+  const latestEvent = mergeCanonEvents([...input.store.listEvents(latestQuery), ...listGlobalCanonEvents(input.rootDir, latestQuery)], 1)[0];
   const semanticIndex = input.snapshot.state.semanticIndex ?? input.snapshot.semanticIndex ?? storeState.semanticIndex;
   const productModel = input.snapshot.state.productModel ?? storeState.productModel;
   return {
@@ -266,14 +268,13 @@ export async function buildStartupRuntimeSnapshot(input: {
   store: ProjectStore;
 }): Promise<RuntimeSnapshot> {
   const project = await loadProjectContext(input.cwd);
-  const recentEvents = mergeCanonEvents([...input.store.listEvents(200), ...listGlobalCanonEvents(project.paths.rootDir, 200)], 200);
   const taskLeases = activeTaskLeaseSummaries(project.paths.rootDir);
   const findings: CanonFinding[] = [];
   const areas: SnapshotArea[] = project.areas.map((area) => snapshotArea(project.paths.rootDir, project.paths.areasPath, area));
   const specs: SnapshotSpec[] = project.specs.map((spec) => snapshotSpec(project.paths.rootDir, project.paths.specsPath, spec));
   const changes: SnapshotChange[] = project.changes.map((change) =>
     snapshotChange(project.paths.rootDir, project.paths.changesPath, change, {
-      events: recentEvents,
+      events: listCompleteChangeHistory(project.paths.rootDir, input.store, change.id),
       findings,
       taskLeases,
     }),
@@ -487,13 +488,12 @@ export async function buildRuntimeSnapshot(input: {
     validators: project.validators.map((validator) => ({ id: validator.id, conventionIds: validator.conventionIds })),
   });
 
-  const recentEvents = mergeCanonEvents([...input.store.listEvents(200), ...listGlobalCanonEvents(project.paths.rootDir, 200)], 200);
   const taskLeases = activeTaskLeaseSummaries(project.paths.rootDir);
   const areas: SnapshotArea[] = project.areas.map((area) => snapshotArea(project.paths.rootDir, project.paths.areasPath, area));
   const specs: SnapshotSpec[] = project.specs.map((spec) => snapshotSpec(project.paths.rootDir, project.paths.specsPath, spec));
   const changes: SnapshotChange[] = project.changes.map((change) =>
     snapshotChange(project.paths.rootDir, project.paths.changesPath, change, {
-      events: recentEvents,
+      events: listCompleteChangeHistory(project.paths.rootDir, input.store, change.id),
       findings,
       taskLeases,
     }),

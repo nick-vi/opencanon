@@ -3,10 +3,45 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "vitest";
 import { createAuthoringProject } from "../packages/runtime/test/support.ts";
 
 const script = path.join(process.cwd(), "packages/cli/src/index.ts");
+
+test("shared Activity filters before bounding repository events", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-worktree-activity-"));
+  const worktreeDb = path.join(rootDir, ".opencanon", "worktrees-test.sqlite");
+  const coordinationModule = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/worktree-coordination.ts")).href;
+  try {
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        [
+          `import { DatabaseSync } from "node:sqlite";`,
+          `import { writeGlobalCanonEvent, listGlobalCanonEvents } from ${JSON.stringify(coordinationModule)};`,
+          `const rootDir = ${JSON.stringify(rootDir)};`,
+          `const dbPath = ${JSON.stringify(worktreeDb)};`,
+          `writeGlobalCanonEvent(rootDir, { id: "target", type: "updated", timestamp: "2026-07-12T00:00:00.000Z", files: [], changeIds: ["target-change"], taskIds: [], checkIds: [], conventionIds: [], validatorIds: [], findingIds: [], summary: "Target update." });`,
+          `const db = new DatabaseSync(dbPath);`,
+          `const repoKey = db.prepare("select repo_key from activity_events where id = 'target'").get().repo_key;`,
+          `const insert = db.prepare("insert into activity_events(id, repo_key, timestamp, event_json, created_at) values (?, ?, ?, ?, ?)");`,
+          `for (let index = 0; index < 600; index += 1) { const id = "unrelated-" + String(index).padStart(4, "0"); const event = { id, type: "updated", timestamp: "2026-07-12T00:00:01.000Z", files: [], changeIds: ["unrelated-change"], taskIds: [], checkIds: [], conventionIds: [], validatorIds: [], findingIds: [], summary: "Unrelated update." }; insert.run(id, repoKey, event.timestamp, JSON.stringify(event), event.timestamp); }`,
+          `db.close();`,
+          `const events = listGlobalCanonEvents(rootDir, { mode: "recent", limit: 1, changeId: "target-change" });`,
+          `process.stdout.write(JSON.stringify(events));`,
+        ].join("\n"),
+      ],
+      { cwd: rootDir, encoding: "utf8", env: testEnv(worktreeDb), timeout: 60_000 },
+    );
+    assert.equal(child.status, 0, child.stderr || child.stdout);
+    assert.deepEqual((JSON.parse(child.stdout) as Array<{ id: string }>).map((event) => event.id), ["target"]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
 
 test("worktree create claims a task and prevents duplicate agent pickup", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-worktree-cli-"));

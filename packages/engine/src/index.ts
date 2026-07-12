@@ -46,6 +46,7 @@ import {
   type BuildRepoGraphRequest,
   type BuildRepoGraphResult,
   type CanonEvent,
+  type CanonEventQuery,
   type ChangeCheckRun,
   type ChangeCheckRunEvent,
   type EmbedSemanticTextsRequest,
@@ -118,7 +119,7 @@ export type EngineProject = {
   drainWatcherEvents(): WatcherEventBatch[];
   stopWatcher(): void;
   writeEvent(event: CanonEvent): void;
-  listEvents(limit?: number): CanonEvent[];
+  listEvents(query: CanonEventQuery): CanonEvent[];
   writeJob(job: ChangeCheckRun): void;
   readJob(jobId: string): ChangeCheckRun | null;
   listJobs(request?: { type?: string; limit?: number }): ChangeCheckRun[];
@@ -324,7 +325,7 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
       (parseJson(callEngine(() => project.drainWatcherEventsJson())) as unknown[]).map((batch) => WatcherEventBatchSchema.parse(batch)),
     stopWatcher: () => callEngine(() => project.stopWatcher()),
     writeEvent: (event) => callEngine(() => project.writeEventJson(JSON.stringify({ event: CanonEventSchema.parse(event) }))),
-    listEvents: (limit = 50) => (parseJson(callEngine(() => project.listEventsJson(JSON.stringify({ limit })))) as unknown[]).map((event) => CanonEventSchema.parse(event)),
+    listEvents: (query) => (parseJson(callEngine(() => project.listEventsJson(JSON.stringify(query)))) as unknown[]).map((event) => CanonEventSchema.parse(event)),
     writeJob: (job) => callEngine(() => project.writeJobJson(JSON.stringify({ job: ChangeCheckRunSchema.parse(job) }))),
     readJob: (jobId) => {
       const value = parseJson(callEngine(() => project.readJobJson(JSON.stringify({ jobId })))) as { job?: unknown };

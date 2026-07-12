@@ -58,6 +58,32 @@ pub struct EngineProjectHandle {
     generation_cache: Mutex<HashMap<String, Generator>>,
 }
 
+fn canon_event_links(event: &serde_json::Value) -> napi::Result<Vec<(&'static str, String)>> {
+    let mut links = Vec::new();
+    for (field, kind) in [
+        ("changeIds", "change"),
+        ("taskIds", "task"),
+        ("checkIds", "check"),
+    ] {
+        let Some(values) = event.get(field).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for value in values {
+            let value = value
+                .as_str()
+                .filter(|item| !item.trim().is_empty())
+                .ok_or_else(|| {
+                    napi_error(
+                        "invalid-engine-payload",
+                        &format!("Canon event {field} must contain non-empty strings."),
+                    )
+                })?;
+            links.push((kind, value.to_string()));
+        }
+    }
+    Ok(links)
+}
+
 #[napi]
 impl EngineProjectHandle {
     #[napi(js_name = "statusJson")]
@@ -366,32 +392,104 @@ impl EngineProjectHandle {
             })?;
         let payload = serde_json::to_string(&request.event)
             .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
-        let conn = self
+        let links = canon_event_links(&request.event)?;
+        let mut conn = self
             .conn
             .lock()
             .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-        conn.execute(
+        let transaction = conn
+            .transaction()
+            .map_err(|error| sqlite_error("Could not start Canon event transaction", error))?;
+        transaction.execute(
             "insert into canon_events(id, type, timestamp, payload) values (?1, ?2, ?3, ?4)
              on conflict(id) do update set type = excluded.type, timestamp = excluded.timestamp, payload = excluded.payload",
             params![id, event_type, timestamp, payload],
         )
         .map_err(|error| sqlite_error("Could not write canon event", error))?;
+        transaction
+            .execute(
+                "delete from canon_event_links where event_id = ?1",
+                params![id],
+            )
+            .map_err(|error| sqlite_error("Could not replace Canon event links", error))?;
+        for (kind, value) in links {
+            transaction
+                .execute(
+                    "insert into canon_event_links(event_id, kind, value) values (?1, ?2, ?3)",
+                    params![id, kind, value],
+                )
+                .map_err(|error| sqlite_error("Could not write Canon event link", error))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| sqlite_error("Could not commit Canon event", error))?;
         Ok(())
     }
 
     #[napi(js_name = "listEventsJson")]
     pub fn list_events_json(&self, request: String) -> napi::Result<String> {
         let request: ListEventsRequest = decode(&request)?;
-        let limit = request.limit.unwrap_or(50).clamp(1, 500);
+        let (change_id, task_id, check_id, limit) = match request.mode.as_str() {
+            "recent" => (
+                request.change_id,
+                request.task_id,
+                request.check_id,
+                i64::from(
+                    request
+                        .limit
+                        .ok_or_else(|| {
+                            napi_error(
+                                "invalid-engine-payload",
+                                "Recent Canon event queries require limit.",
+                            )
+                        })?
+                        .clamp(1, 500),
+                ),
+            ),
+            "change-history" => {
+                let change_id = request
+                    .change_id
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        napi_error(
+                            "invalid-engine-payload",
+                            "Complete Canon history queries require changeId.",
+                        )
+                    })?;
+                (Some(change_id), None, None, i64::MAX)
+            }
+            _ => {
+                return Err(napi_error(
+                    "invalid-engine-payload",
+                    "Canon event query mode must be recent or change-history.",
+                ));
+            }
+        };
         let conn = self
             .conn
             .lock()
             .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
         let mut statement = conn
-            .prepare("select payload from canon_events order by timestamp desc limit ?1")
+            .prepare(
+                "select event.payload
+                 from canon_events event
+                 where (?1 is null or exists (
+                   select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'change' and link.value = ?1
+                 ))
+                 and (?2 is null or exists (
+                   select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'task' and link.value = ?2
+                 ))
+                 and (?3 is null or exists (
+                   select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'check' and link.value = ?3
+                 ))
+                 order by event.timestamp desc, event.id desc
+                 limit ?4",
+            )
             .map_err(|error| sqlite_error("Could not prepare canon event list", error))?;
         let rows = statement
-            .query_map(params![limit], |row| row.get::<_, String>(0))
+            .query_map(params![change_id, task_id, check_id, limit], |row| {
+                row.get::<_, String>(0)
+            })
             .map_err(|error| sqlite_error("Could not list canon events", error))?;
         let mut events = Vec::new();
         for row in rows {

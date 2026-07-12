@@ -257,6 +257,7 @@ export type {
   BuildRepoGraphResult,
   CallFact,
   CanonEvent,
+  CanonEventQuery,
   CanonFinding,
   CanonFix,
   CommentFact,

@@ -32,8 +32,13 @@ pub(crate) struct WriteEventRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ListEventsRequest {
+    pub(crate) mode: String,
     pub(crate) limit: Option<u32>,
+    pub(crate) change_id: Option<String>,
+    pub(crate) task_id: Option<String>,
+    pub(crate) check_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

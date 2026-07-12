@@ -154,7 +154,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   assert.equal(project.startWatcher({}, () => undefined).running, true);
   assert.deepEqual(project.drainWatcherEvents()[0].paths, ["src/company.ts"]);
   project.stopWatcher();
-  assert.deepEqual(project.listEvents(), []);
+  assert.deepEqual(project.listEvents({ mode: "recent", limit: 50 }), []);
   const run = {
     id: "run-1",
     batchId: "batch-1",

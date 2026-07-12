@@ -326,7 +326,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ChangeReady) {
         const project = await loadProjectContext(rootDir);
-        return json({ ok: true, data: deriveChangeWorkQueue(project.changes, listRuntimeEvents(rootDir, currentStore(), 500), { leases: activeTaskLeaseSummaries(rootDir) }) });
+        return json({ ok: true, data: deriveChangeWorkQueue(project.changes, listRuntimeEvents(rootDir, currentStore(), { mode: "recent", limit: 500 }), { leases: activeTaskLeaseSummaries(rootDir) }) });
       }
       if (url.pathname === ApiRoute.Worktrees) {
         return json({ ok: true, data: listWorktreeOverview(rootDir) });
@@ -430,7 +430,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       if (url.pathname === ApiRoute.Events)
         return json({
           ok: true,
-          data: listRuntimeEvents(rootDir, currentStore(), numberParam(url, UrlSearchParam.Limit, 50)),
+          data: listRuntimeEvents(rootDir, currentStore(), { mode: "recent", limit: numberParam(url, UrlSearchParam.Limit, 50) }),
         });
       if (url.pathname === ApiRoute.Observability) {
         const traceId = url.searchParams.get(UrlSearchParam.TraceId)?.trim() || undefined;

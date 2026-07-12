@@ -6,6 +6,7 @@ import {
   type CanonFinding,
   type ChangeCheckRun,
   type ChangeCheckRunEvent,
+  type CanonEventQuery,
   type ContextPaths,
   type RuntimeHealth,
   type ProductModelProjection,
@@ -37,7 +38,7 @@ export type ProjectStore = {
   writeSnapshot(input: StoreSnapshotInput): void;
   readState(): StoreState;
   writeEvent(event: CanonEvent): void;
-  listEvents(limit?: number): CanonEvent[];
+  listEvents(query: CanonEventQuery): CanonEvent[];
   writeJob(job: ChangeCheckRun): void;
   readJob(jobId: string): ChangeCheckRun | null;
   listJobs(request?: { type?: string; limit?: number }): ChangeCheckRun[];
@@ -145,8 +146,8 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
     writeEvent(event) {
       project.writeEvent(event);
     },
-    listEvents(limit = 50) {
-      return project.listEvents(limit);
+    listEvents(query) {
+      return project.listEvents(query);
     },
     writeJob(job) {
       project.writeJob(job);
