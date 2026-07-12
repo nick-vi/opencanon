@@ -42,12 +42,14 @@ export {
   ChangeCheckRunEventType,
   ChangeCheckRunSchema,
   ChangeCheckRunStatus,
+  ChangeCheckRunStatusSchema,
   StartChangeCheckRunsResponseSchema,
 } from "./contracts-change-runs.ts";
 export type {
   ChangeCheckRun,
   ChangeCheckRunAdmissionResult,
   ChangeCheckRunEvent,
+  ChangeCheckRunEventQuery,
   ChangeCheckRunPruneRequest,
   ChangeCheckRunPruneResult,
   ChangeCheckRunQuery,

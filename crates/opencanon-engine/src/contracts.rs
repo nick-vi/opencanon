@@ -82,8 +82,9 @@ pub(crate) struct AppendJobEventRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ListJobEventsRequest {
     pub(crate) job_id: String,
-    pub(crate) after_sequence: Option<u64>,
-    pub(crate) limit: Option<u32>,
+    pub(crate) after_sequence: u64,
+    pub(crate) limit: u32,
+    pub(crate) order: String,
 }
 
 #[derive(Debug, Deserialize)]

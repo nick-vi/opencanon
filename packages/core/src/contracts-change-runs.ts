@@ -9,6 +9,7 @@ export const ChangeCheckRunStatus = {
   Cancelled: "cancelled",
 } as const;
 export type ChangeCheckRunStatus = (typeof ChangeCheckRunStatus)[keyof typeof ChangeCheckRunStatus];
+export const ChangeCheckRunStatusSchema = z.enum(Object.values(ChangeCheckRunStatus));
 
 export const ChangeCheckRunEventType = {
   Queued: "queued",
@@ -116,6 +117,13 @@ export const ChangeCheckRunEventSchema = ChangeCheckRunEventUnionSchema.superRef
   }
 });
 export type ChangeCheckRunEvent = z.infer<typeof ChangeCheckRunEventSchema>;
+
+export type ChangeCheckRunEventQuery = {
+  jobId: string;
+  afterSequence: number;
+  limit: number;
+  order: "asc" | "desc";
+};
 
 export const ChangeCheckRunAdmissionResultSchema = z.object({
   accepted: z.boolean(),

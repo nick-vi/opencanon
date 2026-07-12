@@ -178,7 +178,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   assert.equal(project.readJob(run.id)?.status, "queued");
   assert.equal(project.listJobs({ mode: "recent", limit: 50 }).length, 1);
   project.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 1, timestamp: "2026-07-12T00:00:01.000Z", type: "started" });
-  assert.equal(project.listJobEvents({ jobId: run.id })[0]?.sequence, 1);
+  assert.equal(project.listJobEvents({ jobId: run.id, afterSequence: 0, limit: 50, order: "asc" })[0]?.sequence, 1);
   project.writeObservabilityRecords({
     traces: [
       {

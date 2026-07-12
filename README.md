@@ -30,6 +30,8 @@ opencanon canon list areas
 opencanon changes list
 opencanon changes check <change-id> --task <task-id> --all
 opencanon changes check <change-id> <check-id> --task <task-id>
+opencanon changes runs list --status running
+opencanon changes runs watch <run-id> --after <sequence>
 opencanon rules --convention service-db-boundary
 opencanon rules --validator service-no-db-client
 opencanon search loadCompany
@@ -48,7 +50,7 @@ opencanon mcp --root .
 
 - `context` loads relevant Project Canon, proof checks, knowledge evidence, impact context, and optional git history for files or topics.
 - `canon` lists, renders, drafts, and inspects Project Canon definitions across conventions, areas, specs, and changes.
-- `changes` is the CLI command for Change definitions: it lists active planned changes, renders generated change docs, records SQLite-backed events, and runs declared checks.
+- `changes` is the CLI command for Change definitions and execution: it lists active work, records SQLite-backed Activity, runs declared checks, and can list, inspect, resume, or cancel persisted runs after the initiating client exits.
 - `rules` lists convention summaries, scopes, render targets, runtime checks, and fixture coverage.
 - `search` searches symbols, conventions, checks, docs, and ready Project Knowledge. `ask` queries Project Knowledge with cited evidence. Use `opencanon context status` to inspect readiness and `opencanon project index` to build or refresh Search, Ask, Chunks, and Coverage.
 - `symbols` and `graph` inspect the local TS/JS code graph before edits or refactors.

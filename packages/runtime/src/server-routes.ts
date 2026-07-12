@@ -1,6 +1,7 @@
 import { SpanKind, type SimpleTracer } from "@opencanon/observability";
 import {
   createOpenCanonDiagnostic,
+  ChangeCheckRunStatusSchema,
   ChangeTaskEventType,
   createPaths,
   createValidationResultCache,
@@ -334,10 +335,38 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       if (url.pathname === ApiRoute.ChangeCheckRuns) {
         if (request.method === "GET") {
           const runId = url.searchParams.get(UrlSearchParam.RunId)?.trim();
-          if (!runId) return json(diagnosticsFailure([runtimeInputDiagnostic("runId is required.")]), 400);
-          const run = changeCheckRunner.get(runId);
-          if (!run) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
-          return json({ ok: true, data: { run } });
+          if (runId) {
+            const rawAfter = url.searchParams.get(UrlSearchParam.After);
+            const parsedAfter = rawAfter === null ? undefined : Number(rawAfter);
+            if (parsedAfter !== undefined && (!Number.isInteger(parsedAfter) || parsedAfter < 0)) {
+              return json(diagnosticsFailure([runtimeInputDiagnostic("after must be a non-negative integer.")]), 400);
+            }
+            const afterSequence = parsedAfter;
+            const snapshot = changeCheckRunner.describe(runId, afterSequence);
+            if (!snapshot) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
+            return json({ ok: true, data: snapshot });
+          }
+          const rawStatus = url.searchParams.get(UrlSearchParam.Status)?.trim();
+          const status = rawStatus ? ChangeCheckRunStatusSchema.safeParse(rawStatus) : undefined;
+          if (status && !status.success) {
+            return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run status: ${rawStatus}.`)]), 400);
+          }
+          const rawLimit = url.searchParams.get(UrlSearchParam.Limit);
+          const parsedLimit = rawLimit === null ? 20 : Number(rawLimit);
+          if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+            return json(diagnosticsFailure([runtimeInputDiagnostic("limit must be an integer from 1 to 100.")]), 400);
+          }
+          const limit = parsedLimit;
+          return json({
+            ok: true,
+            data: {
+              runs: changeCheckRunner.list({
+                mode: "recent",
+                limit,
+                ...(status?.success ? { status: status.data } : {}),
+              }),
+            },
+          });
         }
         const project = await loadProjectContext(rootDir);
         const parsed = parseRunChangeCheckRequest(await readJsonBody(request), project.changes);
@@ -368,7 +397,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         if (!runId) return json(diagnosticsFailure([runtimeInputDiagnostic("runId is required.")]), 400);
         const run = await changeCheckRunner.cancel(runId);
         if (!run) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
-        return json({ ok: true, data: { run } });
+        const snapshot = changeCheckRunner.describe(runId);
+        if (!snapshot) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
+        return json({ ok: true, data: snapshot });
       }
       if (url.pathname === ApiRoute.ChangeEvents) {
         if (request.method === "GET") {

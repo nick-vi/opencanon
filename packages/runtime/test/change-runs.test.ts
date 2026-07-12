@@ -90,6 +90,18 @@ test("Change check runs stream output, persist terminal state, and replay from a
 
     const persisted = await readRun(server.url, headers, started.id);
     assert.equal(persisted.status, ChangeCheckRunStatus.Passed);
+    const listedResponse = await fetch(`${server.url}/api/changes/check-runs?status=passed&limit=1`, { headers });
+    const listedText = await listedResponse.text();
+    assert.equal(listedResponse.status, 200, listedText);
+    const listedPayload = JSON.parse(listedText) as { data: { runs: unknown[] } };
+    assert.deepEqual(listedPayload.data.runs.map((run) => ChangeCheckRunSchema.parse(run).id), [started.id]);
+    const snapshotResponse = await fetch(`${server.url}/api/changes/check-runs?runId=${encodeURIComponent(started.id)}&after=0`, { headers });
+    const snapshotText = await snapshotResponse.text();
+    assert.equal(snapshotResponse.status, 200, snapshotText);
+    const snapshotPayload = JSON.parse(snapshotText) as { data: { run: unknown; latestSequence: number; events: unknown[] } };
+    assert.equal(ChangeCheckRunSchema.parse(snapshotPayload.data.run).id, started.id);
+    assert(snapshotPayload.data.latestSequence >= events.at(-1)!.sequence);
+    assert.equal(snapshotPayload.data.events.at(-1) && ChangeCheckRunEventSchema.parse(snapshotPayload.data.events.at(-1)).type, ChangeCheckRunEventType.Passed);
     const after = stdout[0]?.sequence ?? 0;
     const replay = await readRunEvents(server.url, headers, started.id, after);
     assert(replay.every((event) => event.sequence > after));
@@ -115,7 +127,10 @@ test("Change check cancellation terminates the command and persists cancelled st
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify({ runId: started.id }),
         });
-        assert.equal(response.status, 200, await response.text());
+        const text = await response.text();
+        assert.equal(response.status, 200, text);
+        const payload = JSON.parse(text) as { data: { run: unknown } };
+        assert.equal(ChangeCheckRunSchema.parse(payload.data.run).status, ChangeCheckRunStatus.Cancelled);
       }
     });
     assert.equal(cancelled, true);

@@ -11,6 +11,7 @@ import {
   type ChangeCheckRun,
   type ChangeCheckRunEvent,
   type ChangeCheckRunPruneResult,
+  type ChangeCheckRunQuery,
   type ValidationResultCache,
 } from "@opencanon/core";
 import type { SimpleTracer } from "@opencanon/observability";
@@ -54,6 +55,11 @@ type QueuedCheck = {
   runId: string;
 };
 
+type RunCompletion = {
+  promise: Promise<ChangeCheckRun>;
+  resolve(run: ChangeCheckRun): void;
+};
+
 export type ChangeCheckRunner = Awaited<ReturnType<typeof createChangeCheckRunner>>;
 
 export async function createChangeCheckRunner(input: {
@@ -66,6 +72,7 @@ export async function createChangeCheckRunner(input: {
 }) {
   const queue: QueuedCheck[] = [];
   const controllers = new Map<string, AbortController>();
+  const completions = new Map<string, RunCompletion>();
   const sequences = new Map<string, number>();
   let drainPromise: Promise<void> | undefined;
   let stopping = false;
@@ -104,17 +111,27 @@ export async function createChangeCheckRunner(input: {
         const run = runs[index]!;
         const event = queuedEvents[index]!;
         sequences.set(run.id, event.sequence);
+        completions.set(run.id, createRunCompletion());
         input.events.broadcast(operationEvent(event));
         queue.push({ project: request.project, change: request.change, task: request.task, check: request.checks[index]!, runId: run.id });
       }
       scheduleDrain();
       return { ok: true as const, batchId, runs };
     },
-    get(runId: string): ChangeCheckRun | null {
-      return input.store().readJob(runId);
+    list(query: ChangeCheckRunQuery): ChangeCheckRun[] {
+      return input.store().listJobs(query);
+    },
+    describe(runId: string, afterSequence?: number): { run: ChangeCheckRun; latestSequence: number; events: ChangeCheckRunEvent[] } | null {
+      const run = input.store().readJob(runId);
+      if (!run) return null;
+      return {
+        run,
+        latestSequence: latestPersistedSequence(runId),
+        events: afterSequence === undefined ? [] : input.store().listJobEvents({ jobId: runId, afterSequence, limit: ReplayEventLimit, order: "asc" }),
+      };
     },
     listEvents(runId: string, afterSequence = 0): ChangeCheckRunEvent[] {
-      return input.store().listJobEvents({ jobId: runId, afterSequence, limit: ReplayEventLimit });
+      return input.store().listJobEvents({ jobId: runId, afterSequence, limit: ReplayEventLimit, order: "asc" });
     },
     async cancel(runId: string): Promise<ChangeCheckRun | null> {
       return cancelRun(runId);
@@ -134,11 +151,13 @@ export async function createChangeCheckRunner(input: {
     if (queuedIndex >= 0) {
       queue.splice(queuedIndex, 1);
       const cancelled = finishCancelled(run);
+      completeRun(cancelled);
       await recordRetention("queued-cancellation", 0);
       return cancelled;
     }
+    const completion = completions.get(runId)?.promise;
     controllers.get(runId)?.abort();
-    return input.store().readJob(runId);
+    return completion ? await completion : input.store().readJob(runId);
   }
 
   function scheduleDrain(): void {
@@ -166,6 +185,7 @@ export async function createChangeCheckRunner(input: {
     appendEvent(run, ChangeCheckRunEventType.Started);
     const controller = new AbortController();
     controllers.set(run.id, controller);
+    let completedRun: ChangeCheckRun | undefined;
 
     const started = createChangeCheckEvent({
       changeId: item.change.id,
@@ -243,6 +263,7 @@ export async function createChangeCheckRunner(input: {
       });
       input.store().writeJob(terminal);
       appendEvent(terminal, terminalEventType(terminal));
+      completedRun = terminal;
       await recordTerminalCanonEvent(item, terminal);
     } catch (error) {
       flushOutput();
@@ -258,10 +279,12 @@ export async function createChangeCheckRunner(input: {
       });
       input.store().writeJob(failed);
       appendEvent(failed, ChangeCheckRunEventType.Failed);
+      completedRun = failed;
       await recordTerminalCanonEvent(item, failed);
     } finally {
       if (outputFlushTimer) clearTimeout(outputFlushTimer);
       controllers.delete(run.id);
+      if (completedRun) completeRun(completedRun);
     }
     await recordRetention("terminal-run", 0);
   }
@@ -295,8 +318,7 @@ export async function createChangeCheckRunner(input: {
   }
 
   function latestPersistedSequence(runId: string): number {
-    const previous = input.store().listJobEvents({ jobId: runId, afterSequence: 0, limit: ReplayEventLimit });
-    return previous[previous.length - 1]?.sequence ?? 0;
+    return input.store().listJobEvents({ jobId: runId, afterSequence: 0, limit: 1, order: "desc" })[0]?.sequence ?? 0;
   }
 
   async function recordTerminalCanonEvent(item: QueuedCheck, run: ChangeCheckRun): Promise<void> {
@@ -362,6 +384,21 @@ export async function createChangeCheckRunner(input: {
       },
     );
   }
+
+  function completeRun(run: ChangeCheckRun): void {
+    const completion = completions.get(run.id);
+    if (!completion) return;
+    completions.delete(run.id);
+    completion.resolve(run);
+  }
+}
+
+function createRunCompletion(): RunCompletion {
+  let resolve!: (run: ChangeCheckRun) => void;
+  const promise = new Promise<ChangeCheckRun>((completed) => {
+    resolve = completed;
+  });
+  return { promise, resolve };
 }
 
 function createOperationEvent(

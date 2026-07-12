@@ -38,7 +38,8 @@ fn persists_jobs_and_ordered_replay_events() {
     let replay: Value = serde_json::from_str(
         &project
             .list_job_events_json(
-                json!({ "jobId": "run-1", "afterSequence": 1, "limit": 10 }).to_string(),
+                json!({ "jobId": "run-1", "afterSequence": 1, "limit": 10, "order": "asc" })
+                    .to_string(),
             )
             .unwrap(),
     )
@@ -166,6 +167,44 @@ fn prunes_terminal_jobs_by_age_and_count_without_removing_active_jobs() {
         .unwrap();
         assert!(stored["job"].is_null());
     }
+}
+
+#[test]
+fn reads_latest_job_event_sequence_beyond_replay_page_size() {
+    let root = test_root("job-latest-sequence");
+    let project = open_test_project(&root);
+    project
+        .write_job_json(
+            json!({ "job": queued_job("long-run", "2026-07-12T00:00:00.000Z") }).to_string(),
+        )
+        .unwrap();
+    for sequence in 1..=2_100 {
+        project
+            .append_job_event_json(
+                json!({
+                    "event": {
+                        "runId": "long-run",
+                        "batchId": "batch",
+                        "sequence": sequence,
+                        "timestamp": "2026-07-12T00:00:00.000Z",
+                        "type": "started"
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+    }
+
+    let latest: Value = serde_json::from_str(
+        &project
+            .list_job_events_json(
+                json!({ "jobId": "long-run", "afterSequence": 0, "limit": 1, "order": "desc" })
+                    .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(latest[0]["sequence"], 2_100);
 }
 
 fn queued_job(id: &str, timestamp: &str) -> Value {

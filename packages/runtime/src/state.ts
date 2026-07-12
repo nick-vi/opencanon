@@ -7,6 +7,7 @@ import {
   type ChangeCheckRun,
   type ChangeCheckRunAdmissionResult,
   type ChangeCheckRunEvent,
+  type ChangeCheckRunEventQuery,
   type ChangeCheckRunPruneRequest,
   type ChangeCheckRunPruneResult,
   type ChangeCheckRunQuery,
@@ -49,7 +50,7 @@ export type ProjectStore = {
   admitJobs(input: { runs: ChangeCheckRun[]; events: ChangeCheckRunEvent[]; capacity: number }): ChangeCheckRunAdmissionResult;
   pruneJobs(request: ChangeCheckRunPruneRequest): ChangeCheckRunPruneResult;
   appendJobEvent(event: ChangeCheckRunEvent): void;
-  listJobEvents(request: { jobId: string; afterSequence?: number; limit?: number }): ChangeCheckRunEvent[];
+  listJobEvents(request: ChangeCheckRunEventQuery): ChangeCheckRunEvent[];
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
   listObservabilityRecords(query?: ObservabilityRecordQuery): ObservabilityRecordResult;
   writeSemanticIndex(request: WriteSemanticIndexRequest): void;

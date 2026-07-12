@@ -1549,6 +1549,34 @@ test("runtime client repairs a supervised runtime when the registered endpoint d
   }
 });
 
+test("runtime client repairs a supervised runtime before resuming a stream", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-client-stream-repair-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  createAuthoringProject(rootDir);
+  mkdirSync(path.join(rootDir, "src"), { recursive: true });
+  writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
+
+  try {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", runtimeClientStreamRepairCheckSource(), rootDir], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        OPENCANON_SERVICE_REGISTRY_PATH: registryPath,
+      },
+      timeout: 60_000,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout.trim()) as { beforePid: number; afterPid: number; receivedSnapshot: boolean };
+    assert.notEqual(output.afterPid, output.beforePid);
+    assert.equal(output.receivedSnapshot, true);
+  } finally {
+    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
+    await stopService(registryPath).catch(() => undefined);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime client repairs a supervised runtime when the pipe endpoint disappears", async () => {
   if (process.platform === "win32") return;
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-client-pipe-repair-"));
@@ -1838,6 +1866,40 @@ function runtimeClientPipeRepairCheckSource(): string {
         beforePid: before.entry.pid,
         afterPid: after.entry.pid,
       };
+    });
+    console.log(JSON.stringify(output));
+  `;
+}
+
+function runtimeClientStreamRepairCheckSource(): string {
+  const runtimeClientUrl = pathToFileURL(path.join(process.cwd(), "packages/cli/src/runtime-client.ts")).href;
+  const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
+  return `
+    import { RuntimeApiRoute, withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
+    import { inspectProjectRuntime, stopProjectRuntime } from ${JSON.stringify(runtimeUrl)};
+
+    const rootDir = process.argv[1];
+    const output = await withRuntimeClient(rootDir, async (client) => {
+      await client.get(RuntimeApiRoute.Snapshot);
+      const before = await inspectProjectRuntime(rootDir);
+      if (!before) throw new Error("expected registered runtime before stream repair");
+      await stopProjectRuntime(rootDir);
+      const controller = new AbortController();
+      let receivedSnapshot = false;
+      try {
+        await client.stream(RuntimeApiRoute.EventsStream, {
+          signal: controller.signal,
+          onChunk(chunk) {
+            receivedSnapshot ||= chunk.includes('"type":"snapshot"') || chunk.includes('"type": "snapshot"');
+            if (receivedSnapshot) controller.abort();
+          },
+        });
+      } catch (error) {
+        if (!receivedSnapshot) throw error;
+      }
+      const after = await inspectProjectRuntime(rootDir);
+      if (!after) throw new Error("expected registered runtime after stream repair");
+      return { beforePid: before.entry.pid, afterPid: after.entry.pid, receivedSnapshot };
     });
     console.log(JSON.stringify(output));
   `;

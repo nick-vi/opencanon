@@ -91,6 +91,7 @@ export const UrlSearchParam = {
   Topic: "topic",
   TaskId: "taskId",
   RunId: "runId",
+  Status: "status",
   After: "after",
   TraceId: "traceId",
   ValidatorId: "validatorId",

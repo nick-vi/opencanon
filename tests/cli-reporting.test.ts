@@ -166,8 +166,53 @@ test("changes ready and brief expose agent-ready task work", () => {
       timeout: 30_000,
     });
     assert.equal(check.status, 0, check.stderr || check.stdout);
-    const checkPayload = JSON.parse(check.stdout) as { runs: Array<{ taskId?: string; checkId: string; status: string }> };
+    const checkPayload = JSON.parse(check.stdout) as { runs: Array<{ id: string; taskId?: string; checkId: string; status: string }> };
     assert.deepEqual(checkPayload.runs.map((item) => `${item.taskId}:${item.checkId}:${item.status}`), ["model:smoke:passed"]);
+    const runId = checkPayload.runs[0]!.id;
+
+    const listedRuns = spawnSync(process.execPath, [script, "changes", "runs", "list", "--status", "passed", "--limit", "1", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(listedRuns.status, 0, listedRuns.stderr || listedRuns.stdout);
+    const listedRunsPayload = JSON.parse(listedRuns.stdout) as { runs: Array<{ id: string; status: string }> };
+    assert.deepEqual(listedRunsPayload.runs.map((run) => `${run.id}:${run.status}`), [`${runId}:passed`]);
+
+    const shownRun = spawnSync(process.execPath, [script, "changes", "runs", "show", runId, "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(shownRun.status, 0, shownRun.stderr || shownRun.stdout);
+    const shownRunPayload = JSON.parse(shownRun.stdout) as { run: { id: string; status: string }; latestSequence: number };
+    assert.equal(shownRunPayload.run.id, runId);
+    assert.equal(shownRunPayload.run.status, "passed");
+    assert(shownRunPayload.latestSequence > 0);
+
+    const watchedRun = spawnSync(process.execPath, [script, "changes", "runs", "watch", runId, "--after", "0", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(watchedRun.status, 0, watchedRun.stderr || watchedRun.stdout);
+    const watchedRunPayload = JSON.parse(watchedRun.stdout) as { run: { id: string; status: string } };
+    assert.equal(watchedRunPayload.run.id, runId);
+    assert.equal(watchedRunPayload.run.status, "passed");
+
+    const cancelledTerminalRun = spawnSync(process.execPath, [script, "changes", "runs", "cancel", runId, "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(cancelledTerminalRun.status, 0, cancelledTerminalRun.stderr || cancelledTerminalRun.stdout);
+    const cancelledTerminalPayload = JSON.parse(cancelledTerminalRun.stdout) as { run: { id: string; status: string } };
+    assert.equal(cancelledTerminalPayload.run.id, runId);
+    assert.equal(cancelledTerminalPayload.run.status, "passed");
 
     const events = spawnSync(process.execPath, [script, "changes", "events", "cli-task-change", "--task", "model", "--format", "json"], {
       cwd: rootDir,

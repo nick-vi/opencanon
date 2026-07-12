@@ -64,3 +64,10 @@ export function positiveIntegerOption(value: unknown, flag: string, fallback: nu
   if (!Number.isInteger(numberValue) || numberValue < 1) fail(`${flag} requires a positive integer`);
   return numberValue;
 }
+
+export function nonNegativeIntegerOption(value: unknown, flag: string, fallback: number): number {
+  if (value === undefined) return fallback;
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue < 0) fail(`${flag} requires a non-negative integer`);
+  return numberValue;
+}

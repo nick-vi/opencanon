@@ -157,7 +157,26 @@ export async function withRuntimeClient<T>(
     },
     async stream(path, input) {
       if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
-      await streamLocalText(endpoint, { method: "GET", path, ...input });
+      let initialError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await streamLocalText(endpoint, { method: "GET", path, ...input });
+          return;
+        } catch (error) {
+          if (input.signal?.aborted) throw error;
+          if (attempt > 0 || !isLocalTransportFailure(error)) {
+            if (initialError) {
+              throw new Error(
+                `OpenCanon runtime stream failed after repairing the project runtime: ${errorMessage(error)}. Initial failure: ${errorMessage(initialError)}`,
+              );
+            }
+            throw error;
+          }
+          initialError = error;
+          const repaired = await repairSupervisedRuntime();
+          endpoint = localProtocolEndpointFromEntry(repaired, { prefer: options.localTransport });
+        }
+      }
     },
   });
 }

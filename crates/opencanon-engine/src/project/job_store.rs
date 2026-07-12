@@ -382,14 +382,24 @@ pub(super) fn list_job_events_json(
     request: String,
 ) -> napi::Result<String> {
     let request: ListJobEventsRequest = decode(&request)?;
-    let after_sequence = request.after_sequence.unwrap_or(0) as i64;
-    let limit = request.limit.unwrap_or(500).clamp(1, 2_000);
+    let after_sequence = request.after_sequence as i64;
+    let limit = request.limit.clamp(1, 2_000);
     let conn = project
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+    let sql = match request.order.as_str() {
+        "asc" => "select payload from job_events where job_id = ?1 and sequence > ?2 order by sequence asc limit ?3",
+        "desc" => "select payload from job_events where job_id = ?1 and sequence > ?2 order by sequence desc limit ?3",
+        _ => {
+            return Err(napi_error(
+                "invalid-engine-payload",
+                "Change check event order must be asc or desc.",
+            ));
+        }
+    };
     let mut statement = conn
-        .prepare("select payload from job_events where job_id = ?1 and sequence > ?2 order by sequence asc limit ?3")
+        .prepare(sql)
         .map_err(|error| sqlite_error("Could not prepare project job event list", error))?;
     let rows = statement
         .query_map(params![request.job_id, after_sequence, limit], |row| {

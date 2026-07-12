@@ -4,7 +4,9 @@ import {
   ChangeCheckEventType,
   ChangeCheckRunEventSchema,
   ChangeCheckRunEventType,
+  ChangeCheckRunSchema,
   ChangeCheckRunStatus,
+  ChangeCheckRunStatusSchema,
   ChangeLifecycleEventType,
   ChangeTaskEventType,
   fail,
@@ -15,7 +17,7 @@ import {
   type StartChangeCheckRunsResponse,
   type DefinitionTarget,
 } from "@opencanon/core";
-import { booleanOption, formatOption, positiveIntegerOption, rejectUnknownOptions, stringValues } from "./options.ts";
+import { booleanOption, formatOption, nonNegativeIntegerOption, positiveIntegerOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { changesDefinitionCommandSuggestion, isChangeDefinitionCommand, runChangesDefinitionCommand } from "./changes-definition.ts";
 import { RuntimeApiRoute, withRuntimeClient, type RuntimeClient } from "./runtime-client.ts";
 
@@ -101,6 +103,12 @@ type RecordChangeEventResponse = {
   changes: ChangeSummary[];
 };
 
+type ChangeCheckRunSnapshot = {
+  run: ChangeCheckRun;
+  latestSequence: number;
+  events: ChangeCheckRunEvent[];
+};
+
 type ChangeWorkQueue = {
   ready: Array<{
     kind: "change" | "task";
@@ -180,6 +188,10 @@ export async function runChangesCommand(args: string[], cwd: string, options: Ch
   }
   if (command === "check") {
     await runChangesCheckCommand(rest, cwd);
+    return;
+  }
+  if (command === "runs") {
+    await runChangesRunsCommand(rest, cwd);
     return;
   }
   if (!options.allowDefinitionCommands && isChangeDefinitionCommand(command)) {
@@ -409,10 +421,131 @@ async function runChangesCheckCommand(args: string[], cwd: string): Promise<void
   process.exitCode = result.runs.some((item) => item.status !== ChangeCheckRunStatus.Passed) ? 1 : 0;
 }
 
-async function followChangeCheckRun(client: RuntimeClient, initial: ChangeCheckRun, format: Format): Promise<ChangeCheckRun> {
-  let cursor = 0;
+async function runChangesRunsCommand(args: string[], cwd: string): Promise<void> {
+  const [command = "list", ...rest] = args;
+  if (command === "-h" || command === "--help" || command === "help") {
+    printChangesRunsHelp();
+    return;
+  }
+  if (command === "list") return runChangesRunsListCommand(rest, cwd);
+  if (command === "show") return runChangesRunsShowCommand(rest, cwd);
+  if (command === "watch") return runChangesRunsWatchCommand(rest, cwd);
+  if (command === "cancel") return runChangesRunsCancelCommand(rest, cwd);
+  fail(`Unknown changes runs command: ${command}`);
+}
+
+async function runChangesRunsListCommand(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon changes runs list");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--format <format>", "Output format.");
+  cli.option("--status <status>", "Filter by run status.");
+  cli.option("--limit <count>", "Maximum runs to return (1-100).");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["help", "h", "format", "status", "limit"]);
+  if (booleanOption(options.help) || booleanOption(options.h)) {
+    printChangesRunsHelp();
+    return;
+  }
+  if (parsed.args.length > 0) fail(`Unexpected changes runs list arguments: ${parsed.args.join(", ")}`);
+  const limit = positiveIntegerOption(options.limit, "--limit", 20);
+  if (limit > 100) fail("--limit must not exceed 100.");
+  const rawStatus = optionalStringOption(options.status, "--status");
+  const status = rawStatus ? ChangeCheckRunStatusSchema.safeParse(rawStatus) : undefined;
+  if (status && !status.success) fail(`Unsupported --status: ${rawStatus}`);
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (status?.success) query.set("status", status.data);
+  const result = await withChangesRuntimeClient(cwd, (client) =>
+    client.get<{ runs: ChangeCheckRun[] }>(`${RuntimeApiRoute.ChangeCheckRuns}?${query.toString()}`),
+  );
+  const runs = result.runs.map((run) => ChangeCheckRunSchema.parse(run));
+  if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ runs }, null, 2));
+  else console.log(renderChangeCheckRunsMarkdown(runs));
+}
+
+async function runChangesRunsShowCommand(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon changes runs show");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--format <format>", "Output format.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["help", "h", "format"]);
+  if (booleanOption(options.help) || booleanOption(options.h)) {
+    printChangesRunsHelp();
+    return;
+  }
+  const runId = requiredSingleArgument(parsed.args, "changes runs show");
+  const snapshot = await withChangesRuntimeClient(cwd, (client) => readChangeCheckRunSnapshot(client, runId));
+  if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(snapshot, null, 2));
+  else console.log(renderChangeCheckRunMarkdown(snapshot));
+}
+
+async function runChangesRunsWatchCommand(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon changes runs watch");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--format <format>", "Output format.");
+  cli.option("--after <sequence>", "Resume after an event sequence.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["help", "h", "format", "after"]);
+  if (booleanOption(options.help) || booleanOption(options.h)) {
+    printChangesRunsHelp();
+    return;
+  }
+  const runId = requiredSingleArgument(parsed.args, "changes runs watch");
+  const after = nonNegativeIntegerOption(options.after, "--after", 0);
+  const format = formatOption(options.format);
+  const result = await withChangesRuntimeClient(cwd, async (client) => {
+    const snapshot = await readChangeCheckRunSnapshot(client, runId, after);
+    const run = await followChangeCheckRun(client, snapshot.run, format, { after, initialSnapshot: snapshot, cancelOnInterrupt: false });
+    const finalSnapshot = await readChangeCheckRunSnapshot(client, run.id);
+    return finalSnapshot;
+  });
+  if (format === Format.Json) console.log(JSON.stringify(result, null, 2));
+  else console.log(renderChangeCheckRunMarkdown(result));
+  process.exitCode = result.run.status === ChangeCheckRunStatus.Passed ? 0 : 1;
+}
+
+async function runChangesRunsCancelCommand(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon changes runs cancel");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--format <format>", "Output format.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnknownOptions(options, ["help", "h", "format"]);
+  if (booleanOption(options.help) || booleanOption(options.h)) {
+    printChangesRunsHelp();
+    return;
+  }
+  const runId = requiredSingleArgument(parsed.args, "changes runs cancel");
+  const result = await withChangesRuntimeClient(cwd, async (client) => {
+    const raw = await client.post<ChangeCheckRunSnapshot>(RuntimeApiRoute.ChangeCheckRunsCancel, { runId });
+    return parseChangeCheckRunSnapshot(raw);
+  });
+  if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(result, null, 2));
+  else console.log(renderChangeCheckRunMarkdown(result));
+}
+
+async function followChangeCheckRun(
+  client: RuntimeClient,
+  initial: ChangeCheckRun,
+  format: Format,
+  options: { after?: number; initialSnapshot?: ChangeCheckRunSnapshot; cancelOnInterrupt?: boolean } = {},
+): Promise<ChangeCheckRun> {
+  let cursor = options.after ?? 0;
   let terminal: ChangeCheckRun | undefined;
   let cancelRequested = false;
+  let initialSnapshot = options.initialSnapshot;
+  const processEvent = (event: ChangeCheckRunEvent) => {
+    if (event.runId !== initial.id || event.sequence <= cursor) return;
+    cursor = event.sequence;
+    if (event.type === ChangeCheckRunEventType.Stdout || event.type === ChangeCheckRunEventType.Stderr) {
+      const output = format === Format.Json ? process.stderr : event.type === ChangeCheckRunEventType.Stdout ? process.stdout : process.stderr;
+      output.write(event.text);
+      return;
+    }
+    if (isTerminalRunEvent(event)) terminal = event.run;
+  };
   const onInterrupt = () => {
     if (cancelRequested) return;
     cancelRequested = true;
@@ -420,22 +553,23 @@ async function followChangeCheckRun(client: RuntimeClient, initial: ChangeCheckR
       process.stderr.write(`Could not cancel Change check ${initial.checkId}: ${error instanceof Error ? error.message : String(error)}\n`);
     });
   };
-  process.once("SIGINT", onInterrupt);
+  if (options.cancelOnInterrupt !== false) process.once("SIGINT", onInterrupt);
   try {
     for (let reconnect = 0; reconnect < 3 && !terminal; reconnect += 1) {
+      while (!terminal) {
+        const snapshot = initialSnapshot ?? await readChangeCheckRunSnapshot(client, initial.id, cursor);
+        initialSnapshot = undefined;
+        for (const event of snapshot.events) processEvent(event);
+        if (terminal) break;
+        if (isTerminalRun(snapshot.run) && cursor >= snapshot.latestSequence) return snapshot.run;
+        if (cursor < snapshot.latestSequence) continue;
+        break;
+      }
+      if (terminal) break;
       const controller = new AbortController();
       const parser = createSseParser((event) => {
-        if (event.runId !== initial.id || event.sequence <= cursor) return;
-        cursor = event.sequence;
-        if (event.type === ChangeCheckRunEventType.Stdout || event.type === ChangeCheckRunEventType.Stderr) {
-          const output = format === Format.Json ? process.stderr : event.type === ChangeCheckRunEventType.Stdout ? process.stdout : process.stderr;
-          output.write(event.text);
-          return;
-        }
-        if (event.type === ChangeCheckRunEventType.Passed || event.type === ChangeCheckRunEventType.Failed || event.type === ChangeCheckRunEventType.Cancelled) {
-          terminal = event.run;
-          controller.abort();
-        }
+        processEvent(event);
+        if (terminal) controller.abort();
       });
       try {
         await client.stream(`${RuntimeApiRoute.EventsStream}?runId=${encodeURIComponent(initial.id)}&after=${cursor}`, {
@@ -448,10 +582,34 @@ async function followChangeCheckRun(client: RuntimeClient, initial: ChangeCheckR
       }
     }
   } finally {
-    process.off("SIGINT", onInterrupt);
+    if (options.cancelOnInterrupt !== false) process.off("SIGINT", onInterrupt);
   }
   if (!terminal) throw new Error(`Change check ${initial.checkId} event stream ended without a terminal result.`);
   return terminal;
+}
+
+async function readChangeCheckRunSnapshot(client: RuntimeClient, runId: string, after?: number): Promise<ChangeCheckRunSnapshot> {
+  const query = new URLSearchParams({ runId });
+  if (after !== undefined) query.set("after", String(after));
+  const raw = await client.get<ChangeCheckRunSnapshot>(`${RuntimeApiRoute.ChangeCheckRuns}?${query.toString()}`);
+  return parseChangeCheckRunSnapshot(raw);
+}
+
+function parseChangeCheckRunSnapshot(raw: ChangeCheckRunSnapshot): ChangeCheckRunSnapshot {
+  if (!Number.isInteger(raw.latestSequence) || raw.latestSequence < 0) fail("OpenCanon returned an invalid Change check event sequence.");
+  return {
+    run: ChangeCheckRunSchema.parse(raw.run),
+    latestSequence: raw.latestSequence,
+    events: raw.events.map((event) => ChangeCheckRunEventSchema.parse(event)),
+  };
+}
+
+function isTerminalRun(run: ChangeCheckRun): boolean {
+  return run.status === ChangeCheckRunStatus.Passed || run.status === ChangeCheckRunStatus.Failed || run.status === ChangeCheckRunStatus.Cancelled;
+}
+
+function isTerminalRunEvent(event: ChangeCheckRunEvent): event is Extract<ChangeCheckRunEvent, { type: "passed" | "failed" | "cancelled" }> {
+  return event.type === ChangeCheckRunEventType.Passed || event.type === ChangeCheckRunEventType.Failed || event.type === ChangeCheckRunEventType.Cancelled;
 }
 
 function createSseParser(onOperation: (event: ChangeCheckRunEvent) => void): { push(chunk: string): void } {
@@ -636,6 +794,43 @@ function renderRunChangeCheckMarkdown(response: { batchId: string; runs: ChangeC
   return lines.join("\n");
 }
 
+function renderChangeCheckRunsMarkdown(runs: ChangeCheckRun[]): string {
+  const lines = ["# OpenCanon Change Check Runs", ""];
+  if (runs.length === 0) {
+    lines.push("No runs found.");
+    return lines.join("\n");
+  }
+  for (const run of runs) {
+    lines.push(`- [${run.status}] ${run.id}`);
+    lines.push(`  Change: ${run.changeId}${run.taskId ? ` / ${run.taskId}` : ""}`);
+    lines.push(`  Check: ${run.checkId} (${run.checkKind})`);
+    lines.push(`  Updated: ${run.updatedAt}`);
+    if ("summary" in run) lines.push(`  Summary: ${run.summary}`);
+  }
+  return lines.join("\n");
+}
+
+function renderChangeCheckRunMarkdown(snapshot: ChangeCheckRunSnapshot): string {
+  const run = snapshot.run;
+  const lines = [
+    "# OpenCanon Change Check Run",
+    "",
+    `Run: ${run.id}`,
+    `Batch: ${run.batchId}`,
+    `Status: ${run.status}`,
+    `Change: ${run.changeId}`,
+    ...(run.taskId ? [`Task: ${run.taskId}`] : []),
+    `Check: ${run.checkId} (${run.checkKind})`,
+    `Created: ${run.createdAt}`,
+    `Updated: ${run.updatedAt}`,
+    `Latest sequence: ${snapshot.latestSequence}`,
+    `Output bytes: ${run.outputBytes}${run.outputTruncated ? " (truncated)" : ""}`,
+    ...("summary" in run ? [`Summary: ${run.summary}`] : []),
+    ...(run.outputTail ? ["", "Output tail:", ...run.outputTail.split("\n").map((line) => `  ${line}`)] : []),
+  ];
+  return lines.join("\n");
+}
+
 function requiredSingleArgument(args: readonly unknown[], command: string): string {
   const values = args.map(String);
   if (values.length === 0 || !values[0]) fail(`Missing ${command} id.`);
@@ -667,6 +862,10 @@ function printChangesHelp(): void {
   opencanon changes mark-ready <change-id> [--task <task-id>]
   opencanon changes close <change-id> [--task <task-id>]
   opencanon changes check <change-id> [check-id] [--task <task-id>] [--all]
+  opencanon changes runs list [--status <status>] [--limit <count>]
+  opencanon changes runs show <run-id>
+  opencanon changes runs watch <run-id> [--after <sequence>]
+  opencanon changes runs cancel <run-id>
 
 Commands:
   list             Show typed change definitions with derived board state.
@@ -680,6 +879,7 @@ Commands:
   mark-ready       Mark a Change or task as ready.
   close            Close a Change or task.
   check            Run declared checks and record pass/fail events.
+  runs             List, inspect, resume, and cancel persisted check runs.
   record           Record a raw lifecycle event in generated runtime state.
 
 Definition authoring and history:
@@ -697,5 +897,26 @@ Options:
 
 Event types:
   ${Object.values(ChangeEventType).join(", ")}
+`);
+}
+
+function printChangesRunsHelp(): void {
+  console.log(`Usage:
+  opencanon changes runs list [--status <status>] [--limit <count>]
+  opencanon changes runs show <run-id>
+  opencanon changes runs watch <run-id> [--after <sequence>]
+  opencanon changes runs cancel <run-id>
+
+Commands:
+  list    List recent persisted runs, optionally filtered by status.
+  show    Inspect one bounded run snapshot and output tail.
+  watch   Replay unseen events and follow live output without polling.
+  cancel  Cancel queued or running work; terminal runs are unchanged.
+
+Options:
+  --status queued|running|passed|failed|cancelled
+  --limit <count>         Number of runs from 1 to 100. Default: 20.
+  --after <sequence>      Resume after a non-negative event sequence.
+  --format markdown|json Output format. Default: markdown.
 `);
 }
