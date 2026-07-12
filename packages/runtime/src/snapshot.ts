@@ -22,6 +22,7 @@ import {
   type DocSnippet,
   type ImpactSurface,
   type RuntimeProjectSummary,
+  summarizeRuntimeHealth,
   type ChangeTaskState,
   type FileFacts,
   type RepoGraph,
@@ -107,7 +108,7 @@ export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeS
   const productModel = input.snapshot.state.productModel ?? storeState.productModel;
   return {
     rootDir: input.rootDir,
-    health: input.snapshot.health,
+    health: summarizeRuntimeHealth(input.snapshot.health),
     files: storeState.files,
     findings: storeState.findings,
     staleFiles: storeState.staleFiles,

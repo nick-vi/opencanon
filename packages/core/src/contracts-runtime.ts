@@ -84,6 +84,35 @@ export const RuntimeHealthSchema = z.object({
 });
 export type RuntimeHealth = z.infer<typeof RuntimeHealthSchema>;
 
+export const RuntimeValidatorGraphSummarySchema = z.object({
+  hash: z.string().min(1),
+  loadedAt: z.string().datetime(),
+  validatorCount: z.number().int().min(0),
+  dependencyCount: z.number().int().min(0),
+});
+export type RuntimeValidatorGraphSummary = z.infer<typeof RuntimeValidatorGraphSummarySchema>;
+
+export const RuntimeHealthSummarySchema = RuntimeHealthSchema.omit({ validatorGraph: true }).extend({
+  validatorGraph: RuntimeValidatorGraphSummarySchema.optional(),
+});
+export type RuntimeHealthSummary = z.infer<typeof RuntimeHealthSummarySchema>;
+
+export function summarizeRuntimeHealth(health: RuntimeHealth): RuntimeHealthSummary {
+  return RuntimeHealthSummarySchema.parse({
+    ...health,
+    ...(health.validatorGraph
+      ? {
+          validatorGraph: {
+            hash: health.validatorGraph.hash,
+            loadedAt: health.validatorGraph.loadedAt,
+            validatorCount: health.validatorGraph.validatorCount,
+            dependencyCount: health.validatorGraph.dependencyFiles.length,
+          },
+        }
+      : {}),
+  });
+}
+
 export const RuntimeProductModelStateSchema = ProductModelProjectionCountsSchema.extend({
   graphHash: z.string().min(1),
   definitionsHash: z.string().min(1),
@@ -105,7 +134,7 @@ export type RuntimeState = z.infer<typeof RuntimeStateSchema>;
 
 export const RuntimeProjectSummarySchema = z.object({
   rootDir: z.string().min(1),
-  health: RuntimeHealthSchema,
+  health: RuntimeHealthSummarySchema,
   files: z.number().int().min(0),
   findings: z.number().int().min(0),
   staleFiles: z.number().int().min(0),

@@ -808,6 +808,9 @@ function runtimeSummaryRouteCheckSource(): string {
       assert.equal(body.ok, true, text);
       assert.equal(body.data.rootDir, rootDir);
       assert.equal(body.data.health.status, "ready");
+      assert.equal(typeof body.data.health.validatorGraph.dependencyCount, "number");
+      assert.equal("dependencyFiles" in body.data.health.validatorGraph, false);
+      assert.equal("entrypoint" in body.data.health.validatorGraph, false);
       assert.equal(typeof body.data.files, "number");
       assert.equal(typeof body.data.findings, "number");
       assert.equal(typeof body.data.staleFiles, "number");

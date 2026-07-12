@@ -10,12 +10,14 @@ import { ApiRoute, ProjectIndexResponseMode } from "./routes.ts";
 import {
   readProducerStatuses,
   readProjectIndexStatus,
+  readProjectSummary,
   renderOpenCanonStatusSummary,
   renderProducerStatusMarkdown,
   renderProjectIndexStatusMarkdown,
   renderSemanticIndexLines,
   runtimeEntryJson,
   runtimeInspectionJson,
+  runtimeStatusJson,
   serviceEntryJson,
   serviceInspectionJson,
 } from "./cli-status.ts";
@@ -99,6 +101,10 @@ export async function runProjectCommand(args = process.argv.slice(2), cwd = proc
     await runProjectStatusCommand(rest, cwd, RuntimeCliSurface.Project);
     return;
   }
+  if (command === "inspect") {
+    await runProjectInspectCommand(rest, cwd);
+    return;
+  }
   if (command === "index") {
     await runProjectIndexCommand(rest, cwd);
     return;
@@ -150,7 +156,8 @@ export async function runOpenCanonStatusCommand(args = process.argv.slice(2), cw
   const service = await inspectService();
   const project = await inspectProjectRuntime(cwd);
   if (formatOption(options.format) === Format.Json) {
-    writeJson({ service: serviceInspectionJson(service), project: runtimeInspectionJson(project, cwd) });
+    const summary = project?.status === RuntimeStatus.Running ? await readProjectSummary(project.entry) : undefined;
+    writeJson({ service: serviceInspectionJson(service), project: runtimeStatusJson(project, cwd, summary) });
     return;
   }
 
@@ -328,9 +335,9 @@ async function runProjectStatusCommand(args: string[], cwd: string, surface: Pro
   const inspection = await inspectProjectRuntime(cwd);
   if (formatOption(options.format) === Format.Json) {
     const entry = inspection?.status === RuntimeStatus.Running ? inspection.entry : undefined;
+    const summary = entry ? await readProjectSummary(entry) : undefined;
     const producers = entry ? await readProducerStatuses(entry) : undefined;
-    const index = entry ? await readProjectIndexStatus(entry) : undefined;
-    writeJson({ project: runtimeInspectionJson(inspection, cwd), producers, index });
+    writeJson({ project: runtimeStatusJson(inspection, cwd, summary), producers });
     return;
   }
   console.log(renderRuntimeStatusMarkdown(inspection, cwd));
@@ -367,10 +374,56 @@ async function runListCommand(args: string[], surface: ProjectRuntimeCliSurface)
   const diagnostics = readRuntimeRegistryDiagnostics();
   const projects = await inspectAllRuntimes();
   if (formatOption(options.format) === Format.Json) {
-    writeJson({ projects: projects.map((project) => runtimeInspectionJson(project, process.cwd())), diagnostics });
+    writeJson({ projects: projects.map((project) => runtimeStatusJson(project, process.cwd())), diagnostics });
     return;
   }
   console.log(renderRuntimeListMarkdown(projects, diagnostics));
+}
+
+async function runProjectInspectCommand(args: string[], cwd: string): Promise<void> {
+  const cli = cac("opencanon project inspect");
+  cli.option("-h, --help", "Show help.");
+  cli.option("--format <format>", "Output format.");
+  const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
+  const options = parsed.options as Record<string, unknown>;
+  rejectUnexpectedCommandInput(parsed.args.slice(1), "opencanon project inspect", options, ["help", "h", "format"]);
+  if (options.help || options.h) {
+    console.log("Usage: opencanon project inspect <runtime|validator-graph> [--format markdown|json]");
+    return;
+  }
+  const target = String(parsed.args[0] ?? "");
+  if (target !== "runtime" && target !== "validator-graph") {
+    throw new Error("Usage: opencanon project inspect <runtime|validator-graph> [--format markdown|json]");
+  }
+  const inspection = await inspectProjectRuntime(cwd);
+  if (!inspection || inspection.status !== RuntimeStatus.Running) {
+    throw new Error("Project runtime is not running. Run opencanon project start first.");
+  }
+  if (target === "runtime") {
+    writeJson(runtimeInspectionJson(inspection, cwd));
+    return;
+  }
+  const state = await requestLocalJson<{ health?: { validatorGraph?: unknown } }>(localProtocolEndpointFromEntry(inspection.entry), {
+    method: "GET",
+    path: ApiRoute.State,
+  });
+  const graph = state.health?.validatorGraph;
+  if (!graph) throw new Error("The project runtime has no validator graph metadata.");
+  if (formatOption(options.format) === Format.Json) {
+    writeJson(graph);
+    return;
+  }
+  const value = graph as { entrypoint?: string; hash?: string; loadedAt?: string; validatorCount?: number; dependencyFiles?: string[] };
+  console.log([
+    "# OpenCanon Validator Graph",
+    "",
+    `Entrypoint: ${value.entrypoint ?? "unknown"}`,
+    `Hash: ${value.hash ?? "unknown"}`,
+    `Loaded: ${value.loadedAt ?? "unknown"}`,
+    `Validators: ${value.validatorCount ?? 0}`,
+    `Dependencies: ${value.dependencyFiles?.length ?? 0}`,
+    ...(value.dependencyFiles?.length ? ["", ...value.dependencyFiles.map((file) => `- ${file}`)] : []),
+  ].join("\n"));
 }
 
 async function runServiceStartCommand(args: string[], cwd: string): Promise<void> {
@@ -781,6 +834,7 @@ function printProjectHelp(): void {
   console.log(`Usage:
   opencanon project status
   opencanon project status --format json
+  opencanon project inspect validator-graph
   opencanon project start --port 4767
   opencanon project start --format json
   opencanon project start --foreground
@@ -797,6 +851,7 @@ function printProjectHelp(): void {
 
 Commands:
   status  Show this project's runtime, live refresh, producers, and index state.
+  inspect Show explicit runtime internals or validator-graph dependency paths.
   start   Ask the OpenCanon service to start this project's runtime.
   index   Rebuild derived Search, Ask, Context, and Project Map knowledge now.
   logs    Print this project's runtime log path or recent log lines.

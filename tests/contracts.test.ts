@@ -3,9 +3,12 @@ import { test } from "vitest";
 import {
   ContextRequestSchema,
   RuntimeHealthSchema,
+  RuntimeHealthSummarySchema,
+  RuntimeProjectSummarySchema,
   RuntimeResponseSchema,
   RuntimeWorkerJobKindValue,
   RuntimeWorkerJobStatusValue,
+  summarizeRuntimeHealth,
   ExtractFactsRequestSchema,
   ExtractFactsResultSchema,
   FileFactsSchema,
@@ -259,6 +262,30 @@ test("runtime health contract exposes explicit worker jobs", () => {
   assert.equal(health.jobs?.[0]?.kind, RuntimeWorkerJobKindValue.SemanticIndex);
   assert.equal(health.jobs?.[0]?.status, RuntimeWorkerJobStatusValue.Running);
   assert.equal(RuntimeHealthSchema.safeParse({ ...health, jobs: [{ ...health.jobs?.[0], status: "unknown" }] }).success, false);
+});
+
+test("public runtime summaries replace validator dependency paths with a bounded count", () => {
+  const health = RuntimeHealthSchema.parse({
+    status: "ready",
+    engine: { packageVersion: "0.4.5", engineVersion: "0.4.5", napiVersion: "test", schemaVersion: 7 },
+    refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+    startedAt: "2026-07-12T00:00:00.000Z",
+    validatorGraph: {
+      entrypoint: "opencanon/conventions/index.ts",
+      hash: "validator-graph-hash",
+      loadedAt: "2026-07-12T00:00:00.000Z",
+      validatorCount: 25,
+      dependencyFiles: Array.from({ length: 10_000 }, (_item, index) => `opencanon/conventions/rule-${index}.ts`),
+    },
+  });
+
+  const summary = summarizeRuntimeHealth(health);
+  assert.equal(summary.validatorGraph?.dependencyCount, 10_000);
+  assert.equal("dependencyFiles" in (summary.validatorGraph ?? {}), false);
+  assert.equal("entrypoint" in (summary.validatorGraph ?? {}), false);
+  assert.equal(RuntimeHealthSummarySchema.safeParse(summary).success, true);
+  const project = RuntimeProjectSummarySchema.parse({ rootDir: "/repo", health: summary, files: 1, findings: 0, staleFiles: 0 });
+  assert(JSON.stringify(project).length < 4_096);
 });
 
 test("project scope filtering applies project patterns and ignores", () => {

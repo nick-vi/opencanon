@@ -1,9 +1,12 @@
 import {
   ProjectRefreshModeValue,
   ProjectRefreshStatusValue,
+  RuntimeProjectSummarySchema,
+  summarizeRuntimeHealth,
   resolveRootDir,
   type ProducerStatus,
   type ReadSemanticIndexStatusResult,
+  type RuntimeProjectSummary,
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
 import { ApiRoute } from "./routes.ts";
@@ -107,6 +110,11 @@ export async function readProjectIndexStatus(entry: {
   }
 }
 
+export async function readProjectSummary(entry: RuntimeRegistryEntry): Promise<RuntimeProjectSummary> {
+  const value = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(entry), { method: "GET", path: ApiRoute.ProjectSummary });
+  return RuntimeProjectSummarySchema.parse(value);
+}
+
 export function renderSemanticIndexLines(index: SemanticIndexSnapshot): string[] {
   const lines = [
     `Status: ${index.status}`,
@@ -139,7 +147,7 @@ function semanticIndexAction(index: SemanticIndexSnapshot): string | undefined {
   return "Run opencanon project index to rebuild Search, Ask, and Knowledge retrieval.";
 }
 
-export function runtimeInspectionJson(inspection: RuntimeInspection | undefined, cwd: string): Record<string, unknown> {
+export function runtimeStatusJson(inspection: RuntimeInspection | undefined, cwd: string, summary?: RuntimeProjectSummary): Record<string, unknown> {
   if (!inspection) {
     return {
       rootDir: resolveRootDir(cwd),
@@ -147,6 +155,29 @@ export function runtimeInspectionJson(inspection: RuntimeInspection | undefined,
       actions: ["Run opencanon project start."],
     };
   }
+  const state = summary ?? (inspection.health && inspection.state
+    ? {
+        rootDir: inspection.entry.rootDir,
+        health: summarizeRuntimeHealth(inspection.health),
+        files: inspection.state.files,
+        findings: inspection.state.findings,
+        staleFiles: inspection.state.staleFiles,
+        ...(inspection.state.semanticIndex ? { semanticIndex: inspection.state.semanticIndex } : {}),
+        ...(inspection.state.productModel ? { productModel: inspection.state.productModel } : {}),
+      }
+    : undefined);
+  return {
+    rootDir: inspection.entry.rootDir,
+    status: inspection.status,
+    message: inspection.message,
+    problem: inspection.problem,
+    ...(state ?? {}),
+    actions: runtimeStatusActions(inspection),
+  };
+}
+
+export function runtimeInspectionJson(inspection: RuntimeInspection | undefined, cwd: string): Record<string, unknown> {
+  if (!inspection) return runtimeStatusJson(inspection, cwd);
   return {
     entry: runtimeEntryJson(inspection.entry),
     status: inspection.status,
