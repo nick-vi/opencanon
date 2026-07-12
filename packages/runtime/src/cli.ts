@@ -73,8 +73,6 @@ const BindAllHost = {
   Ipv6: "::",
 } as const;
 
-const ProjectRuntimeReadyTimeoutMs = 60_000;
-
 type ProjectRuntimeCliSurface = {
   command: string;
   displayName: string;
@@ -637,8 +635,7 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
     return;
   }
   const format = formatOption(options.format);
-  await ensureProjectRuntimeViaService({ cwd });
-  const inspection = await waitForProjectRuntimeReady(cwd, { timeoutMs: ProjectRuntimeReadyTimeoutMs });
+  const ensured = await ensureProjectRuntimeViaService({ cwd });
   if (format !== Format.Json) {
     console.log("# OpenCanon Project Knowledge");
     console.log("");
@@ -646,7 +643,7 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
     console.log("");
   }
   const snapshot = await requestLocalJson<{ state?: { semanticIndex?: SemanticIndexSnapshot }; semanticIndex?: SemanticIndexSnapshot | null }>(
-    localProtocolEndpointFromEntry(inspection.entry),
+    localProtocolEndpointFromEntry(ensured.project.entry),
     { method: "POST", path: ApiRoute.Index, body: { response: ProjectIndexResponseMode.SemanticIndex, force: options.force === true } },
   );
   const index = snapshot.state?.semanticIndex ?? snapshot.semanticIndex;

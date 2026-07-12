@@ -415,7 +415,7 @@ test("project start retires a live conflicting worker lease before spawning repl
   }
 });
 
-test("service ensure registers slow-starting runtimes without waiting for health", { timeout: 10000 }, async () => {
+test("service ensure returns only after a slow-starting runtime is healthy", { timeout: 10000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-slow-start-"));
   const registryPath = path.join(rootDir, "global", "service.json");
   const fakeCliPath = path.join(rootDir, "slow-opencanon.mjs");
@@ -423,7 +423,7 @@ test("service ensure registers slow-starting runtimes without waiting for health
   let server: Awaited<ReturnType<typeof startServiceServer>> | undefined;
   try {
     writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
-    writeFileSync(fakeCliPath, "setInterval(() => {}, 1000);\n");
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource({ startupDelayMs: 250 }));
     process.env.OPENCANON_CLI = fakeCliPath;
     server = await startServiceServer({ port: 0, registryPath, authToken: "service-token", reconcileIntervalMs: false });
 
@@ -435,10 +435,10 @@ test("service ensure registers slow-starting runtimes without waiting for health
     });
     const text = await response.text();
     assert.equal(response.status, 200, text);
-    assert(Date.now() - startedAt < 2000);
+    assert(Date.now() - startedAt >= 200);
 
     const payload = JSON.parse(text) as { data?: { project?: { entry?: { lifecycle?: { status?: string } } } } };
-    assert.equal(payload.data?.project?.entry?.lifecycle?.status, ProcessLifecycleStatus.Starting);
+    assert.equal(payload.data?.project?.entry?.lifecycle?.status, ProcessLifecycleStatus.Running);
     const entries = readRuntimeRegistry(registryPath);
     assert.equal(entries.length, 1);
     assert.equal(entries[0]?.rootDir, rootDir);
@@ -451,7 +451,7 @@ test("service ensure registers slow-starting runtimes without waiting for health
   }
 });
 
-test("project runtime readiness wait resolves no-wait starts", { timeout: 10000 }, async () => {
+test("project start returns a ready runtime", { timeout: 10000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-ready-wait-"));
   const registryPath = path.join(rootDir, "global", "service.json");
   const fakeCliPath = path.join(rootDir, "ready-opencanon.mjs");
@@ -461,7 +461,7 @@ test("project runtime readiness wait resolves no-wait starts", { timeout: 10000 
     writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
     process.env.OPENCANON_CLI = fakeCliPath;
 
-    const started = await startProjectRuntime({ cwd: rootDir, registryPath, waitForReady: false, idleTimeoutMs: 0 });
+    const started = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
     const ready = await waitForProjectRuntimeReady(rootDir, { registryPath, timeoutMs: 3000, intervalMs: 50 });
 
     assert.equal(started.status, "started");
@@ -927,7 +927,7 @@ test("service registry stores project runtime entries and lazily starts isolated
       const response: Response = await fetch(`${serviceServer.url}/api/projects/ensure`, {
         method: "POST",
         headers: { ...runtimeAuthHeaders(serviceServer.authToken), "content-type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ rootDir, idleTimeoutMs: 30000, waitForReady: true }),
+        body: JSON.stringify({ rootDir, idleTimeoutMs: 30000 }),
       });
       const text = await response.text();
       assert.equal(response.status, 200, text);

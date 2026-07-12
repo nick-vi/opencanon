@@ -72,7 +72,6 @@ export async function startProjectRuntime(input: {
   registryPath?: string;
   allowRemote?: boolean;
   idleTimeoutMs?: number;
-  waitForReady?: boolean;
 }): Promise<StartProjectRuntimeResult> {
   const rootDir = resolveRootDir(input.cwd);
   const host = input.host ?? "127.0.0.1";
@@ -92,13 +91,6 @@ export async function startProjectRuntime(input: {
     if (existing && !runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
       await stopProjectRuntime(rootDir, registryPath);
     } else if (existing?.status === RuntimeStatus.Starting) {
-      if (input.waitForReady === false) {
-        return {
-          status: "already-running",
-          entry: existing.entry,
-          message: `OpenCanon project runtime is still starting for ${rootDir}.`,
-        };
-      }
       const ready = await waitForRuntimeHealth(existing.entry);
       if (ready) {
         const runningEntry = updateRuntimeLifecycle(existing.entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
@@ -128,7 +120,7 @@ export async function startProjectRuntime(input: {
     await retireConflictingProjectWorkerLease(rootDir, registryPath);
 
     const attemptedPorts: number[] = [];
-    const startupAttempts = input.port === undefined && input.waitForReady !== false ? AutoPortStartupAttempts : 1;
+    const startupAttempts = input.port === undefined ? AutoPortStartupAttempts : 1;
     let lastStartupError: Error | undefined;
     for (let attempt = 0; attempt < startupAttempts; attempt += 1) {
       const port = await chooseAvailablePort({
@@ -205,14 +197,6 @@ export async function startProjectRuntime(input: {
         leaseId,
         message: "OpenCanon project runtime process spawned.",
       });
-
-      if (input.waitForReady === false) {
-        return {
-          status: "started",
-          entry,
-          message: `OpenCanon project runtime started for ${rootDir}.`,
-        };
-      }
 
       const health = await waitForRuntimeHealthResult(entry);
       if (health.ready) {
@@ -390,7 +374,6 @@ export async function ensureProjectRuntimeViaService(input: {
   registryPath?: string;
   allowRemote?: boolean;
   idleTimeoutMs?: number;
-  waitForReady?: boolean;
 }): Promise<EnsureProjectRuntimeResult> {
   const project = discoverOpenCanonProject(input.cwd);
   if (!project) {
@@ -419,7 +402,6 @@ export async function ensureProjectRuntimeViaService(input: {
         port: input.port,
         allowRemote: input.allowRemote,
         idleTimeoutMs: input.idleTimeoutMs,
-        waitForReady: input.waitForReady ?? false,
       },
     },
   );

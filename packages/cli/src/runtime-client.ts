@@ -8,8 +8,6 @@ import {
   runtimeIdentityForEntrypoint,
   serviceRegistryPath,
   stopProjectRuntime,
-  RuntimeStatus,
-  type RuntimeInspection,
   type RuntimeRegistryEntry,
 } from "@opencanon/runtime";
 import { resolveRootDir } from "@opencanon/core";
@@ -41,8 +39,6 @@ export const RuntimeApiRoute = {
 
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
 const RunningRuntimeProducerWarmTimeoutMs = 35_000;
-const SupervisedRuntimeStartupAttempts = 3;
-const SupervisedRuntimePollMs = 250;
 
 /**
  * Authoritative producer statuses from an ALREADY-running runtime, or undefined
@@ -99,7 +95,6 @@ export type RuntimeClient = {
 export type RuntimeClientOptions = {
   localTransport?: LocalTransportKind;
   requestTimeoutMs?: number;
-  startupTimeoutMs?: number;
 };
 
 export async function withRuntimeClient<T>(
@@ -111,7 +106,7 @@ export async function withRuntimeClient<T>(
   const registryPath = serviceRegistryPath();
   let supervisedRuntimeRepair: Promise<RuntimeRegistryEntry> | undefined;
 
-  const entry = await ensureSupervisedRuntimeReady(rootDir, registryPath, options.startupTimeoutMs);
+  const entry = await ensureSupervisedRuntimeReady(rootDir, registryPath);
   let endpoint = localProtocolEndpointFromEntry(entry, { prefer: options.localTransport });
 
   const requestWithRepair = async <T>(request: { method: "GET" | "POST"; path: string; body?: unknown }): Promise<T> => {
@@ -139,7 +134,7 @@ export async function withRuntimeClient<T>(
 
   const repairSupervisedRuntime = async (): Promise<RuntimeRegistryEntry> => {
     if (!supervisedRuntimeRepair) {
-      supervisedRuntimeRepair = repairSupervisedRuntimeAfterTransportFailure(rootDir, registryPath, options.startupTimeoutMs);
+      supervisedRuntimeRepair = repairSupervisedRuntimeAfterTransportFailure(rootDir, registryPath);
     }
     try {
       return await supervisedRuntimeRepair;
@@ -159,53 +154,14 @@ export async function withRuntimeClient<T>(
   });
 }
 
-async function repairSupervisedRuntimeAfterTransportFailure(rootDir: string, registryPath: string, timeoutMs: number | undefined): Promise<RuntimeRegistryEntry> {
+async function repairSupervisedRuntimeAfterTransportFailure(rootDir: string, registryPath: string): Promise<RuntimeRegistryEntry> {
   await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
-  return await ensureSupervisedRuntimeReady(rootDir, registryPath, timeoutMs);
+  return await ensureSupervisedRuntimeReady(rootDir, registryPath);
 }
 
-async function ensureSupervisedRuntimeReady(rootDir: string, registryPath: string, timeoutMs = 180_000): Promise<RuntimeRegistryEntry> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < SupervisedRuntimeStartupAttempts; attempt += 1) {
-    await ensureProjectRuntimeViaService({ cwd: rootDir, waitForReady: false, registryPath });
-    try {
-      return await waitForSupervisedRuntimeUsable(rootDir, registryPath, timeoutMs);
-    } catch (error) {
-      lastError = error;
-      if (!(await shouldRetryFailedSupervisedStartup(rootDir, registryPath))) throw error;
-      await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
-    }
-  }
-  throw lastError;
-}
-
-async function waitForSupervisedRuntimeUsable(rootDir: string, registryPath: string, timeoutMs: number): Promise<RuntimeRegistryEntry> {
-  const startedAt = Date.now();
-  let lastMessage = "Project runtime did not become usable.";
-  while (Date.now() - startedAt < timeoutMs) {
-    const inspection = await inspectProjectRuntime(rootDir, registryPath);
-    const entry = usableRuntimeEntry(inspection);
-    if (entry) return entry;
-    if (!inspection) throw new Error("Project runtime did not become usable: no project runtime is registered.");
-    if (inspection.status === RuntimeStatus.Stale || inspection.status === RuntimeStatus.Unhealthy) {
-      throw new Error(`Project runtime did not become usable: ${inspection.status}: ${inspection.message}`);
-    }
-    lastMessage = inspection.message;
-    await sleep(SupervisedRuntimePollMs);
-  }
-  throw new Error(`Project runtime did not become usable within ${timeoutMs}ms: ${lastMessage}`);
-}
-
-function usableRuntimeEntry(inspection: RuntimeInspection | undefined): RuntimeRegistryEntry | undefined {
-  if (!inspection) return undefined;
-  if (inspection.status === RuntimeStatus.Running) return inspection.entry;
-  if (inspection.status === RuntimeStatus.Busy && inspection.health) return inspection.entry;
-  return undefined;
-}
-
-async function shouldRetryFailedSupervisedStartup(rootDir: string, registryPath: string): Promise<boolean> {
-  const inspection = await inspectProjectRuntime(rootDir, registryPath);
-  return !inspection || inspection.status === RuntimeStatus.Stale || inspection.status === RuntimeStatus.Unhealthy;
+async function ensureSupervisedRuntimeReady(rootDir: string, registryPath: string): Promise<RuntimeRegistryEntry> {
+  const ensured = await ensureProjectRuntimeViaService({ cwd: rootDir, registryPath });
+  return ensured.project.entry;
 }
 
 function isLocalTransportFailure(error: unknown): boolean {
@@ -223,10 +179,6 @@ function isLocalTransportFailure(error: unknown): boolean {
     message.includes("ENOENT") ||
     message.includes("No such file or directory")
   );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function errorMessages(error: unknown, seen = new Set<unknown>()): string[] {

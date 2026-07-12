@@ -148,7 +148,7 @@ export function readyFakeServiceCliSource(options: { exitOnceMarkerPath?: string
   ].join("\n");
 }
 
-export function readyFakeRuntimeCliSource(options: { exitOnceMarkerPath?: string; pidPathEnv?: string } = {}): string {
+export function readyFakeRuntimeCliSource(options: { exitOnceMarkerPath?: string; pidPathEnv?: string; startupDelayMs?: number } = {}): string {
   return [
     'import { createServer } from "node:http";',
     'import net from "node:net";',
@@ -164,6 +164,7 @@ export function readyFakeRuntimeCliSource(options: { exitOnceMarkerPath?: string
         ]
       : []),
     ...(options.pidPathEnv ? [`writeFileSync(process.env["${options.pidPathEnv}"], String(process.pid));`] : []),
+    ...(options.startupDelayMs ? [`await new Promise((resolve) => setTimeout(resolve, ${options.startupDelayMs}));`] : []),
     'const portArg = process.argv.indexOf("--port");',
     'const hostArg = process.argv.indexOf("--host");',
     "const port = Number(process.argv[portArg + 1]);",

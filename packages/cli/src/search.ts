@@ -8,7 +8,6 @@ import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
 const SearchKind = { All: "all", Symbol: "symbol", Convention: "convention", Validator: "validator", Doc: "doc", Context: "context" } as const;
 type SearchKind = (typeof SearchKind)[keyof typeof SearchKind];
 const ContextSearchRequestTimeoutMs = 20_000;
-const ContextSearchStartupTimeoutMs = 20_000;
 
 type SearchQuery = {
   query: string;
@@ -104,7 +103,7 @@ async function searchProjectContext(rootDir: string, query: SearchQuery): Promis
     const response = await withRuntimeClient<ContextSearchResponse>(
       rootDir,
       (client) => client.get(`${RuntimeApiRoute.ContextSearch}?${params.toString()}`),
-      { requestTimeoutMs: ContextSearchRequestTimeoutMs, startupTimeoutMs: ContextSearchStartupTimeoutMs },
+      { requestTimeoutMs: ContextSearchRequestTimeoutMs },
     );
     return response.results.map((result) => ({
       kind: "context",

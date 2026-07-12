@@ -150,7 +150,6 @@ export async function startServiceServer(options: {
           registryPath,
           allowRemote: booleanBodyValue(body.body.allowRemote),
           idleTimeoutMs: numberBodyValue(body.body.idleTimeoutMs),
-          waitForReady: booleanBodyValue(body.body.waitForReady) ?? false,
         });
       } catch (error) {
         return serviceJson(serviceProblem(runtimeUnavailableProblem(project.rootDir, error)), 500);
