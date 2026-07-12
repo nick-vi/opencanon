@@ -166,10 +166,20 @@ test("changes ready and brief expose agent-ready task work", () => {
       timeout: 30_000,
     });
     assert.equal(check.status, 0, check.stderr || check.stdout);
-    const checkPayload = JSON.parse(check.stdout) as { results: Array<{ taskId?: string; status: string }>; event: { taskIds: string[]; checkIds: string[] } };
-    assert.deepEqual(checkPayload.results.map((item) => `${item.taskId}:${item.status}`), ["model:passed"]);
-    assert.deepEqual(checkPayload.event.taskIds, ["model"]);
-    assert.deepEqual(checkPayload.event.checkIds, ["smoke"]);
+    const checkPayload = JSON.parse(check.stdout) as { runs: Array<{ taskId?: string; checkId: string; status: string }> };
+    assert.deepEqual(checkPayload.runs.map((item) => `${item.taskId}:${item.checkId}:${item.status}`), ["model:smoke:passed"]);
+
+    const events = spawnSync(process.execPath, [script, "changes", "events", "cli-task-change", "--task", "model", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(events.status, 0, events.stderr || events.stdout);
+    const eventPayload = JSON.parse(events.stdout) as { events: Array<{ type: string; taskIds: string[]; checkIds: string[] }> };
+    const passed = eventPayload.events.find((event) => event.type === "task-check-passed");
+    assert.deepEqual(passed?.taskIds, ["model"]);
+    assert.deepEqual(passed?.checkIds, ["smoke"]);
   } finally {
     removeTestRoot(rootDir);
   }

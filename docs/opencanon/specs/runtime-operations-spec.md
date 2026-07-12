@@ -30,6 +30,8 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `packages/cli/src/runtime-client.ts`
 - Files: `packages/runtime/test/*.test.ts`
 - Files: `tests/runtime-events.test.ts`
+- Files: `tests/cli-reporting.test.ts`
+- Files: `package.json`
 - Docs: `docs/opencanon/specs/runtime-operations-spec.md`
 
 ## Impact surfaces

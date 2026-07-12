@@ -265,10 +265,12 @@ async function runChangesEventsCommand(args: string[], cwd: string): Promise<voi
   cli.option("-h, --help", "Show help.");
   cli.option("--format <format>", "Output format.");
   cli.option("--limit <count>", "Maximum events to return.");
+  cli.option("--task <id>", "Filter by task id.");
+  cli.option("--check <id>", "Filter by check id.");
 
   const parsed = cli.parse(["node", "opencanon", ...args], { run: false });
   const options = parsed.options as Record<string, unknown>;
-  rejectUnknownOptions(options, ["help", "h", "format", "limit"]);
+  rejectUnknownOptions(options, ["help", "h", "format", "limit", "task", "check"]);
   if (booleanOption(options.help) || booleanOption(options.h)) {
     printChangesHelp();
     return;
@@ -276,7 +278,12 @@ async function runChangesEventsCommand(args: string[], cwd: string): Promise<voi
   const [changeId] = parsed.args;
   if (!changeId || parsed.args.length > 1) fail("Usage: opencanon changes events <change-id>");
   const limit = positiveIntegerOption(options.limit, "--limit", 50);
-  const path = `${RuntimeApiRoute.ChangeEvents}?changeId=${encodeURIComponent(String(changeId))}&limit=${String(limit)}`;
+  const query = new URLSearchParams({ changeId: String(changeId), limit: String(limit) });
+  const taskId = optionalStringOption(options.task, "--task");
+  const checkId = optionalStringOption(options.check, "--check");
+  if (taskId) query.set("taskId", taskId);
+  if (checkId) query.set("checkId", checkId);
+  const path = `${RuntimeApiRoute.ChangeEvents}?${query.toString()}`;
   const events = await withChangesRuntimeClient(cwd, (client) => client.get<ChangeEvent[]>(path));
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ events }, null, 2));
   else console.log(renderChangeEventsMarkdown(String(changeId), events));

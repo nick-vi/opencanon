@@ -31,6 +31,8 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/runtime-client.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/*.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/runtime-events.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "tests/cli-reporting.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "package.json" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/specs/runtime-operations-spec.md" },
     ],
     areas: ["local-service-and-runtimes", "project-map-governance"],

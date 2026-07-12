@@ -34,6 +34,8 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/*.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/contracts.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/runtime-events.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "tests/cli-reporting.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "package.json" },
     ],
     intent: {
       problem: "Status responses expose unbounded internal dependency paths, while long Change checks buffer output and look frozen until the request completes.",
