@@ -7,13 +7,20 @@ Long-running project operations expose bounded status, durable execution state, 
 ## Scope
 
 - Files: `packages/core/src/contracts-runtime.ts`
+- Files: `packages/core/src/contracts-change-runs.ts`
 - Files: `packages/engine/src/index.ts`
 - Files: `crates/opencanon-engine/src/project.rs`
 - Files: `crates/opencanon-engine/src/contracts.rs`
 - Files: `crates/opencanon-engine/src/state.rs`
 - Files: `crates/opencanon-engine/src/migrations/*.sql`
 - Files: `packages/runtime/src/server-events.ts`
+- Files: `packages/runtime/src/routes.ts`
+- Files: `packages/runtime/src/local-protocol.ts`
+- Files: `packages/runtime/src/service-http.ts`
+- Files: `packages/runtime/src/service-server.ts`
+- Files: `packages/runtime/src/index.ts`
 - Files: `packages/runtime/src/server-change-runtime.ts`
+- Files: `packages/runtime/src/change-check-runner.ts`
 - Files: `packages/runtime/src/server-routes.ts`
 - Files: `packages/runtime/src/cli-status.ts`
 - Files: `packages/runtime/src/cli.ts`
@@ -22,6 +29,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `packages/cli/src/changes.ts`
 - Files: `packages/cli/src/runtime-client.ts`
 - Files: `packages/runtime/test/*.test.ts`
+- Files: `tests/runtime-events.test.ts`
 - Docs: `docs/opencanon/specs/runtime-operations-spec.md`
 
 ## Impact surfaces

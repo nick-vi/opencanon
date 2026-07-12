@@ -201,8 +201,13 @@ export function serviceDiagnostic(code: OpenCanonErrorCode, message: string): { 
   return { ok: false, error: createOpenCanonDiagnosticsError([createOpenCanonDiagnostic({ code, message })]) };
 }
 
-export async function proxyRuntimeEventStream(entry: RuntimeRegistryEntry): Promise<Response> {
+export async function proxyRuntimeEventStream(entry: RuntimeRegistryEntry, query?: URLSearchParams): Promise<Response> {
   const url = new URL("/api/events/stream", entry.url);
+  if (query) {
+    for (const [key, value] of query) {
+      if (key !== "rootDir") url.searchParams.append(key, value);
+    }
+  }
   const upstream = await fetch(url, { headers: runtimeAuthHeaders(entry.authToken) });
   if (!upstream.ok || !upstream.body) {
     return serviceJson(serviceDiagnostic("runtime-not-running", `OpenCanon runtime event stream failed: ${upstream.status} ${upstream.statusText}.`), upstream.status || 502);

@@ -30,7 +30,8 @@ export type { RuntimeSnapshot, RelatedCanon, RelatedCanonQuery } from "./snapsho
 export { buildRuntimeSnapshot, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot } from "./snapshot.ts";
 export { normalizeRuntimePort, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand } from "./cli.ts";
 export type { LocalProtocolEndpoint, LocalProtocolPipeServer, LocalProtocolRawResponse, LocalProtocolRequest, LocalProtocolTransport } from "./local-protocol.ts";
-export { httpLoopbackTransport, localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, LocalTransportKind, pipeProtocolTransport, requestLocalJson, serveLocalProtocolPipe } from "./local-protocol.ts";
+export { httpLoopbackTransport, localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, LocalTransportKind, pipeProtocolTransport, requestLocalJson, serveLocalProtocolPipe, streamLocalText } from "./local-protocol.ts";
+export type { LocalProtocolStreamRequest } from "./local-protocol.ts";
 export type { TypeProducerRuntime, ProducerResolution } from "./type-producer/runtime.ts";
 export { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
 export { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";

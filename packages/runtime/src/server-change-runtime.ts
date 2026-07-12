@@ -1,8 +1,7 @@
-import { exec as execShell } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
   CanonEventSchema,
   ChangeCheckKind,
@@ -23,6 +22,7 @@ import {
   type ValidationResultCache,
 } from "@opencanon/core";
 import { stopService } from "./service.ts";
+import { terminateSpawnedProcess } from "./service-process.ts";
 import type { ProjectStore } from "./state.ts";
 import { validateRelativePaths } from "./server-fs.ts";
 import {
@@ -37,7 +37,6 @@ import {
   requireTaskLeaseOwner,
 } from "./worktree-coordination.ts";
 
-const execCommand = promisify(execShell);
 const CheckCommandTimeoutMs = 2 * 60 * 1000;
 const CheckCommandMaxBuffer = 1024 * 1024;
 
@@ -72,10 +71,15 @@ export type RunChangeCheckResult = {
   taskId?: string;
   checkId: string;
   kind: ChangeCheck["kind"];
-  status: "passed" | "failed";
+  status: "passed" | "failed" | "cancelled";
   summary: string;
   output: string;
   exitCode?: number | string;
+};
+
+export type RunChangeCheckOptions = {
+  signal?: AbortSignal;
+  onOutput?(stream: "stdout" | "stderr", text: string): void;
 };
 
 export function parseRunChangeCheckRequest(
@@ -143,7 +147,9 @@ export async function runChangeCheck(
   store: ProjectStore,
   resultCache: ValidationResultCache,
   task?: NonNullable<Change["tasks"]>[number],
+  options: RunChangeCheckOptions = {},
 ): Promise<RunChangeCheckResult> {
+  if (options.signal?.aborted) return cancelledCheckResult(change.id, task?.id, check);
   if (check.kind === ChangeCheckKind.Doctor) {
     const report = buildDoctorReport({
       paths: project.paths,
@@ -206,10 +212,22 @@ export async function runChangeCheck(
   }
 
   if (check.kind === ChangeCheckKind.Command) {
-    return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, check.command);
+    return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, check.command, options);
   }
 
-  return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, testCommandForTarget(check.target));
+  return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, testCommandForTarget(check.target), options);
+}
+
+function cancelledCheckResult(changeId: string, taskId: string | undefined, check: ChangeCheck): RunChangeCheckResult {
+  return {
+    changeId,
+    ...(taskId ? { taskId } : {}),
+    checkId: check.id,
+    kind: check.kind,
+    status: "cancelled",
+    summary: `Check ${check.id} cancelled.`,
+    output: "",
+  };
 }
 
 function testCommandForTarget(target: string): string {
@@ -226,41 +244,94 @@ async function runShellCheck(
   checkId: string,
   kind: ChangeCheck["kind"],
   command: string,
+  options: RunChangeCheckOptions,
 ): Promise<RunChangeCheckResult> {
   const checkRuntime = createIsolatedShellCheckRuntime(rootDir);
   try {
-    const { stdout, stderr } = await execCommand(command, {
-      cwd: rootDir,
-      timeout: CheckCommandTimeoutMs,
-      maxBuffer: CheckCommandMaxBuffer,
-      env: checkRuntime.env,
-    });
-    const output = trimCheckOutput([stdout, stderr].filter(Boolean).join("\n"));
-    return {
-      changeId,
-      ...(taskId ? { taskId } : {}),
-      checkId,
-      kind,
-      status: "passed",
-      summary: `Check ${checkId} passed.`,
-      output,
-    };
-  } catch (error) {
-    const failure = error as Error & { stdout?: string; stderr?: string; code?: number | string; signal?: string };
-    const output = trimCheckOutput([failure.stdout, failure.stderr, failure.message].filter(Boolean).join("\n"));
-    return {
-      changeId,
-      ...(taskId ? { taskId } : {}),
-      checkId,
-      kind,
-      status: "failed",
-      summary: `Check ${checkId} failed${failure.signal ? ` (${failure.signal})` : ""}.`,
-      output,
-      exitCode: failure.code,
-    };
+    return await spawnShellCheck({ rootDir, changeId, taskId, checkId, kind, command, env: checkRuntime.env, options });
   } finally {
     await cleanupIsolatedShellCheckRuntime(checkRuntime);
   }
+}
+
+function spawnShellCheck(input: {
+  rootDir: string;
+  changeId: string;
+  taskId?: string;
+  checkId: string;
+  kind: ChangeCheck["kind"];
+  command: string;
+  env: NodeJS.ProcessEnv;
+  options: RunChangeCheckOptions;
+}): Promise<RunChangeCheckResult> {
+  return new Promise((resolve) => {
+    const child = spawn(input.command, {
+      cwd: input.rootDir,
+      env: input.env,
+      shell: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const append = (stream: "stdout" | "stderr", chunk: string) => {
+      if (!chunk) return;
+      if (stream === "stdout") stdout = boundedCheckOutput(stdout, chunk);
+      else stderr = boundedCheckOutput(stderr, chunk);
+      input.options.onOutput?.(stream, chunk);
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => append("stdout", chunk));
+    child.stderr?.on("data", (chunk: string) => append("stderr", chunk));
+
+    const terminate = () => {
+      if (child.pid) void terminateSpawnedProcess(child.pid);
+    };
+    const onAbort = () => terminate();
+    input.options.signal?.addEventListener("abort", onAbort, { once: true });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      terminate();
+    }, CheckCommandTimeoutMs);
+    timeout.unref();
+
+    const finish = (exitCode: number | null, signal: NodeJS.Signals | null, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      input.options.signal?.removeEventListener("abort", onAbort);
+      if (error) append("stderr", `${error.message}\n`);
+      const output = trimCheckOutput([stdout, stderr].filter(Boolean).join("\n"));
+      const base = {
+        changeId: input.changeId,
+        ...(input.taskId ? { taskId: input.taskId } : {}),
+        checkId: input.checkId,
+        kind: input.kind,
+        output,
+        ...(exitCode === null ? {} : { exitCode }),
+      };
+      if (input.options.signal?.aborted) {
+        resolve({ ...base, status: "cancelled", summary: `Check ${input.checkId} cancelled.` });
+      } else if (timedOut) {
+        resolve({ ...base, status: "failed", summary: `Check ${input.checkId} failed: timed out after ${CheckCommandTimeoutMs}ms.` });
+      } else if (exitCode === 0 && !error) {
+        resolve({ ...base, status: "passed", summary: `Check ${input.checkId} passed.` });
+      } else {
+        resolve({ ...base, status: "failed", summary: `Check ${input.checkId} failed${signal ? ` (${signal})` : ""}.` });
+      }
+    };
+    child.once("error", (error) => finish(null, null, error));
+    child.once("close", (exitCode, signal) => finish(exitCode, signal));
+  });
+}
+
+function boundedCheckOutput(current: string, chunk: string): string {
+  const next = current + chunk;
+  if (Buffer.byteLength(next, "utf8") <= CheckCommandMaxBuffer) return next;
+  return Buffer.from(next, "utf8").subarray(0, CheckCommandMaxBuffer).toString("utf8");
 }
 
 type IsolatedShellCheckRuntime = {

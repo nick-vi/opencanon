@@ -191,7 +191,7 @@ export async function startServiceServer(options: {
       } catch (error) {
         return runtimeUnavailableResponse(project.rootDir, error);
       }
-      return proxyRuntimeEventStream(started.entry);
+      return proxyRuntimeEventStream(started.entry, url.searchParams);
     }
 
     if (url.pathname === ServiceApiRoute.Summary && request.method === "GET") {

@@ -15,7 +15,7 @@ import {
 } from "@opencanon/core";
 import { buildProjectSummary, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
 import { TreeScope, buildTreeResponse, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
-import { eventStream, snapshotEvent, type EventBroadcaster } from "./server-events.ts";
+import { eventStream, operationEvent, snapshotEvent, type EventBroadcaster } from "./server-events.ts";
 import { isAuthorizedRuntimeRequest } from "./auth.ts";
 import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
@@ -26,6 +26,7 @@ import type { RuntimeStateManager } from "./state-manager.ts";
 import type { ProjectStore } from "./state.ts";
 import type { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import type { createTypeProducerRuntime } from "./type-producer/runtime.ts";
+import type { ChangeCheckRunner } from "./change-check-runner.ts";
 import {
   activeTaskLeaseSummaries,
   listWorktreeOverview,
@@ -39,15 +40,15 @@ import {
   createChangeCheckEvent,
   parseChangeEventRequest,
   parseRunChangeCheckRequest,
-  runChangeCheck,
-  type RunChangeCheckResult,
 } from "./server-change-runtime.ts";
 import {
   approveCommitGateFromRuntime,
   feedbackFromRuntime,
   hookFeedbackFromRuntime,
   readJsonBody,
+  runtimeInputDiagnostic,
   stringArrayBodyValue,
+  stringBodyValue,
   validateFromRuntime,
 } from "./server-runtime-actions.ts";
 import {
@@ -77,6 +78,7 @@ export type RuntimeRouteHandlerInput = {
   stateManager: RuntimeStateManager;
   projectTypesRuntime: ReturnType<typeof createProjectTypesRuntime>;
   typeProducerRuntime?: ReturnType<typeof createTypeProducerRuntime>;
+  changeCheckRunner: ChangeCheckRunner;
   paths(): RuntimePaths;
   setPaths(paths: RuntimePaths): void;
   store(): ProjectStore;
@@ -88,7 +90,7 @@ export type RuntimeRouteHandlerInput = {
 };
 
 export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (request: Request) => Promise<Response> {
-  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, resetIdleTimer, refreshCurrentSnapshot, ensureProjectSnapshot, buildIndexedSnapshot, restartStore } = input;
+  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, resetIdleTimer, refreshCurrentSnapshot, ensureProjectSnapshot, buildIndexedSnapshot, restartStore } = input;
   let paths = input.paths();
   const currentStore = () => input.store();
 
@@ -327,59 +329,27 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       if (url.pathname === ApiRoute.Worktrees) {
         return json({ ok: true, data: listWorktreeOverview(rootDir) });
       }
-      if (url.pathname === ApiRoute.ChangeChecksRun) {
+      if (url.pathname === ApiRoute.ChangeCheckRuns) {
+        if (request.method === "GET") {
+          const runId = url.searchParams.get(UrlSearchParam.RunId)?.trim();
+          if (!runId) return json(diagnosticsFailure([runtimeInputDiagnostic("runId is required.")]), 400);
+          const run = changeCheckRunner.get(runId);
+          if (!run) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
+          return json({ ok: true, data: { run } });
+        }
         const project = await loadProjectContext(rootDir);
         const parsed = parseRunChangeCheckRequest(await readJsonBody(request), project.changes);
         if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
-        const results: RunChangeCheckResult[] = [];
-        const checkEvents: CanonEvent[] = [];
-        let snapshot = stateManager.currentSnapshot();
-        for (const check of parsed.checks) {
-          const started = createChangeCheckEvent({
-            changeId: parsed.change.id,
-            taskId: parsed.task?.id,
-            checkId: check.id,
-            type: parsed.task ? ChangeEventType.TaskCheckStarted : ChangeEventType.CheckStarted,
-            actor: parsed.actor,
-            summary: parsed.task ? `Task ${parsed.task.id} check ${check.id} started.` : `Check ${check.id} started.`,
-          });
-          writeRuntimeEvent(rootDir, currentStore(), started);
-          checkEvents.push(started);
-          snapshot = await stateManager.rebuildAndPublish(started.summary);
-          const result = await tracer.span(
-            "change.check.run",
-            {
-              kind: SpanKind.TASK,
-              attributes: {
-                changeId: parsed.change.id,
-                taskId: parsed.task?.id,
-                checkId: check.id,
-                checkKind: check.kind,
-              },
-            },
-            async (span) => {
-              const checkResult = await runChangeCheck(rootDir, project, parsed.change, check, currentStore(), stateManager.validationResultCache(), parsed.task);
-              span.setOutput({ status: checkResult.status });
-              return checkResult;
-            },
-          );
-          results.push(result);
-          const finished = createChangeCheckEvent({
-            changeId: parsed.change.id,
-            taskId: parsed.task?.id,
-            checkId: check.id,
-            type: parsed.task
-              ? (result.status === "passed" ? ChangeEventType.TaskCheckPassed : ChangeEventType.TaskCheckFailed)
-              : (result.status === "passed" ? ChangeEventType.CheckPassed : ChangeEventType.CheckFailed),
-            actor: parsed.actor,
-            summary: result.summary,
-          });
-          writeRuntimeEvent(rootDir, currentStore(), finished);
-          checkEvents.push(finished);
-          snapshot = await stateManager.rebuildAndPublish(finished.summary);
-        }
-        const lastEvent = checkEvents[checkEvents.length - 1];
-        return json({ ok: true, data: { result: results[0], results, event: lastEvent, events: checkEvents, changes: snapshot.changes } });
+        const started = changeCheckRunner.start({ project, change: parsed.change, task: parsed.task, checks: parsed.checks, actor: parsed.actor });
+        return json({ ok: true, data: started }, 202);
+      }
+      if (url.pathname === ApiRoute.ChangeCheckRunsCancel) {
+        const body = await readJsonBody(request);
+        const runId = stringBodyValue(body.runId)?.trim();
+        if (!runId) return json(diagnosticsFailure([runtimeInputDiagnostic("runId is required.")]), 400);
+        const run = await changeCheckRunner.cancel(runId);
+        if (!run) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
+        return json({ ok: true, data: { run } });
       }
       if (url.pathname === ApiRoute.ChangeEvents) {
         if (request.method === "GET") {
@@ -426,7 +396,14 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.EventsStream) {
-        return eventStream(events.connect(snapshotEvent(stateManager.currentSnapshot(), "Connected to runtime stream.")));
+        return eventStream(events.connect(() => {
+          const initial = [snapshotEvent(stateManager.currentSnapshot(), "Connected to runtime stream.")];
+          for (const runId of url.searchParams.getAll(UrlSearchParam.RunId).filter(Boolean)) {
+            const after = streamCursor(url, runId);
+            for (const event of changeCheckRunner.listEvents(runId, after)) initial.push(operationEvent(event));
+          }
+          return initial;
+        }));
       }
       if (url.pathname === ApiRoute.Events)
         return json({
@@ -610,6 +587,11 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
   };
 
   return routeRequest;
+}
+
+function streamCursor(url: URL, _runId: string): number {
+  const value = Number(url.searchParams.get(UrlSearchParam.After) ?? "0");
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 function semanticIndexReady(index: SemanticIndexSnapshot | undefined): boolean {

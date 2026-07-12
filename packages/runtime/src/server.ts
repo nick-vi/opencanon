@@ -88,6 +88,7 @@ import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
 import { createRuntimeStateManager, type RuntimeRebuildOptions } from "./state-manager.ts";
+import { createChangeCheckRunner } from "./change-check-runner.ts";
 import { createKnowledgeIndexManager, type KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
 import { ProjectFileLanguage, setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
 import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-facts-provider.ts";
@@ -277,6 +278,14 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       events.broadcast(streamErrorEvent(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error))));
     },
   });
+  const changeCheckRunner = createChangeCheckRunner({
+    rootDir,
+    tracer,
+    events,
+    stateManager,
+    store: () => store,
+    validationResultCache: () => stateManager.validationResultCache(),
+  });
   validatorGraphRuntime = createValidatorGraphRuntime({
     rootDir,
     paths: () => paths,
@@ -329,6 +338,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       stateManager,
       projectTypesRuntime,
       typeProducerRuntime,
+      changeCheckRunner,
       paths: () => paths,
       setPaths(nextPaths) {
         paths = nextPaths;
@@ -836,6 +846,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     fixtureAst.dispose();
     await typeProducerRuntime?.stop();
     await knowledgeWatchQueue.catch(() => undefined);
+    await changeCheckRunner.stop();
     await stateManager.waitForIdle();
     stateManager.stop();
     events.close();

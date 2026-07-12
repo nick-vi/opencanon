@@ -1,7 +1,7 @@
-import type { CanonEvent } from "@opencanon/core";
+import type { CanonEvent, ChangeCheckRunEvent } from "@opencanon/core";
 import type { RuntimeSnapshot } from "./snapshot.ts";
 
-export const StreamEventType = { Error: "error", Indexing: "indexing", Snapshot: "snapshot" } as const;
+export const StreamEventType = { Error: "error", Indexing: "indexing", Operation: "operation", Snapshot: "snapshot" } as const;
 export type StreamEventType = (typeof StreamEventType)[keyof typeof StreamEventType];
 export type RuntimeStreamProgress = {
   phase:
@@ -27,6 +27,7 @@ export type RuntimeStreamEvent = {
   timestamp: string;
   summary: string;
   progress?: RuntimeStreamProgress;
+  operation?: ChangeCheckRunEvent;
   snapshot?: RuntimeSnapshot;
 };
 
@@ -58,14 +59,15 @@ export function createEventBroadcaster() {
   }
 
   return {
-    connect(initial: RuntimeStreamEvent): ReadableStream<Uint8Array> {
+    connect(initial: RuntimeStreamEvent | RuntimeStreamEvent[] | (() => RuntimeStreamEvent[])): ReadableStream<Uint8Array> {
       let activeController: ReadableStreamDefaultController<Uint8Array> | undefined;
       return new ReadableStream<Uint8Array>(
         {
           start(controller) {
             activeController = controller;
             clients.set(controller, {});
-            controller.enqueue(encode(initial));
+            const initialEvents = typeof initial === "function" ? initial() : Array.isArray(initial) ? initial : [initial];
+            for (const event of initialEvents) controller.enqueue(encode(event));
             const heartbeat = setInterval(() => {
               try {
                 controller.enqueue(encoder.encode(": heartbeat\n\n"));
@@ -149,6 +151,15 @@ export function indexingEvent(summary: string, progress?: RuntimeStreamProgress)
     timestamp: new Date().toISOString(),
     summary,
     progress: progress ?? { phase: "validation", label: summary, indeterminate: true },
+  };
+}
+
+export function operationEvent(event: ChangeCheckRunEvent): RuntimeStreamEvent {
+  return {
+    type: StreamEventType.Operation,
+    timestamp: event.timestamp,
+    summary: `Change check ${event.runId} ${event.type}.`,
+    operation: event,
   };
 }
 

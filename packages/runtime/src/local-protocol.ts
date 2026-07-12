@@ -58,6 +58,11 @@ export type LocalProtocolTransport = {
   request(endpoint: LocalProtocolEndpoint, request: LocalProtocolRequest): Promise<LocalProtocolRawResponse>;
 };
 
+export type LocalProtocolStreamRequest = Omit<LocalProtocolRequest, "timeoutMs"> & {
+  signal?: AbortSignal;
+  onChunk(chunk: string): void;
+};
+
 export type LocalProtocolPipeServer = {
   endpoint: string;
   stop(force?: boolean): Promise<void>;
@@ -216,6 +221,42 @@ export async function requestLocalJson<T>(
   throw new Error(formatOpenCanonErrorPayload(error));
 }
 
+export async function streamLocalText(endpoint: LocalProtocolEndpoint, request: LocalProtocolStreamRequest): Promise<void> {
+  if (endpoint.transport === LocalTransportKind.Pipe) {
+    await streamPipeText(endpoint, request);
+    return;
+  }
+  const response = await fetch(`${endpoint.url.replace(/\/$/, "")}${request.path}`, {
+    method: request.method,
+    headers: {
+      ...(endpoint.authToken ? runtimeAuthHeaders(endpoint.authToken) : {}),
+      ...(request.body === undefined ? {} : { "content-type": "application/json; charset=utf-8" }),
+      ...request.headers,
+    },
+    body: request.body === undefined ? undefined : JSON.stringify(request.body),
+    signal: request.signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`OpenCanon event stream failed: ${response.status} ${response.statusText}.`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (chunk) request.onChunk(chunk);
+    }
+    const trailing = decoder.decode();
+    if (trailing) request.onChunk(trailing);
+  } catch (error) {
+    if (!request.signal?.aborted) throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export function localProtocolEndpointFromEntry(entry: LocalProtocolEntry, input: { prefer?: LocalTransportKind } = {}): LocalProtocolEndpoint {
   const transport = input.prefer ?? ("transport" in entry ? entry.transport : undefined);
   if (transport === LocalTransportKind.Http) {
@@ -358,6 +399,82 @@ async function sendPipeFrame(endpoint: string, frame: PipeRequestFrame, timeoutM
         reject(error);
       },
     );
+  });
+}
+
+async function streamPipeText(endpoint: LocalProtocolPipeEndpoint, request: LocalProtocolStreamRequest): Promise<void> {
+  const id = randomUUID();
+  const frame: PipeRequestFrame = {
+    protocol: PipeProtocolName,
+    id,
+    method: request.method,
+    path: request.path,
+    headers: {
+      ...(endpoint.authToken ? runtimeAuthHeaders(endpoint.authToken) : {}),
+      ...(request.body === undefined ? {} : { "content-type": "application/json; charset=utf-8" }),
+      ...request.headers,
+    },
+    body: request.body,
+  };
+  await new Promise<void>((resolve, reject) => {
+    const socket = net.createConnection(endpoint.pipeEndpoint);
+    let buffer = "";
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      request.signal?.removeEventListener("abort", onAbort);
+      socket.removeAllListeners();
+      socket.destroy();
+      if (error && !request.signal?.aborted) reject(error);
+      else resolve();
+    };
+    const onAbort = () => finish();
+    request.signal?.addEventListener("abort", onAbort, { once: true });
+    socket.once("connect", () => socket.write(`${JSON.stringify(frame)}${PipeFrameDelimiter}`));
+    socket.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      if (Buffer.byteLength(buffer, "utf8") > PipeFrameMaxBytes) {
+        finish(new Error("OpenCanon pipe stream frame exceeded the maximum allowed size."));
+        return;
+      }
+      while (true) {
+        const delimiterIndex = buffer.indexOf(PipeFrameDelimiter);
+        if (delimiterIndex < 0) break;
+        const text = buffer.slice(0, delimiterIndex);
+        buffer = buffer.slice(delimiterIndex + PipeFrameDelimiter.length);
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        if (!isPipeStreamFrame(parsed) || parsed.id !== id) {
+          finish(new Error("OpenCanon pipe returned a malformed stream frame."));
+          return;
+        }
+        if (parsed.status < 200 || parsed.status >= 300) {
+          finish(new Error(`OpenCanon event stream failed: ${parsed.status} ${parsed.statusText}.`));
+          return;
+        }
+        if (parsed.chunk) {
+          try {
+            request.onChunk(parsed.chunk);
+          } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+        }
+        if (parsed.done) {
+          finish();
+          return;
+        }
+      }
+    });
+    socket.once("error", (error) => finish(error));
+    socket.once("end", () => finish(new Error("OpenCanon pipe event stream ended before a terminal frame.")));
+    socket.once("close", () => finish(new Error("OpenCanon pipe event stream closed before a terminal frame.")));
   });
 }
 
@@ -616,6 +733,19 @@ function isPipeResponseFrame(value: unknown): value is PipeResponseFrame {
     typeof value.status === "number" &&
     typeof value.statusText === "string" &&
     "body" in value
+  );
+}
+
+function isPipeStreamFrame(value: unknown): value is PipeStreamFrame {
+  if (!isRecord(value)) return false;
+  return (
+    value.protocol === PipeProtocolName &&
+    typeof value.id === "string" &&
+    typeof value.status === "number" &&
+    typeof value.statusText === "string" &&
+    value.stream === true &&
+    (value.chunk === undefined || typeof value.chunk === "string") &&
+    (value.done === undefined || value.done === true)
   );
 }
 

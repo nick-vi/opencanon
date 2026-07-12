@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { localPipeEndpoint, serveLocalProtocolPipe } from "../packages/runtime/src/local-protocol.ts";
+import { localPipeEndpoint, serveLocalProtocolPipe, streamLocalText } from "../packages/runtime/src/local-protocol.ts";
 import { createEventBroadcaster, indexingEvent, streamErrorEvent } from "../packages/runtime/src/server-events.ts";
+import { proxyRuntimeEventStream } from "../packages/runtime/src/service-http.ts";
+import type { RuntimeRegistryEntry } from "../packages/runtime/src/service-types.ts";
 
 test("runtime indexing events carry structured optional progress", () => {
   const event = indexingEvent("Indexing repository.", {
@@ -88,6 +91,47 @@ test("local pipe protocol streams SSE responses as chunk frames", async () => {
   } finally {
     await pipeServer.stop(true);
     rmSync(pipeDir, { recursive: true, force: true });
+  }
+});
+
+test("local pipe stream client consumes SSE chunks and aborts explicitly", async () => {
+  const pipeDir = mkdtempSync(path.join(tmpdir().startsWith("/var/") ? "/tmp" : tmpdir(), "oc-client-"));
+  const endpoint = localPipeEndpoint({ scope: "runtime", key: "runtime-client", pipeDir });
+  const pipeServer = await serveLocalProtocolPipe({
+    endpoint,
+    async routeRequest() {
+      return new Response("event: operation\ndata: {\"ok\":true}\n\n", { headers: { "content-type": "text/event-stream" } });
+    },
+  });
+  try {
+    let output = "";
+    await streamLocalText({ transport: "pipe", pipeEndpoint: endpoint }, { method: "GET", path: "/api/events/stream", onChunk: (chunk) => { output += chunk; } });
+    assert.match(output, /event: operation/);
+    assert.match(output, /"ok":true/);
+  } finally {
+    await pipeServer.stop(true);
+    rmSync(pipeDir, { recursive: true, force: true });
+  }
+});
+
+test("service event proxy preserves operation cursors and removes service-only project selection", async () => {
+  let requestPath = "";
+  const upstream = createServer((request, response) => {
+    requestPath = request.url ?? "";
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end("event: operation\ndata: {\"ok\":true}\n\n");
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const address = upstream.address();
+  assert(address && typeof address === "object");
+  try {
+    const entry = { url: `http://127.0.0.1:${address.port}`, authToken: "runtime-token" } as RuntimeRegistryEntry;
+    const response = await proxyRuntimeEventStream(entry, new URLSearchParams({ rootDir: "/repo", runId: "run-1", after: "4" }));
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /event: operation/);
+    assert.equal(requestPath, "/api/events/stream?runId=run-1&after=4");
+  } finally {
+    await new Promise<void>((resolve, reject) => upstream.close((error) => error ? reject(error) : resolve()));
   }
 });
 

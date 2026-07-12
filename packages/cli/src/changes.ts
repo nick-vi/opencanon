@@ -2,13 +2,19 @@ import { randomUUID } from "node:crypto";
 import { cac } from "cac";
 import {
   ChangeCheckEventType,
+  ChangeCheckRunEventSchema,
+  ChangeCheckRunEventType,
+  ChangeCheckRunStatus,
   ChangeLifecycleEventType,
   ChangeTaskEventType,
   fail,
   Format,
+  StartChangeCheckRunsResponseSchema,
+  type ChangeCheckRun,
+  type ChangeCheckRunEvent,
+  type StartChangeCheckRunsResponse,
   type DefinitionTarget,
 } from "@opencanon/core";
-import { LocalTransportKind } from "@opencanon/runtime";
 import { booleanOption, formatOption, positiveIntegerOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { changesDefinitionCommandSuggestion, isChangeDefinitionCommand, runChangesDefinitionCommand } from "./changes-definition.ts";
 import { RuntimeApiRoute, withRuntimeClient, type RuntimeClient } from "./runtime-client.ts";
@@ -34,12 +40,6 @@ const ChangeEventType = {
 } as const;
 type ChangeEventType = (typeof ChangeEventType)[keyof typeof ChangeEventType];
 const changeEventTypes = new Set<string>(Object.values(ChangeEventType));
-
-const CheckRunStatus = {
-  Passed: "passed",
-  Failed: "failed",
-} as const;
-type CheckRunStatus = (typeof CheckRunStatus)[keyof typeof CheckRunStatus];
 
 const ChangeWorkItemKind = {
   Change: "change",
@@ -101,25 +101,6 @@ type RecordChangeEventResponse = {
   changes: ChangeSummary[];
 };
 
-type RunChangeCheckResultPayload = {
-    changeId: string;
-    taskId?: string;
-    checkId: string;
-    kind: string;
-    status: CheckRunStatus;
-    summary: string;
-    output: string;
-    exitCode?: number | string;
-};
-
-type RunChangeCheckResponse = {
-  result: RunChangeCheckResultPayload;
-  event: ChangeEvent;
-  events: ChangeEvent[];
-  results: RunChangeCheckResultPayload[];
-  changes: ChangeSummary[];
-};
-
 type ChangeWorkQueue = {
   ready: Array<{
     kind: "change" | "task";
@@ -168,7 +149,7 @@ type ChangesCommandOptions = {
 };
 
 function withChangesRuntimeClient<T>(cwd: string, fn: (client: RuntimeClient) => Promise<T>): Promise<T> {
-  return withRuntimeClient(cwd, fn, { localTransport: LocalTransportKind.Http });
+  return withRuntimeClient(cwd, fn);
 }
 
 export async function runChangesCommand(args: string[], cwd: string, options: ChangesCommandOptions = {}): Promise<void> {
@@ -395,20 +376,102 @@ async function runChangesCheckCommand(args: string[], cwd: string): Promise<void
   const values = parsed.args.map(String);
   if (values.length < 1 || values.length > 2 || !values[0]) fail("Usage: opencanon changes check <change-id> [check-id] [--task <task-id>] [--all]");
   const all = booleanOption(options.all);
-  const result = await withChangesRuntimeClient(
-    cwd,
-    (client) =>
-      client.post<RunChangeCheckResponse>(RuntimeApiRoute.ChangeChecksRun, {
+  const format = formatOption(options.format);
+  const result = await withChangesRuntimeClient(cwd, async (client) => {
+    const started = StartChangeCheckRunsResponseSchema.parse(
+      await client.post<StartChangeCheckRunsResponse>(RuntimeApiRoute.ChangeCheckRuns, {
         changeId: values[0],
         checkId: values[1],
         taskId: optionalStringOption(options.task, "--task"),
         all,
         actor: optionalStringOption(options.actor, "--actor"),
       }),
-  );
-  if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(result, null, 2));
+    );
+    const runs: ChangeCheckRun[] = [];
+    if (format !== Format.Json) {
+      console.log(`# OpenCanon Change Check\n\nChange: ${values[0]}\nBatch: ${started.batchId}`);
+    }
+    for (const run of started.runs) {
+      if (format !== Format.Json) console.log(`\nCheck: ${run.checkId}\nStatus: running\n`);
+      runs.push(await followChangeCheckRun(client, run, format));
+    }
+    return { batchId: started.batchId, runs };
+  });
+  if (format === Format.Json) console.log(JSON.stringify(result, null, 2));
   else console.log(renderRunChangeCheckMarkdown(result));
-  process.exit(result.results.some((item) => item.status === CheckRunStatus.Failed) ? 1 : 0);
+  process.exitCode = result.runs.some((item) => item.status !== ChangeCheckRunStatus.Passed) ? 1 : 0;
+}
+
+async function followChangeCheckRun(client: RuntimeClient, initial: ChangeCheckRun, format: Format): Promise<ChangeCheckRun> {
+  let cursor = 0;
+  let terminal: ChangeCheckRun | undefined;
+  let cancelRequested = false;
+  const onInterrupt = () => {
+    if (cancelRequested) return;
+    cancelRequested = true;
+    void client.post(RuntimeApiRoute.ChangeCheckRunsCancel, { runId: initial.id }).catch((error) => {
+      process.stderr.write(`Could not cancel Change check ${initial.checkId}: ${error instanceof Error ? error.message : String(error)}\n`);
+    });
+  };
+  process.once("SIGINT", onInterrupt);
+  try {
+    for (let reconnect = 0; reconnect < 3 && !terminal; reconnect += 1) {
+      const controller = new AbortController();
+      const parser = createSseParser((event) => {
+        if (event.runId !== initial.id || event.sequence <= cursor) return;
+        cursor = event.sequence;
+        if (event.type === ChangeCheckRunEventType.Stdout || event.type === ChangeCheckRunEventType.Stderr) {
+          const output = format === Format.Json ? process.stderr : event.type === ChangeCheckRunEventType.Stdout ? process.stdout : process.stderr;
+          output.write(event.text);
+          return;
+        }
+        if (event.type === ChangeCheckRunEventType.Passed || event.type === ChangeCheckRunEventType.Failed || event.type === ChangeCheckRunEventType.Cancelled) {
+          terminal = event.run;
+          controller.abort();
+        }
+      });
+      try {
+        await client.stream(`${RuntimeApiRoute.EventsStream}?runId=${encodeURIComponent(initial.id)}&after=${cursor}`, {
+          signal: controller.signal,
+          onChunk: parser.push,
+        });
+      } catch (error) {
+        if (terminal) break;
+        if (reconnect >= 2) throw error;
+      }
+    }
+  } finally {
+    process.off("SIGINT", onInterrupt);
+  }
+  if (!terminal) throw new Error(`Change check ${initial.checkId} event stream ended without a terminal result.`);
+  return terminal;
+}
+
+function createSseParser(onOperation: (event: ChangeCheckRunEvent) => void): { push(chunk: string): void } {
+  let buffer = "";
+  return {
+    push(chunk) {
+      buffer += chunk.replace(/\r\n/g, "\n");
+      while (true) {
+        const boundary = buffer.indexOf("\n\n");
+        if (boundary < 0) return;
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const data = frame
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n");
+        if (!data) continue;
+        try {
+          const parsed = JSON.parse(data) as { operation?: unknown };
+          if (parsed.operation) onOperation(ChangeCheckRunEventSchema.parse(parsed.operation));
+        } catch (error) {
+          throw new Error(`OpenCanon returned a malformed Change check event: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    },
+  };
 }
 
 function lifecycleEventType(command: string, taskId: string | undefined): ChangeEventType {
@@ -556,18 +619,12 @@ function renderRecordedChangeEventMarkdown(event: ChangeEvent): string {
   ].join("\n");
 }
 
-function renderRunChangeCheckMarkdown(response: RunChangeCheckResponse): string {
-  const lines = [
-    "# OpenCanon Change Check",
-    "",
-    `Change: ${response.result.changeId}`,
-  ];
-  for (const result of response.results ?? [response.result]) {
-    lines.push("", `Check: ${result.checkId}`, ...(result.taskId ? [`Task: ${result.taskId}`] : []), `Kind: ${result.kind}`, `Status: ${result.status}`, `Summary: ${result.summary}`);
-    if (result.exitCode !== undefined) lines.push(`Exit code: ${String(result.exitCode)}`);
-    if (result.output) {
-      lines.push("", "Output:", "```", result.output, "```");
-    }
+function renderRunChangeCheckMarkdown(response: { batchId: string; runs: ChangeCheckRun[] }): string {
+  const lines = ["", "Results:"];
+  for (const run of response.runs) {
+    lines.push(`- ${run.checkId}: ${run.status}${"summary" in run ? ` - ${run.summary}` : ""}`);
+    if ("exitCode" in run && run.exitCode !== undefined) lines.push(`  Exit code: ${String(run.exitCode)}`);
+    if (run.outputTruncated) lines.push(`  Output was truncated after ${run.outputBytes} bytes.`);
   }
   return lines.join("\n");
 }

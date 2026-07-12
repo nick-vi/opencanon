@@ -15,7 +15,8 @@ export const ApiRoute = {
   CanonRelated: "/api/canon/related",
   CanonHistory: "/api/canon/history",
   Changes: "/api/changes",
-  ChangeChecksRun: "/api/changes/checks/run",
+  ChangeCheckRuns: "/api/changes/check-runs",
+  ChangeCheckRunsCancel: "/api/changes/check-runs/cancel",
   ChangeEvents: "/api/changes/events",
   ChangeReady: "/api/changes/ready",
   CodeGraph: "/api/code/graph",
@@ -89,6 +90,8 @@ export const UrlSearchParam = {
   SymbolId: "symbolId",
   Topic: "topic",
   TaskId: "taskId",
+  RunId: "runId",
+  After: "after",
   TraceId: "traceId",
   ValidatorId: "validatorId",
   WithFindings: "withFindings",
@@ -108,7 +111,8 @@ export type ApiSuccess<T> = {
 
 const postApiRoutes = new Set<string>([
   ApiRoute.CanonRelated,
-  ApiRoute.ChangeChecksRun,
+  ApiRoute.ChangeCheckRuns,
+  ApiRoute.ChangeCheckRunsCancel,
   ApiRoute.ChangeEvents,
   ApiRoute.Feedback,
   ApiRoute.GateApprove,
@@ -144,7 +148,7 @@ export function diagnosticsFailure(diagnostics: unknown[], fallbackCode: Diagnos
 
 export function validateMethod(pathname: string, method: string): { ok: true } | { ok: false; error: RuntimeError } {
   if (!pathname.startsWith(ApiPathPrefix)) return { ok: true };
-  const expected = pathname === ApiRoute.Settings || pathname === ApiRoute.ChangeEvents || pathname === ApiRoute.CanonRelated ? ["GET", "POST"] : [postApiRoutes.has(pathname) ? "POST" : "GET"];
+  const expected = pathname === ApiRoute.Settings || pathname === ApiRoute.ChangeEvents || pathname === ApiRoute.ChangeCheckRuns || pathname === ApiRoute.CanonRelated ? ["GET", "POST"] : [postApiRoutes.has(pathname) ? "POST" : "GET"];
   if (expected.includes(method)) return { ok: true };
   return {
     ok: false,

@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   ContextRequestSchema,
   RuntimeHealthSchema,
+  ChangeCheckRunEventSchema,
   RuntimeHealthSummarySchema,
   RuntimeProjectSummarySchema,
   RuntimeResponseSchema,
@@ -286,6 +287,27 @@ test("public runtime summaries replace validator dependency paths with a bounded
   assert.equal(RuntimeHealthSummarySchema.safeParse(summary).success, true);
   const project = RuntimeProjectSummarySchema.parse({ rootDir: "/repo", health: summary, files: 1, findings: 0, staleFiles: 0 });
   assert(JSON.stringify(project).length < 4_096);
+});
+
+test("Change check terminal events require matching run status", () => {
+  const run = {
+    id: "run-1",
+    batchId: "batch-1",
+    kind: "change-check",
+    status: "failed",
+    changeId: "change-1",
+    checkId: "check-1",
+    checkKind: "command",
+    createdAt: "2026-07-12T00:00:00.000Z",
+    updatedAt: "2026-07-12T00:00:01.000Z",
+    startedAt: "2026-07-12T00:00:00.000Z",
+    finishedAt: "2026-07-12T00:00:01.000Z",
+    summary: "Failed.",
+    outputTail: "",
+    outputBytes: 0,
+    outputTruncated: false,
+  };
+  assert.equal(ChangeCheckRunEventSchema.safeParse({ runId: "run-1", batchId: "batch-1", sequence: 1, timestamp: "2026-07-12T00:00:01.000Z", type: "passed", run }).success, false);
 });
 
 test("project scope filtering applies project patterns and ignores", () => {

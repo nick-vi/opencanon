@@ -423,61 +423,6 @@ test("change event routes persist events and update the readonly board", () => {
   }
 });
 
-test("change check route runs a declared check and records pass/fail events", () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-change-check-route-"));
-  createAuthoringProject(rootDir);
-  mkdirSync(path.join(rootDir, "src"), { recursive: true });
-  mkdirSync(path.join(rootDir, "opencanon/changes"), { recursive: true });
-  mkdirSync(path.join(rootDir, "docs/opencanon"), { recursive: true });
-  writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
-  writeFileSync(
-    path.join(rootDir, "docs/opencanon/impact-surfaces.json"),
-    JSON.stringify(
-      [
-        {
-          id: "company-workflow",
-          title: "Company Workflow",
-          applies: ["src/company.ts"],
-          proposed: true,
-        },
-      ],
-      null,
-      2,
-    ),
-  );
-  writeFileSync(
-    path.join(rootDir, "opencanon/changes/index.ts"),
-    [
-      "import { defineChange } from \"@opencanon/core\";",
-      "",
-      "export default defineChange({",
-      "  id: \"check-change\",",
-      "  title: \"Check Change\",",
-      "  kind: \"feature\",",
-      "  intent: { problem: \"No check\", outcome: \"Check runs\" },",
-      "  checks: [{ id: \"smoke\", kind: \"command\", command: " + JSON.stringify(`${process.execPath} -e "console.log(process.env.OPENCANON_SERVICE_REGISTRY_PATH)"`) + " }],",
-      "  render: { kind: \"none\" },",
-      "});",
-      "",
-    ].join("\n"),
-  );
-
-  try {
-    const callerRegistryPath = path.join(rootDir, "global", "caller-service.json");
-    const result = spawnSync(process.execPath, ["--input-type=module", "-e", changeCheckRouteCheckSource(), rootDir, callerRegistryPath], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        OPENCANON_SERVICE_REGISTRY_PATH: callerRegistryPath,
-      },
-    });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-  } finally {
-    rmSync(rootDir, { recursive: true, force: true });
-  }
-});
-
 test("change task graph routes expose ready work and persist task lifecycle state", { timeout: HeavyRouteIntegrationTestTimeoutMs }, () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-change-task-routes-"));
   createAuthoringProject(rootDir);
@@ -773,7 +718,7 @@ function doctorRouteCheckSource(): string {
 
       const response = await fetch(server.url + "/api/doctor", { headers: runtimeAuthHeaders(server.authToken) });
       const text = await response.text();
-      assert.equal(response.status, 200, text);
+      assert(response.status >= 200 && response.status < 300, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true);
       assert(["pass", "warn", "fail"].includes(body.data.status));
@@ -1047,45 +992,6 @@ function activityRoutesCheckSource(): string {
   `;
 }
 
-function changeCheckRouteCheckSource(): string {
-  const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
-  return `
-    import assert from "node:assert/strict";
-    import path from "node:path";
-    import { runtimeAuthHeaders, startOpenCanonRuntime } from ${JSON.stringify(runtimeUrl)};
-
-    const rootDir = process.argv[1];
-    const callerRegistryPath = process.argv[2];
-    const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
-    try {
-      const headers = { ...runtimeAuthHeaders(server.authToken), "content-type": "application/json" };
-      const response = await fetch(server.url + "/api/changes/checks/run", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ changeId: "check-change", checkId: "smoke", actor: "test" }),
-      });
-      const text = await response.text();
-      assert.equal(response.status, 200, text);
-      const body = JSON.parse(text);
-      assert.equal(body.ok, true);
-      assert.equal(body.data.result.status, "passed");
-      const checkRegistryPath = body.data.result.output.trim();
-      assert.notEqual(checkRegistryPath, callerRegistryPath);
-      assert(checkRegistryPath.startsWith(path.join(rootDir, ".opencanon", "check-")), checkRegistryPath);
-      assert.equal(body.data.event.type, "check-passed");
-      assert.equal(body.data.changes.find((change) => change.id === "check-change").boardColumn, "ready");
-
-      const eventsResponse = await fetch(server.url + "/api/changes/events?changeId=check-change", { headers: runtimeAuthHeaders(server.authToken) });
-      const eventsText = await eventsResponse.text();
-      assert.equal(eventsResponse.status, 200, eventsText);
-      const eventsBody = JSON.parse(eventsText);
-      assert.deepEqual(eventsBody.data.map((event) => event.type).sort(), ["check-passed", "check-started"]);
-    } finally {
-      await server.stop();
-    }
-  `;
-}
-
 function changeTaskRoutesCheckSource(): string {
   const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
   return `
@@ -1110,10 +1016,40 @@ function changeTaskRoutesCheckSource(): string {
     async function post(path, body) {
       const response = await fetch(server.url + path, { method: "POST", headers, body: JSON.stringify(body) });
       const text = await response.text();
-      assert.equal(response.status, 200, text);
+      assert(response.status >= 200 && response.status < 300, text);
       const parsed = JSON.parse(text);
       assert.equal(parsed.ok, true, text);
       return parsed.data;
+    }
+    async function waitForRun(runId) {
+      const response = await fetch(server.url + "/api/events/stream?runId=" + encodeURIComponent(runId), { headers: runtimeAuthHeaders(server.authToken) });
+      assert.equal(response.status, 200);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (true) {
+          const read = await reader.read();
+          if (read.done) break;
+          buffer += decoder.decode(read.value, { stream: true });
+          while (buffer.includes("\\n\\n")) {
+            const boundary = buffer.indexOf("\\n\\n");
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const data = frame.split("\\n").find((line) => line.startsWith("data:"))?.slice(5).trimStart();
+            if (!data) continue;
+            const operation = JSON.parse(data).operation;
+            if (operation?.runId !== runId) continue;
+            if (["passed", "failed", "cancelled"].includes(operation.type)) {
+              await reader.cancel();
+              return operation.run;
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      throw new Error("Change check stream ended without a terminal event.");
     }
 
     try {
@@ -1184,17 +1120,16 @@ function changeTaskRoutesCheckSource(): string {
       const releasedWorktrees = await get("/api/worktrees");
       assert.equal(releasedWorktrees.leases.filter((lease) => lease.status === "active").length, 0);
 
-      const check = await post("/api/changes/checks/run", {
+      const check = await post("/api/changes/check-runs", {
         changeId: "task-change",
         taskId: "cli",
         all: true,
         actor: "test",
       });
-      assert.equal(check.results.length, 1);
-      assert.equal(check.result.taskId, "cli");
-      assert.equal(check.event.type, "task-check-passed");
-      assert.deepEqual(check.event.taskIds, ["cli"]);
-      assert.deepEqual(check.event.checkIds, ["smoke"]);
+      assert.equal(check.runs.length, 1);
+      assert.equal(check.runs[0].taskId, "cli");
+      const checked = await waitForRun(check.runs[0].id);
+      assert.equal(checked.status, "passed");
 
       const cliEvents = await get("/api/changes/events?changeId=task-change&taskId=cli");
       assert(cliEvents.every((event) => event.taskIds.includes("cli")));

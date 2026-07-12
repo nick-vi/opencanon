@@ -4,6 +4,7 @@ import {
   LocalTransportKind,
   localProtocolEndpointFromEntry,
   requestLocalJson,
+  streamLocalText,
   resolveRuntimeCliEntrypoint,
   runtimeIdentityForEntrypoint,
   serviceRegistryPath,
@@ -15,7 +16,9 @@ import { resolveRootDir } from "@opencanon/core";
 export const RuntimeApiRoute = {
   CanonRelated: "/api/canon/related",
   Changes: "/api/changes",
-  ChangeChecksRun: "/api/changes/checks/run",
+  ChangeCheckRuns: "/api/changes/check-runs",
+  ChangeCheckRunsCancel: "/api/changes/check-runs/cancel",
+  EventsStream: "/api/events/stream",
   ChangeEvents: "/api/changes/events",
   ChangeReady: "/api/changes/ready",
   CodeGraph: "/api/code/graph",
@@ -90,6 +93,7 @@ function runtimeProducerProbeIdentityMatches(
 export type RuntimeClient = {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body: unknown): Promise<T>;
+  stream(path: string, input: { signal?: AbortSignal; onChunk(chunk: string): void }): Promise<void>;
 };
 
 export type RuntimeClientOptions = {
@@ -150,6 +154,10 @@ export async function withRuntimeClient<T>(
     },
     async post<T>(path: string, body: unknown) {
       return requestWithRepair<T>({ method: "POST", path, body });
+    },
+    async stream(path, input) {
+      if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
+      await streamLocalText(endpoint, { method: "GET", path, ...input });
     },
   });
 }
