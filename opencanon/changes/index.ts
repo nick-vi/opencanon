@@ -9,7 +9,7 @@ export default [
     updates: {
       areas: ["local-service-and-runtimes", "explicit-error-contracts"],
       specs: ["project-runtime-lifecycle-spec"],
-      surfaces: ["local-service-control"],
+      surfaces: ["local-service-control", "project-canon-model", "release-update"],
     },
     scope: [
       { kind: DefinitionTargetKind.File, path: "opencanon/changes/index.ts" },
