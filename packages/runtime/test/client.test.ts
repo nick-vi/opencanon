@@ -1103,6 +1103,35 @@ function changeTaskRoutesCheckSource(): string {
       assert.deepEqual(startedChange.tasks.find((task) => task.id === "model").surfaces, ["company-workflow"]);
       assert.equal(startedChange.readyTaskCount, 0);
 
+      const earlyClose = await fetch(server.url + "/api/changes/events", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          changeId: "task-change",
+          type: "change-closed",
+          summary: "Tried to close unfinished Change.",
+          actor: "test",
+        }),
+      });
+      const earlyCloseText = await earlyClose.text();
+      assert.equal(earlyClose.status, 409, earlyCloseText);
+      assert.match(earlyCloseText, /All tasks must be closed before close/);
+
+      const modelCheck = await post("/api/changes/check-runs", {
+        changeId: "task-change",
+        taskId: "model",
+        all: true,
+        actor: "test",
+      });
+      assert.equal((await waitForRun(modelCheck.runs[0].id)).status, "passed");
+      await post("/api/changes/events", {
+        changeId: "task-change",
+        taskId: "model",
+        type: "task-review",
+        summary: "Reviewed model task.",
+        actor: "test",
+      });
+
       await post("/api/changes/events", {
         changeId: "task-change",
         taskId: "model",

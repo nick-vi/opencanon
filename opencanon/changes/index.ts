@@ -19,6 +19,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/change-state.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/contracts-change-runs.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/problem.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/src/errors.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/generated-state.ts" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon-architecture.md" },
       { kind: DefinitionTargetKind.Doc, path: "README.md" },

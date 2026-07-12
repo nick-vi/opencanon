@@ -1,6 +1,7 @@
 import { SpanKind, type SimpleTracer } from "@opencanon/observability";
 import {
   createOpenCanonDiagnostic,
+  ChangeTaskEventType,
   createPaths,
   createValidationResultCache,
   buildDoctorReport,
@@ -10,6 +11,7 @@ import {
   loadProjectContext,
   normalizeProducerStatusesForProject,
   resolveProducerStatuses,
+  validateChangeLifecycleTransition,
   type CanonEvent,
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
@@ -361,6 +363,26 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const project = await loadProjectContext(rootDir);
         const parsed = parseChangeEventRequest(await readJsonBody(request), project.changes);
         if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
+        const change = project.changes.find((item) => item.id === parsed.event.changeIds[0]);
+        if (!change) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change ${parsed.event.changeIds[0]}.`)]), 404);
+        const leases = activeTaskLeaseSummaries(rootDir);
+        const activeLease = parsed.event.type === ChangeTaskEventType.Claimed
+          ? leases.find((lease) => lease.changeId === change.id && lease.taskId === parsed.event.taskIds[0])
+          : undefined;
+        if (activeLease && parsed.event.actor !== activeLease.agentId) {
+          const ownership = applyTaskOwnershipEvent(rootDir, parsed.event);
+          if (!ownership.ok) return json(diagnosticsFailure(ownership.diagnostics), ownership.status);
+        }
+        const transitionIssues = validateChangeLifecycleTransition({
+          change,
+          event: parsed.event,
+          events: listChangeEvents(rootDir, currentStore(), { changeId: change.id, limit: 500 }),
+          leases,
+        });
+        if (transitionIssues.length > 0) {
+          const diagnostics = transitionIssues.map((message) => createOpenCanonDiagnostic({ code: diagnosticCodes.lifecycleConflict, message }));
+          return json(diagnosticsFailure(diagnostics, diagnosticCodes.lifecycleConflict), 409);
+        }
         const ownership = applyTaskOwnershipEvent(rootDir, parsed.event);
         if (!ownership.ok) return json(diagnosticsFailure(ownership.diagnostics), ownership.status);
         writeRuntimeEvent(rootDir, currentStore(), ownership.event);

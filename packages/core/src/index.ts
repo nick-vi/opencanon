@@ -136,8 +136,9 @@ export {
   deriveChangeWorkQueue,
   deriveChangeWorkStatus,
   latestChangeEvent,
+  validateChangeLifecycleTransition,
 } from "./change-state.ts";
-export type { ChangeBlockedWorkItem, ChangeCheckState, ChangeEventSummary, ChangeReadyWorkItem, ChangeTaskState, ChangeWorkQueue } from "./change-state.ts";
+export type { ChangeBlockedWorkItem, ChangeCheckState, ChangeEventSummary, ChangeLifecycleTransitionInput, ChangeReadyWorkItem, ChangeTaskState, ChangeWorkQueue } from "./change-state.ts";
 export {
   changeAnchor,
   changeDocsReference,

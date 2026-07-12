@@ -114,6 +114,13 @@ export type ChangeWorkQueue = {
   blocked: ChangeBlockedWorkItem[];
 };
 
+export type ChangeLifecycleTransitionInput = {
+  change: Change;
+  event: CanonEvent;
+  events: readonly CanonEvent[];
+  leases?: readonly TaskLeaseSummary[];
+};
+
 const EmptyUpdates: NormalizedChangeUpdates = {
   areas: [],
   specs: [],
@@ -232,6 +239,75 @@ export function deriveChangeWorkQueue(changes: readonly Change[], events: readon
 
 export function deriveChangeWorkStatus(changeId: string, events: readonly CanonEvent[]): ChangeWorkStatus {
   return changeStatusFromEvent(latestLifecycleOrCheckEventForChange(events, changeId));
+}
+
+export function validateChangeLifecycleTransition(input: ChangeLifecycleTransitionInput): string[] {
+  const { change, event, events } = input;
+  if (!(event.changeIds ?? []).includes(change.id)) return [`Event ${event.id} does not target Change ${change.id}.`];
+  const changeStatus = deriveChangeWorkStatus(change.id, events);
+  const taskId = event.taskIds?.[0];
+  const taskStates = deriveChangeTaskStates(change, events, { leases: input.leases ?? [] });
+
+  if (taskId) {
+    const task = taskStates.find((item) => item.id === taskId);
+    if (!task) return [`Unknown task ${taskId} for Change ${change.id}.`];
+    if (changeStatus === ChangeWorkStatus.Closed) {
+      return [`Change ${change.id} is closed. Mark the Change ready before recording more task activity.`];
+    }
+    if (task.status === ChangeWorkStatus.Closed) return [`Task ${task.id} in ${change.id} is already closed.`];
+
+    const dependencyIssues = task.blockedReasons;
+    switch (event.type) {
+      case ChangeTaskEventType.Claimed:
+        return task.status === ChangeWorkStatus.Planned && dependencyIssues.length === 0
+          ? []
+          : transitionIssues(change.id, task.id, "claim", task.status, dependencyIssues);
+      case ChangeTaskEventType.Started:
+        return task.status === ChangeWorkStatus.Claimed && dependencyIssues.length === 0
+          ? []
+          : transitionIssues(change.id, task.id, "start", task.status, dependencyIssues.length > 0 ? dependencyIssues : ["Claim the task before starting it."]);
+      case ChangeTaskEventType.Review:
+        return task.status === ChangeWorkStatus.Running || task.status === ChangeWorkStatus.Ready
+          ? []
+          : transitionIssues(change.id, task.id, "review", task.status, ["Start the task and complete its checks before review."]);
+      case ChangeTaskEventType.Blocked:
+        return [];
+      case ChangeTaskEventType.Ready:
+        return task.status === ChangeWorkStatus.Blocked || task.status === ChangeWorkStatus.Review
+          ? []
+          : transitionIssues(change.id, task.id, "mark ready", task.status, ["Only blocked or review tasks can be marked ready."]);
+      case ChangeTaskEventType.Closed: {
+        const failedChecks = task.checkStates.filter((check) => check.status !== ChangeCheckStatus.Passed).map((check) => `${check.id} (${check.status})`);
+        const issues = [
+          ...dependencyIssues,
+          ...(task.status === ChangeWorkStatus.Review || task.status === ChangeWorkStatus.Ready ? [] : [`Task status is ${task.status}; move it to review before closing.`]),
+          ...(failedChecks.length > 0 ? [`Checks must pass before closing: ${failedChecks.join(", ")}.`] : []),
+        ];
+        return issues.length === 0 ? [] : transitionIssues(change.id, task.id, "close", task.status, issues);
+      }
+      default:
+        return [];
+    }
+  }
+
+  switch (event.type) {
+    case ChangeLifecycleEventType.Started:
+      return changeStatus === ChangeWorkStatus.Closed ? [`Change ${change.id} is closed. Mark it ready before starting it again.`] : [];
+    case ChangeLifecycleEventType.Review:
+    case ChangeLifecycleEventType.Closed: {
+      const unfinished = taskStates.filter((task) => task.status !== ChangeWorkStatus.Closed).map((task) => `${task.id} (${task.status})`);
+      const action = event.type === ChangeLifecycleEventType.Closed ? "close" : "review";
+      const issues = unfinished.length > 0 ? [`All tasks must be closed before ${action}: ${unfinished.join(", ")}.`] : [];
+      if (event.type === ChangeLifecycleEventType.Closed && changeStatus !== ChangeWorkStatus.Review && changeStatus !== ChangeWorkStatus.Ready) {
+        issues.push(`Change status is ${changeStatus}; move it to review before closing.`);
+      }
+      return issues;
+    }
+    case ChangeLifecycleEventType.Ready:
+      return [];
+    default:
+      return changeStatus === ChangeWorkStatus.Closed ? [`Change ${change.id} is closed. Mark it ready before recording more lifecycle activity.`] : [];
+  }
 }
 
 export function latestChangeEvent(events: readonly CanonEvent[], changeId: string): CanonEvent | undefined {
@@ -355,6 +431,10 @@ function taskBlockers(task: ChangeTaskState, tasks: Map<string, ChangeTaskState>
     }
   }
   return blockers;
+}
+
+function transitionIssues(changeId: string, taskId: string, action: string, status: ChangeWorkStatus, issues: readonly string[]): string[] {
+  return [`Cannot ${action} task ${taskId} in ${changeId} while its status is ${status}.`, ...issues];
 }
 
 function changeDependencyBlockers(change: Change, statusById: Map<string, ChangeWorkStatus>): string[] {
