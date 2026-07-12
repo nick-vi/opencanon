@@ -313,6 +313,7 @@ export const ProjectRuntimeEnv = {
   LeaseId: "OPENCANON_RUNTIME_LEASE_ID",
   RegistryPath: "OPENCANON_SERVICE_REGISTRY_PATH",
   PipeEndpoint: "OPENCANON_RUNTIME_PIPE_ENDPOINT",
+  StartupResultPath: "OPENCANON_RUNTIME_STARTUP_RESULT_PATH",
 } as const;
 
 export const LocalHealthWaitFailure = {

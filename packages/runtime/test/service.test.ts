@@ -66,6 +66,7 @@ import {
   writeStartupLock,
 } from "./service-support.ts";
 import { createAuthoringProject } from "./support.ts";
+import { parseOpenCanonProblemFromError } from "@opencanon/core";
 
 test("runtime CLI resolution ignores project-local runtime paths", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-cli-resolution-"));
@@ -511,6 +512,72 @@ test("project runtime readiness wait fails fast for stale registered state", asy
     );
   } finally {
     forgetRuntimeEntry(rootDir, registryPath);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("project start returns one typed failure for a missing conventions entrypoint", { timeout: 30000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-missing-canon-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const sourceCliPath = path.resolve("packages/cli/src/index.ts");
+  const originalOverride = process.env.OPENCANON_CLI;
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ fileDiscovery: "filesystem" }));
+    process.env.OPENCANON_CLI = sourceCliPath;
+
+    let startupError: unknown;
+    try {
+      await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
+    } catch (error) {
+      startupError = error;
+    }
+
+    const problem = parseOpenCanonProblemFromError(startupError);
+    const runtimeLog = readFileSync(path.join(rootDir, ".opencanon", "runtime.log"), "utf8");
+    assert(problem, `${startupError instanceof Error ? startupError.message : String(startupError)}\n${runtimeLog}`);
+    assert.equal(problem?.code, "project-definition-missing");
+    assert.equal(problem?.path, "opencanon/conventions/index.ts");
+    assert.equal(problem?.retryable, false);
+    assert.match(problem?.action ?? "", /opencanon init --yes/);
+    assert.deepEqual(readRuntimeRegistry(registryPath), []);
+    assert.equal(existsSync(path.join(rootDir, ".opencanon", "startup")), false);
+  } finally {
+    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
+    if (originalOverride === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalOverride;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("service preserves typed project startup failures", { timeout: 30000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-missing-canon-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const sourceCliPath = path.resolve("packages/cli/src/index.ts");
+  const originalOverride = process.env.OPENCANON_CLI;
+  let server: Awaited<ReturnType<typeof startServiceServer>> | undefined;
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), JSON.stringify({ fileDiscovery: "filesystem" }));
+    process.env.OPENCANON_CLI = sourceCliPath;
+    server = await startServiceServer({ port: 0, registryPath, authToken: "service-token", reconcileIntervalMs: false });
+
+    const response = await fetch(`${server.url}/api/projects/ensure`, {
+      method: "POST",
+      headers: { ...runtimeAuthHeaders(server.authToken), "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ rootDir }),
+    });
+    const payload = await response.json() as { error?: { kind?: string; problem?: { code?: string; retryable?: boolean; path?: string } } };
+
+    assert.equal(response.status, 422);
+    assert.equal(payload.error?.kind, "problem");
+    assert.equal(payload.error?.problem?.code, "project-definition-missing");
+    assert.equal(payload.error?.problem?.retryable, false);
+    assert.equal(payload.error?.problem?.path, "opencanon/conventions/index.ts");
+    assert.deepEqual(readRuntimeRegistry(registryPath), []);
+  } finally {
+    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
+    await server?.stop().catch(() => undefined);
+    if (originalOverride === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalOverride;
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

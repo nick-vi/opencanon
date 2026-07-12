@@ -152,7 +152,7 @@ export async function startServiceServer(options: {
           idleTimeoutMs: numberBodyValue(body.body.idleTimeoutMs),
         });
       } catch (error) {
-        return serviceJson(serviceProblem(runtimeUnavailableProblem(project.rootDir, error)), 500);
+        return runtimeUnavailableResponse(project.rootDir, error);
       }
       return serviceJson({ ok: true, data: { project: started } });
     }
@@ -170,7 +170,7 @@ export async function startServiceServer(options: {
       try {
         started = await startProjectRuntime({ cwd: project.rootDir, registryPath });
       } catch (error) {
-        return serviceJson(serviceProblem(runtimeUnavailableProblem(project.rootDir, error)), 500);
+        return runtimeUnavailableResponse(project.rootDir, error);
       }
       const proxied = await localProtocolTransport.request(localProtocolEndpointFromEntry(started.entry), {
         method: serviceRequestMethod(body.body.method),
@@ -189,7 +189,7 @@ export async function startServiceServer(options: {
       try {
         started = await startProjectRuntime({ cwd: project.rootDir, registryPath });
       } catch (error) {
-        return serviceJson(serviceProblem(runtimeUnavailableProblem(project.rootDir, error)), 500);
+        return runtimeUnavailableResponse(project.rootDir, error);
       }
       return proxyRuntimeEventStream(started.entry);
     }
@@ -202,7 +202,7 @@ export async function startServiceServer(options: {
       try {
         started = await startProjectRuntime({ cwd: project.rootDir, registryPath });
       } catch (error) {
-        return serviceJson(serviceProblem(runtimeUnavailableProblem(project.rootDir, error)), 500);
+        return runtimeUnavailableResponse(project.rootDir, error);
       }
       const summaryPayload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(started.entry), {
         method: "GET",
@@ -258,4 +258,9 @@ export async function startServiceServer(options: {
       await Promise.all([server.stop(true), pipeServer.stop(true)]);
     },
   };
+}
+
+function runtimeUnavailableResponse(rootDir: string, error: unknown): Response {
+  const problem = runtimeUnavailableProblem(rootDir, error);
+  return serviceJson(serviceProblem(problem), problem.status ?? 500);
 }

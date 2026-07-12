@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
 import { inspectProjectRuntime, inspectService, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, RuntimeStatus, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
-import { fail, Format, resolveRootDir } from "@opencanon/core";
+import { fail, formatOpenCanonProblem, Format, parseOpenCanonProblemFromError, resolveRootDir } from "@opencanon/core";
 import { applyDoctorFixes, buildDoctorReport, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
 import type { DoctorRuntimeHealth, ProducerStatus } from "@opencanon/core";
 import { fetchRunningRuntimeProducers } from "./runtime-client.ts";
@@ -433,4 +433,12 @@ Options:
 `);
 }
 
-if (import.meta.main) await runOpenCanonCli();
+if (import.meta.main) {
+  try {
+    await runOpenCanonCli();
+  } catch (error) {
+    const problem = parseOpenCanonProblemFromError(error);
+    console.error(problem ? formatOpenCanonProblem(problem) : error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}

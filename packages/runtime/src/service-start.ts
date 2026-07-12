@@ -23,6 +23,7 @@ import {
 } from "./service-process.ts";
 import { errorMessage, isLocalProtocolTransportFailure, projectNotFoundProblem } from "./service-http.ts";
 import { runtimeCliInvocation } from "./service-entrypoint.ts";
+import { clearRuntimeStartupResults, readRuntimeStartupFailure, removeRuntimeStartupResult, runtimeStartupResultPath } from "./service-startup-result.ts";
 import {
   appendLifecycleEvent,
   closeFileDescriptor,
@@ -118,6 +119,7 @@ export async function startProjectRuntime(input: {
     }
     if (existing?.status === RuntimeStatus.Stale) forgetRuntimeEntry(rootDir, registryPath);
     await retireConflictingProjectWorkerLease(rootDir, registryPath);
+    clearRuntimeStartupResults(rootDir);
 
     const attemptedPorts: number[] = [];
     const startupAttempts = input.port === undefined ? AutoPortStartupAttempts : 1;
@@ -134,6 +136,7 @@ export async function startProjectRuntime(input: {
       const logPath = runtimeLogPath(rootDir);
       const authToken = createRuntimeAuthToken();
       const leaseId = createProcessLeaseId();
+      const startupResultPath = runtimeStartupResultPath(rootDir, leaseId);
       const pipeEndpoint = localPipeEndpoint({ scope: "runtime", key: `${registryPath}:${rootDir}` });
       ensurePrivateDirectory(path.dirname(logPath));
       const logFd = openSync(logPath, "a", 0o600);
@@ -155,6 +158,7 @@ export async function startProjectRuntime(input: {
           [ProjectRuntimeEnv.LeaseId]: leaseId,
           [ProjectRuntimeEnv.RegistryPath]: registryPath,
           [ProjectRuntimeEnv.PipeEndpoint]: pipeEndpoint,
+          [ProjectRuntimeEnv.StartupResultPath]: startupResultPath,
         },
       });
       let childPid: number;
@@ -200,6 +204,7 @@ export async function startProjectRuntime(input: {
 
       const health = await waitForRuntimeHealthResult(entry);
       if (health.ready) {
+        removeRuntimeStartupResult(startupResultPath);
         const runningEntry = updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
         return {
           status: "started",
@@ -210,7 +215,11 @@ export async function startProjectRuntime(input: {
 
       forgetRuntimeEntryIfPid(rootDir, childPid, registryPath);
       await terminateSpawnedProcess(childPid);
-      lastStartupError = new Error(`OpenCanon runtime did not become ready. See ${logPath}.`);
+      const startupProblem = readRuntimeStartupFailure(startupResultPath);
+      removeRuntimeStartupResult(startupResultPath);
+      lastStartupError = startupProblem
+        ? new Error(serializeOpenCanonProblem(startupProblem))
+        : new Error(`OpenCanon runtime did not become ready. See ${logPath}.`);
       appendLifecycleEvent(registryPath, {
         kind: ProcessLifecycleEventKind.RuntimeStartupFailed,
         scope: ProcessLifecycleScope.Runtime,
@@ -219,7 +228,7 @@ export async function startProjectRuntime(input: {
         leaseId,
         message: lastStartupError.message,
       });
-      if (health.reason !== LocalHealthWaitFailure.ProcessExited || attempt === startupAttempts - 1) {
+      if (startupProblem?.retryable === false || health.reason !== LocalHealthWaitFailure.ProcessExited || attempt === startupAttempts - 1) {
         throw lastStartupError;
       }
     }

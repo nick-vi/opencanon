@@ -24,6 +24,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/validator-graph.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/problem.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/service*.test.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/service-support.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/client.test.ts" },
@@ -58,7 +59,14 @@ export default [
       {
         id: "typed-startup-failure",
         title: "Carry typed startup failures across the process boundary",
-        files: ["packages/core/src/problem.ts", "packages/core/src/validator-graph.ts", "packages/runtime/src/service*.ts", "packages/runtime/src/cli.ts", "packages/cli/src/index.ts"],
+        files: [
+          "packages/core/src/problem.ts",
+          "packages/core/src/validator-graph.ts",
+          "packages/core/src/index.ts",
+          "packages/runtime/src/service*.ts",
+          "packages/runtime/src/cli.ts",
+          "packages/cli/src/index.ts",
+        ],
         checks: ["service-tests", "client-tests", "contracts-tests", "typecheck"],
         dependsOn: ["ready-only-ensure"],
       },

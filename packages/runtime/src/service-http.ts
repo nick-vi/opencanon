@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server as NodeHttpServer } from "node:http";
 import type { Socket } from "node:net";
 import path from "node:path";
-import { createOpenCanonDiagnostic, createOpenCanonDiagnosticsError, createOpenCanonProblem, createOpenCanonProblemError, OpenCanonProblemCode, OpenCanonProblemSource, type OpenCanonErrorCode, type OpenCanonErrorPayload, type OpenCanonProblem } from "@opencanon/core";
+import { createOpenCanonDiagnostic, createOpenCanonDiagnosticsError, createOpenCanonProblem, createOpenCanonProblemError, OpenCanonProblemCode, OpenCanonProblemSource, parseOpenCanonProblemFromError, type OpenCanonErrorCode, type OpenCanonErrorPayload, type OpenCanonProblem } from "@opencanon/core";
 import { runtimeAuthHeaders } from "./auth.ts";
 import { maxServiceRequestBodyBytes, type RuntimeRegistryEntry, type ServiceRecentProject } from "./service-types.ts";
 
@@ -157,6 +157,8 @@ export function projectNotFoundProblem(input: { rootDir?: string; status?: numbe
 }
 
 export function runtimeUnavailableProblem(rootDir: string, error: unknown): OpenCanonProblem {
+  const startupProblem = parseOpenCanonProblemFromError(error);
+  if (startupProblem) return startupProblem;
   return createOpenCanonProblem({
     code: OpenCanonProblemCode.RuntimeUnavailable,
     title: "Could not start the project runtime",

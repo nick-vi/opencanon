@@ -20,8 +20,10 @@ import {
   serviceInspectionJson,
 } from "./cli-status.ts";
 import { startOpenCanonRuntime, checkRuntimePrerequisites } from "./server.ts";
+import { runtimeStartupProblem, writeRuntimeStartupFailure } from "./service-startup-result.ts";
 import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
 import { HiddenServiceRegistryArg } from "./service-peer-discovery.ts";
+import { ProjectRuntimeEnv } from "./service-types.ts";
 import {
   ProcessLifecycleStatus,
   RuntimeStatus,
@@ -275,17 +277,24 @@ async function runServeCommand(args: string[], cwd: string, surface: ProjectRunt
   const stoppedPromise = new Promise<void>((resolve) => {
     resolveStopped = resolve;
   });
-  const server = await startOpenCanonRuntime({
-    cwd,
-    host: typeof options.host === "string" ? options.host : undefined,
-    port: normalizeRuntimePort(options.port),
-    allowRemote: options.allowRemote === true,
-    idleTimeoutMs: normalizeRuntimeIdleTimeoutMs(options.idleTimeoutMs),
-    onIdle: registryPath
-      ? () => forgetRuntimeEntryForPid(resolvedRootDir, process.pid, registryPath)
-      : undefined,
-    onStopped: resolveStopped,
-  });
+  let server: Awaited<ReturnType<typeof startOpenCanonRuntime>>;
+  try {
+    server = await startOpenCanonRuntime({
+      cwd,
+      host: typeof options.host === "string" ? options.host : undefined,
+      port: normalizeRuntimePort(options.port),
+      allowRemote: options.allowRemote === true,
+      idleTimeoutMs: normalizeRuntimeIdleTimeoutMs(options.idleTimeoutMs),
+      onIdle: registryPath
+        ? () => forgetRuntimeEntryForPid(resolvedRootDir, process.pid, registryPath)
+        : undefined,
+      onStopped: resolveStopped,
+    });
+  } catch (error) {
+    const startupResultPath = process.env[ProjectRuntimeEnv.StartupResultPath];
+    if (startupResultPath) writeRuntimeStartupFailure(resolvedRootDir, startupResultPath, runtimeStartupProblem(resolvedRootDir, error));
+    throw error;
+  }
   let stopping = false;
   const stop = async () => {
     if (stopping) return;

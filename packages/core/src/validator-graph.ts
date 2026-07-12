@@ -11,6 +11,7 @@ import { ProjectTypesFilePath } from "./project-types.ts";
 import { resolveValidators } from "./validator.ts";
 import type { Validator } from "./validator.ts";
 import { conventionToValidator, resolveConventions, type Convention } from "./convention.ts";
+import { createProjectDefinitionMissingProblem, serializeOpenCanonProblem } from "./problem.ts";
 
 const ValidatorGraphBundleLimit = 20;
 
@@ -44,6 +45,16 @@ export async function loadConventionGraph(
   paths: ContextPaths,
   conventionsEntry: string,
 ): Promise<{ validators: Validator[]; conventions: ReturnType<typeof resolveConventions>; metadata: ValidatorGraphMetadata }> {
+  if (!existsSync(conventionsEntry)) {
+    throw new Error(
+      serializeOpenCanonProblem(
+        createProjectDefinitionMissingProblem({
+          rootDir,
+          path: relative(rootDir, conventionsEntry),
+        }),
+      ),
+    );
+  }
   const bundled = await bundleValidatorGraph(rootDir, paths, conventionsEntry);
   const module = await import(`${pathToImportUrl(bundled.bundlePath)}?conventionGraph=${bundled.hash}`);
   const definitions = (Array.isArray(module.default) ? module.default : [module.default]) as Convention[];

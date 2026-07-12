@@ -1,6 +1,7 @@
 export const OpenCanonProblemSchemaId = "opencanon.problem.v1";
 
 export const OpenCanonProblemCode = {
+  ProjectDefinitionMissing: "project-definition-missing",
   ProjectNotFound: "project-not-found",
   RuntimePreflightFailed: "runtime-preflight-failed",
   ServiceUnavailable: "service-unavailable",
@@ -49,6 +50,20 @@ export function createOpenCanonProblem(input: OpenCanonProblemInput): OpenCanonP
     ...(input.status !== undefined ? { status: input.status } : {}),
     ...(input.details ? { details: input.details } : {}),
   };
+}
+
+export function createProjectDefinitionMissingProblem(input: { rootDir: string; path: string }): OpenCanonProblem {
+  return createOpenCanonProblem({
+    code: OpenCanonProblemCode.ProjectDefinitionMissing,
+    title: "Required Project Canon definition is missing",
+    detail: "The project cannot start because a required Project Canon entrypoint is missing.",
+    source: OpenCanonProblemSource.Project,
+    path: input.path,
+    action: `Run opencanon init --yes in ${input.rootDir} to restore required project files, then start the project again.`,
+    retryable: false,
+    status: 422,
+    details: { rootDir: input.rootDir },
+  });
 }
 
 export function isOpenCanonProblem(value: unknown): value is OpenCanonProblem {

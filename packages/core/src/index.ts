@@ -213,6 +213,7 @@ export {
 } from "./discovery.ts";
 export {
   createOpenCanonProblem,
+  createProjectDefinitionMissingProblem,
   formatOpenCanonProblem,
   isOpenCanonProblem,
   OpenCanonProblemCode,
