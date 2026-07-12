@@ -93,15 +93,12 @@ export function createEventBroadcaster() {
     broadcast(event: RuntimeStreamEvent): void {
       const payload = encode(event);
       for (const controller of [...clients.keys()]) {
-        // Backpressure guard: local HTTP stream adapters can report non-positive
-        // desiredSize during normal bursts, so only remove streams that are
-        // already errored/closed. Runtime streams are local and low-cardinality;
-        // preserving correctness is more important than dropping active clients.
         const desiredSize = controller.desiredSize;
-        if (desiredSize === null) {
+        if (desiredSize === null || desiredSize <= 0) {
           removeClient(controller);
           try {
-            controller.close();
+            if (desiredSize === null) controller.close();
+            else controller.error(new Error("OpenCanon event stream consumer fell behind; reconnect with the last event cursor."));
           } catch {
             // already closed/errored
           }

@@ -112,6 +112,38 @@ test("Change check runs stream output, persist terminal state, and replay from a
   }
 });
 
+test("Change check output preserves UTF-8 at persisted and tail byte limits", { timeout: IntegrationTimeoutMs }, async () => {
+  const characterCount = 300_000;
+  const rootDir = createChangeRunProject(
+    "utf8",
+    `${quotedNode()} -e ${shellQuote(`process.stdout.write('\\u{1F642}'.repeat(${characterCount}))`)}`,
+  );
+  const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+  try {
+    const headers = runtimeAuthHeaders(server.authToken);
+    const started = await startRun(server.url, headers, "utf8-change", "stream");
+    const events = await readRunEvents(server.url, headers, started.id);
+    const output = events
+      .filter((event): event is Extract<ChangeCheckRunEvent, { type: "stdout" }> => event.type === ChangeCheckRunEventType.Stdout)
+      .map((event) => event.text)
+      .join("");
+    const terminal = events.at(-1);
+    assert(terminal && "run" in terminal);
+    if (!terminal || !("run" in terminal)) throw new Error("Expected terminal Change check run.");
+
+    assert.equal(terminal.run.status, ChangeCheckRunStatus.Passed);
+    assert.equal(terminal.run.outputBytes, characterCount * 4);
+    assert.equal(terminal.run.outputTruncated, true);
+    assert.equal(Buffer.byteLength(output, "utf8"), 1024 * 1024);
+    assert.equal(Buffer.byteLength(terminal.run.outputTail, "utf8"), 64 * 1024);
+    assert.equal(output.includes("\uFFFD"), false);
+    assert.equal(terminal.run.outputTail.includes("\uFFFD"), false);
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("Change check cancellation terminates the command and persists cancelled state", { timeout: IntegrationTimeoutMs }, async () => {
   const rootDir = createChangeRunProject("cancel", `${quotedNode()} -e ${shellQuote("require('node:fs').writeFileSync('child.pid', String(process.pid)); console.log('ready-to-cancel'); setInterval(() => {}, 1000)")}`);
   const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });

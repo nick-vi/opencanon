@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "vitest";
+import { ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, createPaths } from "@opencanon/core";
+import { openProjectStore } from "@opencanon/runtime";
 import { createAuthoringProject } from "../packages/runtime/test/support.ts";
 
 const script = path.join(process.cwd(), "packages/cli/src/index.ts");
@@ -225,6 +227,59 @@ test("changes ready and brief expose agent-ready task work", () => {
     const passed = eventPayload.events.find((event) => event.type === "task-check-passed");
     assert.deepEqual(passed?.taskIds, ["model"]);
     assert.deepEqual(passed?.checkIds, ["smoke"]);
+  } finally {
+    removeTestRoot(rootDir);
+  }
+}, CliSpawnTimeoutMs);
+
+test("changes runs watch pages replay beyond one event frame", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-cli-run-replay-"));
+  try {
+    createAuthoringProject(rootDir);
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
+    const timestamp = new Date().toISOString();
+    const run = ChangeCheckRunSchema.parse({
+      id: "paged-run",
+      batchId: "paged-batch",
+      kind: "change-check",
+      status: ChangeCheckRunStatus.Passed,
+      changeId: "paged-change",
+      checkId: "paged-check",
+      checkKind: "command",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      startedAt: timestamp,
+      finishedAt: timestamp,
+      summary: "Check passed.",
+      outputTail: "x",
+      outputBytes: 2_099,
+      outputTruncated: false,
+    });
+    const store = openProjectStore({ rootDir, paths: createPaths(rootDir) });
+    try {
+      store.writeJob(run);
+      store.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 1, timestamp, type: ChangeCheckRunEventType.Queued });
+      for (let sequence = 2; sequence <= 2_100; sequence += 1) {
+        store.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence, timestamp, type: ChangeCheckRunEventType.Stdout, text: "x" });
+      }
+      store.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 2_101, timestamp, type: ChangeCheckRunEventType.Passed, run });
+    } finally {
+      store.close();
+    }
+
+    const watched = spawnSync(process.execPath, [script, "changes", "runs", "watch", run.id, "--after", "0", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(watched.status, 0, watched.stderr || watched.stdout);
+    assert.equal(watched.stderr, "x".repeat(2_099));
+    const payload = JSON.parse(watched.stdout) as { run: { id: string; status: string }; latestSequence: number };
+    assert.equal(payload.run.id, run.id);
+    assert.equal(payload.run.status, ChangeCheckRunStatus.Passed);
+    assert.equal(payload.latestSequence, 2_101);
   } finally {
     removeTestRoot(rootDir);
   }

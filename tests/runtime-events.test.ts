@@ -51,6 +51,18 @@ test("event broadcaster emits the typed SSE envelope", async () => {
   assert.match(text, /"phase":"runtime-start"/);
 });
 
+test("event broadcaster disconnects a stalled consumer at its buffer bound", async () => {
+  const broadcaster = createEventBroadcaster();
+  const stream = broadcaster.connect(indexingEvent("Connected.", { phase: "runtime-start", indeterminate: true }));
+  const reader = stream.getReader();
+  for (let index = 0; index < 64; index += 1) {
+    broadcaster.broadcast(indexingEvent(`Queued ${index}.`, { phase: "validation", current: index, total: 64 }));
+  }
+
+  await assert.rejects(() => reader.read(), /consumer fell behind/);
+  broadcaster.close();
+});
+
 test("local pipe protocol streams SSE responses as chunk frames", async () => {
   const pipeDir = mkdtempSync(path.join(tmpdir().startsWith("/var/") ? "/tmp" : tmpdir(), "oc-"));
   const endpoint = localPipeEndpoint({ scope: "runtime", key: "runtime", pipeDir });
