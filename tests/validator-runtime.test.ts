@@ -525,7 +525,7 @@ test("doctor reports and fixes unignored cache files", () => {
     const gitignore = readFileSync(path.join(rootDir, ".gitignore"), "utf8");
     assert(gitignore.includes(".opencanon/cache/"));
     assert(gitignore.includes(".opencanon/generated/"));
-    assert(gitignore.includes(".opencanon/worker.lock"));
+    assert(gitignore.includes(".opencanon/processes/"));
     assert(gitignore.includes(".opencanon/*.sqlite"));
     assert.equal(existsSync(path.join(rootDir, ".agents/skills/opencanon/.gitignore")), false);
 

@@ -99,8 +99,8 @@ export async function waitForSpawnedPid(child: ReturnType<typeof spawn>, descrip
   });
 }
 
-export function writeProjectWorkerLease(rootDir: string, pid: number, leaseId = "test-worker-lease"): void {
-  const lockPath = projectWorkerLeasePath(rootDir);
+export function writeProjectWorkerLease(rootDir: string, pid: number, leaseId = "test-worker-lease", registryPath?: string): void {
+  const lockPath = projectWorkerLeasePath(rootDir, registryPath);
   mkdirSync(path.dirname(lockPath), { recursive: true });
   const now = new Date().toISOString();
   writeFileSync(lockPath, JSON.stringify({ rootDir, pid, leaseId, acquiredAt: now, heartbeatAt: now }, null, 2));

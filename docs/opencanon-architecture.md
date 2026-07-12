@@ -181,7 +181,7 @@ Starts:
 - browser diagnostics harness
 - server-sent event state stream for browser diagnostics clients
 
-The OpenCanon service is a registry and lifecycle controller, not a shared project runtime. It stores runtime metadata in `~/.opencanon/service.json`; each project runtime still owns exactly one repo root, one `.opencanon` state directory, one auth token, and one watcher root. Registry entries advertise both a pipe endpoint for local app/CLI traffic and a loopback URL for browser diagnostics.
+The OpenCanon service is a registry and lifecycle controller, not a shared project runtime. It stores runtime metadata in `~/.opencanon/namespaces/<namespace>/service.json`; installed builds use `stable`, while source checkouts derive an isolated development namespace. Each project runtime still owns exactly one repo root, one namespaced process directory, one shared derived-state database, one auth token, and one watcher root. Registry entries advertise both a pipe endpoint for local app/CLI traffic and a loopback URL for browser diagnostics.
 
 ### CLI Use
 
@@ -382,7 +382,7 @@ Fact extraction diagnostics are data, but malformed bridge payloads are errors. 
 
 The project runtime exposes HTTP for request/response operations and server-sent events for live state. Health is public; other API routes require the runtime bearer token or runtime session cookie. Remote UI bootstrap accepts the token on the index route, then serves static assets only to authorized requests.
 
-Base URL is stored in `.opencanon/runtime.json`:
+The service registry stores the runtime endpoint, and a namespaced project-local pointer is written to `.opencanon/processes/<namespace>/runtime.json`:
 
 ```json
 {
@@ -392,7 +392,7 @@ Base URL is stored in `.opencanon/runtime.json`:
   "port": 43187,
   "url": "http://127.0.0.1:43187",
   "startedAt": "<ISO-8601 timestamp>",
-  "logPath": ".opencanon/runtime.log",
+  "logPath": ".opencanon/processes/<namespace>/runtime.log",
   "authToken": "<generated-token>"
 }
 ```
@@ -498,8 +498,8 @@ JSON is for human-readable configuration and small generated pointers only.
 Store these as JSON:
 
 - `opencanon.config.json`: optional repo-authored configuration overrides.
-- `.opencanon/runtime.json`: generated runtime pointer with `rootDir`, `host`, `pid`, `port`, `url`, `startedAt`, `logPath`, and `authToken`.
-- `~/.opencanon/service.json`: generated service registry for running project runtimes.
+- `.opencanon/processes/<namespace>/runtime.json`: generated runtime pointer with `rootDir`, `host`, `pid`, `port`, `url`, `startedAt`, `logPath`, and `authToken`.
+- `~/.opencanon/namespaces/<namespace>/service.json`: generated service registry for running project runtimes.
 - Optional local UI preferences if they are not important to validation correctness.
 
 Do not store these as JSON:

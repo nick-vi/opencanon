@@ -1,6 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
-import path from "node:path";
 
 const PlatformName = {
   Win32: "win32",
@@ -9,10 +7,6 @@ const PlatformName = {
 export const ServiceRunCommandToken = "service run";
 export const ProjectRuntimeRunCommandToken = "project start --foreground";
 export const HiddenServiceRegistryArg = "--registry";
-
-export type ServicePeerEntrypoint = {
-  path: string;
-};
 
 export type ServiceRunPeer = {
   pid: number;
@@ -23,26 +17,22 @@ export type ProjectRuntimeRunPeer = ServiceRunPeer;
 
 export function discoverServiceRunPeers(input: {
   registryPath: string;
-  entrypoint: ServicePeerEntrypoint;
   currentPid?: number;
 }): ServiceRunPeer[] {
   return discoverOpenCanonProcessPeers({
     commandToken: ServiceRunCommandToken,
     registryPath: input.registryPath,
-    entrypoint: input.entrypoint,
     currentPid: input.currentPid,
   });
 }
 
 export function discoverProjectRuntimeRunPeers(input: {
   registryPath: string;
-  entrypoint: ServicePeerEntrypoint;
   currentPid?: number;
 }): ProjectRuntimeRunPeer[] {
   return discoverOpenCanonProcessPeers({
     commandToken: ProjectRuntimeRunCommandToken,
     registryPath: input.registryPath,
-    entrypoint: input.entrypoint,
     currentPid: input.currentPid,
   });
 }
@@ -50,25 +40,19 @@ export function discoverProjectRuntimeRunPeers(input: {
 function discoverOpenCanonProcessPeers(input: {
   commandToken: string;
   registryPath: string;
-  entrypoint: ServicePeerEntrypoint;
   currentPid?: number;
 }): ServiceRunPeer[] {
   const currentPid = input.currentPid ?? process.pid;
   return processCommandRows().flatMap((row) => {
     if (row.pid === currentPid) return [];
-    if (!opencanonRunCommandMatches(row.command, input.commandToken, input.registryPath, input.entrypoint)) return [];
+    if (!opencanonRunCommandMatches(row.command, input.commandToken, input.registryPath)) return [];
     return [{ pid: row.pid, source: row.command }];
   });
 }
 
-function opencanonRunCommandMatches(command: string, commandToken: string, registryPath: string, entrypoint: ServicePeerEntrypoint): boolean {
+function opencanonRunCommandMatches(command: string, commandToken: string, registryPath: string): boolean {
   if (!command.includes(commandToken)) return false;
-  if (commandReferencesRegistry(command, registryPath)) return true;
-  return commandReferencesEntrypoint(command, entrypoint.path) && isDefaultUserServiceRegistry(registryPath);
-}
-
-function commandReferencesEntrypoint(command: string, entrypointPath: string): boolean {
-  return command.includes(entrypointPath) || command.includes(JSON.stringify(entrypointPath));
+  return commandReferencesRegistry(command, registryPath);
 }
 
 function commandReferencesRegistry(command: string, registryPath: string): boolean {
@@ -77,10 +61,6 @@ function commandReferencesRegistry(command: string, registryPath: string): boole
     command.includes(`${HiddenServiceRegistryArg}=${registryPath}`) ||
     command.includes(`${HiddenServiceRegistryArg} ${JSON.stringify(registryPath)}`)
   );
-}
-
-function isDefaultUserServiceRegistry(registryPath: string): boolean {
-  return path.resolve(registryPath) === path.resolve(path.join(homedir(), ".opencanon", "service.json"));
 }
 
 function processCommandRows(): Array<{ pid: number; command: string }> {

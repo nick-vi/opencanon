@@ -7,7 +7,7 @@ import path from "node:path";
 import { cleanupLocalPipeEndpoints } from "./local-protocol.ts";
 import { discoverProjectRuntimeRunPeers, discoverServiceRunPeers } from "./service-peer-discovery.ts";
 import { directoryExists } from "./service-discovery.ts";
-import { RuntimeCliInvocationKind, isNodeScriptCli, resolveRuntimeCliEntrypoint, runtimeCliInvocation, type RuntimeCliEntrypoint } from "./service-entrypoint.ts";
+import { runtimeCliInvocation } from "./service-entrypoint.ts";
 import {
   appendLifecycleEvent,
   forgetRuntimeEntryIfPid,
@@ -64,11 +64,11 @@ export async function retireUnsupportedRegistry(registryPath: string): Promise<v
 }
 
 export async function retireUnusableProjectRuntimeEntry(rootDir: string, registryPath: string): Promise<void> {
-  const lease = readProjectRuntimeLease(rootDir);
+  const lease = readProjectRuntimeLease(rootDir, registryPath);
   if (!lease) return;
   await retireRuntimeProcessLeases([lease], registryPath);
-  const projectEntry = readProjectRuntimeEntry(rootDir);
-  if (!projectEntry || projectEntry.pid === lease.pid) rmSync(projectRuntimePath(rootDir), { force: true });
+  const projectEntry = readProjectRuntimeEntry(rootDir, registryPath);
+  if (!projectEntry || projectEntry.pid === lease.pid) rmSync(projectRuntimePath(rootDir, registryPath), { force: true });
 }
 
 export async function retireConflictingProjectWorkerLease(
@@ -77,7 +77,7 @@ export async function retireConflictingProjectWorkerLease(
   allowedPid?: number,
   options: { allowStaleAllowedPid?: boolean } = {},
 ): Promise<boolean> {
-  const lockPath = projectWorkerLeasePath(rootDir);
+  const lockPath = projectWorkerLeasePath(rootDir, registryPath);
   const lease = readProjectWorkerLeaseFile(lockPath);
   if (!lease) {
     rmSync(lockPath, { force: true });
@@ -109,7 +109,6 @@ export async function retireConflictingProjectWorkerLease(
 
 export async function repairServiceProcessArtifacts(input: {
   registryPath: string;
-  entrypoint: RuntimeCliEntrypoint;
   keepPids: Set<number>;
   cleanupPipeMaxAgeMs: number;
   pipeDir?: string;
@@ -147,7 +146,6 @@ export async function repairRegisteredServiceProcessArtifacts(registryPath: stri
   try {
     return await repairServiceProcessArtifacts({
       registryPath,
-      entrypoint: repairEntrypointFromRegistry(registryPath),
       keepPids: serviceRegistryKeepPids(registryPath),
       cleanupPipeMaxAgeMs: LocalPipeCleanupAgeMs,
     });
@@ -309,19 +307,6 @@ export function removeInactiveLocalPipeEndpoint(endpoint: string | undefined, pi
   rmSync(endpoint, { force: true });
 }
 
-function repairEntrypointFromRegistry(registryPath: string): RuntimeCliEntrypoint {
-  const registry = readRuntimeRegistryFile(registryPath);
-  const cliPath = registry.service?.cliPath || registry.entries.find((entry) => entry.cliPath)?.cliPath;
-  if (cliPath) {
-    return {
-      path: cliPath,
-      kind: isNodeScriptCli(cliPath) ? RuntimeCliInvocationKind.NodeScript : RuntimeCliInvocationKind.Executable,
-      source: "registry",
-    };
-  }
-  return resolveRuntimeCliEntrypoint(process.cwd());
-}
-
 function activeRegisteredPipeEndpoints(registryPath: string): string[] {
   const registry = readRuntimeRegistryFile(registryPath);
   const endpoints: string[] = [];
@@ -334,11 +319,10 @@ function activeRegisteredPipeEndpoints(registryPath: string): string[] {
 
 async function retireUnregisteredServicePeers(input: {
   registryPath: string;
-  entrypoint: RuntimeCliEntrypoint;
   keepPids: Set<number>;
 }): Promise<number> {
   let retired = 0;
-  for (const peer of discoverServiceRunPeers({ registryPath: input.registryPath, entrypoint: input.entrypoint })) {
+  for (const peer of discoverServiceRunPeers({ registryPath: input.registryPath })) {
     if (input.keepPids.has(peer.pid)) continue;
     if (!isProcessRunning(peer.pid)) continue;
     await terminateSpawnedProcess(peer.pid);
@@ -355,11 +339,10 @@ async function retireUnregisteredServicePeers(input: {
 
 async function retireUnregisteredProjectRuntimePeers(input: {
   registryPath: string;
-  entrypoint: RuntimeCliEntrypoint;
   keepPids: Set<number>;
 }): Promise<number> {
   let retired = 0;
-  for (const peer of discoverProjectRuntimeRunPeers({ registryPath: input.registryPath, entrypoint: input.entrypoint })) {
+  for (const peer of discoverProjectRuntimeRunPeers({ registryPath: input.registryPath })) {
     if (input.keepPids.has(peer.pid)) continue;
     if (!isProcessRunning(peer.pid)) continue;
     await terminateSpawnedProcess(peer.pid);
@@ -384,8 +367,8 @@ function runtimeProcessLeasesFromRegistryValue(value: unknown, registryPath: str
   });
 }
 
-function readProjectRuntimeLease(rootDir: string): RuntimeProcessLease | undefined {
-  const file = projectRuntimePath(rootDir);
+function readProjectRuntimeLease(rootDir: string, registryPath = serviceRegistryPath()): RuntimeProcessLease | undefined {
+  const file = projectRuntimePath(rootDir, registryPath);
   if (!existsSync(file)) return undefined;
   let parsed: unknown;
   try {

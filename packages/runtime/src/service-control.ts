@@ -1,5 +1,4 @@
 import { resolveRootDir } from "@opencanon/core";
-import { resolveRuntimeCliEntrypoint } from "./service-entrypoint.ts";
 import { createLifecycle, withLifecycle } from "./service-lifecycle.ts";
 import { inspectProjectRuntime, inspectService } from "./service-monitor.ts";
 import {
@@ -39,10 +38,8 @@ export async function repairServiceProcessState(input: {
   pipeDir?: string;
 } = {}): Promise<ServiceRepairResult> {
   const registryPath = input.registryPath ?? serviceRegistryPath();
-  const entrypoint = resolveRuntimeCliEntrypoint(input.cwd ?? process.cwd());
   return await repairServiceProcessArtifacts({
     registryPath,
-    entrypoint,
     keepPids: serviceRegistryKeepPids(registryPath),
     cleanupPipeMaxAgeMs: input.cleanupPipeMaxAgeMs ?? 0,
     pipeDir: input.pipeDir,
@@ -106,7 +103,7 @@ export async function stopService(registryPath = serviceRegistryPath()): Promise
 
 export async function stopProjectRuntime(rootDir: string, registryPath = serviceRegistryPath()): Promise<StopProjectRuntimeResult> {
   const resolvedRoot = resolveRootDir(rootDir);
-  const entry = readRuntimeRegistry(registryPath).find((item) => item.rootDir === resolvedRoot) ?? readProjectRuntimeEntry(resolvedRoot);
+  const entry = readRuntimeRegistry(registryPath).find((item) => item.rootDir === resolvedRoot) ?? readProjectRuntimeEntry(resolvedRoot, registryPath);
   if (!entry) {
     const removedStartupLock = removeInactiveStartupLock(registryPath, startupLockScope("runtime", resolvedRoot));
     const retiredLease = await retireConflictingProjectWorkerLease(resolvedRoot, registryPath);

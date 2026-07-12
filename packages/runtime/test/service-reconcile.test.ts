@@ -18,6 +18,8 @@ import {
   readRuntimeLifecycleEvents,
   readRuntimeRegistry,
   readServiceEntry,
+  projectRuntimePath,
+  runtimeLogPath,
   repairServiceProcessState,
   reconcileProjectRuntimes,
   forgetRuntimeEntry,
@@ -450,7 +452,7 @@ test("runtime start retires unusable project-local runtime leases before replace
     writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
     writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
     if (!previous.pid) throw new Error("test child did not start");
-    const runtimeFile = path.join(rootDir, ".opencanon", "runtime.json");
+    const runtimeFile = projectRuntimePath(rootDir, registryPath);
     mkdirSync(path.dirname(runtimeFile), { recursive: true });
     writeFileSync(runtimeFile, JSON.stringify({
       rootDir,
@@ -460,7 +462,7 @@ test("runtime start retires unusable project-local runtime leases before replace
       pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
       pid: previous.pid,
       startedAt: "2026-05-01T00:00:00.000Z",
-      logPath: path.join(rootDir, ".opencanon", "runtime.log"),
+      logPath: runtimeLogPath(rootDir, registryPath),
       authToken: "",
     }));
     process.env.OPENCANON_CLI = fakeCliPath;

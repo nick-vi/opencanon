@@ -248,7 +248,7 @@ function openLogsActionResult(rootDir: string | undefined, registryPath: string)
 function firstExistingLogPath(rootDir: string | undefined, registryPath: string): string | undefined {
   const candidates: string[] = [];
   if (rootDir) {
-    candidates.push(runtimeLogPath(rootDir));
+    candidates.push(runtimeLogPath(rootDir, registryPath));
     candidates.push(...readRuntimeRegistry(registryPath).filter((entry) => entry.rootDir === rootDir).map((entry) => entry.logPath));
   } else {
     candidates.push(serviceLogPath(registryPath));

@@ -63,7 +63,7 @@ test("validate --files returns without starting runtime when no selected validat
     assert.deepEqual(payload.validators, ["source-only-rule"]);
     assert.equal(payload.findingCount, 0);
     assert.deepEqual(payload.findings, []);
-    assert.equal(existsSync(path.join(rootDir, ".opencanon/runtime.json")), false);
+    assert.equal(existsSync(path.join(rootDir, ".opencanon/processes")), false);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

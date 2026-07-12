@@ -45,7 +45,7 @@ export const RuntimeBusyBudgetMs = 30 * 60_000;
 
 export async function inspectProjectRuntime(rootDir: string, registryPath = serviceRegistryPath()): Promise<RuntimeInspection | undefined> {
   const resolvedRoot = resolveRootDir(rootDir);
-  const entry = readRuntimeRegistry(registryPath).find((item) => item.rootDir === resolvedRoot) ?? readProjectRuntimeEntry(resolvedRoot);
+  const entry = readRuntimeRegistry(registryPath).find((item) => item.rootDir === resolvedRoot) ?? readProjectRuntimeEntry(resolvedRoot, registryPath);
   return entry ? inspectRuntimeEntry(entry, registryPath) : undefined;
 }
 

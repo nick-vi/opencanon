@@ -28,6 +28,7 @@ import {
   readRuntimeLifecycleEvents,
   readRuntimeRegistry,
   readRuntimeRegistryDiagnostics,
+  readProjectRuntimeEntry,
   readProjectWorkerLease,
   readServiceEntry,
   forgetRuntimeEntry,
@@ -49,6 +50,14 @@ import {
   upsertRuntimeEntry,
   upsertServiceEntry,
   writeRuntimeRegistry,
+  defaultRuntimeNamespace,
+  defaultServiceRegistryPath,
+  projectRuntimePath,
+  runtimeNamespaceForRegistry,
+  RuntimeNamespaceEnv,
+  StableRuntimeNamespace,
+  validateRuntimeNamespace,
+  runtimeLogPath,
 } from "@opencanon/runtime";
 import {
   processIsRunning,
@@ -67,6 +76,69 @@ import {
 } from "./service-support.ts";
 import { createAuthoringProject } from "./support.ts";
 import { parseOpenCanonProblemFromError } from "@opencanon/core";
+
+test("runtime namespaces isolate installed, source, and explicit registries", () => {
+  const previous = process.env[RuntimeNamespaceEnv];
+  delete process.env[RuntimeNamespaceEnv];
+  try {
+    const sourceCli = path.join("/workspace", "opencanon", "packages", "cli", "src", "index.ts");
+    const sourceNamespace = defaultRuntimeNamespace(sourceCli);
+    assert.match(sourceNamespace, /^dev-[a-f0-9]{12}$/);
+    assert.equal(defaultRuntimeNamespace("/opt/opencanon/cli.js"), StableRuntimeNamespace);
+    assert.equal(defaultServiceRegistryPath("/home/test", StableRuntimeNamespace), path.join("/home/test", ".opencanon", "namespaces", "stable", "service.json"));
+
+    const sourceRegistry = defaultServiceRegistryPath("/home/test", sourceNamespace);
+    const stableRegistry = defaultServiceRegistryPath("/home/test", StableRuntimeNamespace);
+    assert.equal(runtimeNamespaceForRegistry(sourceRegistry), sourceNamespace);
+    assert.equal(runtimeNamespaceForRegistry(stableRegistry), StableRuntimeNamespace);
+    assert.notEqual(projectRuntimePath("/project", sourceRegistry), projectRuntimePath("/project", stableRegistry));
+
+    process.env[RuntimeNamespaceEnv] = "review-runtime";
+    assert.equal(defaultRuntimeNamespace(sourceCli), "review-runtime");
+    assert.match(runtimeNamespaceForRegistry("/tmp/service.json"), /^custom-[a-f0-9]{12}$/);
+    assert.throws(() => validateRuntimeNamespace("../escape"), /runtime namespace/i);
+  } finally {
+    if (previous === undefined) delete process.env[RuntimeNamespaceEnv];
+    else process.env[RuntimeNamespaceEnv] = previous;
+  }
+});
+
+test("two runtime namespaces can own the same project concurrently", { timeout: 20000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-namespace-coexist-"));
+  const stableRegistry = defaultServiceRegistryPath(path.join(rootDir, "home"), StableRuntimeNamespace);
+  const sourceRegistry = defaultServiceRegistryPath(path.join(rootDir, "home"), "dev-test-source");
+  const fakeCliPath = path.join(rootDir, "ready-opencanon.mjs");
+  const originalCli = process.env.OPENCANON_CLI;
+  let stablePid: number | undefined;
+  let sourcePid: number | undefined;
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
+    process.env.OPENCANON_CLI = fakeCliPath;
+
+    const stable = await startProjectRuntime({ cwd: rootDir, registryPath: stableRegistry, idleTimeoutMs: 0 });
+    stablePid = stable.entry.pid;
+    const source = await startProjectRuntime({ cwd: rootDir, registryPath: sourceRegistry, idleTimeoutMs: 0 });
+    sourcePid = source.entry.pid;
+
+    assert.notEqual(stablePid, sourcePid);
+    assert.equal(processIsRunning(stablePid), true);
+    assert.equal(processIsRunning(sourcePid), true);
+    assert.equal(readProjectRuntimeEntry(rootDir, stableRegistry)?.pid, stablePid);
+    assert.equal(readProjectRuntimeEntry(rootDir, sourceRegistry)?.pid, sourcePid);
+    assert.notEqual(projectRuntimePath(rootDir, stableRegistry), projectRuntimePath(rootDir, sourceRegistry));
+    assert.equal(existsSync(projectRuntimePath(rootDir, stableRegistry)), true);
+    assert.equal(existsSync(projectRuntimePath(rootDir, sourceRegistry)), true);
+  } finally {
+    await stopProjectRuntime(rootDir, stableRegistry).catch(() => undefined);
+    await stopProjectRuntime(rootDir, sourceRegistry).catch(() => undefined);
+    if (stablePid && processIsRunning(stablePid)) process.kill(stablePid, "SIGKILL");
+    if (sourcePid && processIsRunning(sourcePid)) process.kill(sourcePid, "SIGKILL");
+    if (originalCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalCli;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
 
 test("runtime CLI resolution ignores project-local runtime paths", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-cli-resolution-"));
@@ -355,12 +427,12 @@ test("project stop removes stale worker leases without a runtime registry entry"
   const registryPath = path.join(rootDir, "global", "service.json");
   try {
     writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
-    writeProjectWorkerLease(rootDir, 9_999_999, "stale-worker");
+    writeProjectWorkerLease(rootDir, 9_999_999, "stale-worker", registryPath);
 
     const result = await stopProjectRuntime(rootDir, registryPath);
 
     assert.equal(result.status, "stale");
-    assert.equal(readProjectWorkerLease(rootDir), undefined);
+    assert.equal(readProjectWorkerLease(rootDir, registryPath), undefined);
     assert.equal(readRuntimeRegistry(registryPath).length, 0);
     const events = readRuntimeLifecycleEvents(registryPath);
     assert.equal(events.at(-1)?.kind, ProcessLifecycleEventKind.RuntimeStale);
@@ -398,14 +470,14 @@ test("project start retires a live conflicting worker lease before spawning repl
     conflictingPid = await waitForSpawnedPid(conflicting, "conflicting worker");
     writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
     writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
-    writeProjectWorkerLease(rootDir, conflictingPid, "conflicting-worker");
+    writeProjectWorkerLease(rootDir, conflictingPid, "conflicting-worker", registryPath);
     process.env.OPENCANON_CLI = fakeCliPath;
 
     const started = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
 
     assert.equal(started.status, "started");
     assert.equal(await waitUntilProcessStops(conflictingPid, 3000), true);
-    assert.equal(readProjectWorkerLease(rootDir), undefined);
+    assert.equal(readProjectWorkerLease(rootDir, registryPath), undefined);
     assert.equal(readRuntimeRegistry(registryPath).length, 1);
   } finally {
     await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
@@ -533,14 +605,14 @@ test("project start returns one typed failure for a missing conventions entrypoi
     }
 
     const problem = parseOpenCanonProblemFromError(startupError);
-    const runtimeLog = readFileSync(path.join(rootDir, ".opencanon", "runtime.log"), "utf8");
+    const runtimeLog = readFileSync(runtimeLogPath(rootDir, registryPath), "utf8");
     assert(problem, `${startupError instanceof Error ? startupError.message : String(startupError)}\n${runtimeLog}`);
     assert.equal(problem?.code, "project-definition-missing");
     assert.equal(problem?.path, "opencanon/conventions/index.ts");
     assert.equal(problem?.retryable, false);
     assert.match(problem?.action ?? "", /opencanon init --yes/);
     assert.deepEqual(readRuntimeRegistry(registryPath), []);
-    assert.equal(existsSync(path.join(rootDir, ".opencanon", "startup")), false);
+    assert.equal(existsSync(path.join(path.dirname(runtimeLogPath(rootDir, registryPath)), "startup")), false);
   } finally {
     await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
     if (originalOverride === undefined) delete process.env.OPENCANON_CLI;

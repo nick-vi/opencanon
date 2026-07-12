@@ -24,6 +24,7 @@ import {
 import { errorMessage, isLocalProtocolTransportFailure, projectNotFoundProblem } from "./service-http.ts";
 import { runtimeCliInvocation } from "./service-entrypoint.ts";
 import { clearRuntimeStartupResults, readRuntimeStartupFailure, removeRuntimeStartupResult, runtimeStartupResultPath } from "./service-startup-result.ts";
+import { runtimeNamespaceForRegistry } from "./service-namespace.ts";
 import {
   appendLifecycleEvent,
   closeFileDescriptor,
@@ -120,7 +121,7 @@ export async function startProjectRuntime(input: {
     }
     if (existing?.status === RuntimeStatus.Failed || existing?.status === RuntimeStatus.Stale) forgetRuntimeEntry(rootDir, registryPath);
     await retireConflictingProjectWorkerLease(rootDir, registryPath);
-    clearRuntimeStartupResults(rootDir);
+    clearRuntimeStartupResults(rootDir, registryPath);
 
     const attemptedPorts: number[] = [];
     const startupAttempts = input.port === undefined ? AutoPortStartupAttempts : 1;
@@ -134,10 +135,10 @@ export async function startProjectRuntime(input: {
         rangeKey: portRangeKeyForRegistry(registryPath, rootDir),
       });
       attemptedPorts.push(port);
-      const logPath = runtimeLogPath(rootDir);
+      const logPath = runtimeLogPath(rootDir, registryPath);
       const authToken = createRuntimeAuthToken();
       const leaseId = createProcessLeaseId();
-      const startupResultPath = runtimeStartupResultPath(rootDir, leaseId);
+      const startupResultPath = runtimeStartupResultPath(rootDir, leaseId, registryPath);
       const pipeEndpoint = localPipeEndpoint({ scope: "runtime", key: `${registryPath}:${rootDir}` });
       ensurePrivateDirectory(path.dirname(logPath));
       const logFd = openSync(logPath, "a", 0o600);
@@ -160,6 +161,7 @@ export async function startProjectRuntime(input: {
           [ProjectRuntimeEnv.RegistryPath]: registryPath,
           [ProjectRuntimeEnv.PipeEndpoint]: pipeEndpoint,
           [ProjectRuntimeEnv.StartupResultPath]: startupResultPath,
+          [ProjectRuntimeEnv.RuntimeNamespace]: runtimeNamespaceForRegistry(registryPath),
         },
       });
       let childPid: number;
@@ -255,7 +257,6 @@ export async function startService(input: {
     const runtimeIdentity = runtimeIdentityForEntrypoint(cli.entrypoint);
     await repairServiceProcessArtifacts({
       registryPath,
-      entrypoint: cli.entrypoint,
       keepPids: serviceRegistryKeepPids(registryPath),
       cleanupPipeMaxAgeMs: LocalPipeCleanupAgeMs,
     });
@@ -307,6 +308,7 @@ export async function startService(input: {
           [ServiceEnv.LeaseId]: leaseId,
           [ServiceEnv.RegistryPath]: registryPath,
           [ServiceEnv.PipeEndpoint]: pipeEndpoint,
+          [ServiceEnv.RuntimeNamespace]: runtimeNamespaceForRegistry(registryPath),
         },
       });
       let childPid: number;

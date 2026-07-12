@@ -4,9 +4,8 @@ tmp/
 .opencanon/generated/
 .opencanon/cache/
 .opencanon/semantic-index/
-.opencanon/runtime.json
-.opencanon/runtime.log
-.opencanon/worker.lock
+.opencanon/processes/
+.opencanon/*.log
 .opencanon/init.json
 .opencanon/commit-approvals.json
 .opencanon/*.sqlite

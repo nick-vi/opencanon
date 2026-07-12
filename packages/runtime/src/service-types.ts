@@ -314,6 +314,7 @@ export const ServiceEnv = {
   RegistryPath: "OPENCANON_SERVICE_REGISTRY_PATH",
   OwnerPid: "OPENCANON_SERVICE_OWNER_PID",
   PipeEndpoint: "OPENCANON_SERVICE_PIPE_ENDPOINT",
+  RuntimeNamespace: "OPENCANON_RUNTIME_NAMESPACE",
 } as const;
 
 export const ProjectRuntimeEnv = {
@@ -322,6 +323,7 @@ export const ProjectRuntimeEnv = {
   RegistryPath: "OPENCANON_SERVICE_REGISTRY_PATH",
   PipeEndpoint: "OPENCANON_RUNTIME_PIPE_ENDPOINT",
   StartupResultPath: "OPENCANON_RUNTIME_STARTUP_RESULT_PATH",
+  RuntimeNamespace: "OPENCANON_RUNTIME_NAMESPACE",
 } as const;
 
 export const LocalHealthWaitFailure = {

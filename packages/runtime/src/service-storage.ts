@@ -23,6 +23,7 @@ import {
   type ServiceRegistryEntry,
 } from "./service-types.ts";
 import type { ChildProcess } from "node:child_process";
+import { defaultServiceRegistryPath, projectProcessStateDirectory, runtimeNamespaceForRegistry } from "./service-namespace.ts";
 
 const RegistryLockStaleMs = 5000;
 const RegistryLockTimeoutMs = 7000;
@@ -42,21 +43,25 @@ export type StartupLockMetadata = {
 export function serviceRegistryPath(homeDir = homedir()): string {
   if (homeDir === homedir()) {
     const configured = process.env[ServiceEnv.RegistryPath]?.trim();
-    if (configured) return configured;
+    if (configured) return path.resolve(configured);
   }
-  return path.join(homeDir, ".opencanon", "service.json");
+  return defaultServiceRegistryPath(homeDir);
 }
 
-export function projectRuntimePath(rootDir: string): string {
-  return path.join(rootDir, ".opencanon", "runtime.json");
+export function runtimeProcessStateDirectory(rootDir: string, registryPath = serviceRegistryPath()): string {
+  return projectProcessStateDirectory(rootDir, runtimeNamespaceForRegistry(registryPath));
 }
 
-export function projectWorkerLeasePath(rootDir: string): string {
-  return path.join(rootDir, ".opencanon", "worker.lock");
+export function projectRuntimePath(rootDir: string, registryPath = serviceRegistryPath()): string {
+  return path.join(runtimeProcessStateDirectory(rootDir, registryPath), "runtime.json");
 }
 
-export function runtimeLogPath(rootDir: string): string {
-  return path.join(rootDir, ".opencanon", "runtime.log");
+export function projectWorkerLeasePath(rootDir: string, registryPath = serviceRegistryPath()): string {
+  return path.join(runtimeProcessStateDirectory(rootDir, registryPath), "worker.lock");
+}
+
+export function runtimeLogPath(rootDir: string, registryPath = serviceRegistryPath()): string {
+  return path.join(runtimeProcessStateDirectory(rootDir, registryPath), "runtime.log");
 }
 
 export function serviceLogPath(registryPath = serviceRegistryPath()): string {
@@ -133,7 +138,7 @@ export function upsertRuntimeEntry(entry: RuntimeRegistryEntry, registryPath = s
     const entries = readRuntimeRegistry(registryPath).filter((item) => item.rootDir !== entry.rootDir);
     writeRuntimeRegistry([...entries, entry], registryPath);
   });
-  writeProjectRuntimeEntry(entry);
+  writeProjectRuntimeEntry(entry, registryPath);
 }
 
 export function upsertServiceEntry(entry: ServiceRegistryEntry, registryPath = serviceRegistryPath()): void {
@@ -248,7 +253,7 @@ export function forgetRuntimeEntry(rootDir: string, registryPath = serviceRegist
   withRegistryLock(registryPath, () => {
     writeRuntimeRegistry(readRuntimeRegistry(registryPath).filter((entry) => entry.rootDir !== rootDir), registryPath);
   });
-  rmSync(projectRuntimePath(rootDir), { force: true });
+  rmSync(projectRuntimePath(rootDir, registryPath), { force: true });
 }
 
 export function forgetServiceEntry(registryPath = serviceRegistryPath()): void {
@@ -264,8 +269,8 @@ export function forgetRuntimeEntryIfPid(rootDir: string, pid: number, registryPa
     if (existing?.pid !== pid) return;
     writeRuntimeRegistry(entries.filter((entry) => entry.rootDir !== rootDir), registryPath);
   });
-  const projectEntry = readProjectRuntimeEntry(rootDir);
-  if (projectEntry?.pid === pid) rmSync(projectRuntimePath(rootDir), { force: true });
+  const projectEntry = readProjectRuntimeEntry(rootDir, registryPath);
+  if (projectEntry?.pid === pid) rmSync(projectRuntimePath(rootDir, registryPath), { force: true });
 }
 
 export function forgetServiceEntryIfPid(pid: number, registryPath = serviceRegistryPath()): void {
@@ -284,15 +289,15 @@ export function forgetServiceEntryForPid(pid: number, registryPath = serviceRegi
   forgetServiceEntryIfPid(pid, registryPath);
 }
 
-export function writeProjectRuntimeEntry(entry: RuntimeRegistryEntry): void {
-  const file = projectRuntimePath(entry.rootDir);
+export function writeProjectRuntimeEntry(entry: RuntimeRegistryEntry, registryPath = serviceRegistryPath()): void {
+  const file = projectRuntimePath(entry.rootDir, registryPath);
   ensurePrivateDirectory(path.dirname(file));
   writeAtomicJsonFileSync(file, entry);
   chmodSync(file, 0o600);
 }
 
-export function readProjectRuntimeEntry(rootDir: string): RuntimeRegistryEntry | undefined {
-  const file = projectRuntimePath(rootDir);
+export function readProjectRuntimeEntry(rootDir: string, registryPath = serviceRegistryPath()): RuntimeRegistryEntry | undefined {
+  const file = projectRuntimePath(rootDir, registryPath);
   if (!existsSync(file)) return undefined;
   let parsed: unknown;
   try {
@@ -303,13 +308,14 @@ export function readProjectRuntimeEntry(rootDir: string): RuntimeRegistryEntry |
   return isRegistryEntry(parsed) ? parsed : undefined;
 }
 
-export function readProjectWorkerLease(rootDir: string): ProjectWorkerLease | undefined {
-  return readProjectWorkerLeaseFile(projectWorkerLeasePath(rootDir));
+export function readProjectWorkerLease(rootDir: string, registryPath = serviceRegistryPath()): ProjectWorkerLease | undefined {
+  return readProjectWorkerLeaseFile(projectWorkerLeasePath(rootDir, registryPath));
 }
 
 export function acquireProjectWorkerLease(input: { rootDir: string; leaseId: string; registryPath?: string }): ProjectWorkerLeaseHandle {
   const rootDir = resolveRootDir(input.rootDir);
-  const lockPath = projectWorkerLeasePath(rootDir);
+  const registryPath = input.registryPath ?? serviceRegistryPath();
+  const lockPath = projectWorkerLeasePath(rootDir, registryPath);
   ensurePrivateDirectory(path.dirname(lockPath));
   while (true) {
     const now = new Date().toISOString();

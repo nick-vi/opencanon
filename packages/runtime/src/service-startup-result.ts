@@ -9,15 +9,16 @@ import {
   writeAtomicJsonFileSync,
   type OpenCanonProblem,
 } from "@opencanon/core";
+import { runtimeProcessStateDirectory, serviceRegistryPath } from "./service-storage.ts";
 
 const StartupResultDirectory = "startup";
 
-export function runtimeStartupResultPath(rootDir: string, leaseId: string): string {
-  return path.join(rootDir, ".opencanon", StartupResultDirectory, `${leaseId}.json`);
+export function runtimeStartupResultPath(rootDir: string, leaseId: string, registryPath = serviceRegistryPath()): string {
+  return path.join(runtimeProcessStateDirectory(rootDir, registryPath), StartupResultDirectory, `${leaseId}.json`);
 }
 
-export function clearRuntimeStartupResults(rootDir: string): void {
-  rmSync(path.join(rootDir, ".opencanon", StartupResultDirectory), { recursive: true, force: true });
+export function clearRuntimeStartupResults(rootDir: string, registryPath = serviceRegistryPath()): void {
+  rmSync(path.join(runtimeProcessStateDirectory(rootDir, registryPath), StartupResultDirectory), { recursive: true, force: true });
 }
 
 export function removeRuntimeStartupResult(resultPath: string): void {
@@ -31,7 +32,7 @@ export function writeRuntimeStartupFailure(rootDir: string, resultPath: string, 
   const stateDir = path.dirname(startupDir);
   if (path.basename(startupDir) !== StartupResultDirectory || !/^[A-Za-z0-9-]+\.json$/.test(path.basename(resolvedResultPath))) return false;
   try {
-    if (realpathSync(stateDir) !== realpathSync(path.join(rootDir, ".opencanon"))) return false;
+    if (realpathSync(stateDir) !== realpathSync(runtimeProcessStateDirectory(rootDir))) return false;
   } catch {
     return false;
   }
