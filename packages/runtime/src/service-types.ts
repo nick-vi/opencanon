@@ -1,4 +1,4 @@
-import type { RuntimeHealth, RuntimeState } from "@opencanon/core";
+import type { OpenCanonProblem, RuntimeHealth, RuntimeState } from "@opencanon/core";
 import type { ServiceActionDefinition, ServiceProjectStatus } from "@opencanon/service-contracts";
 import type { LocalTransportKind } from "./local-protocol.ts";
 import { HiddenServiceRegistryArg } from "./service-peer-discovery.ts";
@@ -42,7 +42,7 @@ export type ServiceRegistryEntry = {
 };
 
 // Single source of truth for runtime inspection statuses; reference members instead of inlining the strings.
-export const RuntimeStatus = { Busy: "busy", Running: "running", Starting: "starting", Unhealthy: "unhealthy", Stale: "stale" } as const;
+export const RuntimeStatus = { Busy: "busy", Failed: "failed", Running: "running", Starting: "starting", Unhealthy: "unhealthy", Stale: "stale" } as const;
 export type RuntimeStatus = (typeof RuntimeStatus)[keyof typeof RuntimeStatus];
 
 export type ServiceRecentProject = {
@@ -106,6 +106,7 @@ export type RuntimeInspection = {
   entry: RuntimeRegistryEntry;
   status: RuntimeStatus;
   message: string;
+  problem?: OpenCanonProblem;
   health?: RuntimeHealth;
   state?: RuntimeState;
 };
@@ -208,6 +209,7 @@ export type ProcessLifecycleState = {
   status: ProcessLifecycleStatus;
   updatedAt: string;
   message?: string;
+  problem?: OpenCanonProblem;
   restart: ProcessRestartState;
 };
 

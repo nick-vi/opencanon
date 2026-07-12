@@ -2,7 +2,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rm
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
-import { writeAtomicJsonFileSync, resolveRootDir } from "@opencanon/core";
+import { isOpenCanonProblem, writeAtomicJsonFileSync, resolveRootDir } from "@opencanon/core";
 import { LocalTransportKind } from "./local-protocol.ts";
 import { createProcessLeaseId } from "./service-identity.ts";
 import {
@@ -576,6 +576,7 @@ function isLifecycleState(value: unknown): value is ProcessLifecycleState {
     Object.values(ProcessLifecycleStatus).includes(record.status as ProcessLifecycleStatus) &&
     typeof record.updatedAt === "string" &&
     (record.message === undefined || typeof record.message === "string") &&
+    (record.problem === undefined || isOpenCanonProblem(record.problem)) &&
     isRestartState(record.restart)
   );
 }

@@ -61,7 +61,7 @@ export async function waitForProjectRuntimeReady(
     const inspection = await inspectProjectRuntime(rootDir, input.registryPath);
     if (inspection?.status === RuntimeStatus.Running) return inspection as ReadyRuntimeInspection;
     if (!inspection) throw new Error("Project runtime did not become ready: no project runtime is registered.");
-    if (inspection.status === RuntimeStatus.Stale || inspection.status === RuntimeStatus.Unhealthy) {
+    if (inspection.status === RuntimeStatus.Failed || inspection.status === RuntimeStatus.Stale || inspection.status === RuntimeStatus.Unhealthy) {
       throw new Error(`Project runtime did not become ready: ${inspection.status}: ${inspection.message}`);
     }
     lastMessage = inspection.message;
@@ -98,6 +98,14 @@ export async function inspectAllRuntimes(registryPath = serviceRegistryPath()): 
 
 export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryPath?: string | undefined): Promise<RuntimeInspection> {
   if (!isProcessRunning(entry.pid)) {
+    if (entry.lifecycle.status === ProcessLifecycleStatus.Failed) {
+      return {
+        entry,
+        status: RuntimeStatus.Failed,
+        message: entry.lifecycle.problem?.detail ?? entry.lifecycle.message ?? "Project runtime failed.",
+        ...(entry.lifecycle.problem ? { problem: entry.lifecycle.problem } : {}),
+      };
+    }
     return { entry, status: RuntimeStatus.Stale, message: "Registered process is not running." };
   }
   if (!projectRuntimeIdentityMatches(entry)) {

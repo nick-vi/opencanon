@@ -1,4 +1,5 @@
 import { createLifecycle, restartDue, runtimeFailureLifecycle } from "./service-lifecycle.ts";
+import { parseOpenCanonProblemFromError } from "@opencanon/core";
 import { inspectAllRuntimes, runtimeBusyStillWithinBudget, runtimeStartupStillWithinGrace } from "./service-monitor.ts";
 import { repairRegisteredServiceProcessArtifacts, retireConflictingProjectWorkerLease } from "./service-process.ts";
 import { startProjectRuntime } from "./service-start.ts";
@@ -51,6 +52,11 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
 
     if (inspection.status === RuntimeStatus.Busy || withinBusyBudget) {
       result.busy += 1;
+      continue;
+    }
+
+    if (inspection.status === RuntimeStatus.Failed) {
+      result.failed += 1;
       continue;
     }
 
@@ -124,7 +130,7 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
       else result.running += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const lifecycle = runtimeFailureLifecycle(failedEntry, message, nowMs + 1);
+      const lifecycle = runtimeFailureLifecycle(failedEntry, message, nowMs + 1, parseOpenCanonProblemFromError(error));
       updateRuntimeLifecycle(failedEntry, lifecycle, registryPath);
       if (lifecycle.status === ProcessLifecycleStatus.Failed) result.failed += 1;
       else result.backingOff += 1;

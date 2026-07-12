@@ -155,10 +155,11 @@ function projectStatusRank(status: ServiceProjectStatus): number {
   if (status === ServiceProjectStatusValue.Busy) return 1;
   if (status === ServiceProjectStatusValue.Running) return 2;
   if (status === ServiceProjectStatusValue.Starting) return 3;
-  if (status === ServiceProjectStatusValue.Discovered) return 4;
-  if (status === ServiceProjectStatusValue.Recent) return 5;
-  if (status === ServiceProjectStatusValue.Unhealthy) return 6;
-  return 6;
+  if (status === ServiceProjectStatusValue.Failed) return 4;
+  if (status === ServiceProjectStatusValue.Discovered) return 5;
+  if (status === ServiceProjectStatusValue.Recent) return 6;
+  if (status === ServiceProjectStatusValue.Unhealthy) return 7;
+  return 8;
 }
 
 function serviceActivityItemFromLifecycleEvent(event: ProcessLifecycleEvent): ServiceActivityItem {

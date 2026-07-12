@@ -117,7 +117,7 @@ export async function startProjectRuntime(input: {
         message: `OpenCanon project runtime already registered for ${rootDir}.`,
       };
     }
-    if (existing?.status === RuntimeStatus.Stale) forgetRuntimeEntry(rootDir, registryPath);
+    if (existing?.status === RuntimeStatus.Failed || existing?.status === RuntimeStatus.Stale) forgetRuntimeEntry(rootDir, registryPath);
     await retireConflictingProjectWorkerLease(rootDir, registryPath);
     clearRuntimeStartupResults(rootDir);
 

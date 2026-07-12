@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
+import { createOpenCanonProblem, OpenCanonProblemCode, OpenCanonProblemSource } from "@opencanon/core";
 import {
   buildServiceOverview,
   chooseRuntimePort,
@@ -46,6 +47,7 @@ import {
   waitForSpawnedPid,
   waitUntilProcessStops,
 } from "./service-support.ts";
+import { runtimeFailureLifecycle } from "../src/service-lifecycle.ts";
 
 test("reconciler restarts a stale registered project runtime and records lifecycle events", { timeout: 20000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-stale-"));
@@ -277,6 +279,58 @@ test("reconciler preserves active restart backoff without incrementing attempts"
     assert.equal(result.restarted, 0);
     assert.equal(registered?.lifecycle.restart.attempts, 2);
     assert.equal(registered?.lifecycle.restart.nextRestartAt, "2026-05-01T00:01:00.000Z");
+  } finally {
+    forgetRuntimeEntry(rootDir, registryPath);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("reconciler preserves terminal non-retryable project failures", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-terminal-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const baseEntry = {
+    rootDir,
+    host: "127.0.0.1",
+    port: 4767,
+    url: "http://127.0.0.1:4767",
+    pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
+    pid: 9_999_996,
+    startedAt: "2026-05-01T00:00:00.000Z",
+    logPath: path.join(rootDir, ".opencanon", "runtime.log"),
+    authToken: "test-token",
+    leaseId: "terminal-runtime-lease",
+    lifecycle: testLifecycle(),
+    ...testRuntimeIdentity,
+  };
+  const problem = createOpenCanonProblem({
+    code: OpenCanonProblemCode.ProjectDefinitionMissing,
+    title: "Required Project Canon definition is missing",
+    detail: "A required Project Canon entrypoint is missing.",
+    source: OpenCanonProblemSource.Project,
+    path: "opencanon/conventions/index.ts",
+    action: "Run opencanon init --yes.",
+    retryable: false,
+    status: 422,
+  });
+
+  try {
+    const lifecycle = runtimeFailureLifecycle(baseEntry, problem.detail, Date.parse("2026-05-01T00:00:01.000Z"), problem);
+    upsertRuntimeEntry({ ...baseEntry, lifecycle }, registryPath);
+
+    assert.equal(lifecycle.status, ProcessLifecycleStatus.Failed);
+    assert.equal(lifecycle.problem, problem);
+    assert.equal(lifecycle.restart.nextRestartAt, undefined);
+    assert.equal((await inspectRuntimeEntry(readRuntimeRegistry(registryPath)[0]!)).status, "failed");
+
+    const eventsBefore = readRuntimeLifecycleEvents(registryPath).length;
+    const first = await reconcileProjectRuntimes({ registryPath, nowMs: Date.parse("2026-05-01T00:00:02.000Z") });
+    const second = await reconcileProjectRuntimes({ registryPath, nowMs: Date.parse("2026-05-01T00:00:03.000Z") });
+
+    assert.equal(first.failed, 1);
+    assert.equal(second.failed, 1);
+    assert.equal(first.restarted, 0);
+    assert.equal(second.restarted, 0);
+    assert.equal(readRuntimeLifecycleEvents(registryPath).length, eventsBefore);
   } finally {
     forgetRuntimeEntry(rootDir, registryPath);
     rmSync(rootDir, { recursive: true, force: true });

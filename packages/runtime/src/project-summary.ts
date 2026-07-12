@@ -1,13 +1,13 @@
 import path from "node:path";
 import type { RuntimeSnapshot } from "./snapshot.ts";
-import { RuntimeStatus, inspectAllRuntimes, inspectProjectRuntime, type RuntimeRegistryEntry } from "./service.ts";
+import { RuntimeStatus, inspectAllRuntimes, inspectProjectRuntime, type RuntimeRegistryEntry, type RuntimeStatus as RuntimeStatusType } from "./service.ts";
 import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
 
 export type ProjectSummary = {
   id: string;
   rootDir: string;
   url: string;
-  status: "busy" | "running" | "starting" | "unhealthy" | "stale" | "current";
+  status: RuntimeStatusType | "current";
   pid?: number;
   port?: number;
   files?: number;

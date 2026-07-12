@@ -69,7 +69,7 @@ export function createRuntimeUpdateSafetyGuard(): UpdateSafetyGuard {
 async function assertNoRunningRuntimeProcesses(): Promise<void> {
   const service = await inspectService();
   const runtimes = await inspectAllRuntimes();
-  const blockingRuntimes = runtimes.filter((inspection) => inspection.status !== RuntimeStatus.Stale);
+  const blockingRuntimes = runtimes.filter((inspection) => inspection.status !== RuntimeStatus.Failed && inspection.status !== RuntimeStatus.Stale);
   const details: string[] = [];
 
   if (service && service.status !== RuntimeStatus.Stale) {

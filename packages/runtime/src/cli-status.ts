@@ -151,6 +151,7 @@ export function runtimeInspectionJson(inspection: RuntimeInspection | undefined,
     entry: runtimeEntryJson(inspection.entry),
     status: inspection.status,
     message: inspection.message,
+    problem: inspection.problem,
     health: inspection.health,
     state: inspection.state,
     actions: runtimeStatusActions(inspection),
@@ -215,6 +216,9 @@ export function serviceEntryJson(entry: ServiceRegistryEntry): Omit<ServiceRegis
 }
 
 function runtimeStatusActions(inspection: RuntimeInspection): string[] {
+  if (inspection.status === RuntimeStatus.Failed) {
+    return inspection.problem?.action ? [inspection.problem.action] : ["Fix the project startup failure, then run opencanon project start."];
+  }
   if (inspection.status === RuntimeStatus.Busy) return ["Wait for current project work to finish, then rerun opencanon project status."];
   if (inspection.status === RuntimeStatus.Starting) return ["Wait for runtime readiness, then rerun opencanon project status."];
   if (inspection.status === RuntimeStatus.Stale) return ["Run opencanon project start to recreate project runtime state."];

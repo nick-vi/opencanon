@@ -5,6 +5,7 @@ export const ServiceProjectStatusValue = {
   Busy: "busy",
   Current: "current",
   Discovered: "discovered",
+  Failed: "failed",
   Recent: "recent",
   Running: "running",
   Starting: "starting",
