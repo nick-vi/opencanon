@@ -116,6 +116,11 @@ test("engine JSON binding is wrapped in typed contracts", () => {
       },
       readJobJson: () => JSON.stringify({ job }),
       listJobsJson: () => JSON.stringify(job ? [job] : []),
+      admitJobsJson: (requestJson: string) => {
+        const request = JSON.parse(requestJson) as { jobs: unknown[]; capacity: number };
+        return JSON.stringify({ accepted: true, activeCount: request.jobs.length, requestedCount: request.jobs.length, capacity: request.capacity });
+      },
+      pruneJobsJson: () => JSON.stringify({ deletedRuns: 0, deletedEvents: 0, retainedTerminalRuns: job ? 1 : 0 }),
       appendJobEventJson: (requestJson: string) => {
         jobEvents.push((JSON.parse(requestJson) as { event: unknown }).event);
       },
@@ -171,7 +176,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   } as const;
   project.writeJob(run);
   assert.equal(project.readJob(run.id)?.status, "queued");
-  assert.equal(project.listJobs({ type: "change-check" }).length, 1);
+  assert.equal(project.listJobs({ mode: "recent", limit: 50 }).length, 1);
   project.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 1, timestamp: "2026-07-12T00:00:01.000Z", type: "started" });
   assert.equal(project.listJobEvents({ jobId: run.id })[0]?.sequence, 1);
   project.writeObservabilityRecords({

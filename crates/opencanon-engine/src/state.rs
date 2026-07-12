@@ -56,6 +56,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "canon_event_links",
         sql: include_str!("migrations/009_canon_event_links.sql"),
     },
+    Migration {
+        version: 10,
+        name: "job_retention",
+        sql: include_str!("migrations/010_job_retention.sql"),
+    },
 ];
 
 pub(crate) fn schema_version() -> u32 {

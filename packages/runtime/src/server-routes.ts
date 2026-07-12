@@ -343,7 +343,24 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const parsed = parseRunChangeCheckRequest(await readJsonBody(request), project.changes);
         if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
         const started = changeCheckRunner.start({ project, change: parsed.change, task: parsed.task, checks: parsed.checks, actor: parsed.actor });
-        return json({ ok: true, data: started }, 202);
+        if (!started.ok) {
+          const { activeCount, requestedCount, capacity } = started.admission;
+          return json(
+            diagnosticsFailure(
+              [
+                createOpenCanonDiagnostic({
+                  code: diagnosticCodes.operationCapacityExceeded,
+                  message: "Project operation capacity is full; no runs from this request were admitted.",
+                  details: [`Active runs: ${activeCount}.`, `Requested runs: ${requestedCount}.`, `Capacity: ${capacity}.`],
+                  action: "Wait for an active run to finish or cancel one, then retry the whole request.",
+                }),
+              ],
+              diagnosticCodes.operationCapacityExceeded,
+            ),
+            429,
+          );
+        }
+        return json({ ok: true, data: { batchId: started.batchId, runs: started.runs } }, 202);
       }
       if (url.pathname === ApiRoute.ChangeCheckRunsCancel) {
         const body = await readJsonBody(request);

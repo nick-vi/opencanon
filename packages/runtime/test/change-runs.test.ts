@@ -6,8 +6,65 @@ import { test } from "vitest";
 import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, createPaths, type ChangeCheckRunEvent } from "@opencanon/core";
 import { openProjectStore, runtimeAuthHeaders, startOpenCanonRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
+import { ChangeCheckRunPolicy } from "../src/change-check-runner.ts";
 
 const IntegrationTimeoutMs = 60_000;
+
+test("Change check admission rejects an oversized batch without persisting a partial run", { timeout: IntegrationTimeoutMs }, async () => {
+  const rootDir = createCapacityProject(ChangeCheckRunPolicy.activeCapacity + 1);
+  const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+  try {
+    const response = await fetch(`${server.url}/api/changes/check-runs`, {
+      method: "POST",
+      headers: { ...runtimeAuthHeaders(server.authToken), "content-type": "application/json" },
+      body: JSON.stringify({ changeId: "capacity-change", all: true, actor: "test" }),
+    });
+    const payload = JSON.parse(await response.text()) as { error?: { diagnostics?: Array<{ code: string }> } };
+    assert.equal(response.status, 429);
+    assert.equal(payload.error?.diagnostics?.[0]?.code, "operation-capacity-exceeded");
+
+    const store = openProjectStore({ rootDir, paths: createPaths(rootDir) });
+    try {
+      assert.deepEqual(store.listJobs({ mode: "recent", limit: 50 }), []);
+    } finally {
+      store.close();
+    }
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime startup applies terminal run age and count retention", { timeout: IntegrationTimeoutMs }, async () => {
+  const rootDir = createChangeRunProject("retention", `${quotedNode()} -e ${shellQuote("process.exit(0)")}`);
+  const paths = createPaths(rootDir);
+  const seededStore = openProjectStore({ rootDir, paths });
+  try {
+    seededStore.writeJob(terminalRun("expired", new Date(Date.now() - ChangeCheckRunPolicy.terminalRetentionAgeMs - 60_000).toISOString()));
+    for (let index = 0; index <= ChangeCheckRunPolicy.terminalRetentionCount; index += 1) {
+      seededStore.writeJob(terminalRun(`recent-${String(index).padStart(3, "0")}`, new Date(Date.now() - index * 1_000).toISOString()));
+    }
+  } finally {
+    seededStore.close();
+  }
+
+  const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+  try {
+    const store = openProjectStore({ rootDir, paths });
+    try {
+      const retained = store.listJobs({ mode: "recent", limit: 500 });
+      assert.equal(retained.length, ChangeCheckRunPolicy.terminalRetentionCount);
+      assert.equal(store.readJob("expired"), null);
+      assert.equal(store.readJob(`recent-${String(ChangeCheckRunPolicy.terminalRetentionCount).padStart(3, "0")}`), null);
+      assert(store.readJob("recent-000"));
+    } finally {
+      store.close();
+    }
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
 
 test("Change check runs stream output, persist terminal state, and replay from a cursor", { timeout: IntegrationTimeoutMs }, async () => {
   const rootDir = createChangeRunProject("replay", `${quotedNode()} -e ${shellQuote("console.log(process.env.OPENCANON_SERVICE_REGISTRY_PATH); console.log('first'); setTimeout(() => console.log('second'), 100)")}`);
@@ -147,6 +204,56 @@ function createChangeRunProject(name: string, command: string): string {
     ].join("\n"),
   );
   return rootDir;
+}
+
+function createCapacityProject(checkCount: number): string {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-change-run-capacity-"));
+  createAuthoringProject(rootDir);
+  mkdirSync(path.join(rootDir, "src"), { recursive: true });
+  mkdirSync(path.join(rootDir, "opencanon/changes"), { recursive: true });
+  writeFileSync(path.join(rootDir, "src/example.ts"), "export const example = true;\n");
+  const checks = Array.from({ length: checkCount }, (_, index) => ({
+    id: `check-${index + 1}`,
+    kind: "command",
+    command: `${quotedNode()} -e ${shellQuote("process.exit(0)")}`,
+  }));
+  writeFileSync(
+    path.join(rootDir, "opencanon/changes/index.ts"),
+    [
+      'import { defineChange } from "@opencanon/core";',
+      "",
+      "export default defineChange({",
+      '  id: "capacity-change",',
+      '  title: "Capacity change",',
+      '  kind: "feature",',
+      '  intent: { problem: "Operation pressure", outcome: "Admission remains bounded" },',
+      `  checks: ${JSON.stringify(checks)},`,
+      '  render: { kind: "none" },',
+      "});",
+      "",
+    ].join("\n"),
+  );
+  return rootDir;
+}
+
+function terminalRun(id: string, timestamp: string) {
+  return ChangeCheckRunSchema.parse({
+    id,
+    batchId: "retention-batch",
+    kind: "change-check",
+    status: ChangeCheckRunStatus.Passed,
+    changeId: "retention-change",
+    checkId: "stream",
+    checkKind: "command",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    summary: "Passed.",
+    outputTail: "",
+    outputBytes: 0,
+    outputTruncated: false,
+  });
 }
 
 async function startRun(url: string, headers: Record<string, string>, changeId: string, checkId: string) {

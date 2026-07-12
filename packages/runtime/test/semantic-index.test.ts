@@ -11,6 +11,15 @@ import { createEngine } from "@opencanon/engine";
 import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
 
+function admittedJobs(requestJson: string): string {
+  const request = JSON.parse(requestJson) as { jobs: unknown[]; capacity: number };
+  return JSON.stringify({ accepted: true, activeCount: request.jobs.length, requestedCount: request.jobs.length, capacity: request.capacity });
+}
+
+function emptyPruneResult(): string {
+  return JSON.stringify({ deletedRuns: 0, deletedEvents: 0, retainedTerminalRuns: 0 });
+}
+
 test("runtime source snapshots feed captured bytes into fact extraction", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-"));
   try {
@@ -290,6 +299,8 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
+        admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
+        pruneJobsJson: () => emptyPruneResult(),
         appendJobEventJson: () => undefined,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
@@ -753,6 +764,8 @@ test("runtime snapshot reports missing semantic index with project embedding con
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
+        admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
+        pruneJobsJson: () => emptyPruneResult(),
         appendJobEventJson: () => undefined,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
@@ -1035,6 +1048,8 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
+        admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
+        pruneJobsJson: () => emptyPruneResult(),
         appendJobEventJson: () => undefined,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
@@ -1188,6 +1203,8 @@ test("runtime snapshot marks cached semantic index stale after provider config c
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
+        admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
+        pruneJobsJson: () => emptyPruneResult(),
         appendJobEventJson: () => undefined,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
@@ -1446,6 +1463,8 @@ test("KnowledgeIndexManager writes a full index, progress, and query prewarm", a
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
+        admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
+        pruneJobsJson: () => emptyPruneResult(),
         appendJobEventJson: () => undefined,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
@@ -1581,6 +1600,8 @@ for (const scenario of [
           writeJobJson: () => undefined,
           readJobJson: () => JSON.stringify({ job: null }),
           listJobsJson: () => JSON.stringify([]),
+          admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
+          pruneJobsJson: () => emptyPruneResult(),
           appendJobEventJson: () => undefined,
           listJobEventsJson: () => JSON.stringify([]),
           writeObservabilityRecordsJson: () => undefined,

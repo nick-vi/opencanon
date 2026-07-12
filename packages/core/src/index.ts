@@ -37,12 +37,22 @@ export {
 export type { OpenCanonAgentEntryFile as OpenCanonAgentEntryFileType } from "./agent-entry.ts";
 export {
   ChangeCheckRunEventSchema,
+  ChangeCheckRunAdmissionResultSchema,
+  ChangeCheckRunPruneResultSchema,
   ChangeCheckRunEventType,
   ChangeCheckRunSchema,
   ChangeCheckRunStatus,
   StartChangeCheckRunsResponseSchema,
 } from "./contracts-change-runs.ts";
-export type { ChangeCheckRun, ChangeCheckRunEvent, StartChangeCheckRunsResponse } from "./contracts-change-runs.ts";
+export type {
+  ChangeCheckRun,
+  ChangeCheckRunAdmissionResult,
+  ChangeCheckRunEvent,
+  ChangeCheckRunPruneRequest,
+  ChangeCheckRunPruneResult,
+  ChangeCheckRunQuery,
+  StartChangeCheckRunsResponse,
+} from "./contracts-change-runs.ts";
 export { CommitApprovalsIgnoreEntries, GeneratedStateIgnoreEntries, GeneratedStateIgnoreProbePaths, InitStateFilePath } from "./generated-state.ts";
 export type { CommitApprovalContext, CommitApprovalRecord, CommitApprovalsFile, CommitGateApprovalChoice, ResolvedCommitGate, PendingCommitGate, PendingCommitGatesFile } from "./commit-approvals.ts";
 export {

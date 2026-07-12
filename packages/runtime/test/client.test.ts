@@ -14,6 +14,15 @@ const HeavyRouteIntegrationTestTimeoutMs = 120_000;
 const HeavyRouteSubprocessTimeoutMs = 90_000;
 const RuntimeWatcherPropagationTimeoutMs = 30_000;
 
+function admittedJobs(requestJson: string): string {
+  const request = JSON.parse(requestJson) as { jobs: unknown[]; capacity: number };
+  return JSON.stringify({ accepted: true, activeCount: request.jobs.length, requestedCount: request.jobs.length, capacity: request.capacity });
+}
+
+function emptyPruneResult(): string {
+  return JSON.stringify({ deletedRuns: 0, deletedEvents: 0, retainedTerminalRuns: 0 });
+}
+
 type KnowledgeStatusForTest = {
   status?: string;
   embeddingStats?: {
@@ -339,6 +348,8 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
+        admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
+        pruneJobsJson: () => emptyPruneResult(),
         appendJobEventJson: () => undefined,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,

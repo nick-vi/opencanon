@@ -54,8 +54,23 @@ pub(crate) struct ReadJobRequest {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ListJobsRequest {
-    pub(crate) r#type: Option<String>,
+    pub(crate) mode: String,
     pub(crate) limit: Option<u32>,
+    pub(crate) status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AdmitJobsRequest {
+    pub(crate) jobs: Vec<serde_json::Value>,
+    pub(crate) events: Vec<serde_json::Value>,
+    pub(crate) capacity: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PruneJobsRequest {
+    pub(crate) terminal_before: String,
+    pub(crate) max_terminal_count: u32,
 }
 
 #[derive(Debug, Deserialize)]

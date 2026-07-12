@@ -5,7 +5,11 @@ import {
   type CanonEvent,
   type CanonFinding,
   type ChangeCheckRun,
+  type ChangeCheckRunAdmissionResult,
   type ChangeCheckRunEvent,
+  type ChangeCheckRunPruneRequest,
+  type ChangeCheckRunPruneResult,
+  type ChangeCheckRunQuery,
   type CanonEventQuery,
   type ContextPaths,
   type RuntimeHealth,
@@ -41,7 +45,9 @@ export type ProjectStore = {
   listEvents(query: CanonEventQuery): CanonEvent[];
   writeJob(job: ChangeCheckRun): void;
   readJob(jobId: string): ChangeCheckRun | null;
-  listJobs(request?: { type?: string; limit?: number }): ChangeCheckRun[];
+  listJobs(query: ChangeCheckRunQuery): ChangeCheckRun[];
+  admitJobs(input: { runs: ChangeCheckRun[]; events: ChangeCheckRunEvent[]; capacity: number }): ChangeCheckRunAdmissionResult;
+  pruneJobs(request: ChangeCheckRunPruneRequest): ChangeCheckRunPruneResult;
   appendJobEvent(event: ChangeCheckRunEvent): void;
   listJobEvents(request: { jobId: string; afterSequence?: number; limit?: number }): ChangeCheckRunEvent[];
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
@@ -155,8 +161,14 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
     readJob(jobId) {
       return project.readJob(jobId);
     },
-    listJobs(request) {
-      return project.listJobs(request);
+    listJobs(query) {
+      return project.listJobs(query);
+    },
+    admitJobs(input) {
+      return project.admitJobs(input);
+    },
+    pruneJobs(request) {
+      return project.pruneJobs(request);
     },
     appendJobEvent(event) {
       project.appendJobEvent(event);

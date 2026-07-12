@@ -517,6 +517,16 @@ impl EngineProjectHandle {
         job_store::list_jobs_json(self, request)
     }
 
+    #[napi(js_name = "admitJobsJson")]
+    pub fn admit_jobs_json(&self, request: String) -> napi::Result<String> {
+        job_store::admit_jobs_json(self, request)
+    }
+
+    #[napi(js_name = "pruneJobsJson")]
+    pub fn prune_jobs_json(&self, request: String) -> napi::Result<String> {
+        job_store::prune_jobs_json(self, request)
+    }
+
     #[napi(js_name = "appendJobEventJson")]
     pub fn append_job_event_json(&self, request: String) -> napi::Result<()> {
         job_store::append_job_event_json(self, request)

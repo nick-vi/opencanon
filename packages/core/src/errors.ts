@@ -17,6 +17,7 @@ export const openCanonErrorCodeValues = [
   "hook-runtime-unavailable",
   "invalid-runtime-response",
   "lifecycle-conflict",
+  "operation-capacity-exceeded",
   "project-inventory-failed",
   "invalid-engine-payload",
   "inference-error",

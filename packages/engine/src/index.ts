@@ -7,6 +7,8 @@ import {
   BuildRepoGraphResultSchema,
   CanonEventSchema,
   ChangeCheckRunEventSchema,
+  ChangeCheckRunAdmissionResultSchema,
+  ChangeCheckRunPruneResultSchema,
   ChangeCheckRunSchema,
   ExtractFactsRequestSchema,
   ExtractFactsResultSchema,
@@ -48,7 +50,11 @@ import {
   type CanonEvent,
   type CanonEventQuery,
   type ChangeCheckRun,
+  type ChangeCheckRunAdmissionResult,
   type ChangeCheckRunEvent,
+  type ChangeCheckRunPruneRequest,
+  type ChangeCheckRunPruneResult,
+  type ChangeCheckRunQuery,
   type EmbedSemanticTextsRequest,
   type EmbedSemanticTextsResult,
   type GenerateTextRequest,
@@ -122,7 +128,9 @@ export type EngineProject = {
   listEvents(query: CanonEventQuery): CanonEvent[];
   writeJob(job: ChangeCheckRun): void;
   readJob(jobId: string): ChangeCheckRun | null;
-  listJobs(request?: { type?: string; limit?: number }): ChangeCheckRun[];
+  listJobs(query: ChangeCheckRunQuery): ChangeCheckRun[];
+  admitJobs(input: { runs: ChangeCheckRun[]; events: ChangeCheckRunEvent[]; capacity: number }): ChangeCheckRunAdmissionResult;
+  pruneJobs(request: ChangeCheckRunPruneRequest): ChangeCheckRunPruneResult;
   appendJobEvent(event: ChangeCheckRunEvent): void;
   listJobEvents(request: { jobId: string; afterSequence?: number; limit?: number }): ChangeCheckRunEvent[];
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
@@ -178,6 +186,8 @@ type EngineProjectJsonBinding = {
   writeJobJson(request: string): void;
   readJobJson(request: string): string;
   listJobsJson(request: string): string;
+  admitJobsJson(request: string): string;
+  pruneJobsJson(request: string): string;
   appendJobEventJson(request: string): void;
   listJobEventsJson(request: string): string;
   writeObservabilityRecordsJson(request: string): void;
@@ -331,7 +341,25 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
       const value = parseJson(callEngine(() => project.readJobJson(JSON.stringify({ jobId })))) as { job?: unknown };
       return value.job ? ChangeCheckRunSchema.parse(value.job) : null;
     },
-    listJobs: (request = {}) => (parseJson(callEngine(() => project.listJobsJson(JSON.stringify(request)))) as unknown[]).map((job) => ChangeCheckRunSchema.parse(job)),
+    listJobs: (query) => (parseJson(callEngine(() => project.listJobsJson(JSON.stringify(query)))) as unknown[]).map((job) => ChangeCheckRunSchema.parse(job)),
+    admitJobs: ({ runs, events, capacity }) =>
+      ChangeCheckRunAdmissionResultSchema.parse(
+        parseJson(
+          callEngine(() =>
+            project.admitJobsJson(
+              JSON.stringify({
+                jobs: runs.map((run) => ChangeCheckRunSchema.parse(run)),
+                events: events.map((event) => ChangeCheckRunEventSchema.parse(event)),
+                capacity,
+              }),
+            ),
+          ),
+        ),
+      ),
+    pruneJobs: (request) =>
+      ChangeCheckRunPruneResultSchema.parse(
+        parseJson(callEngine(() => project.pruneJobsJson(JSON.stringify(request)))),
+      ),
     appendJobEvent: (event) => callEngine(() => project.appendJobEventJson(JSON.stringify({ event: ChangeCheckRunEventSchema.parse(event) }))),
     listJobEvents: (request) => (parseJson(callEngine(() => project.listJobEventsJson(JSON.stringify(request)))) as unknown[]).map((event) => ChangeCheckRunEventSchema.parse(event)),
     writeObservabilityRecords: (records) => callEngine(() => project.writeObservabilityRecordsJson(JSON.stringify(records))),
@@ -382,6 +410,8 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "writeJobJson",
     "readJobJson",
     "listJobsJson",
+    "admitJobsJson",
+    "pruneJobsJson",
     "appendJobEventJson",
     "listJobEventsJson",
     "writeObservabilityRecordsJson",

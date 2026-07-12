@@ -278,7 +278,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       events.broadcast(streamErrorEvent(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error))));
     },
   });
-  const changeCheckRunner = createChangeCheckRunner({
+  const changeCheckRunner = await createChangeCheckRunner({
     rootDir,
     tracer,
     events,

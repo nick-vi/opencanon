@@ -10,6 +10,7 @@ import {
   type ChangeCheck,
   type ChangeCheckRun,
   type ChangeCheckRunEvent,
+  type ChangeCheckRunPruneResult,
   type ValidationResultCache,
 } from "@opencanon/core";
 import type { SimpleTracer } from "@opencanon/observability";
@@ -32,6 +33,15 @@ const OutputTailLimitBytes = 64 * 1024;
 const OutputFlushBytes = 8 * 1024;
 const OutputFlushIntervalMs = 100;
 const ReplayEventLimit = 2_000;
+const ActiveRunCapacity = 32;
+const TerminalRunRetentionCount = 256;
+const TerminalRunRetentionAgeMs = 30 * 24 * 60 * 60 * 1000;
+
+export const ChangeCheckRunPolicy = Object.freeze({
+  activeCapacity: ActiveRunCapacity,
+  terminalRetentionCount: TerminalRunRetentionCount,
+  terminalRetentionAgeMs: TerminalRunRetentionAgeMs,
+});
 
 type LoadedProject = Awaited<ReturnType<typeof loadProjectContext>>;
 type ChangeTask = NonNullable<Change["tasks"]>[number];
@@ -44,9 +54,9 @@ type QueuedCheck = {
   runId: string;
 };
 
-export type ChangeCheckRunner = ReturnType<typeof createChangeCheckRunner>;
+export type ChangeCheckRunner = Awaited<ReturnType<typeof createChangeCheckRunner>>;
 
-export function createChangeCheckRunner(input: {
+export async function createChangeCheckRunner(input: {
   rootDir: string;
   tracer: SimpleTracer;
   events: EventBroadcaster;
@@ -60,7 +70,8 @@ export function createChangeCheckRunner(input: {
   let drainPromise: Promise<void> | undefined;
   let stopping = false;
 
-  reconcileInterruptedRuns();
+  const interruptedRuns = reconcileInterruptedRuns();
+  await recordRetention("startup", interruptedRuns);
 
   return {
     start(request: { project: LoadedProject; change: Change; task?: ChangeTask; checks: ChangeCheck[]; actor?: string }) {
@@ -84,13 +95,20 @@ export function createChangeCheckRunner(input: {
           outputBytes: 0,
           outputTruncated: false,
         });
-        input.store().writeJob(run);
-        appendEvent(run, ChangeCheckRunEventType.Queued);
-        queue.push({ project: request.project, change: request.change, task: request.task, check, runId: run.id });
         return run;
       });
+      const queuedEvents = runs.map((run) => createOperationEvent(run, ChangeCheckRunEventType.Queued, 1));
+      const admission = input.store().admitJobs({ runs, events: queuedEvents, capacity: ActiveRunCapacity });
+      if (!admission.accepted) return { ok: false as const, admission };
+      for (let index = 0; index < runs.length; index += 1) {
+        const run = runs[index]!;
+        const event = queuedEvents[index]!;
+        sequences.set(run.id, event.sequence);
+        input.events.broadcast(operationEvent(event));
+        queue.push({ project: request.project, change: request.change, task: request.task, check: request.checks[index]!, runId: run.id });
+      }
       scheduleDrain();
-      return { batchId, runs };
+      return { ok: true as const, batchId, runs };
     },
     get(runId: string): ChangeCheckRun | null {
       return input.store().readJob(runId);
@@ -115,7 +133,9 @@ export function createChangeCheckRunner(input: {
     const queuedIndex = queue.findIndex((item) => item.runId === runId);
     if (queuedIndex >= 0) {
       queue.splice(queuedIndex, 1);
-      return finishCancelled(run);
+      const cancelled = finishCancelled(run);
+      await recordRetention("queued-cancellation", 0);
+      return cancelled;
     }
     controllers.get(runId)?.abort();
     return input.store().readJob(runId);
@@ -243,6 +263,7 @@ export function createChangeCheckRunner(input: {
       if (outputFlushTimer) clearTimeout(outputFlushTimer);
       controllers.delete(run.id);
     }
+    await recordRetention("terminal-run", 0);
   }
 
   function appendOutput(run: ChangeCheckRun, stream: ChangeCheckOutputStream, text: string): ChangeCheckRun {
@@ -266,15 +287,7 @@ export function createChangeCheckRunner(input: {
   function appendEvent(run: ChangeCheckRun, type: ChangeCheckRunEvent["type"], text?: string): ChangeCheckRunEvent {
     const knownSequence = sequences.get(run.id) ?? latestPersistedSequence(run.id);
     const sequence = knownSequence + 1;
-    const event = ChangeCheckRunEventSchema.parse({
-      runId: run.id,
-      batchId: run.batchId,
-      sequence,
-      timestamp: new Date().toISOString(),
-      type,
-      ...(text ? { text } : {}),
-      ...(type === ChangeCheckRunEventType.Passed || type === ChangeCheckRunEventType.Failed || type === ChangeCheckRunEventType.Cancelled ? { run } : {}),
-    });
+    const event = createOperationEvent(run, type, sequence, text);
     input.store().appendJobEvent(event);
     sequences.set(run.id, sequence);
     input.events.broadcast(operationEvent(event));
@@ -316,9 +329,9 @@ export function createChangeCheckRunner(input: {
     return cancelled;
   }
 
-  function reconcileInterruptedRuns(): void {
-    for (const run of input.store().listJobs({ type: "change-check", limit: 500 })) {
-      if (isTerminal(run)) continue;
+  function reconcileInterruptedRuns(): number {
+    const activeRuns = input.store().listJobs({ mode: "active" });
+    for (const run of activeRuns) {
       const finishedAt = new Date().toISOString();
       const failed = ChangeCheckRunSchema.parse({
         ...run,
@@ -332,7 +345,40 @@ export function createChangeCheckRunner(input: {
       input.store().writeJob(failed);
       appendEvent(failed, ChangeCheckRunEventType.Failed);
     }
+    return activeRuns.length;
   }
+
+  async function recordRetention(trigger: string, interruptedRuns: number): Promise<ChangeCheckRunPruneResult> {
+    return input.tracer.span(
+      "change.check.retention",
+      { kind: SpanKind.INTERNAL, attributes: { trigger, interruptedRuns } },
+      async (span) => {
+        const result = input.store().pruneJobs({
+          terminalBefore: new Date(Date.now() - TerminalRunRetentionAgeMs).toISOString(),
+          maxTerminalCount: TerminalRunRetentionCount,
+        });
+        span.setOutput(result);
+        return result;
+      },
+    );
+  }
+}
+
+function createOperationEvent(
+  run: ChangeCheckRun,
+  type: ChangeCheckRunEvent["type"],
+  sequence: number,
+  text?: string,
+): ChangeCheckRunEvent {
+  return ChangeCheckRunEventSchema.parse({
+    runId: run.id,
+    batchId: run.batchId,
+    sequence,
+    timestamp: new Date().toISOString(),
+    type,
+    ...(text ? { text } : {}),
+    ...(type === ChangeCheckRunEventType.Passed || type === ChangeCheckRunEventType.Failed || type === ChangeCheckRunEventType.Cancelled ? { run } : {}),
+  });
 }
 
 function terminalEventType(run: ChangeCheckRun): ChangeCheckRunEvent["type"] {

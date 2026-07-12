@@ -77,6 +77,16 @@ export const ChangeCheckRunSchema = z.discriminatedUnion("status", [
 ]);
 export type ChangeCheckRun = z.infer<typeof ChangeCheckRunSchema>;
 
+export type ChangeCheckRunQuery =
+  | {
+      mode: "recent";
+      limit: number;
+      status?: ChangeCheckRunStatus;
+    }
+  | {
+      mode: "active";
+    };
+
 const ChangeCheckRunEventBaseSchema = z.object({
   runId: z.string().min(1),
   batchId: z.string().min(1),
@@ -106,6 +116,26 @@ export const ChangeCheckRunEventSchema = ChangeCheckRunEventUnionSchema.superRef
   }
 });
 export type ChangeCheckRunEvent = z.infer<typeof ChangeCheckRunEventSchema>;
+
+export const ChangeCheckRunAdmissionResultSchema = z.object({
+  accepted: z.boolean(),
+  activeCount: z.number().int().min(0),
+  requestedCount: z.number().int().positive(),
+  capacity: z.number().int().positive(),
+});
+export type ChangeCheckRunAdmissionResult = z.infer<typeof ChangeCheckRunAdmissionResultSchema>;
+
+export const ChangeCheckRunPruneResultSchema = z.object({
+  deletedRuns: z.number().int().min(0),
+  deletedEvents: z.number().int().min(0),
+  retainedTerminalRuns: z.number().int().min(0),
+});
+export type ChangeCheckRunPruneResult = z.infer<typeof ChangeCheckRunPruneResultSchema>;
+
+export type ChangeCheckRunPruneRequest = {
+  terminalBefore: string;
+  maxTerminalCount: number;
+};
 
 export const StartChangeCheckRunsResponseSchema = z.object({
   batchId: z.string().min(1),

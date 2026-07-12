@@ -100,6 +100,7 @@ export const UrlSearchParam = {
 export const diagnosticCodes = {
   invalidRuntimeResponse: "invalid-runtime-response",
   lifecycleConflict: "lifecycle-conflict",
+  operationCapacityExceeded: "operation-capacity-exceeded",
   inferenceError: "inference-error",
   projectInventoryFailed: "project-inventory-failed",
   semanticIndexNotReady: "semantic-index-not-ready",
