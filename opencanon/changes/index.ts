@@ -1,1 +1,80 @@
-export default [];
+import { DefinitionTargetKind, defineChange } from "@opencanon/core";
+
+export default [
+  defineChange({
+    id: "project-runtime-readiness",
+    title: "Project runtime readiness",
+    kind: "fix",
+    summary: "Make project startup success, failure, repair, and restart behavior explicit across the service, runtime, and CLI.",
+    updates: {
+      areas: ["local-service-and-runtimes", "explicit-error-contracts"],
+      specs: ["project-runtime-lifecycle-spec"],
+      surfaces: ["local-service-control"],
+    },
+    scope: [
+      { kind: DefinitionTargetKind.File, path: "opencanon/changes/index.ts" },
+      { kind: DefinitionTargetKind.File, path: "opencanon/areas/index.ts" },
+      { kind: DefinitionTargetKind.File, path: "opencanon/specs/index.ts" },
+      { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/areas/local-service-and-runtimes.md" },
+      { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/specs/project-runtime-lifecycle-spec.md" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/cli.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/cli/src/runtime-client.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/cli/src/index.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/src/validator-graph.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/src/problem.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/test/service*.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/test/client.test.ts" },
+    ],
+    intent: {
+      problem: "Project start can report success before health is ready, deterministic definition failures lose their typed cause, and automatic repair can retry failures that cannot succeed without a project edit.",
+      outcome: "Every successful start is ready, every failed start returns one structured actionable cause, transient failures remain repairable, and deterministic project failures stop retrying.",
+      why: "The service must be the single owner of project process lifecycle so CLI, MCP, desktop, and browser clients observe the same predictable state machine.",
+    },
+    tasks: [
+      {
+        id: "canon-contract",
+        title: "Define the readiness contract",
+        files: ["opencanon/areas/index.ts", "opencanon/specs/index.ts", "opencanon/changes/index.ts"],
+        checks: ["canon-render", "project-doctor"],
+      },
+      {
+        id: "ready-only-ensure",
+        title: "Centralize ready-only project ensure",
+        files: ["packages/runtime/src/service-start.ts", "packages/runtime/src/service-server.ts", "packages/cli/src/runtime-client.ts", "packages/runtime/src/cli.ts"],
+        checks: ["service-tests", "client-tests", "typecheck"],
+        dependsOn: ["canon-contract"],
+      },
+      {
+        id: "typed-startup-failure",
+        title: "Carry typed startup failures across the process boundary",
+        files: ["packages/core/src/problem.ts", "packages/core/src/validator-graph.ts", "packages/runtime/src/service*.ts", "packages/runtime/src/cli.ts", "packages/cli/src/index.ts"],
+        checks: ["service-tests", "client-tests", "contracts-tests", "typecheck"],
+        dependsOn: ["ready-only-ensure"],
+      },
+      {
+        id: "retry-policy",
+        title: "Stop retrying deterministic project failures",
+        files: ["packages/runtime/src/service-lifecycle.ts", "packages/runtime/src/service-reconcile.ts", "packages/runtime/src/service-types.ts", "packages/runtime/test/service-reconcile.test.ts"],
+        checks: ["service-tests", "typecheck"],
+        dependsOn: ["typed-startup-failure"],
+      },
+      {
+        id: "real-project-proof",
+        title: "Prove healthy and incomplete project flows",
+        checks: ["service-tests", "client-tests", "project-validation", "project-doctor"],
+        dependsOn: ["retry-policy"],
+      },
+    ],
+    checks: [
+      { id: "canon-render", kind: "command", command: "npm run opencanon -- canon render specs --dry-run" },
+      { id: "service-tests", kind: "command", command: "npx vitest run packages/runtime/test/service.test.ts packages/runtime/test/service-reconcile.test.ts" },
+      { id: "client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
+      { id: "contracts-tests", kind: "test", target: "tests/contracts.test.ts" },
+      { id: "typecheck", kind: "command", command: "npm run check:types" },
+      { id: "project-validation", kind: "command", command: "npm run opencanon -- validate --changed" },
+      { id: "project-doctor", kind: "doctor" },
+    ],
+    render: { kind: "none" },
+  }),
+];

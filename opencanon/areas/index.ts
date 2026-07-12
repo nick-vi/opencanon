@@ -175,7 +175,7 @@ export default [
     surfaces: ["local-service-control"],
     owns: [
       { kind: DefinitionTargetKind.File, path: "packages/service-contracts/**" },
-      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/local-protocol.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/routes.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/runtime-client.ts" },
@@ -192,7 +192,12 @@ export default [
         as: "developer",
         want: "OpenCanon commands to start the project runtime on demand",
         so: "projects do not require manually managed background processes",
-        acceptance: ["service registry records runtime identity", "large context requests move through the local protocol"],
+        acceptance: [
+          "service registry records runtime identity",
+          "large context requests move through the local protocol",
+          "project start succeeds only after runtime health is ready",
+          "non-retryable project failures remain terminal until the project is repaired",
+        ],
         checks: ["runtime-client-tests", "project-doctor"],
       },
     ],
@@ -217,6 +222,13 @@ export default [
         action: "starts or repairs a project runtime",
         outcome: "one project worker owns the repo state before SQLite opens, while stale or duplicate workers are retired",
         checks: ["service-lifecycle-tests"],
+      },
+      {
+        id: "project-start-is-readiness-contract",
+        actor: "CLI, MCP, or app client",
+        action: "asks the local service to ensure a project runtime",
+        outcome: "success means verified ready; failure preserves a typed cause, retry policy, project path, and recovery action",
+        checks: ["runtime-client-tests", "service-lifecycle-tests"],
       },
     ],
     checks: [
