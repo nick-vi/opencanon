@@ -59,6 +59,12 @@ Rule `service-owns-startup-state`: The local service owns project startup waitin
 - failed starts leave no registered or orphaned worker
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
+Rule `process-control-is-namespaced`: Each runtime distribution owns a deterministic namespace for global and project-local process-control artifacts.
+- installed and source services use different registries
+- runtime registrations and worker leases use the same namespace as their service
+- namespace values cannot escape process-state directories
+Checks: `service-lifecycle-tests`, `runtime-client-tests`
+
 ## Scenarios
 
 Scenario `start-healthy-project`
@@ -77,6 +83,14 @@ Scenario `start-incomplete-project`
 - Then the request fails once with a non-retryable problem
 - Then the problem names the missing path and repair command
 - Then no project runtime remains registered or restarts in the background
+Checks: `service-lifecycle-tests`, `runtime-client-tests`
+
+Scenario `source-and-installed-runtime-coexist`
+- Given an installed runtime and a source checkout target the same project
+- When each starts its own service and project runtime
+- Then neither replaces the other service registry
+- Then neither retires the other worker lease
+- Then schema compatibility is evaluated independently
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 ## Governance

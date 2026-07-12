@@ -82,6 +82,18 @@ Rule `cancellation-is-explicit`: Client cancellation and runtime shutdown termin
 - terminal events distinguish cancellation from failure
 Checks: `change-run-tests`, `service-lifecycle-tests`
 
+Rule `operation-resources-are-bounded`: A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.
+- admission rejects a whole batch before capacity is exceeded
+- terminal history is pruned by age and count
+- run events cascade when their run is removed
+Checks: `change-run-tests`, `engine-tests`
+
+Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and cancel persisted runs independently of the process that created them.
+- list and show responses are bounded
+- watch resumes from an event cursor without polling
+- terminal cancellation is idempotent
+Checks: `change-run-tests`, `runtime-client-tests`
+
 ## Scenarios
 
 Scenario `agent-watches-long-check`
@@ -99,6 +111,14 @@ Scenario `client-reads-large-project-status`
 - Then dependency count remains visible
 - Then an explicit inspection command can list dependency paths
 Checks: `contracts-tests`, `runtime-client-tests`
+
+Scenario `client-reattaches-to-check-run`
+- Given a Change check continues after its initiating client exits
+- When another client inspects and watches the persisted run
+- Then the run is discoverable
+- Then unseen output replays from the requested cursor
+- Then one terminal result is observed
+Checks: `change-run-tests`, `runtime-client-tests`
 
 ## Governance
 

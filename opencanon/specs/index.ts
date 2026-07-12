@@ -62,6 +62,18 @@ export default [
         acceptance: ["Ctrl-C sends cancellation", "runtime shutdown leaves no child check process", "terminal events distinguish cancellation from failure"],
         checks: ["change-run-tests", "service-lifecycle-tests"],
       },
+      {
+        id: "operation-resources-are-bounded",
+        statement: "A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.",
+        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed"],
+        checks: ["change-run-tests", "engine-tests"],
+      },
+      {
+        id: "persisted-runs-remain-operable",
+        statement: "Clients can list, inspect, watch, and cancel persisted runs independently of the process that created them.",
+        acceptance: ["list and show responses are bounded", "watch resumes from an event cursor without polling", "terminal cancellation is idempotent"],
+        checks: ["change-run-tests", "runtime-client-tests"],
+      },
     ],
     scenarios: [
       {
@@ -77,6 +89,13 @@ export default [
         when: "a client requests project status",
         then: ["the response stays bounded", "dependency count remains visible", "an explicit inspection command can list dependency paths"],
         checks: ["contracts-tests", "runtime-client-tests"],
+      },
+      {
+        id: "client-reattaches-to-check-run",
+        given: ["a Change check continues after its initiating client exits"],
+        when: "another client inspects and watches the persisted run",
+        then: ["the run is discoverable", "unseen output replays from the requested cursor", "one terminal result is observed"],
+        checks: ["change-run-tests", "runtime-client-tests"],
       },
     ],
     checks: [
@@ -352,6 +371,12 @@ export default [
         acceptance: ["CLI and runtime client share the same ensure path", "one startup lock serializes a project start", "failed starts leave no registered or orphaned worker"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
+      {
+        id: "process-control-is-namespaced",
+        statement: "Each runtime distribution owns a deterministic namespace for global and project-local process-control artifacts.",
+        acceptance: ["installed and source services use different registries", "runtime registrations and worker leases use the same namespace as their service", "namespace values cannot escape process-state directories"],
+        checks: ["service-lifecycle-tests", "runtime-client-tests"],
+      },
     ],
     scenarios: [
       {
@@ -366,6 +391,13 @@ export default [
         given: ["an OpenCanon config exists", "the required conventions entrypoint is missing"],
         when: "a client starts or queries the project",
         then: ["the request fails once with a non-retryable problem", "the problem names the missing path and repair command", "no project runtime remains registered or restarts in the background"],
+        checks: ["service-lifecycle-tests", "runtime-client-tests"],
+      },
+      {
+        id: "source-and-installed-runtime-coexist",
+        given: ["an installed runtime and a source checkout target the same project"],
+        when: "each starts its own service and project runtime",
+        then: ["neither replaces the other service registry", "neither retires the other worker lease", "schema compatibility is evaluated independently"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
     ],
