@@ -6,6 +6,7 @@ export {
   ProcessLifecycleScope,
   ProcessLifecycleStatus,
   RuntimeStatus,
+  StartProjectRuntimeStatus,
 } from "./service-types.ts";
 export type {
   EnsureProjectRuntimeResult,

@@ -13,6 +13,7 @@ import {
   ProcessLifecycleScope,
   ProcessLifecycleStatus,
   RuntimeStatus,
+  StartProjectRuntimeStatus,
   defaultProjectRuntimeIdleTimeoutMs,
   type ReconcileProjectRuntimesResult,
 } from "./service-types.ts";
@@ -126,7 +127,7 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
         registryPath,
         idleTimeoutMs: defaultProjectRuntimeIdleTimeoutMs,
       });
-      if (restarted.status === "started") result.restarted += 1;
+      if (restarted.status === StartProjectRuntimeStatus.Started) result.restarted += 1;
       else result.running += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

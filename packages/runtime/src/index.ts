@@ -107,6 +107,7 @@ export type {
 } from "./service.ts";
 export {
   RuntimeStatus,
+  StartProjectRuntimeStatus,
   ProcessLifecycleStatus,
   ProcessLifecycleEventKind,
   ProcessLifecycleScope,

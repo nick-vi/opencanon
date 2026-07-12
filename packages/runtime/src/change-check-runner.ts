@@ -18,6 +18,8 @@ import { operationEvent, type EventBroadcaster } from "./server-events.ts";
 import { writeRuntimeEvent } from "./server-canon-events.ts";
 import {
   ChangeEventType,
+  ChangeCheckOutputStream,
+  ChangeCheckResultStatus,
   createChangeCheckEvent,
   runChangeCheck,
 } from "./server-change-runtime.ts";
@@ -156,7 +158,7 @@ export function createChangeCheckRunner(input: {
     writeRuntimeEvent(input.rootDir, input.store(), started);
     await input.stateManager.rebuildAndPublish(started.summary);
 
-    const pendingOutput: Array<{ stream: "stdout" | "stderr"; text: string }> = [];
+    const pendingOutput: Array<{ stream: ChangeCheckOutputStream; text: string }> = [];
     let pendingOutputBytes = 0;
     let outputFlushTimer: ReturnType<typeof setTimeout> | undefined;
     const flushOutput = () => {
@@ -165,7 +167,7 @@ export function createChangeCheckRunner(input: {
       pendingOutputBytes = 0;
       for (const chunk of pendingOutput.splice(0)) run = appendOutput(run, chunk.stream, chunk.text);
     };
-    const queueOutput = (stream: "stdout" | "stderr", text: string) => {
+    const queueOutput = (stream: ChangeCheckOutputStream, text: string) => {
       const previous = pendingOutput[pendingOutput.length - 1];
       if (previous?.stream === stream) previous.text += text;
       else pendingOutput.push({ stream, text });
@@ -205,9 +207,9 @@ export function createChangeCheckRunner(input: {
       flushOutput();
       const latest = input.store().readJob(run.id) ?? run;
       const finishedAt = new Date().toISOString();
-      const status = result.status === "passed"
+      const status = result.status === ChangeCheckResultStatus.Passed
         ? ChangeCheckRunStatus.Passed
-        : result.status === "cancelled"
+        : result.status === ChangeCheckResultStatus.Cancelled
           ? ChangeCheckRunStatus.Cancelled
           : ChangeCheckRunStatus.Failed;
       const terminal = ChangeCheckRunSchema.parse({
@@ -243,7 +245,7 @@ export function createChangeCheckRunner(input: {
     }
   }
 
-  function appendOutput(run: ChangeCheckRun, stream: "stdout" | "stderr", text: string): ChangeCheckRun {
+  function appendOutput(run: ChangeCheckRun, stream: ChangeCheckOutputStream, text: string): ChangeCheckRun {
     const bytes = Buffer.byteLength(text, "utf8");
     const previousPersisted = Math.min(run.outputBytes, PersistedOutputLimitBytes);
     const remaining = Math.max(0, PersistedOutputLimitBytes - previousPersisted);
@@ -257,7 +259,7 @@ export function createChangeCheckRunner(input: {
       outputTruncated: run.outputTruncated || Buffer.byteLength(persistedText, "utf8") < bytes,
     });
     input.store().writeJob(next);
-    if (persistedText) appendEvent(next, stream === "stdout" ? ChangeCheckRunEventType.Stdout : ChangeCheckRunEventType.Stderr, persistedText);
+    if (persistedText) appendEvent(next, stream === ChangeCheckOutputStream.Stdout ? ChangeCheckRunEventType.Stdout : ChangeCheckRunEventType.Stderr, persistedText);
     return next;
   }
 

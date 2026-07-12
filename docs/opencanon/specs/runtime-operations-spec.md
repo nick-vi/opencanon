@@ -18,6 +18,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `packages/runtime/src/local-protocol.ts`
 - Files: `packages/runtime/src/service-http.ts`
 - Files: `packages/runtime/src/service-server.ts`
+- Files: `packages/runtime/src/service*.ts`
 - Files: `packages/runtime/src/index.ts`
 - Files: `packages/runtime/src/server-change-runtime.ts`
 - Files: `packages/runtime/src/change-check-runner.ts`
@@ -39,6 +40,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 - [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 - [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)
+- [Release and update path](../areas/runtime-release-update.md#runtime-updates)
 
 ## Areas
 

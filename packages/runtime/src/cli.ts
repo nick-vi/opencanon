@@ -65,6 +65,11 @@ const RuntimeCliOptionFlag = {
   AllowRemote: "--allow-remote",
 } as const;
 
+const ProjectInspectTarget = {
+  Runtime: "runtime",
+  ValidatorGraph: "validator-graph",
+} as const;
+
 const RuntimeEnv = {
   RegistryPath: "OPENCANON_SERVICE_REGISTRY_PATH",
   ServiceToken: "OPENCANON_SERVICE_TOKEN",
@@ -392,14 +397,14 @@ async function runProjectInspectCommand(args: string[], cwd: string): Promise<vo
     return;
   }
   const target = String(parsed.args[0] ?? "");
-  if (target !== "runtime" && target !== "validator-graph") {
+  if (target !== ProjectInspectTarget.Runtime && target !== ProjectInspectTarget.ValidatorGraph) {
     throw new Error("Usage: opencanon project inspect <runtime|validator-graph> [--format markdown|json]");
   }
   const inspection = await inspectProjectRuntime(cwd);
   if (!inspection || inspection.status !== RuntimeStatus.Running) {
     throw new Error("Project runtime is not running. Run opencanon project start first.");
   }
-  if (target === "runtime") {
+  if (target === ProjectInspectTarget.Runtime) {
     writeJson(runtimeInspectionJson(inspection, cwd));
     return;
   }

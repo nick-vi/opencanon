@@ -51,6 +51,7 @@ import {
   ProcessLifecycleEventKind,
   ProcessLifecycleScope,
   ProcessLifecycleStatus,
+  StartProjectRuntimeStatus,
   ProjectRuntimeEnv,
   RuntimeStatus,
   ServiceApiRoute,
@@ -96,7 +97,7 @@ export async function startProjectRuntime(input: {
       if (ready) {
         const runningEntry = updateRuntimeLifecycle(existing.entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
         return {
-          status: "already-running",
+          status: StartProjectRuntimeStatus.AlreadyRunning,
           entry: runningEntry,
           message: `OpenCanon project runtime already registered for ${rootDir}.`,
         };
@@ -106,13 +107,13 @@ export async function startProjectRuntime(input: {
       await stopProjectRuntime(rootDir, registryPath);
     } else if (existing?.status === RuntimeStatus.Busy) {
       return {
-        status: "already-running",
+        status: StartProjectRuntimeStatus.AlreadyRunning,
         entry: existing.entry,
         message: `OpenCanon project runtime is busy for ${rootDir}.`,
       };
     } else if (existing?.status === RuntimeStatus.Running) {
       return {
-        status: "already-running",
+        status: StartProjectRuntimeStatus.AlreadyRunning,
         entry: existing.entry,
         message: `OpenCanon project runtime already registered for ${rootDir}.`,
       };
@@ -207,7 +208,7 @@ export async function startProjectRuntime(input: {
         removeRuntimeStartupResult(startupResultPath);
         const runningEntry = updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
         return {
-          status: "started",
+          status: StartProjectRuntimeStatus.Started,
           entry: runningEntry,
           message: `OpenCanon project runtime started for ${rootDir}.`,
         };
@@ -263,7 +264,7 @@ export async function startService(input: {
       await stopService(registryPath);
     } else if (existing?.status === RuntimeStatus.Running && runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
       return {
-        status: "already-running",
+        status: StartProjectRuntimeStatus.AlreadyRunning,
         entry: existing.entry,
         message: "OpenCanon service is already running.",
       };
@@ -352,7 +353,7 @@ export async function startService(input: {
         const runningEntry = withLifecycle(entry, ProcessLifecycleStatus.Running, "OpenCanon service health endpoint is ready.");
         upsertServiceEntry(runningEntry, registryPath);
         return {
-          status: "started",
+          status: StartProjectRuntimeStatus.Started,
           entry: runningEntry,
           message: "OpenCanon service started.",
         };

@@ -5,7 +5,7 @@ export default [
     id: "runtime-operations-spec",
     title: "Runtime Operations Spec",
     summary: "Long-running project operations expose bounded status, durable execution state, replayable progress, and explicit cancellation through one runtime contract.",
-    surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index"],
+    surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index", "release-update"],
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/contracts-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/contracts-change-runs.ts" },
@@ -19,6 +19,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/local-protocol.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-http.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-server.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-change-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/change-check-runner.ts" },

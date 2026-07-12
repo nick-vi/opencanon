@@ -9,7 +9,7 @@ export default [
     updates: {
       areas: ["local-service-and-runtimes", "project-map-governance"],
       specs: ["runtime-operations-spec"],
-      surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index"],
+      surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index", "release-update"],
     },
     scope: [
       { kind: DefinitionTargetKind.File, path: "opencanon/specs/index.ts" },
@@ -25,6 +25,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-http.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-server.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/change-check-runner.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/state.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/snapshot.ts" },

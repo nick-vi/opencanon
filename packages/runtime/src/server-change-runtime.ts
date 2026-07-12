@@ -44,6 +44,19 @@ const FindingSeverityValue = {
   Error: "error",
 } as const;
 
+export const ChangeCheckResultStatus = {
+  Passed: "passed",
+  Failed: "failed",
+  Cancelled: "cancelled",
+} as const;
+export type ChangeCheckResultStatus = (typeof ChangeCheckResultStatus)[keyof typeof ChangeCheckResultStatus];
+
+export const ChangeCheckOutputStream = {
+  Stdout: "stdout",
+  Stderr: "stderr",
+} as const;
+export type ChangeCheckOutputStream = (typeof ChangeCheckOutputStream)[keyof typeof ChangeCheckOutputStream];
+
 export const ChangeEventType = {
   Started: ChangeLifecycleEventType.Started,
   Review: ChangeLifecycleEventType.Review,
@@ -71,7 +84,7 @@ export type RunChangeCheckResult = {
   taskId?: string;
   checkId: string;
   kind: ChangeCheck["kind"];
-  status: "passed" | "failed" | "cancelled";
+  status: ChangeCheckResultStatus;
   summary: string;
   output: string;
   exitCode?: number | string;
@@ -79,7 +92,7 @@ export type RunChangeCheckResult = {
 
 export type RunChangeCheckOptions = {
   signal?: AbortSignal;
-  onOutput?(stream: "stdout" | "stderr", text: string): void;
+  onOutput?(stream: ChangeCheckOutputStream, text: string): void;
 };
 
 export function parseRunChangeCheckRequest(
@@ -166,7 +179,7 @@ export async function runChangeCheck(
       ...(task ? { taskId: task.id } : {}),
       checkId: check.id,
       kind: check.kind,
-      status: report.status === "fail" ? "failed" : "passed",
+      status: report.status === "fail" ? ChangeCheckResultStatus.Failed : ChangeCheckResultStatus.Passed,
       summary: report.status === "fail" ? `Check ${check.id} failed: doctor status fail.` : `Check ${check.id} passed: doctor status ${report.status}.`,
       output: trimCheckOutput(report.checks.map((item) => `${item.id}: ${item.status} - ${item.message}`).join("\n")),
     };
@@ -180,7 +193,7 @@ export async function runChangeCheck(
         ...(task ? { taskId: task.id } : {}),
         checkId: check.id,
         kind: check.kind,
-        status: "failed",
+        status: ChangeCheckResultStatus.Failed,
         summary: `Check ${check.id} failed: unknown validator ${check.validatorId}.`,
         output: "",
       };
@@ -202,7 +215,7 @@ export async function runChangeCheck(
       ...(task ? { taskId: task.id } : {}),
       checkId: check.id,
       kind: check.kind,
-      status: failed ? "failed" : "passed",
+      status: failed ? ChangeCheckResultStatus.Failed : ChangeCheckResultStatus.Passed,
       summary: failed ? `Check ${check.id} failed: validator ${check.validatorId} reported issues.` : `Check ${check.id} passed: validator ${check.validatorId}.`,
       output: trimCheckOutput([
         ...validation.diagnostics,
@@ -224,7 +237,7 @@ function cancelledCheckResult(changeId: string, taskId: string | undefined, chec
     ...(taskId ? { taskId } : {}),
     checkId: check.id,
     kind: check.kind,
-    status: "cancelled",
+    status: ChangeCheckResultStatus.Cancelled,
     summary: `Check ${check.id} cancelled.`,
     output: "",
   };
@@ -276,16 +289,16 @@ function spawnShellCheck(input: {
     let stderr = "";
     let timedOut = false;
     let settled = false;
-    const append = (stream: "stdout" | "stderr", chunk: string) => {
+    const append = (stream: ChangeCheckOutputStream, chunk: string) => {
       if (!chunk) return;
-      if (stream === "stdout") stdout = boundedCheckOutput(stdout, chunk);
+      if (stream === ChangeCheckOutputStream.Stdout) stdout = boundedCheckOutput(stdout, chunk);
       else stderr = boundedCheckOutput(stderr, chunk);
       input.options.onOutput?.(stream, chunk);
     };
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => append("stdout", chunk));
-    child.stderr?.on("data", (chunk: string) => append("stderr", chunk));
+    child.stdout?.on("data", (chunk: string) => append(ChangeCheckOutputStream.Stdout, chunk));
+    child.stderr?.on("data", (chunk: string) => append(ChangeCheckOutputStream.Stderr, chunk));
 
     const terminate = () => {
       if (child.pid) void terminateSpawnedProcess(child.pid);
@@ -314,13 +327,13 @@ function spawnShellCheck(input: {
         ...(exitCode === null ? {} : { exitCode }),
       };
       if (input.options.signal?.aborted) {
-        resolve({ ...base, status: "cancelled", summary: `Check ${input.checkId} cancelled.` });
+        resolve({ ...base, status: ChangeCheckResultStatus.Cancelled, summary: `Check ${input.checkId} cancelled.` });
       } else if (timedOut) {
-        resolve({ ...base, status: "failed", summary: `Check ${input.checkId} failed: timed out after ${CheckCommandTimeoutMs}ms.` });
+        resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed: timed out after ${CheckCommandTimeoutMs}ms.` });
       } else if (exitCode === 0 && !error) {
-        resolve({ ...base, status: "passed", summary: `Check ${input.checkId} passed.` });
+        resolve({ ...base, status: ChangeCheckResultStatus.Passed, summary: `Check ${input.checkId} passed.` });
       } else {
-        resolve({ ...base, status: "failed", summary: `Check ${input.checkId} failed${signal ? ` (${signal})` : ""}.` });
+        resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed${signal ? ` (${signal})` : ""}.` });
       }
     };
     child.once("error", (error) => finish(null, null, error));

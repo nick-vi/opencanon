@@ -113,14 +113,20 @@ export type RuntimeInspection = {
 
 export type ReadyRuntimeInspection = RuntimeInspection & { status: typeof RuntimeStatus.Running };
 
+export const StartProjectRuntimeStatus = {
+  Started: "started",
+  AlreadyRunning: "already-running",
+} as const;
+export type StartProjectRuntimeStatus = (typeof StartProjectRuntimeStatus)[keyof typeof StartProjectRuntimeStatus];
+
 export type StartProjectRuntimeResult = {
-  status: "started" | "already-running";
+  status: StartProjectRuntimeStatus;
   entry: RuntimeRegistryEntry;
   message: string;
 };
 
 export type StartServiceResult = {
-  status: "started" | "already-running";
+  status: StartProjectRuntimeStatus;
   entry: ServiceRegistryEntry;
   message: string;
 };
