@@ -200,16 +200,21 @@ export const CanonEventSchema = z.object({
 });
 export type CanonEvent = z.infer<typeof CanonEventSchema>;
 
+export const CanonEventQueryMode = {
+  Recent: "recent",
+  ChangeHistory: "change-history",
+} as const;
+
 export type CanonEventQuery =
   | {
-      mode: "recent";
+      mode: typeof CanonEventQueryMode.Recent;
       limit: number;
       changeId?: string;
       taskId?: string;
       checkId?: string;
     }
   | {
-      mode: "change-history";
+      mode: typeof CanonEventQueryMode.ChangeHistory;
       changeId: string;
     };
 

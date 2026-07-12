@@ -6,6 +6,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   CanonEventSchema,
+  CanonEventQueryMode,
   TaskLeaseClaimAction,
   TaskLeaseSchema,
   TaskLeaseStatus,
@@ -317,7 +318,7 @@ export function listGlobalCanonEvents(rootDir: string, query: CanonEventQuery): 
   const db = openCoordinationDb();
   try {
     upsertRepository(db, repository);
-    const completeHistory = query.mode === "change-history";
+    const completeHistory = query.mode === CanonEventQueryMode.ChangeHistory;
     const changeId = completeHistory ? query.changeId : query.changeId ?? null;
     const taskId = completeHistory ? null : query.taskId ?? null;
     const checkId = completeHistory ? null : query.checkId ?? null;

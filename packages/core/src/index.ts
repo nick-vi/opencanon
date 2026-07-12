@@ -384,6 +384,7 @@ export {
   BuildRepoGraphResultSchema,
   CallFactSchema,
   CanonEventSchema,
+  CanonEventQueryMode,
   CanonFindingSchema,
   CanonFixSchema,
   CommentFactSchema,

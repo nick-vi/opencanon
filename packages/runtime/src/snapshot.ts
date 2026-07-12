@@ -1,6 +1,7 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
+  CanonEventQueryMode,
   createValidationContext,
   buildDefinitionGraph,
   FixSafety,
@@ -104,7 +105,7 @@ export type RuntimeSnapshot = {
 
 export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeSnapshot; store: ProjectStore }): RuntimeProjectSummary {
   const storeState = input.store.readState();
-  const latestQuery = { mode: "recent", limit: 1 } as const;
+  const latestQuery = { mode: CanonEventQueryMode.Recent, limit: 1 } as const;
   const latestEvent = mergeCanonEvents([...input.store.listEvents(latestQuery), ...listGlobalCanonEvents(input.rootDir, latestQuery)], 1)[0];
   const semanticIndex = input.snapshot.state.semanticIndex ?? input.snapshot.semanticIndex ?? storeState.semanticIndex;
   const productModel = input.snapshot.state.productModel ?? storeState.productModel;
