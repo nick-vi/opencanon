@@ -6,6 +6,8 @@ import {
   BuildRepoGraphRequestSchema,
   BuildRepoGraphResultSchema,
   CanonEventSchema,
+  ChangeCheckRunEventSchema,
+  ChangeCheckRunSchema,
   ExtractFactsRequestSchema,
   ExtractFactsResultSchema,
   EngineVersionSchema,
@@ -44,6 +46,8 @@ import {
   type BuildRepoGraphRequest,
   type BuildRepoGraphResult,
   type CanonEvent,
+  type ChangeCheckRun,
+  type ChangeCheckRunEvent,
   type EmbedSemanticTextsRequest,
   type EmbedSemanticTextsResult,
   type GenerateTextRequest,
@@ -115,6 +119,11 @@ export type EngineProject = {
   stopWatcher(): void;
   writeEvent(event: CanonEvent): void;
   listEvents(limit?: number): CanonEvent[];
+  writeJob(job: ChangeCheckRun): void;
+  readJob(jobId: string): ChangeCheckRun | null;
+  listJobs(request?: { type?: string; limit?: number }): ChangeCheckRun[];
+  appendJobEvent(event: ChangeCheckRunEvent): void;
+  listJobEvents(request: { jobId: string; afterSequence?: number; limit?: number }): ChangeCheckRunEvent[];
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
   listObservabilityRecords(query?: ObservabilityRecordQuery): ObservabilityRecordResult;
   close(): void;
@@ -165,6 +174,11 @@ type EngineProjectJsonBinding = {
   stopWatcher(): void;
   writeEventJson(request: string): void;
   listEventsJson(request: string): string;
+  writeJobJson(request: string): void;
+  readJobJson(request: string): string;
+  listJobsJson(request: string): string;
+  appendJobEventJson(request: string): void;
+  listJobEventsJson(request: string): string;
   writeObservabilityRecordsJson(request: string): void;
   listObservabilityRecordsJson(request: string): string;
   close(): void;
@@ -311,6 +325,14 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     stopWatcher: () => callEngine(() => project.stopWatcher()),
     writeEvent: (event) => callEngine(() => project.writeEventJson(JSON.stringify({ event: CanonEventSchema.parse(event) }))),
     listEvents: (limit = 50) => (parseJson(callEngine(() => project.listEventsJson(JSON.stringify({ limit })))) as unknown[]).map((event) => CanonEventSchema.parse(event)),
+    writeJob: (job) => callEngine(() => project.writeJobJson(JSON.stringify({ job: ChangeCheckRunSchema.parse(job) }))),
+    readJob: (jobId) => {
+      const value = parseJson(callEngine(() => project.readJobJson(JSON.stringify({ jobId })))) as { job?: unknown };
+      return value.job ? ChangeCheckRunSchema.parse(value.job) : null;
+    },
+    listJobs: (request = {}) => (parseJson(callEngine(() => project.listJobsJson(JSON.stringify(request)))) as unknown[]).map((job) => ChangeCheckRunSchema.parse(job)),
+    appendJobEvent: (event) => callEngine(() => project.appendJobEventJson(JSON.stringify({ event: ChangeCheckRunEventSchema.parse(event) }))),
+    listJobEvents: (request) => (parseJson(callEngine(() => project.listJobEventsJson(JSON.stringify(request)))) as unknown[]).map((event) => ChangeCheckRunEventSchema.parse(event)),
     writeObservabilityRecords: (records) => callEngine(() => project.writeObservabilityRecordsJson(JSON.stringify(records))),
     listObservabilityRecords: (query = {}) => parseObservabilityRecordResult(parseJson(callEngine(() => project.listObservabilityRecordsJson(JSON.stringify(query))))),
     close: () => callEngine(() => project.close()),
@@ -356,6 +378,11 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "stopWatcher",
     "writeEventJson",
     "listEventsJson",
+    "writeJobJson",
+    "readJobJson",
+    "listJobsJson",
+    "appendJobEventJson",
+    "listJobEventsJson",
     "writeObservabilityRecordsJson",
     "listObservabilityRecordsJson",
     "close",

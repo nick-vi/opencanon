@@ -1,6 +1,7 @@
 mod support;
 
 mod code_graph;
+mod jobs;
 mod observability;
 mod product_model;
 mod project_state;

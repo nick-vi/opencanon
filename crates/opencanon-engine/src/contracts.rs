@@ -37,6 +37,36 @@ pub(crate) struct ListEventsRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(crate) struct WriteJobRequest {
+    pub(crate) job: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReadJobRequest {
+    pub(crate) job_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListJobsRequest {
+    pub(crate) r#type: Option<String>,
+    pub(crate) limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AppendJobEventRequest {
+    pub(crate) event: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListJobEventsRequest {
+    pub(crate) job_id: String,
+    pub(crate) after_sequence: Option<u64>,
+    pub(crate) limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WriteObservabilityRecordsRequest {
     #[serde(default)]

@@ -46,6 +46,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "knowledge_nodes",
         sql: include_str!("migrations/007_knowledge_nodes.sql"),
     },
+    Migration {
+        version: 8,
+        name: "job_events",
+        sql: include_str!("migrations/008_job_events.sql"),
+    },
 ];
 
 pub(crate) fn schema_version() -> u32 {

@@ -32,6 +32,8 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   let observabilityRecords: { traces: unknown[]; spans: unknown[]; events: unknown[] } = { traces: [], spans: [], events: [] };
   let semanticIndex: unknown = null;
   let semanticResults: unknown[] = [];
+  let job: unknown = null;
+  const jobEvents: unknown[] = [];
   const engine = createEngine({
     versionJson: () => JSON.stringify({ packageVersion: "0.1.0", engineVersion: "0.1.0", napiVersion: "3.9.0", schemaVersion: 1 }),
     openProjectJson: () => ({
@@ -109,6 +111,15 @@ test("engine JSON binding is wrapped in typed contracts", () => {
       stopWatcher: () => undefined,
       writeEventJson: () => undefined,
       listEventsJson: () => JSON.stringify([]),
+      writeJobJson: (requestJson: string) => {
+        job = (JSON.parse(requestJson) as { job: unknown }).job;
+      },
+      readJobJson: () => JSON.stringify({ job }),
+      listJobsJson: () => JSON.stringify(job ? [job] : []),
+      appendJobEventJson: (requestJson: string) => {
+        jobEvents.push((JSON.parse(requestJson) as { event: unknown }).event);
+      },
+      listJobEventsJson: () => JSON.stringify(jobEvents),
       writeObservabilityRecordsJson: (requestJson: string) => {
         const request = JSON.parse(requestJson) as { traces?: unknown[]; spans?: unknown[]; events?: unknown[] };
         observabilityRecords = {
@@ -144,6 +155,25 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   assert.deepEqual(project.drainWatcherEvents()[0].paths, ["src/company.ts"]);
   project.stopWatcher();
   assert.deepEqual(project.listEvents(), []);
+  const run = {
+    id: "run-1",
+    batchId: "batch-1",
+    kind: "change-check",
+    status: "queued",
+    changeId: "runtime-operations",
+    checkId: "engine-tests",
+    checkKind: "command",
+    createdAt: "2026-07-12T00:00:00.000Z",
+    updatedAt: "2026-07-12T00:00:00.000Z",
+    outputTail: "",
+    outputBytes: 0,
+    outputTruncated: false,
+  } as const;
+  project.writeJob(run);
+  assert.equal(project.readJob(run.id)?.status, "queued");
+  assert.equal(project.listJobs({ type: "change-check" }).length, 1);
+  project.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 1, timestamp: "2026-07-12T00:00:01.000Z", type: "started" });
+  assert.equal(project.listJobEvents({ jobId: run.id })[0]?.sequence, 1);
   project.writeObservabilityRecords({
     traces: [
       {

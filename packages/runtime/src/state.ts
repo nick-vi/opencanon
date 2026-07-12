@@ -4,6 +4,8 @@ import {
   relative,
   type CanonEvent,
   type CanonFinding,
+  type ChangeCheckRun,
+  type ChangeCheckRunEvent,
   type ContextPaths,
   type RuntimeHealth,
   type ProductModelProjection,
@@ -36,6 +38,11 @@ export type ProjectStore = {
   readState(): StoreState;
   writeEvent(event: CanonEvent): void;
   listEvents(limit?: number): CanonEvent[];
+  writeJob(job: ChangeCheckRun): void;
+  readJob(jobId: string): ChangeCheckRun | null;
+  listJobs(request?: { type?: string; limit?: number }): ChangeCheckRun[];
+  appendJobEvent(event: ChangeCheckRunEvent): void;
+  listJobEvents(request: { jobId: string; afterSequence?: number; limit?: number }): ChangeCheckRunEvent[];
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
   listObservabilityRecords(query?: ObservabilityRecordQuery): ObservabilityRecordResult;
   writeSemanticIndex(request: WriteSemanticIndexRequest): void;
@@ -140,6 +147,21 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
     },
     listEvents(limit = 50) {
       return project.listEvents(limit);
+    },
+    writeJob(job) {
+      project.writeJob(job);
+    },
+    readJob(jobId) {
+      return project.readJob(jobId);
+    },
+    listJobs(request) {
+      return project.listJobs(request);
+    },
+    appendJobEvent(event) {
+      project.appendJobEvent(event);
+    },
+    listJobEvents(request) {
+      return project.listJobEvents(request);
     },
     writeObservabilityRecords(records) {
       project.writeObservabilityRecords(records);
