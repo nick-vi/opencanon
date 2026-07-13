@@ -54,6 +54,8 @@ Long-running project operations expose bounded status, durable execution state, 
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
 - `change-run-tests` test `packages/runtime/test/change-runs.test.ts`
 - `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
+- `cli-tests` test `tests/cli-reporting.test.ts`
+- `doctor-tests` test `tests/validator-runtime.test.ts`
 - `project-doctor` doctor
 
 ## Rules
@@ -94,6 +96,24 @@ Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and can
 - terminal cancellation is idempotent
 Checks: `change-run-tests`, `runtime-client-tests`
 
+Rule `state-projections-use-complete-activity`: Correctness-sensitive Change state is derived from complete indexed Activity for the relevant Changes, while browsing feeds remain bounded.
+- unrelated Activity cannot reopen closed work
+- ready work and snapshots use the same complete history
+- complete history is queried in one batch for current Changes
+Checks: `engine-tests`, `runtime-client-tests`
+
+Rule `local-clients-use-pipe-transport`: Local CLI and MCP requests use the pipe control plane by default while loopback HTTP remains an explicit browser and diagnostics adapter.
+- brief uses the shared default runtime client
+- commands do not select HTTP without a surface requirement
+- pipe transport is covered by integration proof
+Checks: `runtime-client-tests`, `cli-tests`
+
+Rule `doctor-reports-live-knowledge`: Doctor reports current Project Knowledge readiness when a matching project runtime is running and never presents an uninspected snapshot as ready.
+- stale or missing live Knowledge warns
+- invalid state or a failed live probe fails
+- no running runtime is described as uninspected
+Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`
+
 ## Scenarios
 
 Scenario `agent-watches-long-check`
@@ -119,6 +139,14 @@ Scenario `client-reattaches-to-check-run`
 - Then unseen output replays from the requested cursor
 - Then one terminal result is observed
 Checks: `change-run-tests`, `runtime-client-tests`
+
+Scenario `agent-brief-survives-unrelated-activity`
+- Given a Change and all of its tasks are closed
+- Given more than 500 newer events belong to other Changes
+- When an agent requests ready work or a briefing
+- Then the closed Change is absent from ready and blocked work
+- Then the briefing queue agrees with the Change snapshot
+Checks: `engine-tests`, `runtime-client-tests`, `cli-tests`
 
 ## Governance
 

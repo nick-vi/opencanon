@@ -74,6 +74,24 @@ export default [
         acceptance: ["list and show responses are bounded", "watch resumes from an event cursor without polling", "terminal cancellation is idempotent"],
         checks: ["change-run-tests", "runtime-client-tests"],
       },
+      {
+        id: "state-projections-use-complete-activity",
+        statement: "Correctness-sensitive Change state is derived from complete indexed Activity for the relevant Changes, while browsing feeds remain bounded.",
+        acceptance: ["unrelated Activity cannot reopen closed work", "ready work and snapshots use the same complete history", "complete history is queried in one batch for current Changes"],
+        checks: ["engine-tests", "runtime-client-tests"],
+      },
+      {
+        id: "local-clients-use-pipe-transport",
+        statement: "Local CLI and MCP requests use the pipe control plane by default while loopback HTTP remains an explicit browser and diagnostics adapter.",
+        acceptance: ["brief uses the shared default runtime client", "commands do not select HTTP without a surface requirement", "pipe transport is covered by integration proof"],
+        checks: ["runtime-client-tests", "cli-tests"],
+      },
+      {
+        id: "doctor-reports-live-knowledge",
+        statement: "Doctor reports current Project Knowledge readiness when a matching project runtime is running and never presents an uninspected snapshot as ready.",
+        acceptance: ["stale or missing live Knowledge warns", "invalid state or a failed live probe fails", "no running runtime is described as uninspected"],
+        checks: ["doctor-tests", "cli-tests", "runtime-client-tests"],
+      },
     ],
     scenarios: [
       {
@@ -97,6 +115,13 @@ export default [
         then: ["the run is discoverable", "unseen output replays from the requested cursor", "one terminal result is observed"],
         checks: ["change-run-tests", "runtime-client-tests"],
       },
+      {
+        id: "agent-brief-survives-unrelated-activity",
+        given: ["a Change and all of its tasks are closed", "more than 500 newer events belong to other Changes"],
+        when: "an agent requests ready work or a briefing",
+        then: ["the closed Change is absent from ready and blocked work", "the briefing queue agrees with the Change snapshot"],
+        checks: ["engine-tests", "runtime-client-tests", "cli-tests"],
+      },
     ],
     checks: [
       { id: "contracts-tests", kind: "test", target: "tests/contracts.test.ts" },
@@ -104,6 +129,8 @@ export default [
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
       { id: "change-run-tests", kind: "test", target: "packages/runtime/test/change-runs.test.ts" },
       { id: "service-lifecycle-tests", kind: "test", target: "packages/runtime/test/service.test.ts" },
+      { id: "cli-tests", kind: "test", target: "tests/cli-reporting.test.ts" },
+      { id: "doctor-tests", kind: "test", target: "tests/validator-runtime.test.ts" },
       { id: "project-doctor", kind: "doctor" },
     ],
     governedBy: { inferFromScope: true, conventions: ["explicit-error-contracts", "service-events-current", "state-ownership-current", "tests-follow-risk"] },
