@@ -29,6 +29,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `packages/runtime/src/snapshot.ts`
 - Files: `packages/cli/src/changes.ts`
 - Files: `packages/cli/src/runtime-client.ts`
+- Files: `packages/runtime/test/client-test-sources.ts`
 - Files: `packages/runtime/test/*.test.ts`
 - Files: `tests/runtime-events.test.ts`
 - Files: `tests/cli-reporting.test.ts`

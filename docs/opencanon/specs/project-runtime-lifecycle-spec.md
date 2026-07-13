@@ -14,6 +14,7 @@ The local service owns a ready-only, typed, and retry-aware lifecycle for isolat
 - Files: `packages/core/src/validator-graph.ts`
 - Files: `packages/runtime/test/service.test.ts`
 - Files: `packages/runtime/test/service-reconcile.test.ts`
+- Files: `packages/runtime/test/client-test-sources.ts`
 - Files: `packages/runtime/test/client.test.ts`
 - Docs: `docs/opencanon/specs/project-runtime-lifecycle-spec.md`
 
