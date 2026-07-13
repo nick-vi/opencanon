@@ -48,6 +48,7 @@ test("init scaffolds missing files, installs requested hooks, validates, and wri
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/*.sqlite"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/processes/"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/semantic-index/"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/check-*/"));
     assert(!readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
     const initState = JSON.parse(readFileSync(path.join(rootDir, ".opencanon/init.json"), "utf8")) as { status: string; steps: unknown[] };
     assert.equal(initState.status, "warn");

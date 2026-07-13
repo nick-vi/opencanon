@@ -23,6 +23,7 @@ import {
 } from "./cli-status.ts";
 import { startOpenCanonRuntime, checkRuntimePrerequisites } from "./server.ts";
 import { runtimeStartupProblem, writeRuntimeStartupFailure } from "./service-startup-result.ts";
+import { stopAllProjectRuntimes } from "./service-control.ts";
 import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
 import { HiddenServiceRegistryArg } from "./service-peer-discovery.ts";
 import { ProjectRuntimeEnv } from "./service-types.ts";
@@ -531,18 +532,28 @@ async function runServiceServeCommand(args: string[]): Promise<void> {
     stopping = true;
     if (ownerTimer) clearInterval(ownerTimer);
     ownerTimer = undefined;
-    forgetServiceEntryForPid(process.pid, registryPath);
     try {
       await server.stop();
     } finally {
-      resolveStopped();
+      try {
+        await stopAllProjectRuntimes(registryPath);
+      } finally {
+        forgetServiceEntryForPid(process.pid, registryPath);
+        resolveStopped();
+      }
     }
   };
-  process.once("SIGINT", () => void stop());
-  process.once("SIGTERM", () => void stop());
+  const requestStop = () => {
+    void stop().catch((error) => {
+      console.error(`OpenCanon service shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    });
+  };
+  process.once("SIGINT", requestStop);
+  process.once("SIGTERM", requestStop);
   if (ownerPid !== undefined) {
     ownerTimer = setInterval(() => {
-      if (!isProcessRunning(ownerPid)) void stop();
+      if (!isProcessRunning(ownerPid)) requestStop();
     }, OwnedServiceOwnerPollIntervalMs);
     ownerTimer.unref();
   }

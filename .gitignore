@@ -5,6 +5,7 @@ tmp/
 .opencanon/cache/
 .opencanon/semantic-index/
 .opencanon/processes/
+.opencanon/check-*/
 .opencanon/*.log
 .opencanon/init.json
 .opencanon/commit-approvals.json

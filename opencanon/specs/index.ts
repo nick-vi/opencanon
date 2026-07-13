@@ -76,6 +76,12 @@ export default [
         checks: ["change-run-tests", "runtime-client-tests"],
       },
       {
+        id: "isolated-check-runtimes-follow-owner-lifecycle",
+        statement: "Shell-backed Proof uses isolated service namespaces whose service, project runtimes, and generated workspace share one explicit owner lifecycle.",
+        acceptance: ["owner death stops the isolated service and every child project runtime", "completed checks remove their generated workspace", "a later check reaps an orphaned workspace only after its owner is dead"],
+        checks: ["change-run-tests", "service-lifecycle-tests"],
+      },
+      {
         id: "state-projections-use-complete-activity",
         statement: "Correctness-sensitive Change state is derived from complete indexed Activity for the relevant Changes, while browsing feeds remain bounded.",
         acceptance: ["unrelated Activity cannot reopen closed work", "ready work and snapshots use the same complete history", "complete history is queried in one batch for current Changes"],

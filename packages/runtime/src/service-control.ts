@@ -147,7 +147,7 @@ export async function stopProjectRuntime(rootDir: string, registryPath = service
   };
 }
 
-async function stopAllProjectRuntimes(registryPath: string): Promise<StopProjectRuntimeResult[]> {
+export async function stopAllProjectRuntimes(registryPath: string): Promise<StopProjectRuntimeResult[]> {
   const entries = readRuntimeRegistry(registryPath);
   const results: StopProjectRuntimeResult[] = [];
   for (const entry of entries) {

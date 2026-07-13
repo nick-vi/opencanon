@@ -43,6 +43,9 @@ Checks: `service-lifecycle-tests`
 Behavior `project-start-is-readiness-contract`: CLI, MCP, or app client asks the local service to ensure a project runtime; success means verified ready; failure preserves a typed cause, retry policy, project path, and recovery action.
 Checks: `runtime-client-tests`, `service-lifecycle-tests`
 
+Behavior `owned-proof-runtime-lifecycle`: project runtime runs shell-backed Proof in an isolated service namespace; owner shutdown retires the isolated service, every child project runtime, and its generated workspace.
+Checks: `service-lifecycle-tests`
+
 ## Governance
 
 - infer governing conventions from owned scope

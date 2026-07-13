@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -101,6 +101,7 @@ test("Change check runs stream output, persist terminal state, and replay from a
       assert.match(terminal.run.outputTail, /second/);
       assert.match(terminal.run.outputTail, /\.opencanon\/check-/);
     }
+    assert.equal(readdirSync(path.join(rootDir, ".opencanon")).some((entry) => entry.startsWith("check-")), false);
 
     const persisted = await readRun(server.url, headers, started.id);
     assert.equal(persisted.status, ChangeCheckRunStatus.Passed);

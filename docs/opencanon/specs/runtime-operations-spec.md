@@ -104,6 +104,12 @@ Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and can
 - in-flight responses and event streams hold an activity lease until transport completion
 Checks: `change-run-tests`, `runtime-client-tests`
 
+Rule `isolated-check-runtimes-follow-owner-lifecycle`: Shell-backed Proof uses isolated service namespaces whose service, project runtimes, and generated workspace share one explicit owner lifecycle.
+- owner death stops the isolated service and every child project runtime
+- completed checks remove their generated workspace
+- a later check reaps an orphaned workspace only after its owner is dead
+Checks: `change-run-tests`, `service-lifecycle-tests`
+
 Rule `state-projections-use-complete-activity`: Correctness-sensitive Change state is derived from complete indexed Activity for the relevant Changes, while browsing feeds remain bounded.
 - unrelated Activity cannot reopen closed work
 - ready work and snapshots use the same complete history

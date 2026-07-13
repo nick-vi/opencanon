@@ -230,6 +230,13 @@ export default [
         outcome: "success means verified ready; failure preserves a typed cause, retry policy, project path, and recovery action",
         checks: ["runtime-client-tests", "service-lifecycle-tests"],
       },
+      {
+        id: "owned-proof-runtime-lifecycle",
+        actor: "project runtime",
+        action: "runs shell-backed Proof in an isolated service namespace",
+        outcome: "owner shutdown retires the isolated service, every child project runtime, and its generated workspace",
+        checks: ["service-lifecycle-tests"],
+      },
     ],
     checks: [
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },

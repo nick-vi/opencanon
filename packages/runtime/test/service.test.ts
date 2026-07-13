@@ -76,6 +76,7 @@ import {
 } from "./service-support.ts";
 import { createAuthoringProject } from "./support.ts";
 import { parseOpenCanonProblemFromError } from "@opencanon/core";
+import { pruneOrphanedCheckRuntimes } from "../src/service-check-runtime.ts";
 
 test("runtime namespaces isolate installed, source, and explicit registries", () => {
   const previous = process.env[RuntimeNamespaceEnv];
@@ -147,26 +148,56 @@ test("an owner-bound service exits when its owner process stops", { timeout: 200
   const previousCli = process.env.OPENCANON_CLI;
   const previousOwnerPid = process.env.OPENCANON_SERVICE_OWNER_PID;
   let servicePid: number | undefined;
+  let runtimePid: number | undefined;
   try {
     if (!owner.pid) throw new Error("test owner process did not start");
+    createAuthoringProject(rootDir);
     process.env.OPENCANON_CLI = path.resolve("packages/cli/src/index.ts");
     process.env.OPENCANON_SERVICE_OWNER_PID = String(owner.pid);
     const started = await startService({ cwd: rootDir, registryPath });
     servicePid = started.entry.pid;
     assert.equal(readServiceEntry(registryPath)?.ownerPid, owner.pid);
+    const runtime = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
+    runtimePid = runtime.entry.pid;
+    assert.equal(processIsRunning(runtimePid), true);
 
     owner.kill("SIGTERM");
     assert.equal(await waitUntilProcessStops(owner.pid, 3000), true);
     assert.equal(await waitUntilProcessStops(servicePid, 5000), true);
+    assert.equal(await waitUntilProcessStops(runtimePid, 5000), true);
     assert.equal(readServiceEntry(registryPath), undefined);
+    assert.deepEqual(readRuntimeRegistry(registryPath), []);
   } finally {
     await stopService(registryPath).catch(() => undefined);
+    if (runtimePid && processIsRunning(runtimePid)) process.kill(runtimePid, "SIGKILL");
     if (servicePid && processIsRunning(servicePid)) process.kill(servicePid, "SIGKILL");
     if (owner.pid && processIsRunning(owner.pid)) process.kill(owner.pid, "SIGKILL");
     if (previousCli === undefined) delete process.env.OPENCANON_CLI;
     else process.env.OPENCANON_CLI = previousCli;
     if (previousOwnerPid === undefined) delete process.env.OPENCANON_SERVICE_OWNER_PID;
     else process.env.OPENCANON_SERVICE_OWNER_PID = previousOwnerPid;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("isolated check runtime pruning preserves live owners and removes dead or expired owners", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-check-runtime-prune-"));
+  const liveDir = path.join(rootDir, "check-live");
+  const orphanDir = path.join(rootDir, "check-orphan");
+  const expiredDir = path.join(rootDir, "check-expired");
+  try {
+    mkdirSync(liveDir, { recursive: true });
+    mkdirSync(orphanDir, { recursive: true });
+    mkdirSync(expiredDir, { recursive: true });
+    writeFileSync(path.join(liveDir, "owner.json"), JSON.stringify({ version: 1, ownerPid: process.pid, createdAt: new Date().toISOString() }));
+    writeFileSync(path.join(orphanDir, "owner.json"), JSON.stringify({ version: 1, ownerPid: 999_999_999, createdAt: new Date().toISOString() }));
+    writeFileSync(path.join(expiredDir, "owner.json"), JSON.stringify({ version: 1, ownerPid: process.pid, createdAt: new Date(0).toISOString() }));
+
+    assert.equal(await pruneOrphanedCheckRuntimes(rootDir), 2);
+    assert.equal(existsSync(liveDir), true);
+    assert.equal(existsSync(orphanDir), false);
+    assert.equal(existsSync(expiredDir), false);
+  } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

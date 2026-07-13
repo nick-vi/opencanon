@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import {
   CanonEventSchema,
@@ -22,9 +21,8 @@ import {
   type ChangeCheck,
   type ValidationResultCache,
 } from "@opencanon/core";
-import { stopService } from "./service.ts";
+import { cleanupIsolatedCheckRuntime, createIsolatedCheckRuntime } from "./service-check-runtime.ts";
 import { terminateSpawnedProcess } from "./service-process.ts";
-import { ServiceEnv } from "./service-types.ts";
 import type { ProjectStore } from "./state.ts";
 import { validateRelativePaths } from "./server-fs.ts";
 import {
@@ -261,11 +259,11 @@ async function runShellCheck(
   timeoutMs: number,
   options: RunChangeCheckOptions,
 ): Promise<RunChangeCheckResult> {
-  const checkRuntime = createIsolatedShellCheckRuntime(rootDir);
+  const checkRuntime = await createIsolatedCheckRuntime(rootDir);
   try {
     return await spawnShellCheck({ rootDir, changeId, taskId, checkId, kind, command, timeoutMs, env: checkRuntime.env, options });
   } finally {
-    await cleanupIsolatedShellCheckRuntime(checkRuntime);
+    await cleanupIsolatedCheckRuntime(checkRuntime);
   }
 }
 
@@ -348,38 +346,6 @@ function boundedCheckOutput(current: string, chunk: string): string {
   const next = current + chunk;
   if (Buffer.byteLength(next, "utf8") <= CheckCommandMaxBuffer) return next;
   return Buffer.from(next, "utf8").subarray(0, CheckCommandMaxBuffer).toString("utf8");
-}
-
-type IsolatedShellCheckRuntime = {
-  dir: string;
-  registryPath: string;
-  env: NodeJS.ProcessEnv;
-};
-
-const ShellCheckRuntimeEnvKeys = [
-  "OPENCANON_SERVICE_TOKEN",
-  "OPENCANON_SERVICE_LEASE_ID",
-  "OPENCANON_SERVICE_OWNER_PID",
-  "OPENCANON_SERVICE_PIPE_ENDPOINT",
-  "OPENCANON_RUNTIME_TOKEN",
-  "OPENCANON_RUNTIME_LEASE_ID",
-  "OPENCANON_RUNTIME_PIPE_ENDPOINT",
-] as const;
-
-function createIsolatedShellCheckRuntime(rootDir: string): IsolatedShellCheckRuntime {
-  const parentDir = path.join(rootDir, ".opencanon");
-  mkdirSync(parentDir, { recursive: true });
-  const dir = mkdtempSync(path.join(parentDir, "check-"));
-  const registryPath = path.join(dir, "service.json");
-  const env: NodeJS.ProcessEnv = { ...process.env, OPENCANON_SERVICE_REGISTRY_PATH: registryPath };
-  for (const key of ShellCheckRuntimeEnvKeys) delete env[key];
-  env[ServiceEnv.OwnerPid] = String(process.pid);
-  return { dir, registryPath, env };
-}
-
-async function cleanupIsolatedShellCheckRuntime(runtime: IsolatedShellCheckRuntime): Promise<void> {
-  await stopService(runtime.registryPath).catch(() => undefined);
-  rmSync(runtime.dir, { recursive: true, force: true });
 }
 
 function trimCheckOutput(output: string, maxChars = 6000): string {

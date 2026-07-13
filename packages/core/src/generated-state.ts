@@ -3,6 +3,7 @@ export const InitStateFilePath = ".opencanon/init.json";
 export const GeneratedStateIgnoreEntries = [
   ".opencanon/generated/",
   ".opencanon/processes/",
+  ".opencanon/check-*/",
   ".opencanon/*.log",
   InitStateFilePath,
   ".opencanon/*.sqlite",
@@ -17,6 +18,7 @@ export const GeneratedStateIgnoreProbePaths = [
   ".opencanon/processes/stable/runtime.json",
   ".opencanon/processes/stable/runtime.log",
   ".opencanon/processes/stable/worker.lock",
+  ".opencanon/check-example/owner.json",
   ".opencanon/diagnostic.log",
   InitStateFilePath,
   ".opencanon/state.sqlite",
