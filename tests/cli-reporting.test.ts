@@ -260,6 +260,7 @@ test("changes runs watch pages replay beyond one event frame", () => {
       changeId: "paged-change",
       checkId: "paged-check",
       checkKind: "command",
+      executor: { runtimeNamespace: "test", leaseId: "cli-reporting" },
       createdAt: timestamp,
       updatedAt: timestamp,
       startedAt: timestamp,

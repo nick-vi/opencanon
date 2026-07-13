@@ -93,6 +93,7 @@ import { createKnowledgeIndexManager, type KnowledgeIndexProgress } from "./know
 import { ProjectFileLanguage, setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
 import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-facts-provider.ts";
 import { createProjectObservabilityExporter } from "./observability.ts";
+import { readRuntimeProcessEnvironment } from "./runtime-process-environment.ts";
 import {
   askProjectContext,
   listProjectContextChunks,
@@ -149,12 +150,6 @@ export type RuntimeServer = {
   stop(): Promise<void>;
 };
 
-const RuntimeEnv = {
-  LeaseId: "OPENCANON_RUNTIME_LEASE_ID",
-  RegistryPath: "OPENCANON_SERVICE_REGISTRY_PATH",
-  PipeEndpoint: "OPENCANON_RUNTIME_PIPE_ENDPOINT",
-} as const;
-
 export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}): Promise<RuntimeServer> {
   const cwd = options.cwd ?? process.cwd();
   const rootDir = resolveRootDir(cwd);
@@ -162,10 +157,13 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   assertSafeRuntimeHost(host, options.allowRemote);
   const authToken = usableRuntimeAuthToken(options.authToken) ?? usableRuntimeAuthToken(process.env.OPENCANON_RUNTIME_TOKEN) ?? createRuntimeAuthToken();
   const port = options.port ?? 4767;
+  const runtimeEnvironment = readRuntimeProcessEnvironment();
+  const runtimeRegistryPath = runtimeEnvironment.registryPath;
+  const configuredPipeEndpoint = runtimeEnvironment.pipeEndpoint;
   const processIdentity = {
     kind: "runtime" as const,
     pid: process.pid,
-    leaseId: process.env[RuntimeEnv.LeaseId]?.trim() || `runtime-${process.pid}`,
+    leaseId: runtimeEnvironment.leaseId,
   };
   let paths = createPaths(rootDir);
   const configDiagnostics = validateConfig(paths);
@@ -176,7 +174,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   const workerLease = acquireProjectWorkerLease({
     rootDir,
     leaseId: processIdentity.leaseId,
-    registryPath: process.env[RuntimeEnv.RegistryPath]?.trim() || undefined,
+    registryPath: runtimeRegistryPath,
   });
   const storeResource = resource({
     init() {
@@ -282,6 +280,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   });
   const changeCheckRunner = await createChangeCheckRunner({
     rootDir,
+    executor: { runtimeNamespace: runtimeEnvironment.runtimeNamespace, leaseId: processIdentity.leaseId },
     tracer,
     events,
     stateManager,
@@ -360,7 +359,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     server = await serveRuntime({ host, port, routeRequest, beginActivity: beginTransportActivity });
     const pipeEndpoint =
       options.pipeEndpoint ??
-      process.env[RuntimeEnv.PipeEndpoint] ??
+      configuredPipeEndpoint ??
       localPipeEndpoint({ scope: "runtime", key: `${rootDir}:${options.statePath ?? ""}:${process.pid}:${port}` });
     pipeServer = await serveLocalProtocolPipe({
       endpoint: pipeEndpoint,
@@ -747,20 +746,19 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
 
   function syncRuntimeBusyLifecycle(): void {
-    const registryPath = process.env[RuntimeEnv.RegistryPath]?.trim();
-    if (!registryPath) return;
-    const entry = currentRuntimeRegistryEntry(registryPath);
+    if (!runtimeRegistryPath) return;
+    const entry = currentRuntimeRegistryEntry(runtimeRegistryPath);
     if (!entry) return;
     const messages = [...runtimeBusyActivities.values()];
     if (messages.length > 0) {
       const message = messages[messages.length - 1]!;
       if (entry.lifecycle.status !== ProcessLifecycleStatus.Busy || entry.lifecycle.message !== message) {
-        updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), registryPath);
+        updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), runtimeRegistryPath);
       }
       return;
     }
     if (entry.lifecycle.status === ProcessLifecycleStatus.Busy) {
-      updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", entry.lifecycle.restart), registryPath);
+      updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", entry.lifecycle.restart), runtimeRegistryPath);
     }
   }
 

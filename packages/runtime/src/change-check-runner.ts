@@ -12,6 +12,7 @@ import {
   type ChangeCheckRun,
   type ChangeCheckRunEvent,
   type ChangeCheckRunEventDraft,
+  type ChangeCheckRunExecutor,
   type ChangeCheckRunPruneResult,
   type ChangeCheckRunQuery,
   type ValidationResultCache,
@@ -66,6 +67,7 @@ export type ChangeCheckRunner = Awaited<ReturnType<typeof createChangeCheckRunne
 
 export async function createChangeCheckRunner(input: {
   rootDir: string;
+  executor: ChangeCheckRunExecutor;
   tracer: SimpleTracer;
   events: EventBroadcaster;
   stateManager: RuntimeStateManager;
@@ -98,6 +100,7 @@ export async function createChangeCheckRunner(input: {
           ...(request.task ? { taskId: request.task.id } : {}),
           checkId: check.id,
           checkKind: check.kind,
+          executor: input.executor,
           ...(request.actor ? { actor: request.actor } : {}),
           createdAt: now,
           updatedAt: now,
@@ -140,8 +143,10 @@ export async function createChangeCheckRunner(input: {
     hasActiveWork(): boolean {
       return queue.length > 0 || controllers.size > 0 || drainPromise !== undefined;
     },
-    async cancel(runId: string): Promise<ChangeCheckRun | null> {
-      return cancelRun(runId);
+    async cancel(runId: string): Promise<{ ok: true; run: ChangeCheckRun | null } | { ok: false; run: ChangeCheckRun }> {
+      const run = input.store().readJob(runId);
+      if (run && !isTerminal(run) && !isOwnedByCurrentExecutor(run)) return { ok: false as const, run };
+      return { ok: true as const, run: await cancelRun(runId) };
     },
     async stop(): Promise<void> {
       stopping = true;
@@ -359,7 +364,11 @@ export async function createChangeCheckRunner(input: {
   }
 
   function reconcileInterruptedRuns(): number {
-    const activeRuns = input.store().listJobs({ mode: "active" });
+    const activeRuns = input.store().listJobs({ mode: "active" }).filter(
+      (run) =>
+        run.executor.runtimeNamespace === input.executor.runtimeNamespace &&
+        run.executor.leaseId !== input.executor.leaseId,
+    );
     for (const run of activeRuns) {
       const finishedAt = new Date().toISOString();
       const failed = ChangeCheckRunSchema.parse({
@@ -375,6 +384,10 @@ export async function createChangeCheckRunner(input: {
       appendEvent(failed, ChangeCheckRunEventType.Failed);
     }
     return activeRuns.length;
+  }
+
+  function isOwnedByCurrentExecutor(run: ChangeCheckRun): boolean {
+    return run.executor.runtimeNamespace === input.executor.runtimeNamespace && run.executor.leaseId === input.executor.leaseId;
   }
 
   async function recordRetention(trigger: string, interruptedRuns: number): Promise<ChangeCheckRunPruneResult> {

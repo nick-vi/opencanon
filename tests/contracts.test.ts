@@ -299,6 +299,7 @@ test("Change check terminal events require matching run status", () => {
     changeId: "change-1",
     checkId: "check-1",
     checkKind: "command",
+    executor: { runtimeNamespace: "test", leaseId: "contract-test" },
     createdAt: "2026-07-12T00:00:00.000Z",
     updatedAt: "2026-07-12T00:00:01.000Z",
     startedAt: "2026-07-12T00:00:00.000Z",

@@ -396,8 +396,23 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const body = await readJsonBody(request);
         const runId = stringBodyValue(body.runId)?.trim();
         if (!runId) return json(diagnosticsFailure([runtimeInputDiagnostic("runId is required.")]), 400);
-        const run = await changeCheckRunner.cancel(runId);
-        if (!run) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
+        const cancelled = await changeCheckRunner.cancel(runId);
+        if (!cancelled.ok) {
+          return json(
+            diagnosticsFailure(
+              [
+                createOpenCanonDiagnostic({
+                  code: diagnosticCodes.lifecycleConflict,
+                  message: `Change check run ${runId} is owned by runtime namespace ${cancelled.run.executor.runtimeNamespace}.`,
+                  action: "Use the OpenCanon service namespace that started the run or wait for that run to finish.",
+                }),
+              ],
+              diagnosticCodes.lifecycleConflict,
+            ),
+            409,
+          );
+        }
+        if (!cancelled.run) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
         const snapshot = changeCheckRunner.describe(runId);
         if (!snapshot) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${runId}.`)]), 404);
         return json({ ok: true, data: snapshot });

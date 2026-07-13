@@ -29,6 +29,12 @@ const ChangeCheckKindSchema = z.enum([
   ChangeCheckKind.Test,
 ]);
 
+export const ChangeCheckRunExecutorSchema = z.object({
+  runtimeNamespace: z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,62})$/),
+  leaseId: z.string().min(1),
+}).strict();
+export type ChangeCheckRunExecutor = z.infer<typeof ChangeCheckRunExecutorSchema>;
+
 const ChangeCheckRunBaseSchema = z.object({
   id: z.string().min(1),
   batchId: z.string().min(1),
@@ -37,6 +43,7 @@ const ChangeCheckRunBaseSchema = z.object({
   taskId: z.string().min(1).optional(),
   checkId: z.string().min(1),
   checkKind: ChangeCheckKindSchema,
+  executor: ChangeCheckRunExecutorSchema,
   actor: z.string().min(1).optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

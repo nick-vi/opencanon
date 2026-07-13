@@ -170,6 +170,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
     changeId: "runtime-operations",
     checkId: "engine-tests",
     checkKind: "command",
+    executor: { runtimeNamespace: "test", leaseId: "engine-test" },
     createdAt: "2026-07-12T00:00:00.000Z",
     updatedAt: "2026-07-12T00:00:00.000Z",
     outputTail: "",

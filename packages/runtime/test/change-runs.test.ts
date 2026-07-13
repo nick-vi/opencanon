@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, ChangeCheckTimeout, createPaths, resolveChangeCheckTimeoutMs, type ChangeCheckRunEvent } from "@opencanon/core";
-import { openProjectStore, runtimeAuthHeaders, startOpenCanonRuntime } from "@opencanon/runtime";
+import { openProjectStore, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 import { createChangeRunProject, quotedNode, readRunEvents, shellQuote, startRun } from "./change-run-test-support.ts";
 import { ChangeCheckRunPolicy } from "../src/change-check-runner.ts";
@@ -273,33 +273,47 @@ test("Change check commands honor their declared timeout budget", { timeout: Int
   }
 });
 
-test("runtime startup finalizes persisted non-terminal Change check runs as interrupted", { timeout: IntegrationTimeoutMs }, async () => {
+test("runtime namespaces reconcile only their abandoned runs and replay the terminal event", { timeout: IntegrationTimeoutMs }, async () => {
   const rootDir = createChangeRunProject("interrupted", `${quotedNode()} -e ${shellQuote("process.exit(0)")}`);
-  const run = ChangeCheckRunSchema.parse({
-    id: "interrupted-run",
-    batchId: "interrupted-batch",
-    kind: "change-check",
-    status: ChangeCheckRunStatus.Running,
-    changeId: "interrupted-change",
-    checkId: "stream",
-    checkKind: "command",
-    createdAt: "2026-07-12T00:00:00.000Z",
-    updatedAt: "2026-07-12T00:00:01.000Z",
-    startedAt: "2026-07-12T00:00:01.000Z",
-    outputTail: "partial",
-    outputBytes: 7,
-    outputTruncated: false,
-  });
+  const registryA = path.join(rootDir, "namespace-a", "service.json");
+  const registryB = path.join(rootDir, "namespace-b", "service.json");
+  const namespaceA = runtimeNamespaceForRegistry(registryA);
+  const namespaceB = runtimeNamespaceForRegistry(registryB);
+  const runA = activeRun("run-a", { runtimeNamespace: namespaceA, leaseId: "lease-a-abandoned" });
+  const runB = activeRun("run-b", { runtimeNamespace: namespaceB, leaseId: "lease-b-current" });
   const store = openProjectStore({ rootDir, paths: createPaths(rootDir) });
-  store.writeJob(run);
+  store.writeJob(runA);
+  store.writeJob(runB);
   store.close();
-  const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+
+  const serverB = await startRuntimeWithIdentity(rootDir, registryB, namespaceB, "lease-b-current");
   try {
-    const recovered = await readRun(server.url, runtimeAuthHeaders(server.authToken), run.id);
+    assert.equal((await readRun(serverB.url, runtimeAuthHeaders(serverB.authToken), runA.id)).status, ChangeCheckRunStatus.Running);
+    assert.equal((await readRun(serverB.url, runtimeAuthHeaders(serverB.authToken), runB.id)).status, ChangeCheckRunStatus.Running);
+
+    const cancelResponse = await fetch(`${serverB.url}/api/changes/check-runs/cancel`, {
+      method: "POST",
+      headers: { ...runtimeAuthHeaders(serverB.authToken), "content-type": "application/json" },
+      body: JSON.stringify({ runId: runA.id }),
+    });
+    assert.equal(cancelResponse.status, 409, await cancelResponse.text());
+  } finally {
+    await serverB.stop();
+  }
+
+  const replacementA = await startRuntimeWithIdentity(rootDir, registryA, namespaceA, "lease-a-replacement");
+  try {
+    const headers = runtimeAuthHeaders(replacementA.authToken);
+    const recovered = await readRun(replacementA.url, headers, runA.id);
     assert.equal(recovered.status, ChangeCheckRunStatus.Failed);
     assert("interrupted" in recovered && recovered.interrupted);
+    assert.equal((await readRun(replacementA.url, headers, runB.id)).status, ChangeCheckRunStatus.Running);
+    const replay = await readRunEvents(replacementA.url, headers, runA.id);
+    const terminal = replay.at(-1);
+    assert.equal(terminal?.type, ChangeCheckRunEventType.Failed);
+    assert(terminal && "run" in terminal && terminal.run.status === ChangeCheckRunStatus.Failed);
   } finally {
-    await server.stop();
+    await replacementA.stop();
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -343,6 +357,7 @@ function terminalRun(id: string, timestamp: string) {
     changeId: "retention-change",
     checkId: "stream",
     checkKind: "command",
+    executor: { runtimeNamespace: "test", leaseId: "retention" },
     createdAt: timestamp,
     updatedAt: timestamp,
     startedAt: timestamp,
@@ -352,6 +367,53 @@ function terminalRun(id: string, timestamp: string) {
     outputBytes: 0,
     outputTruncated: false,
   });
+}
+
+function activeRun(id: string, executor: { runtimeNamespace: string; leaseId: string }) {
+  return ChangeCheckRunSchema.parse({
+    id,
+    batchId: "interrupted-batch",
+    kind: "change-check",
+    status: ChangeCheckRunStatus.Running,
+    changeId: "interrupted-change",
+    checkId: "stream",
+    checkKind: "command",
+    executor,
+    createdAt: "2026-07-12T00:00:00.000Z",
+    updatedAt: "2026-07-12T00:00:01.000Z",
+    startedAt: "2026-07-12T00:00:01.000Z",
+    outputTail: "partial",
+    outputBytes: 7,
+    outputTruncated: false,
+  });
+}
+
+async function startRuntimeWithIdentity(
+  rootDir: string,
+  registryPath: string,
+  runtimeNamespace: string,
+  leaseId: string,
+) {
+  const previous = {
+    registryPath: process.env.OPENCANON_SERVICE_REGISTRY_PATH,
+    runtimeNamespace: process.env.OPENCANON_RUNTIME_NAMESPACE,
+    leaseId: process.env.OPENCANON_RUNTIME_LEASE_ID,
+  };
+  process.env.OPENCANON_SERVICE_REGISTRY_PATH = registryPath;
+  process.env.OPENCANON_RUNTIME_NAMESPACE = runtimeNamespace;
+  process.env.OPENCANON_RUNTIME_LEASE_ID = leaseId;
+  try {
+    return await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+  } finally {
+    restoreEnvironment("OPENCANON_SERVICE_REGISTRY_PATH", previous.registryPath);
+    restoreEnvironment("OPENCANON_RUNTIME_NAMESPACE", previous.runtimeNamespace);
+    restoreEnvironment("OPENCANON_RUNTIME_LEASE_ID", previous.leaseId);
+  }
+}
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 async function readRun(url: string, headers: Record<string, string>, runId: string) {

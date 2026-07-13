@@ -1,3 +1,4 @@
+use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::sync::{Arc, Barrier};
 
@@ -15,6 +16,7 @@ fn persists_jobs_and_ordered_replay_events() {
         "changeId": "runtime-operations",
         "checkId": "engine-tests",
         "checkKind": "command",
+        "executor": { "runtimeNamespace": "test", "leaseId": "jobs-test" },
         "createdAt": "2026-07-12T00:00:00.000Z",
         "updatedAt": "2026-07-12T00:00:00.000Z",
         "outputTail": "",
@@ -65,6 +67,69 @@ fn persists_jobs_and_ordered_replay_events() {
     )
     .unwrap();
     assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn migration_011_discards_pre_executor_jobs_without_touching_canon_events() {
+    let root = test_root("job-executor-migration");
+    let state_path = root.join(".opencanon/state.sqlite");
+    {
+        let project = open_test_project(&root);
+        project
+            .write_job_json(
+                json!({ "job": queued_job("pre-contract", "2026-07-12T00:00:00.000Z") })
+                    .to_string(),
+            )
+            .unwrap();
+        project
+            .append_job_event_json(
+                json!({ "event": event_draft("pre-contract", "queued") }).to_string(),
+            )
+            .unwrap();
+    }
+    let conn = Connection::open(&state_path).unwrap();
+    conn.execute(
+        "insert into canon_events(id, type, timestamp, payload) values (?1, ?2, ?3, ?4)",
+        (
+            "canon-event",
+            "indexed",
+            "2026-07-12T00:00:00.000Z",
+            "{\"id\":\"canon-event\"}",
+        ),
+    )
+    .unwrap();
+    conn.execute("delete from migrations where version = 11", [])
+        .unwrap();
+    drop(conn);
+
+    drop(open_test_project(&root));
+    let conn = Connection::open(&state_path).unwrap();
+    assert_eq!(
+        conn.query_row("select count(*) from jobs", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row("select count(*) from job_events", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row("select count(*) from canon_events", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        conn.query_row(
+            "select count(*) from migrations where version = 11",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -267,6 +332,7 @@ fn queued_job(id: &str, timestamp: &str) -> Value {
         "changeId": "runtime-operations",
         "checkId": "engine-tests",
         "checkKind": "command",
+        "executor": { "runtimeNamespace": "test", "leaseId": "jobs-test" },
         "createdAt": timestamp,
         "updatedAt": timestamp,
         "outputTail": "",
@@ -284,6 +350,7 @@ fn terminal_job(id: &str, timestamp: &str) -> Value {
         "changeId": "runtime-operations",
         "checkId": "engine-tests",
         "checkKind": "command",
+        "executor": { "runtimeNamespace": "test", "leaseId": "jobs-test" },
         "createdAt": timestamp,
         "updatedAt": timestamp,
         "startedAt": timestamp,
