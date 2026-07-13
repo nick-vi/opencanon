@@ -619,10 +619,25 @@ export default [
         dependsOn: ["active-proof-ownership"],
       },
       {
+        id: "doctor-ready-inspection",
+        title: "Inspect one settled runtime in Doctor",
+        files: [
+          "packages/cli/src/index.ts",
+          "packages/cli/src/runtime-client.ts",
+          "packages/runtime/src/service-monitor.ts",
+          "tests/cli-reporting.test.ts",
+          "opencanon/specs/index.ts",
+          "opencanon/changes/index.ts",
+          "docs/opencanon/specs/project-runtime-lifecycle-spec.md",
+        ],
+        checks: ["cli-tests", "runtime-client-tests", "typecheck", "project-doctor", "process-steady-state"],
+        dependsOn: ["namespace-project-state"],
+      },
+      {
         id: "full-proof",
         title: "Prove release integrity and clean steady state",
         checks: ["typecheck", "vector-tests", "engine-tests", "inference-tests", "service-tests", "runtime-client-tests", "mcp-tests", "worktree-tests", "release-tests", "dependency-audit", "project-validation", "project-doctor", "process-steady-state", "full-ci"],
-        dependsOn: ["namespace-project-state", "semantic-publication-consistency", "durable-docs-only"],
+        dependsOn: ["doctor-ready-inspection", "semantic-publication-consistency", "durable-docs-only"],
       },
     ],
     checks: [

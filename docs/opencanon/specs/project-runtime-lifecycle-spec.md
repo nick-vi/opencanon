@@ -16,6 +16,7 @@ The local service owns a ready-only, typed, and retry-aware lifecycle for isolat
 - Files: `packages/runtime/test/service-reconcile.test.ts`
 - Files: `packages/runtime/test/client-test-sources.ts`
 - Files: `packages/runtime/test/client.test.ts`
+- Files: `tests/cli-reporting.test.ts`
 - Files: `tests/mcp.test.ts`
 - Files: `tests/worktree.test.ts`
 - Docs: `docs/opencanon/specs/project-runtime-lifecycle-spec.md`
@@ -70,6 +71,12 @@ Rule `process-control-is-namespaced`: Each runtime distribution owns a determini
 - ephemeral Proof state is removed with its owned workspace
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
+Rule `doctor-inspects-settled-runtime`: Doctor waits within a bounded lifecycle budget for expected project startup or active work before inspecting runtime health, producers, and Project Knowledge.
+- Doctor immediately after validation does not report transient busy work as unhealthy
+- all live checks observe the settled matching runtime
+- work that exceeds the budget remains an explicit nonzero lifecycle failure
+Checks: `service-lifecycle-tests`, `runtime-client-tests`
+
 Rule `isolated-clients-retire-owned-processes`: Tests and ephemeral clients that create private service registries must retire every service and project process they own before deleting their workspace.
 - teardown stops project runtimes before the service
 - stop failures fail the test
@@ -103,6 +110,15 @@ Scenario `source-and-installed-runtime-coexist`
 - Then neither retires the other worker lease
 - Then each opens namespace-owned SQLite and vector state
 - Then schema compatibility and indexing are evaluated independently without writer contention
+Checks: `service-lifecycle-tests`, `runtime-client-tests`
+
+Scenario `doctor-after-project-work`
+- Given a matching project runtime is registered
+- Given validation or refresh work is still active
+- When Doctor runs immediately after that project work
+- Then Doctor waits for the runtime to settle within its bounded budget
+- Then health, producer, and Knowledge checks use the ready runtime
+- Then transient busy state is not rendered as a false failure
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 ## Governance
