@@ -839,8 +839,7 @@ test("runtime client lazily starts a supervised project runtime when none is run
     assert.equal(output.service, true);
     assert.equal(existsSync(path.join(rootDir, ".opencanon", "state.sqlite")), true);
   } finally {
-    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
-    await stopService(registryPath).catch(() => undefined);
+    await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -868,8 +867,7 @@ test("runtime client repairs a supervised runtime when the registered endpoint d
     assert.deepEqual(output.secondFiles, ["src/company.ts"]);
     assert.notEqual(output.afterPid, output.beforePid);
   } finally {
-    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
-    await stopService(registryPath).catch(() => undefined);
+    await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -896,8 +894,7 @@ test("runtime client repairs a supervised runtime before resuming a stream", asy
     assert.notEqual(output.afterPid, output.beforePid);
     assert.equal(output.receivedSnapshot, true);
   } finally {
-    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
-    await stopService(registryPath).catch(() => undefined);
+    await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -926,8 +923,7 @@ test("runtime client repairs a supervised runtime when the pipe endpoint disappe
     assert.deepEqual(output.secondFiles, ["src/company.ts"]);
     assert.notEqual(output.afterPid, output.beforePid);
   } finally {
-    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
-    await stopService(registryPath).catch(() => undefined);
+    await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { stopService } from "@opencanon/runtime";
 import { test } from "vitest";
 
 const script = path.join(process.cwd(), "packages/cli/src/index.ts");
@@ -69,7 +70,7 @@ test("validate --files returns without starting runtime when no selected validat
   }
 });
 
-test("validate --project uses and reuses the supervised runtime", () => {
+test("validate --project uses and reuses the supervised runtime", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validate-project-local-"));
   const serviceRegistryPath = path.join(rootDir, "service-registry.json");
   const env = { ...process.env, OPENCANON_SERVICE_REGISTRY_PATH: serviceRegistryPath };
@@ -136,12 +137,7 @@ test("validate --project uses and reuses the supervised runtime", () => {
     assert.equal(second.error, undefined, second.error ? second.error.message : "spawn failed");
     assert.equal(second.status, 0, second.stderr || second.stdout);
   } finally {
-    spawnSync(process.execPath, [script, "service", "stop"], {
-      cwd: rootDir,
-      encoding: "utf8",
-      timeout: validateSpawnTimeoutMs,
-      env,
-    });
+    await stopService(serviceRegistryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { stopService } from "@opencanon/runtime";
 import { test } from "vitest";
 import { createAuthoringProject } from "../packages/runtime/test/support.ts";
 
@@ -48,7 +49,7 @@ test("shared Activity filters before bounding repository events", () => {
   }
 });
 
-test("worktree create claims a task and prevents duplicate agent pickup", { timeout: 60_000 }, () => {
+test("worktree create claims a task and prevents duplicate agent pickup", { timeout: 60_000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-worktree-cli-"));
   const worktreePath = path.join(tmpdir(), `opencanon-worktree-cli-wt-${Date.now()}`);
   const worktreeDb = path.join(rootDir, ".opencanon", "worktrees-test.sqlite");
@@ -170,6 +171,7 @@ test("worktree create claims a task and prevents duplicate agent pickup", { time
     assert.deepEqual(listedAfterRemovePayload.worktrees, []);
     assert.deepEqual(listedAfterRemovePayload.leases, []);
   } finally {
+    await stopService(testEnv(worktreeDb).OPENCANON_SERVICE_REGISTRY_PATH);
     rmSync(rootDir, { recursive: true, force: true });
     rmSync(worktreePath, { recursive: true, force: true });
   }

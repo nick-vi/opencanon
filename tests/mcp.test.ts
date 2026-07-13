@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { stopService } from "@opencanon/runtime";
 import { test } from "vitest";
 import { createAuthoringProject } from "../packages/runtime/test/support.ts";
 
@@ -51,6 +52,7 @@ test("opencanon mcp exposes project tools backed by the runtime", async () => {
     assert.equal(payload.results[0]?.file, "src/company.ts");
   } finally {
     await client.close().catch(() => undefined);
+    await stopService(env.OPENCANON_SERVICE_REGISTRY_PATH);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

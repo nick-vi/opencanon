@@ -487,7 +487,7 @@ export default [
       {
         id: "owned-test-processes",
         title: "Retire every process owned by isolated tests",
-        files: ["packages/runtime/src/service-check-runtime.ts", "packages/runtime/test/*.test.ts", "tests/mcp.test.ts", "tests/worktree.test.ts"],
+        files: ["packages/runtime/src/service-check-runtime.ts", "packages/runtime/test/*.test.ts", "tests/setup-vitest.ts", "tests/mcp.test.ts", "tests/worktree.test.ts", "tests/validate-cli-fast-path.test.ts", "tests/cli-reporting.test.ts", "scripts/check-test-processes.ts", "package.json"],
         checks: ["service-tests", "change-run-tests", "runtime-client-tests", "mcp-tests", "worktree-tests", "process-steady-state"],
         dependsOn: ["canon-contract"],
       },

@@ -813,7 +813,7 @@ test("project and service stop commands support JSON format", () => {
   }
 });
 
-test("project start supports JSON format", { timeout: 60000 }, () => {
+test("project start supports JSON format", { timeout: 60000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-start-json-"));
   const registryPath = path.join(rootDir, "global", "service.json");
   const cli = path.join(process.cwd(), "packages/cli/src/index.ts");
@@ -838,8 +838,7 @@ test("project start supports JSON format", { timeout: 60000 }, () => {
     assert.equal(payload.service.status, "running");
     assert.equal(payload.service.entry.authToken, undefined);
   } finally {
-    spawnSync(process.execPath, [cli, "project", "stop", "--format", "json"], { cwd: rootDir, env, encoding: "utf8" });
-    spawnSync(process.execPath, [cli, "service", "stop", "--format", "json"], { cwd: rootDir, env, encoding: "utf8" });
+    await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

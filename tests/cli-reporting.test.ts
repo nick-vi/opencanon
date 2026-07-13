@@ -309,12 +309,13 @@ function stopTestRuntime(rootDir: string): void {
     ["project", "stop", "--format", "json"],
     ["service", "stop", "--format", "json"],
   ]) {
-    spawnSync(process.execPath, [script, ...args], {
+    const result = spawnSync(process.execPath, [script, ...args], {
       cwd: rootDir,
       encoding: "utf8",
       env,
       timeout: 15_000,
     });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
   }
 }
 
