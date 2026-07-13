@@ -9,7 +9,7 @@ export default [
     updates: {
       areas: ["local-service-and-runtimes", "project-map-governance"],
       specs: ["runtime-operations-spec", "spec-governance-model"],
-      surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index"],
+      surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index", "release-update"],
     },
     scope: [
       { kind: DefinitionTargetKind.File, path: "opencanon/specs/index.ts" },
@@ -33,7 +33,8 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/runtime-client.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/review.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-change-runtime.ts" },
-      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-check-runtime.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-control.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/state.ts" },
       { kind: DefinitionTargetKind.File, path: ".gitignore" },
       { kind: DefinitionTargetKind.File, path: "package.json" },
@@ -94,7 +95,7 @@ export default [
       {
         id: "full-proof",
         title: "Prove agent readiness integrity end to end",
-        files: ["package.json", ".gitignore", "packages/core/src/change.ts", "packages/core/src/contracts-change-runs.ts", "packages/core/src/generated-state.ts", "packages/core/src/index.ts", "packages/engine/src/index.ts", "crates/opencanon-engine/src/**", "packages/runtime/src/change-check-runner.ts", "packages/runtime/src/cli.ts", "packages/runtime/src/local-protocol.ts", "packages/runtime/src/server.ts", "packages/runtime/src/server-change-runtime.ts", "packages/runtime/src/server-http.ts", "packages/runtime/src/service*.ts", "packages/runtime/src/state.ts", "packages/runtime/test/change-run-test-support.ts", "packages/runtime/test/engine-binding-test-support.ts", "packages/runtime/test/change-runs.test.ts", "packages/runtime/test/runtime-supervision.test.ts", "packages/runtime/test/client-test-sources.ts", "packages/runtime/test/client.test.ts", "packages/runtime/test/engine.test.ts", "packages/runtime/test/semantic-index.test.ts", "packages/runtime/test/service.test.ts", "packages/runtime/test/state.test.ts", "tests/contracts.test.ts", "tests/cli-reporting.test.ts", "tests/init*.test.ts", "tests/validator-runtime.test.ts", "opencanon/areas/index.ts", "opencanon/specs/index.ts", "opencanon/changes/index.ts", "docs/opencanon/areas/local-service-and-runtimes.md", "docs/opencanon/specs/project-runtime-lifecycle-spec.md", "docs/opencanon/specs/runtime-operations-spec.md"],
+        files: ["package.json", ".gitignore", "packages/core/src/change.ts", "packages/core/src/contracts-change-runs.ts", "packages/core/src/generated-state.ts", "packages/core/src/index.ts", "packages/engine/src/index.ts", "crates/opencanon-engine/src/**", "packages/runtime/src/change-check-runner.ts", "packages/runtime/src/cli.ts", "packages/runtime/src/local-protocol.ts", "packages/runtime/src/server.ts", "packages/runtime/src/server-change-runtime.ts", "packages/runtime/src/server-http.ts", "packages/runtime/src/service-check-runtime.ts", "packages/runtime/src/service-control.ts", "packages/runtime/src/state.ts", "packages/runtime/test/change-run-test-support.ts", "packages/runtime/test/engine-binding-test-support.ts", "packages/runtime/test/change-runs.test.ts", "packages/runtime/test/runtime-supervision.test.ts", "packages/runtime/test/client-test-sources.ts", "packages/runtime/test/client.test.ts", "packages/runtime/test/engine.test.ts", "packages/runtime/test/semantic-index.test.ts", "packages/runtime/test/service.test.ts", "packages/runtime/test/state.test.ts", "tests/contracts.test.ts", "tests/cli-reporting.test.ts", "tests/init*.test.ts", "tests/validator-runtime.test.ts", "opencanon/areas/index.ts", "opencanon/specs/index.ts", "opencanon/changes/index.ts", "docs/opencanon/areas/local-service-and-runtimes.md", "docs/opencanon/specs/project-runtime-lifecycle-spec.md", "docs/opencanon/specs/runtime-operations-spec.md"],
         checks: ["contracts-tests", "change-run-tests", "runtime-supervision-tests", "service-lifecycle-tests", "init-tests", "engine-tests", "runtime-client-tests", "worktree-tests", "cli-tests", "doctor-tests", "typecheck", "project-validation", "project-doctor", "full-ci"],
         dependsOn: ["owned-check-runtimes"],
       },
