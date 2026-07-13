@@ -131,19 +131,27 @@ test("doctor waits for active project work before inspecting runtime state", asy
     const doctorPromise = runCliProcess(rootDir, ["doctor", "--format", "json"]);
     await delay(350);
 
-    const activeEntry = readProjectRuntimeEntry(rootDir, registryPath);
-    assert(activeEntry, "project runtime registration disappeared while Doctor waited");
-    const running = compareAndSetRuntimeLifecycle(
-      activeEntry,
-      {
-        ...activeEntry.lifecycle,
-        status: ProcessLifecycleStatus.Running,
-        updatedAt: new Date().toISOString(),
-        message: "Test project work completed.",
-      },
-      registryPath,
-    );
-    assert.equal(running.applied, true, "project runtime did not leave the test busy state");
+    let completed = false;
+    for (let attempt = 0; attempt < 20 && !completed; attempt += 1) {
+      const activeEntry = readProjectRuntimeEntry(rootDir, registryPath);
+      assert(activeEntry, "project runtime registration disappeared while Doctor waited");
+      if (activeEntry.lifecycle.status === ProcessLifecycleStatus.Running) {
+        completed = true;
+        break;
+      }
+      completed = compareAndSetRuntimeLifecycle(
+        activeEntry,
+        {
+          ...activeEntry.lifecycle,
+          status: ProcessLifecycleStatus.Running,
+          updatedAt: new Date().toISOString(),
+          message: "Test project work completed.",
+        },
+        registryPath,
+      ).applied;
+      if (!completed) await delay(25);
+    }
+    assert.equal(completed, true, "project runtime did not leave the test busy state");
 
     const doctor = await doctorPromise;
     assert(Date.now() - doctorStartedAt >= 300, "Doctor returned before active project work settled");
