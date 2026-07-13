@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { ChangeCheckRunEventType } from "@opencanon/core";
@@ -25,7 +26,8 @@ test("active Change checks hold the supervised runtime busy lifecycle", { timeou
     "busy",
     `${quotedNode()} -e ${shellQuote("setTimeout(() => console.log('finished'), 700)")}`,
   );
-  const registryPath = path.join(rootDir, "service.json");
+  const registryDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-registry-"));
+  const registryPath = path.join(registryDir, "service.json");
   const leaseId = `runtime-${process.pid}-busy-test`;
   const previousRegistry = process.env.OPENCANON_SERVICE_REGISTRY_PATH;
   const previousLease = process.env.OPENCANON_RUNTIME_LEASE_ID;
@@ -65,6 +67,7 @@ test("active Change checks hold the supervised runtime busy lifecycle", { timeou
     restoreEnvironment("OPENCANON_SERVICE_REGISTRY_PATH", previousRegistry);
     restoreEnvironment("OPENCANON_RUNTIME_LEASE_ID", previousLease);
     rmSync(rootDir, { recursive: true, force: true });
+    rmSync(registryDir, { recursive: true, force: true });
   }
 });
 
