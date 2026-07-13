@@ -352,6 +352,17 @@ test("native embedding smoke is required unless explicitly optional", () => {
   assert(!source.includes("OPENCANON_NATIVE_EMBEDDING_SMOKE"));
 });
 
+test("CI separates fixture checks from required project producers", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const checkCi = packageJson.scripts?.["check:ci"] ?? "";
+
+  assert.match(checkCi, /validate --check-fixtures(?:\s|&&)/);
+  assert.doesNotMatch(checkCi, /validate --check-fixtures --require-producer/);
+  assert.match(checkCi, /validate --project --require-producer typescript/);
+});
+
 test("CI relies on doctor for managed skill drift instead of retired launcher paths", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const releaseCheck = readFileSync("scripts/check-release-consistency.ts", "utf8");
