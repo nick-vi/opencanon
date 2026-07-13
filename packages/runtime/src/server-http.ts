@@ -2,7 +2,12 @@ import { createServer, type IncomingMessage, type Server as NodeHttpServer, type
 import type { Socket } from "node:net";
 import { diagnosticsFailure } from "./routes.ts";
 
-export async function serveRuntime(input: { host: string; port: number; routeRequest(request: Request): Promise<Response> }): Promise<{ port: number; stop(force?: boolean): Promise<void> }> {
+export async function serveRuntime(input: {
+  host: string;
+  port: number;
+  routeRequest(request: Request): Promise<Response>;
+  beginActivity?(): () => void;
+}): Promise<{ port: number; stop(force?: boolean): Promise<void> }> {
   const sockets = new Set<Socket>();
   const nodeServer = createServer(async (nodeRequest, nodeResponse) => {
     await handleNodeRequest(input, nodeRequest, nodeResponse);
@@ -53,10 +58,11 @@ async function closeNodeServer(server: NodeHttpServer, sockets: Set<Socket>, for
 }
 
 async function handleNodeRequest(
-  input: { host: string; routeRequest(request: Request): Promise<Response> },
+  input: { host: string; routeRequest(request: Request): Promise<Response>; beginActivity?(): () => void },
   nodeRequest: IncomingMessage,
   nodeResponse: ServerResponse,
 ): Promise<void> {
+  const endActivity = input.beginActivity?.();
   const abortController = new AbortController();
   let responseFinished = false;
   nodeRequest.on("aborted", () => abortController.abort());
@@ -96,6 +102,8 @@ async function handleNodeRequest(
       return;
     }
     nodeResponse.destroy(error instanceof Error ? error : new Error(String(error)));
+  } finally {
+    endActivity?.();
   }
 }
 
@@ -210,4 +218,3 @@ function waitForDrain(nodeResponse: ServerResponse, signal: AbortSignal): Promis
     signal.addEventListener("abort", onAbort, { once: true });
   });
 }
-

@@ -342,6 +342,7 @@ export async function serveLocalProtocolPipe(input: {
   routeRequest(request: Request): Promise<Response>;
   host?: string;
   maxFrameBytes?: number;
+  beginActivity?(): () => void;
 }): Promise<LocalProtocolPipeServer> {
   const sockets = new Set<Socket>();
   const nodeServer = net.createServer((socket) => {
@@ -479,9 +480,10 @@ async function streamPipeText(endpoint: LocalProtocolPipeEndpoint, request: Loca
 }
 
 async function handlePipeSocket(
-  input: { routeRequest(request: Request): Promise<Response>; host?: string; maxFrameBytes?: number },
+  input: { routeRequest(request: Request): Promise<Response>; host?: string; maxFrameBytes?: number; beginActivity?(): () => void },
   socket: Socket,
 ): Promise<void> {
+  const endActivity = input.beginActivity?.();
   let requestId: string | undefined;
   try {
     const rawFrame = await readPipeFrame(socket, input.maxFrameBytes ?? PipeFrameMaxBytes);
@@ -508,6 +510,8 @@ async function handlePipeSocket(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await endPipeFrame(socket, errorFrame(requestId, 500, "Internal Server Error", message));
+  } finally {
+    endActivity?.();
   }
 }
 
@@ -554,6 +558,10 @@ async function streamPipeResponse(socket: Socket, id: string, response: Response
   }
   const reader = body.getReader();
   const decoder = new TextDecoder();
+  const cancelReader = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  socket.once("close", cancelReader);
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -570,6 +578,7 @@ async function streamPipeResponse(socket: Socket, id: string, response: Response
     await emit({ protocol: PipeProtocolName, id, status, statusText, stream: true, done: true });
     socket.end();
   } finally {
+    socket.off("close", cancelReader);
     reader.releaseLock();
   }
 }

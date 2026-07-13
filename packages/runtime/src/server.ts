@@ -305,6 +305,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let knowledgeWatchQueue: Promise<void> = Promise.resolve();
   const idleTimeoutMs = options.idleTimeoutMs && options.idleTimeoutMs > 0 ? options.idleTimeoutMs : undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let activeTransportRequests = 0;
   // Producer warming->ready refresh state. `latestReadyGeneration` is the newest
   // generation observed; a debounced refresh fires after quiescence and the
   // generation-guard drops it if a newer generation arrived meanwhile.
@@ -351,7 +352,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       buildIndexedSnapshot,
       restartStore,
     });
-    server = await serveRuntime({ host, port, routeRequest });
+    server = await serveRuntime({ host, port, routeRequest, beginActivity: beginTransportActivity });
     const pipeEndpoint =
       options.pipeEndpoint ??
       process.env[RuntimeEnv.PipeEndpoint] ??
@@ -361,6 +362,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       routeRequest,
       host: "opencanon.runtime",
       maxFrameBytes: MaxRequestBodyBytes,
+      beginActivity: beginTransportActivity,
     });
     resetIdleTimer();
   } catch (error) {
@@ -620,9 +622,21 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     }
   }
 
+  function beginTransportActivity(): () => void {
+    activeTransportRequests += 1;
+    resetIdleTimer();
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      activeTransportRequests = Math.max(0, activeTransportRequests - 1);
+      resetIdleTimer();
+    };
+  }
+
   async function stopForIdle(): Promise<void> {
     if (stopped) return;
-    if (currentWorkerJob || changeCheckRunner.hasActiveWork()) {
+    if (activeTransportRequests > 0 || currentWorkerJob || changeCheckRunner.hasActiveWork()) {
       resetIdleTimer();
       return;
     }
