@@ -570,6 +570,8 @@ export default [
           "packages/runtime/src/server-change-runtime.ts",
           "packages/runtime/test/service.test.ts",
           "packages/runtime/test/runtime-supervision.test.ts",
+          "opencanon/specs/index.ts",
+          "docs/opencanon/specs/runtime-operations-spec.md",
         ],
         checks: ["service-tests", "runtime-supervision-tests", "change-run-tests", "typecheck", "process-steady-state"],
         dependsOn: ["proof-terminal-contracts", "owned-test-processes"],

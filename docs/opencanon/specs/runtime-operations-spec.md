@@ -92,6 +92,7 @@ Rule `operation-resources-are-bounded`: A project runtime bounds active operatio
 - terminal history is pruned by age and count
 - run events cascade when their run is removed
 - active operations hold the supervised runtime busy lifecycle
+- stale inspection cannot overwrite or replace active work
 - Project State allocates monotonic run-event sequences atomically across runtime connections
 Checks: `contracts-tests`, `change-run-tests`, `runtime-supervision-tests`, `engine-tests`
 
@@ -105,7 +106,7 @@ Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and can
 Checks: `change-run-tests`, `runtime-client-tests`
 
 Rule `isolated-check-runtimes-follow-owner-lifecycle`: Shell-backed Proof uses isolated service namespaces whose service, project runtimes, and generated workspace share one explicit owner lifecycle.
-- owner death stops the isolated service and every child project runtime
+- owner death stops the isolated service, every child project runtime, and the active shell process tree
 - completed checks remove their generated workspace
 - a later check reaps an orphaned workspace only after its owner is dead
 Checks: `change-run-tests`, `service-lifecycle-tests`

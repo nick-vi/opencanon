@@ -66,7 +66,7 @@ export default [
       {
         id: "operation-resources-are-bounded",
         statement: "A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.",
-        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations hold the supervised runtime busy lifecycle", "Project State allocates monotonic run-event sequences atomically across runtime connections"],
+        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations hold the supervised runtime busy lifecycle", "stale inspection cannot overwrite or replace active work", "Project State allocates monotonic run-event sequences atomically across runtime connections"],
         checks: ["contracts-tests", "change-run-tests", "runtime-supervision-tests", "engine-tests"],
       },
       {
@@ -78,7 +78,7 @@ export default [
       {
         id: "isolated-check-runtimes-follow-owner-lifecycle",
         statement: "Shell-backed Proof uses isolated service namespaces whose service, project runtimes, and generated workspace share one explicit owner lifecycle.",
-        acceptance: ["owner death stops the isolated service and every child project runtime", "completed checks remove their generated workspace", "a later check reaps an orphaned workspace only after its owner is dead"],
+        acceptance: ["owner death stops the isolated service, every child project runtime, and the active shell process tree", "completed checks remove their generated workspace", "a later check reaps an orphaned workspace only after its owner is dead"],
         checks: ["change-run-tests", "service-lifecycle-tests"],
       },
       {
