@@ -636,6 +636,7 @@ export default [
       {
         id: "full-proof",
         title: "Prove release integrity and clean steady state",
+        files: ["opencanon/changes/index.ts"],
         checks: ["typecheck", "vector-tests", "engine-tests", "inference-tests", "service-tests", "runtime-client-tests", "mcp-tests", "worktree-tests", "release-tests", "dependency-audit", "project-validation", "project-doctor", "process-steady-state", "full-ci"],
         dependsOn: ["doctor-ready-inspection", "semantic-publication-consistency", "durable-docs-only"],
       },
@@ -658,7 +659,7 @@ export default [
       { id: "worktree-tests", kind: "test", target: "tests/worktree.test.ts" },
       { id: "release-tests", kind: "test", target: "tests/release.test.ts" },
       { id: "dependency-audit", kind: "command", command: "npm run security:audit" },
-      { id: "project-validation", kind: "command", command: "npm run opencanon -- validate --project --require-producer typescript" },
+      { id: "project-validation", kind: "command", command: "npm run opencanon -- analyze --typed && npm run opencanon -- validate --project --require-producer typescript" },
       { id: "project-doctor", kind: "doctor" },
       { id: "process-steady-state", kind: "command", command: "node scripts/check-test-processes.ts" },
       { id: "release-check", kind: "command", command: "npm run release:check" },
