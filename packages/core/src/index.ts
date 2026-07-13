@@ -37,6 +37,7 @@ export {
 export type { OpenCanonAgentEntryFile as OpenCanonAgentEntryFileType } from "./agent-entry.ts";
 export {
   ChangeCheckRunEventSchema,
+  ChangeCheckRunEventDraftSchema,
   ChangeCheckRunAdmissionResultSchema,
   ChangeCheckRunPruneResultSchema,
   ChangeCheckRunEventType,
@@ -49,6 +50,7 @@ export type {
   ChangeCheckRun,
   ChangeCheckRunAdmissionResult,
   ChangeCheckRunEvent,
+  ChangeCheckRunEventDraft,
   ChangeCheckRunEventQuery,
   ChangeCheckRunPruneRequest,
   ChangeCheckRunPruneResult,

@@ -7,6 +7,7 @@ import {
   BuildRepoGraphResultSchema,
   CanonEventSchema,
   ChangeCheckRunEventSchema,
+  ChangeCheckRunEventDraftSchema,
   ChangeCheckRunAdmissionResultSchema,
   ChangeCheckRunPruneResultSchema,
   ChangeCheckRunSchema,
@@ -52,6 +53,7 @@ import {
   type ChangeCheckRun,
   type ChangeCheckRunAdmissionResult,
   type ChangeCheckRunEvent,
+  type ChangeCheckRunEventDraft,
   type ChangeCheckRunEventQuery,
   type ChangeCheckRunPruneRequest,
   type ChangeCheckRunPruneResult,
@@ -132,7 +134,7 @@ export type EngineProject = {
   listJobs(query: ChangeCheckRunQuery): ChangeCheckRun[];
   admitJobs(input: { runs: ChangeCheckRun[]; events: ChangeCheckRunEvent[]; capacity: number }): ChangeCheckRunAdmissionResult;
   pruneJobs(request: ChangeCheckRunPruneRequest): ChangeCheckRunPruneResult;
-  appendJobEvent(event: ChangeCheckRunEvent): void;
+  appendJobEvent(event: ChangeCheckRunEventDraft): ChangeCheckRunEvent;
   listJobEvents(request: ChangeCheckRunEventQuery): ChangeCheckRunEvent[];
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
   listObservabilityRecords(query?: ObservabilityRecordQuery): ObservabilityRecordResult;
@@ -189,7 +191,7 @@ type EngineProjectJsonBinding = {
   listJobsJson(request: string): string;
   admitJobsJson(request: string): string;
   pruneJobsJson(request: string): string;
-  appendJobEventJson(request: string): void;
+  appendJobEventJson(request: string): string;
   listJobEventsJson(request: string): string;
   writeObservabilityRecordsJson(request: string): void;
   listObservabilityRecordsJson(request: string): string;
@@ -361,7 +363,12 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
       ChangeCheckRunPruneResultSchema.parse(
         parseJson(callEngine(() => project.pruneJobsJson(JSON.stringify(request)))),
       ),
-    appendJobEvent: (event) => callEngine(() => project.appendJobEventJson(JSON.stringify({ event: ChangeCheckRunEventSchema.parse(event) }))),
+    appendJobEvent: (event) =>
+      ChangeCheckRunEventSchema.parse(
+        parseJson(
+          callEngine(() => project.appendJobEventJson(JSON.stringify({ event: ChangeCheckRunEventDraftSchema.parse(event) }))),
+        ),
+      ),
     listJobEvents: (request) => (parseJson(callEngine(() => project.listJobEventsJson(JSON.stringify(request)))) as unknown[]).map((event) => ChangeCheckRunEventSchema.parse(event)),
     writeObservabilityRecords: (records) => callEngine(() => project.writeObservabilityRecordsJson(JSON.stringify(records))),
     listObservabilityRecords: (query = {}) => parseObservabilityRecordResult(parseJson(callEngine(() => project.listObservabilityRecordsJson(JSON.stringify(query))))),

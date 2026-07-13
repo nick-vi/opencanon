@@ -6,15 +6,7 @@ import { test } from "vitest";
 import { createPaths } from "@opencanon/core";
 import { createProjectStore } from "@opencanon/runtime";
 import { createEngine } from "@opencanon/engine";
-
-function admittedJobs(requestJson: string): string {
-  const request = JSON.parse(requestJson) as { jobs: unknown[]; capacity: number };
-  return JSON.stringify({ accepted: true, activeCount: request.jobs.length, requestedCount: request.jobs.length, capacity: request.capacity });
-}
-
-function emptyPruneResult(): string {
-  return JSON.stringify({ deletedRuns: 0, deletedEvents: 0, retainedTerminalRuns: 0 });
-}
+import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
 
 test("runtime store can use an isolated state path", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-store-"));
@@ -83,7 +75,7 @@ test("runtime store can use an isolated state path", () => {
         listJobsJson: () => JSON.stringify([]),
         admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
         pruneJobsJson: () => emptyPruneResult(),
-        appendJobEventJson: () => undefined,
+        appendJobEventJson: assignedJobEvent,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
         listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),

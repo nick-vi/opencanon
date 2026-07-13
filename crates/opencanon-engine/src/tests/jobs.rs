@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::sync::{Arc, Barrier};
 
 use super::support::*;
 
@@ -25,9 +26,9 @@ fn persists_jobs_and_ordered_replay_events() {
         .unwrap();
 
     let events = [
-        json!({ "runId": "run-1", "batchId": "batch-1", "sequence": 1, "timestamp": "2026-07-12T00:00:01.000Z", "type": "started" }),
-        json!({ "runId": "run-1", "batchId": "batch-1", "sequence": 2, "timestamp": "2026-07-12T00:00:02.000Z", "type": "stdout", "text": "live output\n" }),
-        json!({ "runId": "run-1", "batchId": "batch-1", "sequence": 3, "timestamp": "2026-07-12T00:00:03.000Z", "type": "started" }),
+        json!({ "runId": "run-1", "batchId": "batch-1", "timestamp": "2026-07-12T00:00:01.000Z", "type": "started" }),
+        json!({ "runId": "run-1", "batchId": "batch-1", "timestamp": "2026-07-12T00:00:02.000Z", "type": "stdout", "text": "live output\n" }),
+        json!({ "runId": "run-1", "batchId": "batch-1", "timestamp": "2026-07-12T00:00:03.000Z", "type": "started" }),
     ];
     for event in events {
         project
@@ -64,6 +65,57 @@ fn persists_jobs_and_ordered_replay_events() {
     )
     .unwrap();
     assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn allocates_job_event_sequences_across_project_connections() {
+    let root = test_root("job-event-sequences");
+    let project = open_test_project(&root);
+    project
+        .write_job_json(
+            json!({ "job": queued_job("shared-run", "2026-07-12T00:00:00.000Z") }).to_string(),
+        )
+        .unwrap();
+
+    let barrier = Arc::new(Barrier::new(3));
+    let writers = (0..2)
+        .map(|_| {
+            let root = root.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let writer = open_test_project(&root);
+                barrier.wait();
+                for _ in 0..50 {
+                    writer
+                        .append_job_event_json(
+                            json!({ "event": event_draft("shared-run", "started") }).to_string(),
+                        )
+                        .unwrap();
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    for writer in writers {
+        writer.join().unwrap();
+    }
+
+    let events: Value = serde_json::from_str(
+        &project
+            .list_job_events_json(
+                json!({ "jobId": "shared-run", "afterSequence": 0, "limit": 200, "order": "asc" })
+                    .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let sequences = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["sequence"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(sequences, (1..=100).collect::<Vec<_>>());
 }
 
 #[test]
@@ -133,7 +185,7 @@ fn prunes_terminal_jobs_by_age_and_count_without_removing_active_jobs() {
             .write_job_json(json!({ "job": job }).to_string())
             .unwrap();
         project
-            .append_job_event_json(json!({ "event": queued_event(id, 1) }).to_string())
+            .append_job_event_json(json!({ "event": event_draft(id, "queued") }).to_string())
             .unwrap();
     }
 
@@ -178,14 +230,13 @@ fn reads_latest_job_event_sequence_beyond_replay_page_size() {
             json!({ "job": queued_job("long-run", "2026-07-12T00:00:00.000Z") }).to_string(),
         )
         .unwrap();
-    for sequence in 1..=2_100 {
+    for _ in 1..=2_100 {
         project
             .append_job_event_json(
                 json!({
                     "event": {
                         "runId": "long-run",
                         "batchId": "batch",
-                        "sequence": sequence,
                         "timestamp": "2026-07-12T00:00:00.000Z",
                         "type": "started"
                     }
@@ -251,5 +302,14 @@ fn queued_event(run_id: &str, sequence: u64) -> Value {
         "sequence": sequence,
         "timestamp": "2026-07-12T00:00:00.000Z",
         "type": "queued"
+    })
+}
+
+fn event_draft(run_id: &str, event_type: &str) -> Value {
+    json!({
+        "runId": run_id,
+        "batchId": "batch",
+        "timestamp": "2026-07-12T00:00:00.000Z",
+        "type": event_type
     })
 }

@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   ContextRequestSchema,
   RuntimeHealthSchema,
+  ChangeCheckRunEventDraftSchema,
   ChangeCheckRunEventSchema,
   RuntimeHealthSummarySchema,
   RuntimeProjectSummarySchema,
@@ -308,6 +309,12 @@ test("Change check terminal events require matching run status", () => {
     outputTruncated: false,
   };
   assert.equal(ChangeCheckRunEventSchema.safeParse({ runId: "run-1", batchId: "batch-1", sequence: 1, timestamp: "2026-07-12T00:00:01.000Z", type: "passed", run }).success, false);
+});
+
+test("Change check event drafts leave sequence allocation to Project State", () => {
+  const draft = { runId: "run-1", batchId: "batch-1", timestamp: "2026-07-12T00:00:01.000Z", type: "started" };
+  assert.equal(ChangeCheckRunEventDraftSchema.safeParse(draft).success, true);
+  assert.equal(ChangeCheckRunEventDraftSchema.safeParse({ ...draft, sequence: 1 }).success, false);
 });
 
 test("project scope filtering applies project patterns and ignores", () => {

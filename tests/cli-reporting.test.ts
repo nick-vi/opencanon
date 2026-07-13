@@ -272,11 +272,11 @@ test("changes runs watch pages replay beyond one event frame", () => {
     const store = openProjectStore({ rootDir, paths: createPaths(rootDir) });
     try {
       store.writeJob(run);
-      store.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 1, timestamp, type: ChangeCheckRunEventType.Queued });
+      store.appendJobEvent({ runId: run.id, batchId: run.batchId, timestamp, type: ChangeCheckRunEventType.Queued });
       for (let sequence = 2; sequence <= 2_100; sequence += 1) {
-        store.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence, timestamp, type: ChangeCheckRunEventType.Stdout, text: "x" });
+        store.appendJobEvent({ runId: run.id, batchId: run.batchId, timestamp, type: ChangeCheckRunEventType.Stdout, text: "x" });
       }
-      store.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 2_101, timestamp, type: ChangeCheckRunEventType.Passed, run });
+      store.appendJobEvent({ runId: run.id, batchId: run.batchId, timestamp, type: ChangeCheckRunEventType.Passed, run });
     } finally {
       store.close();
     }

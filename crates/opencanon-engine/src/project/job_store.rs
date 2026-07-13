@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::json;
 
 use super::EngineProjectHandle;
@@ -361,20 +361,35 @@ fn append_job_event_in_transaction(
 pub(super) fn append_job_event_json(
     project: &EngineProjectHandle,
     request: String,
-) -> napi::Result<()> {
-    let request: AppendJobEventRequest = decode(&request)?;
+) -> napi::Result<String> {
+    let mut request: AppendJobEventRequest = decode(&request)?;
+    if request.event.get("sequence").is_some() {
+        return Err(napi_error(
+            "invalid-engine-payload",
+            "Appended job events must not provide a sequence; Project State assigns it atomically.",
+        ));
+    }
     let mut conn = project
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
     let transaction = conn
-        .transaction()
+        .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| sqlite_error("Could not start job event transaction", error))?;
+    let job_id = required_json_string(&request.event, "runId", "Job event")?;
+    let sequence: i64 = transaction
+        .query_row(
+            "select coalesce(max(sequence), 0) + 1 from job_events where job_id = ?1",
+            params![job_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| sqlite_error("Could not allocate project job event sequence", error))?;
+    request.event["sequence"] = json!(sequence);
     append_job_event_in_transaction(&transaction, &request.event)?;
     transaction
         .commit()
         .map_err(|error| sqlite_error("Could not commit project job event", error))?;
-    Ok(())
+    encode(&request.event)
 }
 
 pub(super) fn list_job_events_json(

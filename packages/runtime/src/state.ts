@@ -7,6 +7,7 @@ import {
   type ChangeCheckRun,
   type ChangeCheckRunAdmissionResult,
   type ChangeCheckRunEvent,
+  type ChangeCheckRunEventDraft,
   type ChangeCheckRunEventQuery,
   type ChangeCheckRunPruneRequest,
   type ChangeCheckRunPruneResult,
@@ -49,7 +50,7 @@ export type ProjectStore = {
   listJobs(query: ChangeCheckRunQuery): ChangeCheckRun[];
   admitJobs(input: { runs: ChangeCheckRun[]; events: ChangeCheckRunEvent[]; capacity: number }): ChangeCheckRunAdmissionResult;
   pruneJobs(request: ChangeCheckRunPruneRequest): ChangeCheckRunPruneResult;
-  appendJobEvent(event: ChangeCheckRunEvent): void;
+  appendJobEvent(event: ChangeCheckRunEventDraft): ChangeCheckRunEvent;
   listJobEvents(request: ChangeCheckRunEventQuery): ChangeCheckRunEvent[];
   writeObservabilityRecords(records: ObservabilityRecordBatch): void;
   listObservabilityRecords(query?: ObservabilityRecordQuery): ObservabilityRecordResult;
@@ -172,7 +173,7 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
       return project.pruneJobs(request);
     },
     appendJobEvent(event) {
-      project.appendJobEvent(event);
+      return project.appendJobEvent(event);
     },
     listJobEvents(request) {
       return project.listJobEvents(request);

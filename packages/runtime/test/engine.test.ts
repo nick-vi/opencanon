@@ -122,7 +122,9 @@ test("engine JSON binding is wrapped in typed contracts", () => {
       },
       pruneJobsJson: () => JSON.stringify({ deletedRuns: 0, deletedEvents: 0, retainedTerminalRuns: job ? 1 : 0 }),
       appendJobEventJson: (requestJson: string) => {
-        jobEvents.push((JSON.parse(requestJson) as { event: unknown }).event);
+        const event = { ...(JSON.parse(requestJson) as { event: Record<string, unknown> }).event, sequence: jobEvents.length + 1 };
+        jobEvents.push(event);
+        return JSON.stringify(event);
       },
       listJobEventsJson: () => JSON.stringify(jobEvents),
       writeObservabilityRecordsJson: (requestJson: string) => {
@@ -177,7 +179,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   project.writeJob(run);
   assert.equal(project.readJob(run.id)?.status, "queued");
   assert.equal(project.listJobs({ mode: "recent", limit: 50 }).length, 1);
-  project.appendJobEvent({ runId: run.id, batchId: run.batchId, sequence: 1, timestamp: "2026-07-12T00:00:01.000Z", type: "started" });
+  project.appendJobEvent({ runId: run.id, batchId: run.batchId, timestamp: "2026-07-12T00:00:01.000Z", type: "started" });
   assert.equal(project.listJobEvents({ jobId: run.id, afterSequence: 0, limit: 50, order: "asc" })[0]?.sequence, 1);
   project.writeObservabilityRecords({
     traces: [

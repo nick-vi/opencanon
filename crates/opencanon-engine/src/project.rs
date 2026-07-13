@@ -536,7 +536,7 @@ impl EngineProjectHandle {
     }
 
     #[napi(js_name = "appendJobEventJson")]
-    pub fn append_job_event_json(&self, request: String) -> napi::Result<()> {
+    pub fn append_job_event_json(&self, request: String) -> napi::Result<String> {
         job_store::append_job_event_json(self, request)
     }
 

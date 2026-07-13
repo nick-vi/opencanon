@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ChangeCheckRunEventSchema,
+  ChangeCheckRunEventDraftSchema,
   ChangeCheckRunEventType,
   ChangeCheckRunSchema,
   ChangeCheckRunStatus,
@@ -10,6 +11,7 @@ import {
   type ChangeCheck,
   type ChangeCheckRun,
   type ChangeCheckRunEvent,
+  type ChangeCheckRunEventDraft,
   type ChangeCheckRunPruneResult,
   type ChangeCheckRunQuery,
   type ValidationResultCache,
@@ -75,7 +77,6 @@ export async function createChangeCheckRunner(input: {
   const queue: QueuedCheck[] = [];
   const controllers = new Map<string, AbortController>();
   const completions = new Map<string, RunCompletion>();
-  const sequences = new Map<string, number>();
   let drainPromise: Promise<void> | undefined;
   let stopping = false;
 
@@ -112,7 +113,6 @@ export async function createChangeCheckRunner(input: {
       for (let index = 0; index < runs.length; index += 1) {
         const run = runs[index]!;
         const event = queuedEvents[index]!;
-        sequences.set(run.id, event.sequence);
         completions.set(run.id, createRunCompletion());
         input.events.broadcast(operationEvent(event));
         queue.push({ project: request.project, change: request.change, task: request.task, check: request.checks[index]!, runId: run.id });
@@ -319,11 +319,7 @@ export async function createChangeCheckRunner(input: {
   }
 
   function appendEvent(run: ChangeCheckRun, type: ChangeCheckRunEvent["type"], text?: string): ChangeCheckRunEvent {
-    const knownSequence = sequences.get(run.id) ?? latestPersistedSequence(run.id);
-    const sequence = knownSequence + 1;
-    const event = createOperationEvent(run, type, sequence, text);
-    input.store().appendJobEvent(event);
-    sequences.set(run.id, sequence);
+    const event = input.store().appendJobEvent(createOperationEventDraft(run, type, text));
     input.events.broadcast(operationEvent(event));
     return event;
   }
@@ -420,9 +416,19 @@ function createOperationEvent(
   text?: string,
 ): ChangeCheckRunEvent {
   return ChangeCheckRunEventSchema.parse({
+    ...createOperationEventDraft(run, type, text),
+    sequence,
+  });
+}
+
+function createOperationEventDraft(
+  run: ChangeCheckRun,
+  type: ChangeCheckRunEvent["type"],
+  text?: string,
+): ChangeCheckRunEventDraft {
+  return ChangeCheckRunEventDraftSchema.parse({
     runId: run.id,
     batchId: run.batchId,
-    sequence,
     timestamp: new Date().toISOString(),
     type,
     ...(text ? { text } : {}),

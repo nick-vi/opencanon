@@ -88,12 +88,25 @@ export type ChangeCheckRunQuery =
       mode: "active";
     };
 
-const ChangeCheckRunEventBaseSchema = z.object({
+const ChangeCheckRunEventDraftBaseSchema = z.object({
   runId: z.string().min(1),
   batchId: z.string().min(1),
-  sequence: z.number().int().positive(),
   timestamp: z.string().datetime(),
+}).strict();
+
+const ChangeCheckRunEventBaseSchema = ChangeCheckRunEventDraftBaseSchema.extend({
+  sequence: z.number().int().positive(),
 });
+
+const ChangeCheckRunEventDraftUnionSchema = z.discriminatedUnion("type", [
+  ChangeCheckRunEventDraftBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Queued) }),
+  ChangeCheckRunEventDraftBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Started) }),
+  ChangeCheckRunEventDraftBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Stdout), text: z.string().min(1) }),
+  ChangeCheckRunEventDraftBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Stderr), text: z.string().min(1) }),
+  ChangeCheckRunEventDraftBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Passed), run: ChangeCheckRunSchema }),
+  ChangeCheckRunEventDraftBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Failed), run: ChangeCheckRunSchema }),
+  ChangeCheckRunEventDraftBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Cancelled), run: ChangeCheckRunSchema }),
+]);
 
 const ChangeCheckRunEventUnionSchema = z.discriminatedUnion("type", [
   ChangeCheckRunEventBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Queued) }),
@@ -104,7 +117,11 @@ const ChangeCheckRunEventUnionSchema = z.discriminatedUnion("type", [
   ChangeCheckRunEventBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Failed), run: ChangeCheckRunSchema }),
   ChangeCheckRunEventBaseSchema.extend({ type: z.literal(ChangeCheckRunEventType.Cancelled), run: ChangeCheckRunSchema }),
 ]);
-export const ChangeCheckRunEventSchema = ChangeCheckRunEventUnionSchema.superRefine((event, context) => {
+
+function validateTerminalRunStatus(
+  event: { type: ChangeCheckRunEventType; run?: ChangeCheckRun },
+  context: z.RefinementCtx,
+): void {
   const expected = event.type === ChangeCheckRunEventType.Passed
     ? ChangeCheckRunStatus.Passed
     : event.type === ChangeCheckRunEventType.Failed
@@ -112,10 +129,14 @@ export const ChangeCheckRunEventSchema = ChangeCheckRunEventUnionSchema.superRef
       : event.type === ChangeCheckRunEventType.Cancelled
         ? ChangeCheckRunStatus.Cancelled
         : undefined;
-  if (expected && "run" in event && event.run.status !== expected) {
+  if (expected && event.run?.status !== expected) {
     context.addIssue({ code: "custom", path: ["run", "status"], message: `${event.type} events require a ${expected} run.` });
   }
-});
+}
+
+export const ChangeCheckRunEventDraftSchema = ChangeCheckRunEventDraftUnionSchema.superRefine(validateTerminalRunStatus);
+export type ChangeCheckRunEventDraft = z.infer<typeof ChangeCheckRunEventDraftSchema>;
+export const ChangeCheckRunEventSchema = ChangeCheckRunEventUnionSchema.superRefine(validateTerminalRunStatus);
 export type ChangeCheckRunEvent = z.infer<typeof ChangeCheckRunEventSchema>;
 
 export type ChangeCheckRunEventQuery = {

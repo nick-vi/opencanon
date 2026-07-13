@@ -10,15 +10,7 @@ import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapsh
 import { createEngine } from "@opencanon/engine";
 import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
-
-function admittedJobs(requestJson: string): string {
-  const request = JSON.parse(requestJson) as { jobs: unknown[]; capacity: number };
-  return JSON.stringify({ accepted: true, activeCount: request.jobs.length, requestedCount: request.jobs.length, capacity: request.capacity });
-}
-
-function emptyPruneResult(): string {
-  return JSON.stringify({ deletedRuns: 0, deletedEvents: 0, retainedTerminalRuns: 0 });
-}
+import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
 
 test("runtime source snapshots feed captured bytes into fact extraction", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-"));
@@ -301,7 +293,7 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         listJobsJson: () => JSON.stringify([]),
         admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
         pruneJobsJson: () => emptyPruneResult(),
-        appendJobEventJson: () => undefined,
+        appendJobEventJson: assignedJobEvent,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
         listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
@@ -766,7 +758,7 @@ test("runtime snapshot reports missing semantic index with project embedding con
         listJobsJson: () => JSON.stringify([]),
         admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
         pruneJobsJson: () => emptyPruneResult(),
-        appendJobEventJson: () => undefined,
+        appendJobEventJson: assignedJobEvent,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
         listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
@@ -1050,7 +1042,7 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         listJobsJson: () => JSON.stringify([]),
         admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
         pruneJobsJson: () => emptyPruneResult(),
-        appendJobEventJson: () => undefined,
+        appendJobEventJson: assignedJobEvent,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
         listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
@@ -1205,7 +1197,7 @@ test("runtime snapshot marks cached semantic index stale after provider config c
         listJobsJson: () => JSON.stringify([]),
         admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
         pruneJobsJson: () => emptyPruneResult(),
-        appendJobEventJson: () => undefined,
+        appendJobEventJson: assignedJobEvent,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
         listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
@@ -1465,7 +1457,7 @@ test("KnowledgeIndexManager writes a full index, progress, and query prewarm", a
         listJobsJson: () => JSON.stringify([]),
         admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
         pruneJobsJson: () => emptyPruneResult(),
-        appendJobEventJson: () => undefined,
+        appendJobEventJson: assignedJobEvent,
         listJobEventsJson: () => JSON.stringify([]),
         writeObservabilityRecordsJson: () => undefined,
         listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
@@ -1602,7 +1594,7 @@ for (const scenario of [
           listJobsJson: () => JSON.stringify([]),
           admitJobsJson: (requestJson: string) => admittedJobs(requestJson),
           pruneJobsJson: () => emptyPruneResult(),
-          appendJobEventJson: () => undefined,
+          appendJobEventJson: assignedJobEvent,
           listJobEventsJson: () => JSON.stringify([]),
           writeObservabilityRecordsJson: () => undefined,
           listObservabilityRecordsJson: () => JSON.stringify({ traces: [], spans: [], events: [] }),
