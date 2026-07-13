@@ -452,7 +452,7 @@ mod tests {
             "opencanon-semantic-publication-lock-{}-{unique}",
             std::process::id()
         ));
-        let state_path = root.join(".opencanon/state.sqlite");
+        let state_path = root.join(".opencanon/state/test/state.sqlite");
         let state_path = state_path.to_string_lossy().to_string();
         let exclusive = lock_semantic_vectors_exclusive(&state_path, "project").unwrap();
         let (started_tx, started_rx) = mpsc::channel();

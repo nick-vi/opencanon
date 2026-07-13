@@ -40,6 +40,14 @@ export function projectProcessStateDirectory(rootDir: string, namespace: string)
   return path.join(rootDir, ".opencanon", "processes", validateRuntimeNamespace(namespace));
 }
 
+export function projectRuntimeStatePath(rootDir: string, namespace: string): string {
+  return path.join(rootDir, ".opencanon", "state", validateRuntimeNamespace(namespace), "state.sqlite");
+}
+
+export function projectRuntimeStatePathInRoot(rootDir: string, stateRoot: string): string {
+  return path.join(path.resolve(stateRoot), shortHash(rootDir), "state.sqlite");
+}
+
 function sourceCheckoutRoot(cliPath: string): string | undefined {
   const normalized = path.resolve(cliPath || ".").replace(/\\/g, "/");
   if (!normalized.endsWith(SourceCliSuffix)) return undefined;

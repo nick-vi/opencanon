@@ -36,6 +36,7 @@ import {
   type ObservabilityRecordQuery,
   type ObservabilityRecordResult,
 } from "@opencanon/engine";
+import { projectRuntimeStatePath, StableRuntimeNamespace } from "./service-namespace.ts";
 
 export type ProjectStore = {
   statePath: string;
@@ -89,7 +90,7 @@ export function openProjectStore(input: { rootDir: string; paths: ContextPaths; 
 }
 
 export function createProjectStore(input: { rootDir: string; paths: ContextPaths; engine: Engine; statePath?: string }): ProjectStore {
-  const statePath = input.statePath ?? path.join(input.rootDir, ".opencanon", "state.sqlite");
+  const statePath = input.statePath ?? projectRuntimeStatePath(input.rootDir, StableRuntimeNamespace);
   const project = input.engine.openProject({
     rootDir: input.rootDir,
     statePath,

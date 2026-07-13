@@ -181,7 +181,7 @@ Starts:
 - browser diagnostics harness
 - server-sent event state stream for browser diagnostics clients
 
-The OpenCanon service is a registry and lifecycle controller, not a shared project runtime. It stores runtime metadata in `~/.opencanon/namespaces/<namespace>/service.json`; installed builds use `stable`, while source checkouts derive an isolated development namespace. Each project runtime still owns exactly one repo root, one namespaced process directory, one shared derived-state database, one auth token, and one watcher root. Registry entries advertise both a pipe endpoint for local app/CLI traffic and a loopback URL for browser diagnostics.
+The OpenCanon service is a registry and lifecycle controller, not a shared project runtime. It stores runtime metadata in `~/.opencanon/namespaces/<namespace>/service.json`; installed builds use `stable`, while source checkouts derive an isolated development namespace. Each project runtime owns exactly one repo root, one namespaced process directory, one namespaced Project State database and vector store, one auth token, and one watcher root. Runtime namespaces never share writable SQLite or vector state. Private Proof services derive one state directory per project beneath their owned check directory and remove it with the service. Registry entries advertise both a pipe endpoint for local app/CLI traffic and a loopback URL for browser diagnostics.
 
 ### CLI Use
 
@@ -430,7 +430,7 @@ All API responses are Zod-validated on both server and client boundaries.
 Database path:
 
 ```text
-.opencanon/state.sqlite
+.opencanon/state/<namespace>/state.sqlite
 ```
 
 Required tables:

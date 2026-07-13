@@ -55,7 +55,10 @@ import {
   writeRuntimeRegistry,
   defaultRuntimeNamespace,
   defaultServiceRegistryPath,
+  projectRuntimeStatePath,
+  projectRuntimeStatePathInRoot,
   projectRuntimePath,
+  ProjectRuntimeEnv,
   runtimeNamespaceForRegistry,
   RuntimeNamespaceEnv,
   StableRuntimeNamespace,
@@ -117,7 +120,7 @@ test("two runtime namespaces can own the same project concurrently", { timeout: 
   let sourcePid: number | undefined;
   try {
     writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
-    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource({ writeStateMarker: true }));
     process.env.OPENCANON_CLI = fakeCliPath;
 
     const stable = await startProjectRuntime({ cwd: rootDir, registryPath: stableRegistry, idleTimeoutMs: 0 });
@@ -133,6 +136,11 @@ test("two runtime namespaces can own the same project concurrently", { timeout: 
     assert.notEqual(projectRuntimePath(rootDir, stableRegistry), projectRuntimePath(rootDir, sourceRegistry));
     assert.equal(existsSync(projectRuntimePath(rootDir, stableRegistry)), true);
     assert.equal(existsSync(projectRuntimePath(rootDir, sourceRegistry)), true);
+    const stableState = projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(stableRegistry));
+    const sourceState = projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(sourceRegistry));
+    assert.notEqual(stableState, sourceState);
+    assert.equal(readFileSync(stableState, "utf8"), String(stablePid));
+    assert.equal(readFileSync(sourceState, "utf8"), String(sourcePid));
   } finally {
     await stopProjectRuntime(rootDir, stableRegistry).catch(() => undefined);
     await stopProjectRuntime(rootDir, sourceRegistry).catch(() => undefined);
@@ -141,6 +149,63 @@ test("two runtime namespaces can own the same project concurrently", { timeout: 
     if (originalCli === undefined) delete process.env.OPENCANON_CLI;
     else process.env.OPENCANON_CLI = originalCli;
     rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("a private service state root isolates every project", { timeout: 20000 }, async () => {
+  const fixtureDir = mkdtempSync(path.join(tmpdir(), "opencanon-private-state-root-"));
+  const projectA = path.join(fixtureDir, "project-a");
+  const projectB = path.join(fixtureDir, "project-b");
+  const registryPath = path.join(fixtureDir, "check", "service.json");
+  const stateRoot = path.join(path.dirname(registryPath), "state");
+  const fakeCliPath = path.join(fixtureDir, "ready-opencanon.mjs");
+  const originalCli = process.env.OPENCANON_CLI;
+  const originalStateRoot = process.env[ProjectRuntimeEnv.StateRoot];
+  try {
+    for (const projectDir of [projectA, projectB]) {
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(path.join(projectDir, "opencanon.config.json"), "{}\n");
+    }
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource({ writeStateMarker: true }));
+    process.env.OPENCANON_CLI = fakeCliPath;
+    process.env[ProjectRuntimeEnv.StateRoot] = stateRoot;
+
+    const runtimeA = await startProjectRuntime({ cwd: projectA, registryPath, idleTimeoutMs: 0 });
+    const runtimeB = await startProjectRuntime({ cwd: projectB, registryPath, idleTimeoutMs: 0 });
+    const stateA = projectRuntimeStatePathInRoot(projectA, stateRoot);
+    const stateB = projectRuntimeStatePathInRoot(projectB, stateRoot);
+
+    assert.notEqual(stateA, stateB);
+    assert.equal(readFileSync(stateA, "utf8"), String(runtimeA.entry.pid));
+    assert.equal(readFileSync(stateB, "utf8"), String(runtimeB.entry.pid));
+    assert.equal(path.relative(stateRoot, stateA).startsWith(".."), false);
+    assert.equal(path.relative(stateRoot, stateB).startsWith(".."), false);
+  } finally {
+    await stopProjectRuntime(projectA, registryPath).catch(() => undefined);
+    await stopProjectRuntime(projectB, registryPath).catch(() => undefined);
+    if (originalCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalCli;
+    if (originalStateRoot === undefined) delete process.env[ProjectRuntimeEnv.StateRoot];
+    else process.env[ProjectRuntimeEnv.StateRoot] = originalStateRoot;
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test("a private service rejects state outside its registry directory", async () => {
+  const fixtureDir = mkdtempSync(path.join(tmpdir(), "opencanon-private-state-boundary-"));
+  const registryPath = path.join(fixtureDir, "check", "service.json");
+  const originalStateRoot = process.env[ProjectRuntimeEnv.StateRoot];
+  try {
+    writeFileSync(path.join(fixtureDir, "opencanon.config.json"), "{}\n");
+    process.env[ProjectRuntimeEnv.StateRoot] = path.join(fixtureDir, "outside");
+    await assert.rejects(
+      startProjectRuntime({ cwd: fixtureDir, registryPath, idleTimeoutMs: 0 }),
+      /private Project State root must stay inside its service registry directory/,
+    );
+  } finally {
+    if (originalStateRoot === undefined) delete process.env[ProjectRuntimeEnv.StateRoot];
+    else process.env[ProjectRuntimeEnv.StateRoot] = originalStateRoot;
+    rmSync(fixtureDir, { recursive: true, force: true });
   }
 });
 
@@ -1254,8 +1319,9 @@ test("service registry stores project runtime entries and lazily starts isolated
     assert.deepEqual(entries.map((entry) => entry.rootDir).sort(), [projectA, projectB].sort());
     assert.equal(new Set(entries.map((entry) => entry.pid)).size, 2);
     assert.equal(entries.every((entry) => entry.logPath.startsWith(path.join(entry.rootDir, ".opencanon"))), true);
-    assert.equal(existsSync(path.join(projectA, ".opencanon", "state.sqlite")), true);
-    assert.equal(existsSync(path.join(projectB, ".opencanon", "state.sqlite")), true);
+    const namespace = runtimeNamespaceForRegistry(registryPath);
+    assert.equal(existsSync(projectRuntimeStatePath(projectA, namespace)), true);
+    assert.equal(existsSync(projectRuntimeStatePath(projectB, namespace)), true);
 
     const proxiedSnapshot = await fetch(`${serviceServer.url}/api/projects/request`, {
       method: "POST",

@@ -24,7 +24,7 @@ import {
 import { errorMessage, isLocalProtocolTransportFailure, projectNotFoundProblem } from "./service-http.ts";
 import { runtimeCliInvocation } from "./service-entrypoint.ts";
 import { clearRuntimeStartupResults, readRuntimeStartupFailure, removeRuntimeStartupResult, runtimeStartupResultPath } from "./service-startup-result.ts";
-import { runtimeNamespaceForRegistry } from "./service-namespace.ts";
+import { projectRuntimeStatePath, projectRuntimeStatePathInRoot, runtimeNamespaceForRegistry } from "./service-namespace.ts";
 import {
   appendLifecycleEvent,
   closeFileDescriptor,
@@ -81,6 +81,8 @@ export async function startProjectRuntime(input: {
   const host = input.host ?? "127.0.0.1";
   assertSafeRuntimeHost(host, input.allowRemote);
   const registryPath = input.registryPath ?? serviceRegistryPath();
+  const runtimeNamespace = runtimeNamespaceForRegistry(registryPath);
+  const statePath = resolvedProjectRuntimeStatePath(rootDir, registryPath, runtimeNamespace);
   return await withStartupLock(registryPath, startupLockScope("runtime", rootDir), async () => {
     await retireUnsupportedRegistry(registryPath);
     await retireMalformedRegistryProcessLeases(registryPath);
@@ -173,7 +175,8 @@ export async function startProjectRuntime(input: {
           [ProjectRuntimeEnv.RegistryPath]: registryPath,
           [ProjectRuntimeEnv.PipeEndpoint]: pipeEndpoint,
           [ProjectRuntimeEnv.StartupResultPath]: startupResultPath,
-          [ProjectRuntimeEnv.RuntimeNamespace]: runtimeNamespaceForRegistry(registryPath),
+          [ProjectRuntimeEnv.RuntimeNamespace]: runtimeNamespace,
+          [ProjectRuntimeEnv.StatePath]: statePath,
         },
       });
       let childPid: number;
@@ -254,6 +257,18 @@ export async function startProjectRuntime(input: {
     }
     throw lastStartupError ?? new Error("OpenCanon runtime did not become ready.");
   });
+}
+
+function resolvedProjectRuntimeStatePath(rootDir: string, registryPath: string, namespace: string): string {
+  const configuredRoot = process.env[ProjectRuntimeEnv.StateRoot]?.trim();
+  if (!configuredRoot) return projectRuntimeStatePath(rootDir, namespace);
+  const resolvedRoot = path.resolve(configuredRoot);
+  const registryDir = path.dirname(path.resolve(registryPath));
+  const relative = path.relative(registryDir, resolvedRoot);
+  if (!relative || path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+    throw new Error("OpenCanon private Project State root must stay inside its service registry directory.");
+  }
+  return projectRuntimeStatePathInRoot(rootDir, resolvedRoot);
 }
 
 export async function startService(input: {

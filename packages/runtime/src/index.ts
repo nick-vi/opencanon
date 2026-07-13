@@ -31,7 +31,8 @@ export { buildRuntimeSnapshot, buildRelatedCanon, gitDiffSnapshot, gitHistorySna
 export { normalizeRuntimePort, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand } from "./cli.ts";
 export type { LocalProtocolEndpoint, LocalProtocolPipeServer, LocalProtocolRawResponse, LocalProtocolRequest, LocalProtocolTransport } from "./local-protocol.ts";
 export { httpLoopbackTransport, localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, LocalTransportKind, pipeProtocolTransport, requestLocalJson, serveLocalProtocolPipe, streamLocalText } from "./local-protocol.ts";
-export { defaultRuntimeNamespace, defaultServiceRegistryPath, projectProcessStateDirectory, runtimeNamespaceForRegistry, RuntimeNamespaceEnv, StableRuntimeNamespace, validateRuntimeNamespace } from "./service-namespace.ts";
+export { defaultRuntimeNamespace, defaultServiceRegistryPath, projectProcessStateDirectory, projectRuntimeStatePath, projectRuntimeStatePathInRoot, runtimeNamespaceForRegistry, RuntimeNamespaceEnv, StableRuntimeNamespace, validateRuntimeNamespace } from "./service-namespace.ts";
+export { ProjectRuntimeEnv } from "./service-types.ts";
 export type { LocalProtocolStreamRequest } from "./local-protocol.ts";
 export type { TypeProducerRuntime, ProducerResolution } from "./type-producer/runtime.ts";
 export { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";

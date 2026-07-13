@@ -81,7 +81,7 @@ test("runtime startup applies terminal run age and count retention", { timeout: 
 });
 
 test("Change check runs stream output, persist terminal state, and replay from a cursor", { timeout: IntegrationTimeoutMs }, async () => {
-  const rootDir = createChangeRunProject("replay", `${quotedNode()} -e ${shellQuote("console.log(process.env.OPENCANON_SERVICE_REGISTRY_PATH); console.log('first'); setTimeout(() => console.log('second'), 100)")}`);
+  const rootDir = createChangeRunProject("replay", `${quotedNode()} -e ${shellQuote("const stateRoot = process.env.OPENCANON_PROJECT_STATE_ROOT; if (!stateRoot || process.env.OPENCANON_PROJECT_STATE_PATH) process.exit(2); console.log(stateRoot); console.log('first'); setTimeout(() => console.log('second'), 100)")}`);
   const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
   try {
     const headers = runtimeAuthHeaders(server.authToken);
@@ -100,6 +100,7 @@ test("Change check runs stream output, persist terminal state, and replay from a
       assert.match(terminal.run.outputTail, /first/);
       assert.match(terminal.run.outputTail, /second/);
       assert.match(terminal.run.outputTail, /\.opencanon\/check-/);
+      assert.match(terminal.run.outputTail, /\/state/);
     }
     assert.equal(readdirSync(path.join(rootDir, ".opencanon")).some((entry) => entry.startsWith("check-")), false);
 

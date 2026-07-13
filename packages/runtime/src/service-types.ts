@@ -324,6 +324,8 @@ export const ProjectRuntimeEnv = {
   PipeEndpoint: "OPENCANON_RUNTIME_PIPE_ENDPOINT",
   StartupResultPath: "OPENCANON_RUNTIME_STARTUP_RESULT_PATH",
   RuntimeNamespace: "OPENCANON_RUNTIME_NAMESPACE",
+  StateRoot: "OPENCANON_PROJECT_STATE_ROOT",
+  StatePath: "OPENCANON_PROJECT_STATE_PATH",
 } as const;
 
 export const LocalHealthWaitFailure = {

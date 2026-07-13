@@ -23,7 +23,7 @@ test("runtime source snapshots feed captured bytes into fact extraction", () => 
     const store = {
       scanAndDiff(files: string[]) {
         return {
-          statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+          statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
           schemaVersion: 6,
           inventoryHash: "inventory",
           files: files.map((file) => ({ path: file, contentHash: `scan:${file}`, size: 1, stale: false })),
@@ -107,7 +107,7 @@ test("runtime semantic index chunks files with native vectors", () => {
     const build = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [
@@ -187,7 +187,7 @@ test("Project Knowledge producers own markdown and typed fact chunking", () => {
     const chunks = collectRuntimeKnowledgeChunks({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [
@@ -219,7 +219,7 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
     createAuthoringProject(rootDir);
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
-    const statePath = path.join(rootDir, ".opencanon/state.sqlite");
+    const statePath = path.join(rootDir, ".opencanon/state/test/state.sqlite");
     const engine = createEngine({
       versionJson: () =>
         JSON.stringify({
@@ -327,7 +327,7 @@ test("startup Project Knowledge status is explicit about cached but unverified s
     const previous = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
@@ -393,7 +393,7 @@ test("runtime semantic index makes duplicate fact chunk ids unique", () => {
     const build = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
@@ -453,7 +453,7 @@ test("runtime semantic index skips historical markdown knowledge", () => {
     const build = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [
@@ -497,7 +497,7 @@ test("runtime semantic index can use native engine embeddings when selected", ()
     const build = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [{ path: "README.md", contentHash: "readme", size: 40, stale: false }],
@@ -554,7 +554,7 @@ test("runtime semantic index batches native document embeddings", () => {
     const build = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files,
@@ -600,7 +600,7 @@ test("runtime semantic index bounds code symbol chunks per file", () => {
     const build = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [{ path: "src/large.ts", contentHash: "large", size: 2_000, stale: false }],
@@ -667,7 +667,7 @@ test("runtime snapshot reports missing semantic index with project embedding con
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
     const scan: ScanAndDiffResult = {
-      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
       schemaVersion: 6,
       inventoryHash: "inventory",
       files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
@@ -793,7 +793,7 @@ test("semantic index fails invalid embedding config without local vector output"
     const build = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [{ path: "README.md", contentHash: "readme", size: 40, stale: false }],
@@ -845,7 +845,7 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
     const first = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory-one",
         files: [
@@ -884,7 +884,7 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
     const second = buildProjectSemanticIndex({
       rootDir,
       scan: {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory-two",
         files: [
@@ -938,7 +938,7 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
     const previousScan: ScanAndDiffResult = {
-      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
       schemaVersion: 6,
       inventoryHash: "inventory-before",
       files: [{ path: "src/company.ts", contentHash: "content-before", size: 64, stale: false }],
@@ -1077,7 +1077,7 @@ test("runtime snapshot marks cached semantic index stale after provider config c
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
     const scan: ScanAndDiffResult = {
-      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
       schemaVersion: 6,
       inventoryHash: "inventory",
       files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
@@ -1231,7 +1231,7 @@ test("semantic index delta embeds zero chunks for a warm no-op inventory", () =>
   try {
     writeFileSync(path.join(rootDir, "README.md"), "# Company\n\nThe company search surface.\n");
     const scan: ScanAndDiffResult = {
-      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
       schemaVersion: 6,
       inventoryHash: "inventory",
       files: [{ path: "README.md", contentHash: "readme", size: 40, stale: false }],
@@ -1287,7 +1287,7 @@ test("semantic index delta embeds only changed file chunks", () => {
     writeFileSync(path.join(rootDir, "README.md"), "# Company\n\nThe company search surface.\n");
     writeFileSync(path.join(rootDir, "docs/inventory.md"), "# Inventory\n\nThe original inventory workflow.\n");
     const initialScan: ScanAndDiffResult = {
-      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
       schemaVersion: 6,
       inventoryHash: "inventory-one",
       files: [
@@ -1375,7 +1375,7 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
       ),
     );
     const scan: ScanAndDiffResult = {
-      statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+      statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
       schemaVersion: 6,
       inventoryHash: "inventory",
       files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],
@@ -1555,7 +1555,7 @@ for (const scenario of [
         ),
       );
       const scan: ScanAndDiffResult = {
-        statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
         schemaVersion: 6,
         inventoryHash: "inventory",
         files: [{ path: "src/company.ts", contentHash: "content", size: 64, stale: false }],

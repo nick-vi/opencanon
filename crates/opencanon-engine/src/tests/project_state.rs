@@ -64,7 +64,7 @@ fn opens_project_state_and_scans_file_diff() {
     let root = test_root("project-state");
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(root.join("src/company.ts"), "export const value = 1;\n").unwrap();
-    let state_path = root.join(".opencanon/state.sqlite");
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
 
     let project = open_project_json(
         json!({
@@ -107,7 +107,7 @@ fn opens_project_state_and_scans_file_diff() {
 #[test]
 fn opens_project_state_after_transient_sqlite_write_lock() {
     let root = test_root("project-state-transient-lock");
-    let state_path = root.join(".opencanon/state.sqlite");
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
     fs::create_dir_all(state_path.parent().unwrap()).unwrap();
     let lock_conn = Connection::open(&state_path).unwrap();
     lock_conn.execute_batch("begin immediate;").unwrap();
@@ -136,7 +136,7 @@ fn opens_project_state_after_transient_sqlite_write_lock() {
 #[test]
 fn rejects_state_tables_without_migration_record() {
     let root = test_root("strict-migrations");
-    let state_path = root.join(".opencanon/state.sqlite");
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
     fs::create_dir_all(state_path.parent().unwrap()).unwrap();
     let conn = Connection::open(&state_path).unwrap();
     conn.execute_batch("create table meta (key text primary key, value text not null);")
@@ -175,7 +175,7 @@ fn watcher_path_filter_normalizes_project_files_and_ignores_generated_paths() {
         Some("tests/company.test.ts".to_string())
     );
     assert_eq!(
-        normalize_watcher_path(&root, &filter, &root.join(".opencanon/state.sqlite")),
+        normalize_watcher_path(&root, &filter, &root.join(".opencanon/state/test/state.sqlite")),
         None
     );
     assert_eq!(

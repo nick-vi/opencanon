@@ -463,7 +463,7 @@ fn deleting_files_cascades_graph_rows() {
     let parsed: Value = serde_json::from_str(&symbols).unwrap();
     assert!(parsed["symbols"].as_array().unwrap().is_empty());
 
-    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
     let unresolved_count: i64 = conn
         .query_row(
             "select count(*) from unresolved_references where path = 'src/drop.ts'",

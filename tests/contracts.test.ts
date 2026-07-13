@@ -357,7 +357,7 @@ test("project scope filtering applies project patterns and ignores", () => {
 test("engine project state contracts parse project handles and scan results", () => {
   const request = OpenProjectRequestSchema.parse({
     rootDir: "/repo",
-    statePath: "/repo/.opencanon/state.sqlite",
+    statePath: "/repo/.opencanon/state/test/state.sqlite",
     settings: {
       docsDir: "docs/opencanon",
       conventionsPath: "opencanon/conventions/index.ts",

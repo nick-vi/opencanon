@@ -3,16 +3,12 @@ tmp/
 .DS_Store
 .opencanon/generated/
 .opencanon/cache/
-.opencanon/semantic-index/
+.opencanon/state/
 .opencanon/processes/
 .opencanon/check-*/
 .opencanon/*.log
 .opencanon/init.json
 .opencanon/commit-approvals.json
-.opencanon/*.sqlite
-.opencanon/*.sqlite-shm
-.opencanon/*.sqlite-wal
-.opencanon/*.sqlite-journal
 packages/ui/dist/
 packages/engine/binaries/
 crates/*/target/

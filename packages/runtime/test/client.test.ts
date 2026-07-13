@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { createEngine } from "@opencanon/engine";
-import { inspectProjectRuntime, runtimeAuthHeaders, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
+import { inspectProjectRuntime, projectRuntimeStatePath, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
 import {
@@ -277,7 +277,7 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
         statusJson: () =>
           JSON.stringify({
             rootDir,
-            statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+            statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
             schemaVersion: 6,
             migrationsApplied: [1],
             refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
@@ -301,7 +301,7 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
           previousHashes.clear();
           for (const file of files) previousHashes.set(file.path, file.contentHash);
           return JSON.stringify({
-            statePath: path.join(rootDir, ".opencanon/state.sqlite"),
+            statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
             schemaVersion: 6,
             inventoryHash: createHash("sha256").update(JSON.stringify(files.map((file) => [file.path, file.contentHash]))).digest("hex"),
             files,
@@ -837,7 +837,7 @@ test("runtime client lazily starts a supervised project runtime when none is run
     assert.equal(output.projectState, true);
     assert.deepEqual(output.registryRoots, [rootDir]);
     assert.equal(output.service, true);
-    assert.equal(existsSync(path.join(rootDir, ".opencanon", "state.sqlite")), true);
+    assert.equal(existsSync(projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(registryPath))), true);
   } finally {
     await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });

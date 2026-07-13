@@ -93,7 +93,7 @@ Repo definitions are the source of truth; runtime and project state are generate
 Rules:
 
 - Committed repo files own conventions, areas, change definitions, validators, fixtures, and generated docs.
-- `.opencanon/generated`, `.opencanon/cache`, `.opencanon/state.sqlite`, runtime logs, runtime registry files, and commit approvals are project-local state.
+- `.opencanon/generated`, `.opencanon/cache`, `.opencanon/state/<namespace>`, runtime logs, runtime registry files, and commit approvals are project-local state.
 - Semantic chunks, embeddings, search indexes, vector files, lineage summaries, and product-model projections are generated project-local state.
 - The OpenCanon home directory owns the global service registry, installed runtime bundles, update metadata, and cross-project discovery state.
 - SQLite product-model rows are projections and history, never the source of truth for definitions.

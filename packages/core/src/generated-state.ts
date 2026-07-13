@@ -4,12 +4,9 @@ export const GeneratedStateIgnoreEntries = [
   ".opencanon/generated/",
   ".opencanon/processes/",
   ".opencanon/check-*/",
+  ".opencanon/state/",
   ".opencanon/*.log",
   InitStateFilePath,
-  ".opencanon/*.sqlite",
-  ".opencanon/*.sqlite-shm",
-  ".opencanon/*.sqlite-wal",
-  ".opencanon/semantic-index/",
 ];
 
 export const CommitApprovalsIgnoreEntries = [".opencanon/commit-approvals.json"];
@@ -21,8 +18,8 @@ export const GeneratedStateIgnoreProbePaths = [
   ".opencanon/check-example/owner.json",
   ".opencanon/diagnostic.log",
   InitStateFilePath,
-  ".opencanon/state.sqlite",
-  ".opencanon/state.sqlite-shm",
-  ".opencanon/state.sqlite-wal",
-  ".opencanon/semantic-index/project/vectors.bin",
+  ".opencanon/state/stable/state.sqlite",
+  ".opencanon/state/stable/state.sqlite-shm",
+  ".opencanon/state/stable/state.sqlite-wal",
+  ".opencanon/state/stable/semantic-index/project/vectors.bin",
 ];

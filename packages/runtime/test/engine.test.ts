@@ -40,14 +40,14 @@ test("engine JSON binding is wrapped in typed contracts", () => {
       statusJson: () =>
         JSON.stringify({
           rootDir: "/repo",
-          statePath: "/repo/.opencanon/state.sqlite",
+          statePath: "/repo/.opencanon/state/test/state.sqlite",
           schemaVersion: 1,
           migrationsApplied: [1],
           refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
         }),
       scanAndDiffJson: () =>
         JSON.stringify({
-          statePath: "/repo/.opencanon/state.sqlite",
+          statePath: "/repo/.opencanon/state/test/state.sqlite",
           schemaVersion: 1,
           inventoryHash: "inventory",
           files: [{ path: "src/company.ts", contentHash: "hash", size: 42, stale: false }],
@@ -143,7 +143,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
   assert.equal(engine.version().schemaVersion, 1);
   const project = engine.openProject({
     rootDir: "/repo",
-    statePath: "/repo/.opencanon/state.sqlite",
+    statePath: "/repo/.opencanon/state/test/state.sqlite",
     settings: {
       docsDir: "docs/opencanon",
       conventionsPath: "opencanon/conventions/index.ts",

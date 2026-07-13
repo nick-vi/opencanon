@@ -72,7 +72,7 @@ fn persists_jobs_and_ordered_replay_events() {
 #[test]
 fn migration_011_discards_pre_executor_jobs_without_touching_canon_events() {
     let root = test_root("job-executor-migration");
-    let state_path = root.join(".opencanon/state.sqlite");
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
     {
         let project = open_test_project(&root);
         project

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { createPaths } from "@opencanon/core";
-import { createProjectStore } from "@opencanon/runtime";
+import { createProjectStore, projectRuntimeStatePath, StableRuntimeNamespace } from "@opencanon/runtime";
 import { createEngine } from "@opencanon/engine";
 import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
 
@@ -88,7 +88,7 @@ test("runtime store can use an isolated state path", () => {
     const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine: engine, statePath });
     assert.equal(store.statePath, statePath);
     assert.equal(openedStatePath, statePath);
-    assert.notEqual(store.statePath, path.join(rootDir, ".opencanon", "state.sqlite"));
+    assert.notEqual(store.statePath, projectRuntimeStatePath(rootDir, StableRuntimeNamespace));
     store.close();
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

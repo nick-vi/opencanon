@@ -886,7 +886,7 @@ export function ephemeralRuntimeClientCheckSource(): string {
     import { existsSync } from "node:fs";
     import path from "node:path";
     import { RuntimeApiRoute, withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
-    import { inspectProjectRuntime, projectRuntimePath, readRuntimeRegistry, readServiceEntry } from ${JSON.stringify(runtimeUrl)};
+    import { inspectProjectRuntime, projectRuntimePath, projectRuntimeStatePath, readRuntimeRegistry, readServiceEntry, runtimeNamespaceForRegistry, serviceRegistryPath } from ${JSON.stringify(runtimeUrl)};
 
     const rootDir = process.argv[1];
     if (await inspectProjectRuntime(rootDir)) throw new Error("expected no runtime before request");
@@ -901,7 +901,7 @@ export function ephemeralRuntimeClientCheckSource(): string {
       relatedValidatorIds: files.related.validators.map((validator) => validator.id),
       registered: Boolean(await inspectProjectRuntime(rootDir)),
       projectRuntimeFile: existsSync(projectRuntimePath(rootDir)),
-      projectState: existsSync(path.join(rootDir, ".opencanon", "state.sqlite")),
+      projectState: existsSync(projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(serviceRegistryPath()))),
       registryRoots: readRuntimeRegistry().map((entry) => entry.rootDir),
       service: Boolean(readServiceEntry()),
     }));

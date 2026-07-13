@@ -83,7 +83,7 @@ opencanon project stop
 opencanon project start --foreground
 ```
 
-OpenCanon uses one lightweight service per runtime namespace, registered under `~/.opencanon/namespaces/<namespace>/service.json`. Installed builds use the stable namespace; source checkouts use deterministic development namespaces so they can coexist safely. A service discovers OpenCanon projects, lazily starts isolated per-project runtimes, and lists its registered runtimes. Each project runtime keeps its own `.opencanon/state.sqlite`, namespaced process state, auth token, live refresh state, generated project types, and idle timeout. Registry entries advertise both a local pipe endpoint and a loopback browser URL; CLI, MCP, and runtime clients prefer the pipe endpoint, while URLs remain available for browser diagnostics.
+OpenCanon uses one lightweight service per runtime namespace, registered under `~/.opencanon/namespaces/<namespace>/service.json`. Installed builds use the stable namespace; source checkouts use deterministic development namespaces so they can coexist safely. A service discovers OpenCanon projects, lazily starts isolated per-project runtimes, and lists its registered runtimes. Each project runtime keeps its own `.opencanon/state/<namespace>/state.sqlite`, vector state, process state, auth token, live refresh state, generated project types, and idle timeout. Registry entries advertise both a local pipe endpoint and a loopback browser URL; CLI, MCP, and runtime clients prefer the pipe endpoint, while URLs remain available for browser diagnostics.
 
 `opencanon service open` opens the local service API URL. `opencanon project open` opens the current project's runtime API URL.
 

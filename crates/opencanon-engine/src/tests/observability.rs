@@ -89,7 +89,7 @@ fn observability_records_round_trip_and_filter_by_trace() {
     assert_eq!(parsed["spans"][0]["output"]["findings"], 0);
     assert_eq!(parsed["events"][0]["name"], "doctor.check.completed");
 
-    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
     let span_count: i64 = conn
         .query_row(
             "select count(*) from observability_spans where root_dir = ?1",

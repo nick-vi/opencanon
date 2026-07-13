@@ -85,7 +85,7 @@ fn full_write_replaces_an_incomplete_store_with_the_same_identity() {
         .write_semantic_index_json(request.to_string())
         .unwrap();
 
-    let vector_dir = root.join(".opencanon/semantic-index/project");
+    let vector_dir = root.join(".opencanon/state/test/semantic-index/project");
     let mut db =
         EmbeddingDb::open_with_config(&vector_dir, Some(VectorConfig::with_dimensions(2))).unwrap();
     db.delete("chunk:two").unwrap();
@@ -125,7 +125,7 @@ fn publication_identity_and_pending_state_gate_semantic_reads() {
         .write_semantic_index_json(request.to_string())
         .unwrap();
 
-    let vector_parent = root.join(".opencanon/semantic-index");
+    let vector_parent = root.join(".opencanon/state/test/semantic-index");
     std::fs::remove_file(vector_parent.join("project/publication.json")).unwrap();
     let stale: Value = serde_json::from_str(
         &project
@@ -218,7 +218,7 @@ fn obsolete_vector_format_is_stale_and_full_write_rebuilds_it() {
         .write_semantic_index_json(request.to_string())
         .unwrap();
 
-    let vector_path = root.join(".opencanon/semantic-index/project/vectors.bin");
+    let vector_path = root.join(".opencanon/state/test/semantic-index/project/vectors.bin");
     let mut vectors = OpenOptions::new().write(true).open(&vector_path).unwrap();
     vectors.seek(SeekFrom::Start(4)).unwrap();
     vectors.write_all(&1u32.to_le_bytes()).unwrap();
@@ -399,7 +399,7 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
     let filtered: Value = serde_json::from_str(&filtered).unwrap();
     assert_eq!(filtered["results"][0]["chunk"]["path"], "src/other.ts");
 
-    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
     let chunk_count: i64 = conn
         .query_row("select count(*) from knowledge_chunks", [], |row| {
             row.get(0)
@@ -746,7 +746,7 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
     let search: Value = serde_json::from_str(&search).unwrap();
     assert_eq!(search["results"][0]["chunk"]["path"], "src/company.ts");
 
-    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
     let chunk_count: i64 = conn
         .query_row("select count(*) from knowledge_chunks", [], |row| {
             row.get(0)
@@ -889,7 +889,7 @@ fn knowledge_index_recovers_when_vector_store_has_stale_duplicate_id() {
         .write_semantic_index_json(request.to_string())
         .unwrap();
 
-    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
     conn.execute("delete from knowledge_chunks where id = 'chunk:stale'", [])
         .unwrap();
     conn.execute(
@@ -983,7 +983,7 @@ fn knowledge_index_repair_clears_unsupported_provider_state() {
     let status: Value = serde_json::from_str(&status).unwrap();
     assert_eq!(status["index"], Value::Null);
 
-    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
     let snapshot_count: i64 = conn
         .query_row("select count(*) from knowledge_snapshots", [], |row| {
             row.get(0)

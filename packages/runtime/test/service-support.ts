@@ -148,7 +148,7 @@ export function readyFakeServiceCliSource(options: { exitOnceMarkerPath?: string
   ].join("\n");
 }
 
-export function readyFakeRuntimeCliSource(options: { exitOnceMarkerPath?: string; pidPathEnv?: string; startupDelayMs?: number } = {}): string {
+export function readyFakeRuntimeCliSource(options: { exitOnceMarkerPath?: string; pidPathEnv?: string; startupDelayMs?: number; writeStateMarker?: boolean } = {}): string {
   return [
     'import { createServer } from "node:http";',
     'import net from "node:net";',
@@ -164,6 +164,14 @@ export function readyFakeRuntimeCliSource(options: { exitOnceMarkerPath?: string
         ]
       : []),
     ...(options.pidPathEnv ? [`writeFileSync(process.env["${options.pidPathEnv}"], String(process.pid));`] : []),
+    ...(options.writeStateMarker
+      ? [
+          "const statePath = process.env.OPENCANON_PROJECT_STATE_PATH;",
+          'if (!statePath) throw new Error("Project State path is missing.");',
+          "mkdirSync(path.dirname(statePath), { recursive: true });",
+          "writeFileSync(statePath, String(process.pid));",
+        ]
+      : []),
     ...(options.startupDelayMs ? [`await new Promise((resolve) => setTimeout(resolve, ${options.startupDelayMs}));`] : []),
     'const portArg = process.argv.indexOf("--port");',
     'const hostArg = process.argv.indexOf("--host");',

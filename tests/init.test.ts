@@ -79,8 +79,7 @@ test("init creates scaffold, package script, and requested hooks", () => {
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/cache/"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes("tmp/"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/init.json"));
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/*.sqlite"));
-    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/semantic-index/"));
+    assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/state/"));
     assert(readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".opencanon/check-*/"));
     assert(!readFileSync(path.join(rootDir, ".gitignore"), "utf8").includes(".agents/skills/opencanon/runtime/"));
     assert.equal(JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf8")).scripts.opencanon, "opencanon");

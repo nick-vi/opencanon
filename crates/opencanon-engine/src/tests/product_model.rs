@@ -7,7 +7,7 @@ use crate::open_project_json;
 #[test]
 fn stale_product_model_projection_schema_is_recreated() {
     let root = test_root("stale-product-model-projection");
-    let state_path = root.join(".opencanon/state.sqlite");
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
     {
         let project = open_test_project(&root);
         drop(project);
@@ -193,7 +193,7 @@ fn product_model_projection_round_trips_and_indexes_rows() {
         "touches"
     );
 
-    let conn = Connection::open(root.join(".opencanon/state.sqlite")).unwrap();
+    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
     let node_count: i64 = conn
         .query_row(
             "select count(*) from product_model_nodes where root_dir = ?1",

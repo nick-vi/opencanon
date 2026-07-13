@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { cac } from "cac";
 import {
   Format,
@@ -27,6 +28,7 @@ import { stopAllProjectRuntimes } from "./service-control.ts";
 import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
 import { HiddenServiceRegistryArg } from "./service-peer-discovery.ts";
 import { ProjectRuntimeEnv } from "./service-types.ts";
+import { defaultRuntimeNamespace, projectRuntimeStatePath } from "./service-namespace.ts";
 import {
   ProcessLifecycleStatus,
   RuntimeStatus,
@@ -301,6 +303,9 @@ async function runServeCommand(args: string[], cwd: string, surface: ProjectRunt
       port: normalizeRuntimePort(options.port),
       allowRemote: options.allowRemote === true,
       idleTimeoutMs: normalizeRuntimeIdleTimeoutMs(options.idleTimeoutMs),
+      statePath: process.env[ProjectRuntimeEnv.StatePath]?.trim()
+        ? path.resolve(process.env[ProjectRuntimeEnv.StatePath]!)
+        : projectRuntimeStatePath(resolvedRootDir, defaultRuntimeNamespace()),
       onIdle: registryPath
         ? () => forgetRuntimeEntryForPid(resolvedRootDir, process.pid, registryPath)
         : undefined,
