@@ -5,8 +5,8 @@ import { repairRegisteredServiceProcessArtifacts, retireConflictingProjectWorker
 import { startProjectRuntime } from "./service-start.ts";
 import {
   appendLifecycleEvent,
+  compareAndSetRuntimeLifecycle,
   serviceRegistryPath,
-  updateRuntimeLifecycle,
 } from "./service-storage.ts";
 import {
   ProcessLifecycleEventKind,
@@ -16,6 +16,7 @@ import {
   StartProjectRuntimeStatus,
   defaultProjectRuntimeIdleTimeoutMs,
   type ReconcileProjectRuntimesResult,
+  type RuntimeRegistryEntry,
 } from "./service-types.ts";
 
 export async function reconcileProjectRuntimes(input: { registryPath?: string; nowMs?: number } = {}): Promise<ReconcileProjectRuntimesResult> {
@@ -45,9 +46,6 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
     });
     if (inspection.status === RuntimeStatus.Running) {
       result.running += 1;
-      if (inspection.entry.lifecycle.status !== ProcessLifecycleStatus.Running) {
-        updateRuntimeLifecycle(inspection.entry, createLifecycle(ProcessLifecycleStatus.Running, inspection.message), registryPath);
-      }
       continue;
     }
 
@@ -66,9 +64,6 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
       continue;
     }
 
-    if (inspection.status === RuntimeStatus.Stale) result.stale += 1;
-    if (inspection.status === RuntimeStatus.Unhealthy) result.unhealthy += 1;
-
     if (inspection.entry.lifecycle.status === ProcessLifecycleStatus.BackingOff && !restartDue(inspection.entry.lifecycle, nowMs)) {
       result.backingOff += 1;
       appendLifecycleEvent(registryPath, {
@@ -84,7 +79,14 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
 
     const eventKind = inspection.status === RuntimeStatus.Stale ? ProcessLifecycleEventKind.RuntimeStale : ProcessLifecycleEventKind.RuntimeUnhealthy;
     const failedLifecycle = runtimeFailureLifecycle(inspection.entry, inspection.message, nowMs);
-    const failedEntry = updateRuntimeLifecycle(inspection.entry, failedLifecycle, registryPath);
+    const failureTransition = compareAndSetRuntimeLifecycle(inspection.entry, failedLifecycle, registryPath);
+    if (!failureTransition.applied) {
+      countConcurrentLifecycle(result, failureTransition.current, nowMs);
+      continue;
+    }
+    const failedEntry = failureTransition.entry;
+    if (inspection.status === RuntimeStatus.Stale) result.stale += 1;
+    if (inspection.status === RuntimeStatus.Unhealthy) result.unhealthy += 1;
     appendLifecycleEvent(registryPath, {
       kind: eventKind,
       scope: ProcessLifecycleScope.Runtime,
@@ -132,9 +134,11 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const lifecycle = runtimeFailureLifecycle(failedEntry, message, nowMs + 1, parseOpenCanonProblemFromError(error));
-      updateRuntimeLifecycle(failedEntry, lifecycle, registryPath);
-      if (lifecycle.status === ProcessLifecycleStatus.Failed) result.failed += 1;
-      else result.backingOff += 1;
+      const restartFailureTransition = compareAndSetRuntimeLifecycle(failedEntry, lifecycle, registryPath);
+      if (restartFailureTransition.applied) {
+        if (lifecycle.status === ProcessLifecycleStatus.Failed) result.failed += 1;
+        else result.backingOff += 1;
+      }
       appendLifecycleEvent(registryPath, {
         kind: ProcessLifecycleEventKind.RuntimeRestartSkipped,
         scope: ProcessLifecycleScope.Runtime,
@@ -146,4 +150,24 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
     }
   }
   return result;
+}
+
+function countConcurrentLifecycle(
+  result: ReconcileProjectRuntimesResult,
+  entry: RuntimeRegistryEntry | undefined,
+  nowMs: number,
+): void {
+  if (!entry) {
+    result.stale += 1;
+    return;
+  }
+  if (runtimeBusyStillWithinBudget(entry, nowMs)) {
+    result.busy += 1;
+    return;
+  }
+  if (entry.lifecycle.status === ProcessLifecycleStatus.Running) result.running += 1;
+  else if (entry.lifecycle.status === ProcessLifecycleStatus.Starting) result.starting += 1;
+  else if (entry.lifecycle.status === ProcessLifecycleStatus.Failed) result.failed += 1;
+  else if (entry.lifecycle.status === ProcessLifecycleStatus.BackingOff) result.backingOff += 1;
+  else result.unhealthy += 1;
 }

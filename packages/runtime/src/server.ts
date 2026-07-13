@@ -81,7 +81,7 @@ import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diag
 import { localPipeEndpoint, serveLocalProtocolPipe, type LocalProtocolPipeServer } from "./local-protocol.ts";
 import { acquireProjectWorkerLease, stopService } from "./service.ts";
 import { createLifecycle } from "./service-lifecycle.ts";
-import { readProjectRuntimeEntry, readRuntimeRegistry, updateRuntimeLifecycle } from "./service-storage.ts";
+import { readProjectRuntimeEntry, readRuntimeRegistry, setRuntimeLifecycleForLease } from "./service-storage.ts";
 import { ProcessLifecycleStatus, type RuntimeRegistryEntry } from "./service-types.ts";
 import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
@@ -753,12 +753,12 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     if (messages.length > 0) {
       const message = messages[messages.length - 1]!;
       if (entry.lifecycle.status !== ProcessLifecycleStatus.Busy || entry.lifecycle.message !== message) {
-        updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), runtimeRegistryPath);
+        setRuntimeLifecycleForLease(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), runtimeRegistryPath);
       }
       return;
     }
     if (entry.lifecycle.status === ProcessLifecycleStatus.Busy) {
-      updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", entry.lifecycle.restart), runtimeRegistryPath);
+      setRuntimeLifecycleForLease(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", entry.lifecycle.restart), runtimeRegistryPath);
     }
   }
 

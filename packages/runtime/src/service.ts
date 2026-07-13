@@ -38,6 +38,7 @@ export type {
 export { openCanonRuntimeVersion, runtimeIdentityForEntrypoint } from "./service-identity.ts";
 export {
   acquireProjectWorkerLease,
+  compareAndSetRuntimeLifecycle,
   forgetRuntimeEntry,
   forgetRuntimeEntryForPid,
   forgetServiceEntry,
@@ -54,11 +55,13 @@ export {
   runtimeLogPath,
   serviceLogPath,
   serviceRegistryPath,
+  setRuntimeLifecycleForLease,
   upsertRuntimeEntry,
   upsertServiceEntry,
   writeProjectRuntimeEntry,
   writeRuntimeRegistry,
 } from "./service-storage.ts";
+export type { RuntimeLifecycleTransitionResult } from "./service-storage.ts";
 export { discoverOpenCanonProject, discoverOpenCanonProjectsFromRoots } from "./service-discovery.ts";
 export {
   inspectAllRuntimes,

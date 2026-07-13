@@ -2,6 +2,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rm
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { isOpenCanonProblem, writeAtomicJsonFileSync, resolveRootDir } from "@opencanon/core";
 import { LocalTransportKind } from "./local-protocol.ts";
 import { createProcessLeaseId } from "./service-identity.ts";
@@ -39,6 +40,10 @@ export type StartupLockMetadata = {
   startedAt: string;
   heartbeatAt: string;
 };
+
+export type RuntimeLifecycleTransitionResult =
+  | { applied: true; entry: RuntimeRegistryEntry }
+  | { applied: false; current?: RuntimeRegistryEntry };
 
 export function serviceRegistryPath(homeDir = homedir()): string {
   if (homeDir === homedir()) {
@@ -115,6 +120,13 @@ export function writeRuntimeRegistry(entries: RuntimeRegistryEntry[], registryPa
   writeRuntimeRegistryFile(entries, registry.service, registryPath, registry.events);
 }
 
+export function compactRuntimeRegistry(registryPath = serviceRegistryPath()): void {
+  withRegistryLock(registryPath, () => {
+    const registry = readRuntimeRegistryFile(registryPath);
+    writeRuntimeRegistryFile(registry.entries, registry.service, registryPath, registry.events);
+  });
+}
+
 export function writeRuntimeRegistryFile(
   entries: RuntimeRegistryEntry[],
   service: ServiceRegistryEntry | undefined,
@@ -135,10 +147,11 @@ export function writeRuntimeRegistryFile(
 
 export function upsertRuntimeEntry(entry: RuntimeRegistryEntry, registryPath = serviceRegistryPath()): void {
   withRegistryLock(registryPath, () => {
-    const entries = readRuntimeRegistry(registryPath).filter((item) => item.rootDir !== entry.rootDir);
-    writeRuntimeRegistry([...entries, entry], registryPath);
+    const registry = readRuntimeRegistryFile(registryPath);
+    const entries = registry.entries.filter((item) => item.rootDir !== entry.rootDir);
+    writeRuntimeRegistryFile([...entries, entry], registry.service, registryPath, registry.events);
+    writeProjectRuntimeEntry(entry, registryPath);
   });
-  writeProjectRuntimeEntry(entry, registryPath);
 }
 
 export function upsertServiceEntry(entry: ServiceRegistryEntry, registryPath = serviceRegistryPath()): void {
@@ -168,10 +181,20 @@ export function appendLifecycleEvent(
   return next;
 }
 
-export function updateRuntimeLifecycle(entry: RuntimeRegistryEntry, lifecycle: ProcessLifecycleState, registryPath = serviceRegistryPath()): RuntimeRegistryEntry {
-  const next = { ...entry, lifecycle };
-  upsertRuntimeEntry(next, registryPath);
-  return next;
+export function setRuntimeLifecycleForLease(
+  entry: RuntimeRegistryEntry,
+  lifecycle: ProcessLifecycleState,
+  registryPath = serviceRegistryPath(),
+): RuntimeLifecycleTransitionResult {
+  return transitionRuntimeLifecycle(entry, lifecycle, registryPath, false);
+}
+
+export function compareAndSetRuntimeLifecycle(
+  entry: RuntimeRegistryEntry,
+  lifecycle: ProcessLifecycleState,
+  registryPath = serviceRegistryPath(),
+): RuntimeLifecycleTransitionResult {
+  return transitionRuntimeLifecycle(entry, lifecycle, registryPath, true);
 }
 
 export function withRegistryLock<T>(registryPath: string, fn: () => T): T {
@@ -251,9 +274,10 @@ export function startupLockScope(kind: "service" | "runtime", key: string): stri
 
 export function forgetRuntimeEntry(rootDir: string, registryPath = serviceRegistryPath()): void {
   withRegistryLock(registryPath, () => {
-    writeRuntimeRegistry(readRuntimeRegistry(registryPath).filter((entry) => entry.rootDir !== rootDir), registryPath);
+    const registry = readRuntimeRegistryFile(registryPath);
+    writeRuntimeRegistryFile(registry.entries.filter((entry) => entry.rootDir !== rootDir), registry.service, registryPath, registry.events);
+    rmSync(projectRuntimePath(rootDir, registryPath), { force: true });
   });
-  rmSync(projectRuntimePath(rootDir, registryPath), { force: true });
 }
 
 export function forgetServiceEntry(registryPath = serviceRegistryPath()): void {
@@ -264,13 +288,13 @@ export function forgetServiceEntry(registryPath = serviceRegistryPath()): void {
 
 export function forgetRuntimeEntryIfPid(rootDir: string, pid: number, registryPath = serviceRegistryPath()): void {
   withRegistryLock(registryPath, () => {
-    const entries = readRuntimeRegistry(registryPath);
-    const existing = entries.find((entry) => entry.rootDir === rootDir);
+    const registry = readRuntimeRegistryFile(registryPath);
+    const existing = registry.entries.find((entry) => entry.rootDir === rootDir);
     if (existing?.pid !== pid) return;
-    writeRuntimeRegistry(entries.filter((entry) => entry.rootDir !== rootDir), registryPath);
+    writeRuntimeRegistryFile(registry.entries.filter((entry) => entry.rootDir !== rootDir), registry.service, registryPath, registry.events);
+    const projectEntry = readProjectRuntimeEntry(rootDir, registryPath);
+    if (projectEntry?.pid === pid) rmSync(projectRuntimePath(rootDir, registryPath), { force: true });
   });
-  const projectEntry = readProjectRuntimeEntry(rootDir, registryPath);
-  if (projectEntry?.pid === pid) rmSync(projectRuntimePath(rootDir, registryPath), { force: true });
 }
 
 export function forgetServiceEntryIfPid(pid: number, registryPath = serviceRegistryPath()): void {
@@ -489,6 +513,37 @@ function releaseProjectWorkerLease(lockPath: string, lease: ProjectWorkerLease):
 
 function sleepSync(milliseconds: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function transitionRuntimeLifecycle(
+  expected: RuntimeRegistryEntry,
+  lifecycle: ProcessLifecycleState,
+  registryPath: string,
+  compareLifecycle: boolean,
+): RuntimeLifecycleTransitionResult {
+  let result: RuntimeLifecycleTransitionResult = { applied: false };
+  withRegistryLock(registryPath, () => {
+    const registry = readRuntimeRegistryFile(registryPath);
+    const current = registry.entries.find((entry) => entry.rootDir === expected.rootDir);
+    if (!current || current.pid !== expected.pid || current.leaseId !== expected.leaseId) {
+      result = { applied: false, ...(current ? { current } : {}) };
+      return;
+    }
+    if (compareLifecycle && !isDeepStrictEqual(current.lifecycle, expected.lifecycle)) {
+      result = { applied: false, current };
+      return;
+    }
+    const next = { ...current, lifecycle };
+    writeRuntimeRegistryFile(
+      registry.entries.map((entry) => entry.rootDir === next.rootDir ? next : entry),
+      registry.service,
+      registryPath,
+      registry.events,
+    );
+    writeProjectRuntimeEntry(next, registryPath);
+    result = { applied: true, entry: next };
+  });
+  return result;
 }
 
 async function acquireStartupLock(lockPath: string): Promise<number> {

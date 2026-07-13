@@ -20,6 +20,7 @@ import {
   RuntimeStatus,
   RuntimeCliInvocationKind,
   chooseRuntimePort,
+  compareAndSetRuntimeLifecycle,
   inspectAllRuntimes,
   inspectProjectRuntime,
   inspectRuntimeEntry,
@@ -42,6 +43,7 @@ import {
   runtimeIdentityForEntrypoint,
   serveLocalProtocolPipe,
   startProjectRuntime,
+  setRuntimeLifecycleForLease,
   startService,
   startServiceServer,
   stopService,
@@ -1315,6 +1317,7 @@ test("service reconciliation preserves runtimes busy with project work", async (
         message: "Manual reindex is running.",
       },
       ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
+      runtimeFingerprint: "outdated-runtime-identity",
     };
     upsertRuntimeEntry(entry, registryPath);
 
@@ -1327,8 +1330,138 @@ test("service reconciliation preserves runtimes busy with project work", async (
     assert.equal(result.unhealthy, 0);
     assert.equal(readRuntimeRegistry(registryPath)[0]?.pid, pid);
     assert.equal(processIsRunning(pid), true);
+
+    const started = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
+    assert.equal(started.status, "already-running");
+    assert.equal(started.entry.pid, pid);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.pid, pid);
+    assert.equal(processIsRunning(pid), true);
   } finally {
     if (child.pid && processIsRunning(child.pid)) process.kill(child.pid, "SIGKILL");
+    forgetRuntimeEntry(rootDir, registryPath);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime lifecycle transitions reject stale revisions and replaced leases", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-lifecycle-cas-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const original = {
+    rootDir,
+    host: "127.0.0.1",
+    port: 9,
+    url: "http://127.0.0.1:9",
+    pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
+    pid: process.pid,
+    startedAt: "2026-05-01T00:00:00.000Z",
+    logPath: path.join(rootDir, ".opencanon", "runtime.log"),
+    authToken: "test-token",
+    leaseId: "lifecycle-cas-original",
+    lifecycle: testLifecycle(ProcessLifecycleStatus.Running),
+    ...testRuntimeIdentity,
+  };
+
+  try {
+    upsertRuntimeEntry(original, registryPath);
+    const busy = setRuntimeLifecycleForLease(original, {
+      ...testLifecycle(ProcessLifecycleStatus.Busy),
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+    }, registryPath);
+    assert.equal(busy.applied, true);
+
+    const staleTransition = compareAndSetRuntimeLifecycle(original, testLifecycle(ProcessLifecycleStatus.Running), registryPath);
+    assert.equal(staleTransition.applied, false);
+    assert.equal(staleTransition.current?.lifecycle.status, ProcessLifecycleStatus.Busy);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, ProcessLifecycleStatus.Busy);
+    assert.equal(readProjectRuntimeEntry(rootDir, registryPath)?.lifecycle.status, ProcessLifecycleStatus.Busy);
+
+    const replacement = {
+      ...original,
+      leaseId: "lifecycle-cas-replacement",
+      lifecycle: testLifecycle(ProcessLifecycleStatus.Running),
+    };
+    upsertRuntimeEntry(replacement, registryPath);
+    const replacedTransition = setRuntimeLifecycleForLease(original, testLifecycle(ProcessLifecycleStatus.Stopping), registryPath);
+    assert.equal(replacedTransition.applied, false);
+    assert.equal(replacedTransition.current?.leaseId, replacement.leaseId);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.leaseId, replacement.leaseId);
+
+    forgetRuntimeEntry(rootDir, registryPath);
+    const removedTransition = setRuntimeLifecycleForLease(replacement, testLifecycle(ProcessLifecycleStatus.Running), registryPath);
+    assert.equal(removedTransition.applied, false);
+    assert.equal(removedTransition.current, undefined);
+    assert.equal(readRuntimeRegistry(registryPath).length, 0);
+    assert.equal(readProjectRuntimeEntry(rootDir, registryPath), undefined);
+  } finally {
+    forgetRuntimeEntry(rootDir, registryPath);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime inspection cannot overwrite work that becomes busy during a health probe", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-inspection-cas-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const pipeEndpoint = testRuntimePipeEndpoint(rootDir, registryPath);
+  const leaseId = "inspection-cas-lease";
+  let releaseHealthProbe: () => void = () => undefined;
+  let markHealthProbeStarted: () => void = () => undefined;
+  const healthProbeStarted = new Promise<void>((resolve) => {
+    markHealthProbeStarted = resolve;
+  });
+  const healthProbeRelease = new Promise<void>((resolve) => {
+    releaseHealthProbe = resolve;
+  });
+  const pipeServer = await serveLocalProtocolPipe({
+    endpoint: pipeEndpoint,
+    async routeRequest() {
+      markHealthProbeStarted();
+      await healthProbeRelease;
+      return new Response(JSON.stringify({
+        ok: true,
+        data: {
+          status: "ready",
+          process: { kind: "runtime", pid: process.pid, leaseId },
+          engine: { engineVersion: "0.4.0-test", packageVersion: "0.4.0-test", napiVersion: "test", schemaVersion: 1 },
+          refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
+          startedAt: new Date().toISOString(),
+        },
+      }), { status: 200, headers: { "content-type": "application/json; charset=utf-8" } });
+    },
+  });
+  const entry = {
+    rootDir,
+    host: "127.0.0.1",
+    port: 9,
+    url: "http://127.0.0.1:9",
+    pipeEndpoint,
+    pid: process.pid,
+    startedAt: "2026-05-01T00:00:00.000Z",
+    logPath: path.join(rootDir, ".opencanon", "runtime.log"),
+    authToken: "test-token",
+    leaseId,
+    lifecycle: testLifecycle(ProcessLifecycleStatus.Starting),
+    ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
+  };
+
+  try {
+    upsertRuntimeEntry(entry, registryPath);
+    const inspectionPromise = inspectRuntimeEntry(entry, registryPath);
+    await healthProbeStarted;
+    const busy = setRuntimeLifecycleForLease(entry, {
+      ...testLifecycle(ProcessLifecycleStatus.Busy),
+      updatedAt: new Date().toISOString(),
+      message: "Full Proof is running.",
+    }, registryPath);
+    assert.equal(busy.applied, true);
+    releaseHealthProbe();
+
+    const inspection = await inspectionPromise;
+    assert.equal(inspection.status, RuntimeStatus.Busy, inspection.message);
+    assert.equal(inspection.entry.lifecycle.status, ProcessLifecycleStatus.Busy);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, ProcessLifecycleStatus.Busy);
+  } finally {
+    releaseHealthProbe();
+    await pipeServer.stop(true).catch(() => undefined);
     forgetRuntimeEntry(rootDir, registryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }

@@ -18,14 +18,14 @@ import {
 } from "./service-types.ts";
 import {
   isProcessRunning,
+  compareAndSetRuntimeLifecycle,
+  compactRuntimeRegistry,
   readProjectRuntimeEntry,
   readRuntimeRegistry,
   readRuntimeRegistryFile,
   readServiceEntry,
   serviceRegistryPath,
   sleep,
-  updateRuntimeLifecycle,
-  writeRuntimeRegistry,
 } from "./service-storage.ts";
 import { retireRuntimeProcessLeases, runtimeProcessLeasesFromMalformedRegistryEntries } from "./service-process.ts";
 import { withLifecycle } from "./service-lifecycle.ts";
@@ -92,7 +92,7 @@ export async function inspectAllRuntimes(registryPath = serviceRegistryPath()): 
   await retireRuntimeProcessLeases(malformedRuntimeLeases, registryPath);
   const entries = registry.entries;
   const inspections = await Promise.all(entries.map((entry) => inspectRuntimeEntry(entry, registryPath)));
-  if (registry.diagnostics.length > 0 || malformedRuntimeLeases.length > 0) writeRuntimeRegistry(inspections.map((inspection) => inspection.entry), registryPath);
+  if (registry.diagnostics.length > 0 || malformedRuntimeLeases.length > 0) compactRuntimeRegistry(registryPath);
   return inspections;
 }
 
@@ -108,6 +108,10 @@ export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryP
     }
     return { entry, status: RuntimeStatus.Stale, message: "Registered process is not running." };
   }
+  const nowMs = Date.now();
+  if (runtimeBusyStillWithinBudget(entry, nowMs)) {
+    return { entry, status: RuntimeStatus.Busy, message: entry.lifecycle.message ?? "Runtime is busy with project work." };
+  }
   if (!projectRuntimeIdentityMatches(entry)) {
     return {
       entry,
@@ -115,38 +119,53 @@ export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryP
       message: "Registered project runtime was started by a different OpenCanon runtime. Run opencanon project start to recreate project runtime state.",
     };
   }
-  const nowMs = Date.now();
   const runtime = await projectRuntimeStatus(entry);
-  const busyWithinBudget = runtimeBusyStillWithinBudget(entry, nowMs);
   if (runtime.ok) {
-    if (busyWithinBudget) {
+    const message = runtime.state ? "Runtime health and state endpoints are ready." : "Runtime health endpoint is ready.";
+    const lifecycleCurrent = entry.lifecycle.status === ProcessLifecycleStatus.Running && entry.lifecycle.message === message;
+    const normalizedEntry = lifecycleCurrent ? entry : withLifecycle(entry, ProcessLifecycleStatus.Running, message);
+    if (registryPath && !lifecycleCurrent) {
+      const transition = compareAndSetRuntimeLifecycle(entry, normalizedEntry.lifecycle, registryPath);
+      if (!transition.applied) {
+        if (!transition.current) {
+          return { entry, status: RuntimeStatus.Stale, message: "Runtime registration changed while health was inspected." };
+        }
+        if (transition.current.pid !== entry.pid || transition.current.leaseId !== entry.leaseId) {
+          return await inspectRuntimeEntry(transition.current, registryPath);
+        }
+        return inspectionFromCurrentLifecycle(transition.current);
+      }
       return {
-        entry,
-        status: RuntimeStatus.Busy,
-        message: entry.lifecycle.message ?? "Runtime is busy with project work.",
+        entry: transition.entry,
+        status: RuntimeStatus.Running,
+        message,
         health: runtime.health,
         state: runtime.state,
       };
     }
-    const message = runtime.state ? "Runtime health and state endpoints are ready." : "Runtime health endpoint is ready.";
-    const lifecycleCurrent = entry.lifecycle.status === ProcessLifecycleStatus.Running && entry.lifecycle.message === message;
-    const normalizedEntry = lifecycleCurrent ? entry : withLifecycle(entry, ProcessLifecycleStatus.Running, message);
-    const inspectedEntry = registryPath && !lifecycleCurrent ? updateRuntimeLifecycle(entry, normalizedEntry.lifecycle, registryPath) : normalizedEntry;
     return {
-      entry: inspectedEntry,
+      entry: normalizedEntry,
       status: RuntimeStatus.Running,
       message,
       health: runtime.health,
       state: runtime.state,
     };
   }
-  if (busyWithinBudget) {
-    return { entry, status: RuntimeStatus.Busy, message: entry.lifecycle.message ?? "Runtime is busy with project work." };
-  }
   if (runtimeStartupStillWithinGrace(entry, nowMs)) {
     return { entry, status: RuntimeStatus.Starting, message: "Runtime is still starting; waiting for health endpoint." };
   }
   return { entry, status: RuntimeStatus.Unhealthy, message: runtime.message };
+}
+
+function inspectionFromCurrentLifecycle(entry: RuntimeRegistryEntry): RuntimeInspection {
+  const message = entry.lifecycle.problem?.detail ?? entry.lifecycle.message ?? "Runtime lifecycle changed while health was inspected.";
+  if (runtimeBusyStillWithinBudget(entry, Date.now())) return { entry, status: RuntimeStatus.Busy, message };
+  if (entry.lifecycle.status === ProcessLifecycleStatus.Failed) {
+    return { entry, status: RuntimeStatus.Failed, message, ...(entry.lifecycle.problem ? { problem: entry.lifecycle.problem } : {}) };
+  }
+  if (entry.lifecycle.status === ProcessLifecycleStatus.Starting) return { entry, status: RuntimeStatus.Starting, message };
+  if (entry.lifecycle.status === ProcessLifecycleStatus.Running) return { entry, status: RuntimeStatus.Running, message };
+  return { entry, status: RuntimeStatus.Unhealthy, message };
 }
 
 function projectRuntimeIdentityMatches(entry: RuntimeRegistryEntry): boolean {

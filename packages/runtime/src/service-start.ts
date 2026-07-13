@@ -28,6 +28,7 @@ import { runtimeNamespaceForRegistry } from "./service-namespace.ts";
 import {
   appendLifecycleEvent,
   closeFileDescriptor,
+  compareAndSetRuntimeLifecycle,
   ensurePrivateDirectory,
   forgetRuntimeEntry,
   forgetRuntimeEntryIfPid,
@@ -37,8 +38,8 @@ import {
   runtimeLogPath,
   serviceLogPath,
   serviceRegistryPath,
+  setRuntimeLifecycleForLease,
   startupLockScope,
-  updateRuntimeLifecycle,
   upsertRuntimeEntry,
   upsertServiceEntry,
   waitForChildSpawn,
@@ -91,27 +92,38 @@ export async function startProjectRuntime(input: {
     await retireConflictingProjectWorkerLease(rootDir, registryPath, existing?.entry.pid, {
       allowStaleAllowedPid: existing ? runtimeStartupStillWithinGrace(existing.entry, nowMs) || runtimeBusyStillWithinBudget(existing.entry, nowMs) : false,
     });
+    if (existing?.status === RuntimeStatus.Busy) {
+      return {
+        status: StartProjectRuntimeStatus.AlreadyRunning,
+        entry: existing.entry,
+        message: `OpenCanon project runtime is busy for ${rootDir}.`,
+      };
+    }
     if (existing && !runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
       await stopProjectRuntime(rootDir, registryPath);
     } else if (existing?.status === RuntimeStatus.Starting) {
       const ready = await waitForRuntimeHealth(existing.entry);
       if (ready) {
-        const runningEntry = updateRuntimeLifecycle(existing.entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
+        const transition = compareAndSetRuntimeLifecycle(existing.entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
+        if (!transition.applied) {
+          if (transition.current && runtimeBusyStillWithinBudget(transition.current, Date.now())) {
+            return {
+              status: StartProjectRuntimeStatus.AlreadyRunning,
+              entry: transition.current,
+              message: `OpenCanon project runtime is busy for ${rootDir}.`,
+            };
+          }
+          throw new Error(`Project runtime registration changed while startup health was being confirmed for ${rootDir}.`);
+        }
         return {
           status: StartProjectRuntimeStatus.AlreadyRunning,
-          entry: runningEntry,
+          entry: transition.entry,
           message: `OpenCanon project runtime already registered for ${rootDir}.`,
         };
       }
       await stopProjectRuntime(rootDir, registryPath);
     } else if (existing?.status === RuntimeStatus.Unhealthy) {
       await stopProjectRuntime(rootDir, registryPath);
-    } else if (existing?.status === RuntimeStatus.Busy) {
-      return {
-        status: StartProjectRuntimeStatus.AlreadyRunning,
-        entry: existing.entry,
-        message: `OpenCanon project runtime is busy for ${rootDir}.`,
-      };
     } else if (existing?.status === RuntimeStatus.Running) {
       return {
         status: StartProjectRuntimeStatus.AlreadyRunning,
@@ -208,10 +220,15 @@ export async function startProjectRuntime(input: {
       const health = await waitForRuntimeHealthResult(entry);
       if (health.ready) {
         removeRuntimeStartupResult(startupResultPath);
-        const runningEntry = updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
+        const transition = setRuntimeLifecycleForLease(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
+        if (!transition.applied) {
+          forgetRuntimeEntryIfPid(rootDir, childPid, registryPath);
+          await terminateSpawnedProcess(childPid);
+          throw new Error(`Project runtime registration changed before startup completed for ${rootDir}.`);
+        }
         return {
           status: StartProjectRuntimeStatus.Started,
-          entry: runningEntry,
+          entry: transition.entry,
           message: `OpenCanon project runtime started for ${rootDir}.`,
         };
       }

@@ -18,8 +18,8 @@ import {
   readServiceEntry,
   removeInactiveStartupLock,
   serviceRegistryPath,
+  setRuntimeLifecycleForLease,
   startupLockScope,
-  updateRuntimeLifecycle,
   upsertServiceEntry,
 } from "./service-storage.ts";
 import {
@@ -123,7 +123,7 @@ export async function stopProjectRuntime(rootDir: string, registryPath = service
 
   const wasRunning = isProcessRunning(entry.pid);
   if (wasRunning) {
-    updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Stopping, "Stopping project runtime.", entry.lifecycle.restart), registryPath);
+    setRuntimeLifecycleForLease(entry, createLifecycle(ProcessLifecycleStatus.Stopping, "Stopping project runtime.", entry.lifecycle.restart), registryPath);
     await terminateSpawnedProcess(entry.pid);
   }
   removeInactiveLocalPipeEndpoint(entry.pipeEndpoint, entry.pid);
