@@ -13,8 +13,8 @@ import { renderConvention, resolveConventionGeneratedDocsPath } from "./conventi
 import { SpecRenderKind, type Spec } from "./spec.ts";
 import { renderSpec, resolveSpecGeneratedDocsPath } from "./spec-render.ts";
 import { satisfiesMinimumVersion } from "./core-utils.ts";
-import { ExternalToolMissingSeverity, factKindValues, validatorScopeValues, type SemanticIndexSnapshot } from "./contracts.ts";
-import { DoctorStatus, type DoctorRuntimeHealth } from "./doctor-types.ts";
+import { ExternalToolMissingSeverity, factKindValues, validatorScopeValues } from "./contracts.ts";
+import { DoctorKnowledgeInspectionKind, DoctorStatus, type DoctorKnowledgeInspection, type DoctorRuntimeHealth } from "./doctor-types.ts";
 import { resolveExternalTool } from "./external-tools.ts";
 import { GeneratedStateIgnoreEntries, GeneratedStateIgnoreProbePaths } from "./generated-state.ts";
 import { validatePatterns } from "./globs.ts";
@@ -33,7 +33,9 @@ import { ValidatorDomain } from "./validator-types.ts";
 
 const SemanticIndexDoctorStatus = {
   Failed: "failed",
+  Indexing: "indexing",
   Missing: "missing",
+  Ready: "ready",
   Stale: "stale",
 } as const;
 
@@ -291,14 +293,22 @@ export function ensureAgentEntryFiles(rootDir: string): void {
   }
 }
 
-export function validateSemanticIndex(index: SemanticIndexSnapshot | null | undefined): { status: DoctorStatus; message: string; details: string[] } {
-  if (index === undefined) {
+export function validateSemanticIndex(inspection: DoctorKnowledgeInspection | undefined): { status: DoctorStatus; message: string; details: string[] } {
+  if (inspection === undefined || inspection.kind === DoctorKnowledgeInspectionKind.NotInspected) {
     return {
       status: DoctorStatus.Pass,
-      message: "Project Knowledge status is verified by the project runtime when available.",
+      message: "Project Knowledge was not inspected because no matching healthy project runtime is available.",
       details: [],
     };
   }
+  if (inspection.kind === DoctorKnowledgeInspectionKind.Failed) {
+    return {
+      status: DoctorStatus.Fail,
+      message: "Could not inspect live Project Knowledge.",
+      details: [inspection.error],
+    };
+  }
+  const index = inspection.index;
   if (index === null) {
     return {
       status: DoctorStatus.Warn,
@@ -307,30 +317,48 @@ export function validateSemanticIndex(index: SemanticIndexSnapshot | null | unde
     };
   }
 
-  const details: string[] = [];
-  if (!index.version.trim()) details.push("Project Knowledge version is missing.");
-  if (!index.chunkerVersion.trim()) details.push("Project Knowledge chunker version is missing.");
-  if (!index.producerVersion.trim()) details.push("Project Knowledge producer version is missing.");
-  if (!index.sourceInventoryHash.trim()) details.push("Project Knowledge source inventory hash is missing.");
-  if (!index.chunkTreeHash.trim()) details.push("Project Knowledge chunk tree hash is missing.");
-  if (!index.identityHash.trim()) details.push("Project Knowledge identity hash is missing.");
-  if (!index.provider.id.trim()) details.push("Project Knowledge provider id is missing.");
-  if (!index.provider.modelId.trim()) details.push("Project Knowledge model id is missing.");
-  if (!index.provider.configHash.trim()) details.push("Project Knowledge provider config hash is missing.");
-  if (index.provider.dimensions < 1) details.push("Project Knowledge provider dimensions must be positive.");
-  if (index.chunkCount !== index.vectorCount) details.push(`Project Knowledge chunk/vector counts differ (${index.chunkCount} chunks, ${index.vectorCount} vectors).`);
-  if (index.status === SemanticIndexDoctorStatus.Failed) details.push(...index.diagnostics.map((diagnostic) => diagnostic.message));
+  const metadataErrors: string[] = [];
+  if (!index.version.trim()) metadataErrors.push("Project Knowledge version is missing.");
+  if (!index.chunkerVersion.trim()) metadataErrors.push("Project Knowledge chunker version is missing.");
+  if (!index.producerVersion.trim()) metadataErrors.push("Project Knowledge producer version is missing.");
+  if (!index.sourceInventoryHash.trim()) metadataErrors.push("Project Knowledge source inventory hash is missing.");
+  if (!index.chunkTreeHash.trim()) metadataErrors.push("Project Knowledge chunk tree hash is missing.");
+  if (!index.identityHash.trim()) metadataErrors.push("Project Knowledge identity hash is missing.");
+  if (!index.provider.id.trim()) metadataErrors.push("Project Knowledge provider id is missing.");
+  if (!index.provider.modelId.trim()) metadataErrors.push("Project Knowledge model id is missing.");
+  if (!index.provider.configHash.trim()) metadataErrors.push("Project Knowledge provider config hash is missing.");
+  if (index.provider.dimensions < 1) metadataErrors.push("Project Knowledge provider dimensions must be positive.");
+  if (index.chunkCount !== index.vectorCount) metadataErrors.push(`Project Knowledge chunk/vector counts differ (${index.chunkCount} chunks, ${index.vectorCount} vectors).`);
+  const runtimeDetails = index.diagnostics.map((diagnostic) => diagnostic.message);
+
+  if (metadataErrors.length > 0) {
+    return {
+      status: DoctorStatus.Fail,
+      message: "Project Knowledge identity or freshness metadata is invalid.",
+      details: [...metadataErrors, ...runtimeDetails],
+    };
+  }
+  if (index.status === SemanticIndexDoctorStatus.Failed) {
+    return {
+      status: DoctorStatus.Fail,
+      message: "Project Knowledge indexing failed.",
+      details: runtimeDetails.length > 0 ? runtimeDetails : ["The project runtime reported a failed Knowledge snapshot without diagnostics."],
+    };
+  }
+  if (index.status === SemanticIndexDoctorStatus.Missing) {
+    return { status: DoctorStatus.Warn, message: "Project Knowledge has not been built yet.", details: runtimeDetails };
+  }
+  if (index.status === SemanticIndexDoctorStatus.Indexing) {
+    return { status: DoctorStatus.Warn, message: `Project Knowledge is indexing (${index.chunkCount} chunks prepared).`, details: runtimeDetails };
+  }
+  if (index.status === SemanticIndexDoctorStatus.Stale) {
+    return { status: DoctorStatus.Warn, message: "Project Knowledge exists but is stale.", details: runtimeDetails };
+  }
 
   return {
-    status: details.length > 0 ? DoctorStatus.Fail : index.status === SemanticIndexDoctorStatus.Stale || index.status === SemanticIndexDoctorStatus.Missing ? DoctorStatus.Warn : DoctorStatus.Pass,
-    message: details.length > 0
-      ? "Project Knowledge identity or freshness metadata is invalid."
-      : index.status === SemanticIndexDoctorStatus.Missing
-        ? "Project Knowledge has not been built yet."
-      : index.status === SemanticIndexDoctorStatus.Stale
-        ? "Project Knowledge exists but is stale."
-        : `Project Knowledge is ${index.status} (${index.chunkCount} chunks).`,
-    details,
+    status: DoctorStatus.Pass,
+    message: `Project Knowledge is ${SemanticIndexDoctorStatus.Ready} (${index.chunkCount} chunks).`,
+    details: runtimeDetails,
   };
 }
 

@@ -172,7 +172,7 @@ export async function runChangeCheck(
       conventions: project.conventions,
       validators: project.validators,
       producerStatuses: resolveProducerStatuses(rootDir),
-      semanticIndex: store.readSemanticIndexStatus({ indexId: "project" }).index,
+      knowledgeInspection: { kind: "available", index: store.readSemanticIndexStatus({ indexId: "project" }).index },
     });
     return {
       changeId: change.id,

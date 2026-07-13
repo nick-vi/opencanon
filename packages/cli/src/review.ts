@@ -91,7 +91,7 @@ export async function runReviewCommand(args = process.argv.slice(2), cwd = proce
     validators: project.validators,
     runExternalTools: query.runExternalTools,
     producerStatuses,
-    semanticIndex: snapshot?.semanticIndex ?? null,
+    knowledgeInspection: { kind: "available", index: snapshot?.semanticIndex ?? null },
   });
   const impact = resolveImpactSurfaceConventionsForFiles({
     files,

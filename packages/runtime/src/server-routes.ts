@@ -299,7 +299,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           specs: project.specs,
           validators: project.validators,
           producerStatuses: resolveProducerStatuses(rootDir),
-          semanticIndex: currentStore().readSemanticIndexStatus({ indexId: "project" }).index,
+          knowledgeInspection: { kind: "available", index: currentStore().readSemanticIndexStatus({ indexId: "project" }).index },
         });
         return json({
           ok: true,
@@ -537,7 +537,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
             specs: project.specs,
             validators: project.validators,
             producerStatuses: resolveProducerStatuses(rootDir),
-            semanticIndex: currentStore().readSemanticIndexStatus({ indexId: "project" }).index,
+            knowledgeInspection: { kind: "available", index: currentStore().readSemanticIndexStatus({ indexId: "project" }).index },
           });
           span.setOutput({ status: report.status, checks: report.checks.length });
           return json({

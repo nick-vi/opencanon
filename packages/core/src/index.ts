@@ -717,8 +717,8 @@ export type {
 export { LiteralContext, LiteralValueKind, TypeScriptDeclarationKind } from "./typescript.ts";
 export type { TreeBoundaryRule, TreeDefinition, TreeFileRules, TreeFolderRules, TreeGraphDefinition, TreeImportRules, TreeNode, TreePathDefinition } from "./tree.ts";
 export { tree, validateTree, validateTreeDefinition } from "./tree.ts";
-export type { DoctorCheck, DoctorFixResult, DoctorReport, DoctorRuntimeHealth } from "./doctor.ts";
-export { applyDoctorFixes, buildDoctorReport, DoctorCheckGroup, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "./doctor.ts";
+export type { DoctorCheck, DoctorFixResult, DoctorKnowledgeInspection, DoctorReport, DoctorRuntimeHealth } from "./doctor.ts";
+export { applyDoctorFixes, buildDoctorReport, DoctorCheckGroup, DoctorKnowledgeInspectionKind, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "./doctor.ts";
 export type { AnalysisCache } from "./cache.ts";
 export { getAnalysisCache } from "./cache.ts";
 export type { LazyValue } from "./lazy.ts";

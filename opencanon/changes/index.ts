@@ -26,6 +26,8 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/brief.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/runtime-client.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/cli/src/review.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-change-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/client.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/cli-reporting.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/validator-runtime.test.ts" },
@@ -60,7 +62,7 @@ export default [
       {
         id: "live-knowledge-doctor",
         title: "Report live Project Knowledge in Doctor",
-        files: ["packages/core/src/doctor-checks.ts", "packages/core/src/doctor.ts", "packages/cli/src/index.ts", "packages/cli/src/runtime-client.ts", "tests/validator-runtime.test.ts", "tests/cli-reporting.test.ts"],
+        files: ["packages/core/src/doctor-checks.ts", "packages/core/src/doctor-types.ts", "packages/core/src/doctor.ts", "packages/core/src/index.ts", "packages/cli/src/index.ts", "packages/cli/src/runtime-client.ts", "packages/cli/src/review.ts", "packages/runtime/src/server-change-runtime.ts", "packages/runtime/src/server-routes.ts", "tests/validator-runtime.test.ts", "tests/cli-reporting.test.ts"],
         checks: ["doctor-tests", "cli-tests", "typecheck"],
         dependsOn: ["pipe-first-brief"],
       },

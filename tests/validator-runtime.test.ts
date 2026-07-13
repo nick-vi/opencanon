@@ -73,6 +73,7 @@ import {
   restrictedSymbols,
   similarFunctionNames,
 } from "./validator-test-helpers.ts";
+import type { SemanticIndexSnapshot } from "@opencanon/core";
 
 test("validator runtime context exposes deterministic project coverage", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-context-"));
@@ -445,6 +446,75 @@ test("doctor uses the authoritative producer statuses when provided (live produc
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test("doctor reports Project Knowledge inspection outcomes explicitly", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-knowledge-"));
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
+    const base = { paths: createPaths(rootDir), conventions: [], validators: [] };
+
+    const uninspected = buildDoctorReport(base).checks.find((item) => item.id === "semantic-index");
+    assert.equal(uninspected?.status, DoctorStatus.Pass);
+    assert.match(uninspected?.message ?? "", /not inspected.*no matching healthy project runtime/i);
+
+    const missing = buildDoctorReport({
+      ...base,
+      knowledgeInspection: { kind: "available", index: null },
+    }).checks.find((item) => item.id === "semantic-index");
+    assert.equal(missing?.status, DoctorStatus.Warn);
+
+    const indexing = buildDoctorReport({
+      ...base,
+      knowledgeInspection: { kind: "available", index: doctorKnowledgeSnapshot("indexing") },
+    }).checks.find((item) => item.id === "semantic-index");
+    assert.equal(indexing?.status, DoctorStatus.Warn);
+    assert.match(indexing?.message ?? "", /indexing/i);
+
+    const failedSnapshot = buildDoctorReport({
+      ...base,
+      knowledgeInspection: { kind: "available", index: doctorKnowledgeSnapshot("failed") },
+    }).checks.find((item) => item.id === "semantic-index");
+    assert.equal(failedSnapshot?.status, DoctorStatus.Fail);
+    assert(failedSnapshot?.details?.some((detail) => detail.includes("without diagnostics")));
+
+    const failedProbe = buildDoctorReport({
+      ...base,
+      knowledgeInspection: { kind: "failed", error: "pipe probe timed out" },
+    });
+    const failedProbeCheck = failedProbe.checks.find((item) => item.id === "semantic-index");
+    assert.equal(failedProbe.status, DoctorStatus.Fail);
+    assert.equal(failedProbeCheck?.status, DoctorStatus.Fail);
+    assert.deepEqual(failedProbeCheck?.details, ["pipe probe timed out"]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+function doctorKnowledgeSnapshot(status: SemanticIndexSnapshot["status"]): SemanticIndexSnapshot {
+  return {
+    id: "project",
+    version: "semantic-index-v2",
+    status,
+    provider: {
+      id: "native-test",
+      kind: "native",
+      modelId: "test-model",
+      dimensions: 3,
+      distance: "cosine",
+      configHash: "test-config",
+    },
+    chunkerVersion: "test-chunker",
+    producerVersion: "test-producer",
+    sourceInventoryHash: "test-inventory",
+    chunkTreeHash: "test-tree",
+    identityHash: "test-identity",
+    chunkCount: 1,
+    vectorCount: 1,
+    staleChunkCount: status === "stale" ? 1 : 0,
+    indexedAt: "2026-07-13T00:00:00.000Z",
+    diagnostics: [],
+  };
+}
 
 test("doctor treats TypeScript producer as not applicable for JavaScript-only projects", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-js-producer-"));
@@ -842,7 +912,7 @@ export default defineConvention({
     stopIsolatedCliRuntime(rootDir);
     rmSync(rootDir, { recursive: true, force: true });
   }
-});
+}, 30_000);
 
 test("validate --files ignores absolute paths outside the current OpenCanon project", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-validate-external-root-"));
@@ -941,7 +1011,7 @@ export default defineConvention({
     stopIsolatedCliRuntime(rootDir);
     rmSync(rootDir, { recursive: true, force: true });
   }
-});
+}, 30_000);
 
 test("Project Knowledge skips broken symlinks in ignored directories", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-project-"));

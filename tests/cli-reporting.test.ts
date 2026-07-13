@@ -161,6 +161,19 @@ test("changes ready and brief expose agent-ready task work", () => {
     assert.match(briefPayload.packet.xml, /<ready-work>/);
     assert.match(briefPayload.packet.xml, /surface id="company-workflow"/);
 
+    const doctor = spawnSync(process.execPath, [script, "doctor", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(doctor.error, undefined, doctor.error ? doctor.error.message : "spawn failed");
+    assert([0, 1].includes(doctor.status ?? -1), doctor.stderr || doctor.stdout);
+    const doctorPayload = JSON.parse(doctor.stdout) as { checks: Array<{ id: string; status: string; message: string }> };
+    const knowledgeCheck = doctorPayload.checks.find((check) => check.id === "semantic-index");
+    assert.equal(knowledgeCheck?.status, "warn");
+    assert.match(knowledgeCheck?.message ?? "", /snapshot|built|stale/i);
+
     const check = spawnSync(process.execPath, [script, "changes", "check", "cli-task-change", "--task", "model", "--all", "--format", "json"], {
       cwd: rootDir,
       encoding: "utf8",

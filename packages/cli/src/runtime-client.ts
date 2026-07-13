@@ -1,8 +1,15 @@
 import {
+  DoctorKnowledgeInspectionKind,
+  ReadSemanticIndexStatusResultSchema,
+  resolveRootDir,
+  type DoctorKnowledgeInspection,
+} from "@opencanon/core";
+import {
   ensureProjectRuntimeViaService,
   inspectProjectRuntime,
   localProtocolEndpointFromEntry,
   requestLocalJson,
+  RuntimeStatus,
   streamLocalText,
   resolveRuntimeCliEntrypoint,
   runtimeIdentityForEntrypoint,
@@ -10,7 +17,6 @@ import {
   stopProjectRuntime,
   type RuntimeRegistryEntry,
 } from "@opencanon/runtime";
-import { resolveRootDir } from "@opencanon/core";
 
 export const RuntimeApiRoute = {
   CanonRelated: "/api/canon/related",
@@ -41,6 +47,7 @@ export const RuntimeApiRoute = {
 
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
 const RunningRuntimeProducerWarmTimeoutMs = 35_000;
+const RunningRuntimeKnowledgeProbeTimeoutMs = 2_000;
 
 /**
  * Authoritative producer statuses from an ALREADY-running runtime, or undefined
@@ -57,7 +64,7 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
   if (inspection?.status !== "running") return undefined;
   try {
     const identity = runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir));
-    if (!runtimeProducerProbeIdentityMatches(inspection.entry, identity)) return undefined;
+    if (!runtimeProbeIdentityMatches(inspection.entry, identity)) return undefined;
   } catch {
     return undefined;
   }
@@ -76,7 +83,38 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
   }
 }
 
-function runtimeProducerProbeIdentityMatches(
+export async function inspectRunningRuntimeKnowledge(cwd: string): Promise<DoctorKnowledgeInspection> {
+  const rootDir = resolveRootDir(cwd);
+  const inspection = await inspectProjectRuntime(rootDir);
+  if (inspection?.status !== RuntimeStatus.Running && inspection?.status !== RuntimeStatus.Busy) {
+    return { kind: DoctorKnowledgeInspectionKind.NotInspected };
+  }
+  try {
+    const identity = runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir));
+    if (!runtimeProbeIdentityMatches(inspection.entry, identity)) {
+      return {
+        kind: DoctorKnowledgeInspectionKind.Failed,
+        error: "The running project runtime identity does not match this OpenCanon CLI.",
+      };
+    }
+    const payload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(inspection.entry), {
+      method: "GET",
+      path: RuntimeApiRoute.ContextStatus,
+      timeoutMs: RunningRuntimeKnowledgeProbeTimeoutMs,
+    });
+    return {
+      kind: DoctorKnowledgeInspectionKind.Available,
+      index: ReadSemanticIndexStatusResultSchema.parse(payload).index,
+    };
+  } catch (error) {
+    return {
+      kind: DoctorKnowledgeInspectionKind.Failed,
+      error: errorMessage(error),
+    };
+  }
+}
+
+function runtimeProbeIdentityMatches(
   entry: RuntimeRegistryEntry,
   identity: Pick<RuntimeRegistryEntry, "transport" | "protocolVersion" | "runtimeVersion" | "runtimeFingerprint" | "cliPath">,
 ): boolean {

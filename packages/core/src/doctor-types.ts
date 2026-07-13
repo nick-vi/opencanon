@@ -1,4 +1,5 @@
 import type { FixMode } from "./fixes.ts";
+import type { SemanticIndexSnapshot } from "./contracts.ts";
 
 export const DoctorStatus = {
   Pass: "pass",
@@ -42,6 +43,17 @@ export type DoctorRuntimeHealth = {
     lifecycleStatus?: string;
   };
 };
+
+export const DoctorKnowledgeInspectionKind = {
+  Available: "available",
+  Failed: "failed",
+  NotInspected: "not-inspected",
+} as const;
+
+export type DoctorKnowledgeInspection =
+  | { kind: typeof DoctorKnowledgeInspectionKind.Available; index: SemanticIndexSnapshot | null }
+  | { kind: typeof DoctorKnowledgeInspectionKind.Failed; error: string }
+  | { kind: typeof DoctorKnowledgeInspectionKind.NotInspected };
 
 export type DoctorFixResult = {
   mode: FixMode;

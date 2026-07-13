@@ -38,6 +38,7 @@ import {
 } from "./doctor-checks.ts";
 import {
   DoctorCheckGroup,
+  type DoctorKnowledgeInspection,
   DoctorStatus,
   type DoctorCheck,
   type DoctorFixResult,
@@ -55,12 +56,12 @@ import type { Validator } from "./validator.ts";
 import { normalizeProducerStatusesForProject } from "./validator.ts";
 import type { ProducerStatus } from "./type-facts-provider.ts";
 import { ProducerStatusKind } from "./type-facts-provider.ts";
-import type { SemanticIndexSnapshot } from "./contracts.ts";
 
 export { DoctorCheckGroup, DoctorStatus } from "./doctor-types.ts";
-export type { DoctorCheck, DoctorFixResult, DoctorReport, DoctorRuntimeHealth } from "./doctor-types.ts";
+export { DoctorKnowledgeInspectionKind } from "./doctor-types.ts";
+export type { DoctorCheck, DoctorFixResult, DoctorKnowledgeInspection, DoctorReport, DoctorRuntimeHealth } from "./doctor-types.ts";
 
-export function buildDoctorReport(params: { paths: ContextPaths; conventions: Convention[]; validators: Validator[]; areas?: Area[]; specs?: Spec[]; changes?: Change[]; runExternalTools?: boolean; producerStatuses?: ProducerStatus[]; semanticIndex?: SemanticIndexSnapshot | null; runtimeHealth?: DoctorRuntimeHealth }): DoctorReport {
+export function buildDoctorReport(params: { paths: ContextPaths; conventions: Convention[]; validators: Validator[]; areas?: Area[]; specs?: Spec[]; changes?: Change[]; runExternalTools?: boolean; producerStatuses?: ProducerStatus[]; knowledgeInspection?: DoctorKnowledgeInspection; runtimeHealth?: DoctorRuntimeHealth }): DoctorReport {
   const checks: DoctorCheck[] = [];
   const pushCheck = (group: DoctorCheckGroup, check: Omit<DoctorCheck, "group">): void => {
     checks.push({ group, ...check });
@@ -145,7 +146,7 @@ export function buildDoctorReport(params: { paths: ContextPaths; conventions: Co
     details: projectAuthoringDiagnostics,
   });
 
-  const semanticIndexDiagnostics = validateSemanticIndex(params.semanticIndex);
+  const semanticIndexDiagnostics = validateSemanticIndex(params.knowledgeInspection);
   pushCheck(DoctorCheckGroup.GeneratedState, {
     id: "semantic-index",
     status: semanticIndexDiagnostics.status,
