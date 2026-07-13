@@ -37,6 +37,7 @@ pub(crate) struct ListEventsRequest {
     pub(crate) mode: String,
     pub(crate) limit: Option<u32>,
     pub(crate) change_id: Option<String>,
+    pub(crate) change_ids: Option<Vec<String>>,
     pub(crate) task_id: Option<String>,
     pub(crate) check_id: Option<String>,
 }

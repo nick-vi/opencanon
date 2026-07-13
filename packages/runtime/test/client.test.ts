@@ -492,6 +492,50 @@ test("change task graph routes expose ready work and persist task lifecycle stat
   }
 });
 
+test("ready work keeps closed Changes closed beyond the recent Activity window", { timeout: HeavyRouteIntegrationTestTimeoutMs }, () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-complete-ready-history-"));
+  createAuthoringProject(rootDir);
+  mkdirSync(path.join(rootDir, "src"), { recursive: true });
+  mkdirSync(path.join(rootDir, "opencanon/changes"), { recursive: true });
+  writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
+  writeFileSync(
+    path.join(rootDir, "opencanon/changes/index.ts"),
+    [
+      "import { defineChange } from \"@opencanon/core\";",
+      "",
+      "export default [",
+      "  defineChange({",
+      "    id: \"closed-change\",",
+      "    title: \"Closed Change\",",
+      "    kind: \"fix\",",
+      "    intent: { problem: \"Ready work can drift\", outcome: \"Closed work stays closed\" },",
+      "    tasks: [{ id: \"finish\", title: \"Finish work\", files: [\"src/company.ts\"] }],",
+      "    render: { kind: \"none\" },",
+      "  }),",
+      "  defineChange({",
+      "    id: \"unrelated-change\",",
+      "    title: \"Unrelated Change\",",
+      "    kind: \"feature\",",
+      "    intent: { problem: \"Other activity exists\", outcome: \"Other activity remains bounded\" },",
+      "    render: { kind: \"none\" },",
+      "  }),",
+      "];",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", completeReadyHistoryCheckSource(), rootDir], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: HeavyRouteSubprocessTimeoutMs,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime stream refreshes when external worktree coordination changes", { timeout: 30000 }, () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-worktree-stream-"));
   createAuthoringProject(rootDir);
@@ -1180,6 +1224,76 @@ function changeTaskRoutesCheckSource(): string {
       assert(packet.xml.includes("task-change"));
       assert(packet.xml.includes('surface id="company-workflow"'));
       assert.equal(typeof packet.facts.readyTasks, "number");
+    } finally {
+      await server.stop();
+    }
+  `;
+}
+
+function completeReadyHistoryCheckSource(): string {
+  const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
+  const coreUrl = pathToFileURL(path.join(process.cwd(), "packages/core/src/index.ts")).href;
+  return `
+    import assert from "node:assert/strict";
+    import { CanonEventSchema, createPaths } from ${JSON.stringify(coreUrl)};
+    import { openProjectStore, runtimeAuthHeaders, startOpenCanonRuntime } from ${JSON.stringify(runtimeUrl)};
+
+    const rootDir = process.argv[1];
+    const store = openProjectStore({ rootDir, paths: createPaths(rootDir) });
+    const event = (id, type, changeId, timestamp, taskId) => CanonEventSchema.parse({
+      id,
+      type,
+      timestamp,
+      actor: "test",
+      files: [],
+      changeIds: [changeId],
+      taskIds: taskId ? [taskId] : [],
+      checkIds: [],
+      conventionIds: [],
+      validatorIds: [],
+      findingIds: [],
+      summary: id,
+    });
+    try {
+      const lifecycle = [
+        ["closed-claim", "task-claimed", "finish"],
+        ["closed-start", "task-started", "finish"],
+        ["closed-review-task", "task-review", "finish"],
+        ["closed-task", "task-closed", "finish"],
+        ["closed-review-change", "change-review", undefined],
+        ["closed-change", "change-closed", undefined],
+      ];
+      for (let index = 0; index < lifecycle.length; index += 1) {
+        const [id, type, taskId] = lifecycle[index];
+        store.writeEvent(event(id, type, "closed-change", new Date(Date.UTC(2026, 0, 1, 0, 0, 0, index)).toISOString(), taskId));
+      }
+      for (let index = 0; index < 600; index += 1) {
+        store.writeEvent(event("unrelated-" + String(index).padStart(4, "0"), "updated", "unrelated-change", new Date(Date.UTC(2026, 1, 1, 0, 0, 0, index)).toISOString()));
+      }
+    } finally {
+      store.close();
+    }
+
+    const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+    const headers = runtimeAuthHeaders(server.authToken);
+    async function get(path) {
+      const response = await fetch(server.url + path, { headers });
+      const text = await response.text();
+      assert.equal(response.status, 200, text);
+      const body = JSON.parse(text);
+      assert.equal(body.ok, true, text);
+      return body.data;
+    }
+    try {
+      const queue = await get("/api/changes/ready");
+      assert(!queue.ready.some((item) => item.changeId === "closed-change"));
+      assert(!queue.blocked.some((item) => item.changeId === "closed-change"));
+      assert(queue.ready.some((item) => item.changeId === "unrelated-change"));
+
+      const snapshot = await get("/api/snapshot");
+      const closed = snapshot.changes.find((change) => change.id === "closed-change");
+      assert.equal(closed.boardColumn, "closed");
+      assert.equal(closed.tasks[0].status, "closed");
     } finally {
       await server.stop();
     }

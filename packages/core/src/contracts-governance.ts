@@ -215,7 +215,7 @@ export type CanonEventQuery =
     }
   | {
       mode: typeof CanonEventQueryMode.ChangeHistory;
-      changeId: string;
+      changeIds: string[];
     };
 
 export const EngineVersionSchema = z.object({

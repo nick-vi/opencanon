@@ -56,6 +56,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
 - `cli-tests` test `tests/cli-reporting.test.ts`
 - `doctor-tests` test `tests/validator-runtime.test.ts`
+- `worktree-tests` test `tests/worktree.test.ts`
 - `project-doctor` doctor
 
 ## Rules
@@ -100,7 +101,7 @@ Rule `state-projections-use-complete-activity`: Correctness-sensitive Change sta
 - unrelated Activity cannot reopen closed work
 - ready work and snapshots use the same complete history
 - complete history is queried in one batch for current Changes
-Checks: `engine-tests`, `runtime-client-tests`
+Checks: `engine-tests`, `runtime-client-tests`, `worktree-tests`
 
 Rule `local-clients-use-pipe-transport`: Local CLI and MCP requests use the pipe control plane by default while loopback HTTP remains an explicit browser and diagnostics adapter.
 - brief uses the shared default runtime client
@@ -146,7 +147,7 @@ Scenario `agent-brief-survives-unrelated-activity`
 - When an agent requests ready work or a briefing
 - Then the closed Change is absent from ready and blocked work
 - Then the briefing queue agrees with the Change snapshot
-Checks: `engine-tests`, `runtime-client-tests`, `cli-tests`
+Checks: `engine-tests`, `runtime-client-tests`, `worktree-tests`, `cli-tests`
 
 ## Governance
 

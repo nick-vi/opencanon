@@ -39,7 +39,7 @@ import type { Engine } from "@opencanon/engine";
 import type { ProjectStore } from "./state.ts";
 import { cachedSemanticIndexSnapshot, cachedStartupSemanticIndexSnapshot } from "./semantic-index-snapshot.ts";
 import { activeTaskLeaseSummaries, listGlobalCanonEvents, mergeCanonEvents } from "./worktree-coordination.ts";
-import { listCompleteChangeHistory } from "./server-canon-events.ts";
+import { listCompleteChangeHistories } from "./server-canon-events.ts";
 import {
   buildProductModelProjection,
   buildSnapshotFileCoverage,
@@ -270,12 +270,13 @@ export async function buildStartupRuntimeSnapshot(input: {
 }): Promise<RuntimeSnapshot> {
   const project = await loadProjectContext(input.cwd);
   const taskLeases = activeTaskLeaseSummaries(project.paths.rootDir);
+  const changeHistories = listCompleteChangeHistories(project.paths.rootDir, input.store, project.changes.map((change) => change.id));
   const findings: CanonFinding[] = [];
   const areas: SnapshotArea[] = project.areas.map((area) => snapshotArea(project.paths.rootDir, project.paths.areasPath, area));
   const specs: SnapshotSpec[] = project.specs.map((spec) => snapshotSpec(project.paths.rootDir, project.paths.specsPath, spec));
   const changes: SnapshotChange[] = project.changes.map((change) =>
     snapshotChange(project.paths.rootDir, project.paths.changesPath, change, {
-      events: listCompleteChangeHistory(project.paths.rootDir, input.store, change.id),
+      events: changeHistories.byChangeId.get(change.id) ?? [],
       findings,
       taskLeases,
     }),
@@ -490,11 +491,12 @@ export async function buildRuntimeSnapshot(input: {
   });
 
   const taskLeases = activeTaskLeaseSummaries(project.paths.rootDir);
+  const changeHistories = listCompleteChangeHistories(project.paths.rootDir, input.store, project.changes.map((change) => change.id));
   const areas: SnapshotArea[] = project.areas.map((area) => snapshotArea(project.paths.rootDir, project.paths.areasPath, area));
   const specs: SnapshotSpec[] = project.specs.map((spec) => snapshotSpec(project.paths.rootDir, project.paths.specsPath, spec));
   const changes: SnapshotChange[] = project.changes.map((change) =>
     snapshotChange(project.paths.rootDir, project.paths.changesPath, change, {
-      events: listCompleteChangeHistory(project.paths.rootDir, input.store, change.id),
+      events: changeHistories.byChangeId.get(change.id) ?? [],
       findings,
       taskLeases,
     }),

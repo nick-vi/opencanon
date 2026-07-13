@@ -78,7 +78,7 @@ export default [
         id: "state-projections-use-complete-activity",
         statement: "Correctness-sensitive Change state is derived from complete indexed Activity for the relevant Changes, while browsing feeds remain bounded.",
         acceptance: ["unrelated Activity cannot reopen closed work", "ready work and snapshots use the same complete history", "complete history is queried in one batch for current Changes"],
-        checks: ["engine-tests", "runtime-client-tests"],
+        checks: ["engine-tests", "runtime-client-tests", "worktree-tests"],
       },
       {
         id: "local-clients-use-pipe-transport",
@@ -120,7 +120,7 @@ export default [
         given: ["a Change and all of its tasks are closed", "more than 500 newer events belong to other Changes"],
         when: "an agent requests ready work or a briefing",
         then: ["the closed Change is absent from ready and blocked work", "the briefing queue agrees with the Change snapshot"],
-        checks: ["engine-tests", "runtime-client-tests", "cli-tests"],
+        checks: ["engine-tests", "runtime-client-tests", "worktree-tests", "cli-tests"],
       },
     ],
     checks: [
@@ -131,6 +131,7 @@ export default [
       { id: "service-lifecycle-tests", kind: "test", target: "packages/runtime/test/service.test.ts" },
       { id: "cli-tests", kind: "test", target: "tests/cli-reporting.test.ts" },
       { id: "doctor-tests", kind: "test", target: "tests/validator-runtime.test.ts" },
+      { id: "worktree-tests", kind: "test", target: "tests/worktree.test.ts" },
       { id: "project-doctor", kind: "doctor" },
     ],
     governedBy: { inferFromScope: true, conventions: ["explicit-error-contracts", "service-events-current", "state-ownership-current", "tests-follow-risk"] },

@@ -57,13 +57,30 @@ fn complete_change_history_is_not_truncated() {
             )
             .unwrap();
     }
+    project
+        .write_event_json(json!({ "event": event("secondary", "secondary-change") }).to_string())
+        .unwrap();
 
     let output = project
         .list_events_json(
-            json!({ "mode": "change-history", "changeId": "target-change" }).to_string(),
+            json!({ "mode": "change-history", "changeIds": ["target-change", "secondary-change"] })
+                .to_string(),
         )
         .unwrap();
     let events: Vec<Value> = serde_json::from_str(&output).unwrap();
 
-    assert_eq!(events.len(), 550);
+    assert_eq!(events.len(), 551);
+    assert!(events.iter().any(|event| event["id"] == "secondary"));
+}
+
+#[test]
+fn complete_change_history_requires_change_ids() {
+    let root = test_root("activity-complete-history-empty");
+    let project = open_test_project(&root);
+
+    let error = project
+        .list_events_json(json!({ "mode": "change-history", "changeIds": [] }).to_string())
+        .unwrap_err();
+
+    assert!(error.to_string().contains("require changeIds"));
 }

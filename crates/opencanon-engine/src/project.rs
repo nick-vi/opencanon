@@ -429,9 +429,10 @@ impl EngineProjectHandle {
     #[napi(js_name = "listEventsJson")]
     pub fn list_events_json(&self, request: String) -> napi::Result<String> {
         let request: ListEventsRequest = decode(&request)?;
-        let (change_id, task_id, check_id, limit) = match request.mode.as_str() {
+        let (change_id, change_ids_json, task_id, check_id, limit) = match request.mode.as_str() {
             "recent" => (
                 request.change_id,
+                None,
                 request.task_id,
                 request.check_id,
                 i64::from(
@@ -447,16 +448,17 @@ impl EngineProjectHandle {
                 ),
             ),
             "change-history" => {
-                let change_id = request
-                    .change_id
-                    .filter(|value| !value.trim().is_empty())
-                    .ok_or_else(|| {
-                        napi_error(
-                            "invalid-engine-payload",
-                            "Complete Canon history queries require changeId.",
-                        )
-                    })?;
-                (Some(change_id), None, None, i64::MAX)
+                let mut change_ids = request.change_ids.unwrap_or_default();
+                change_ids.retain(|value| !value.trim().is_empty());
+                change_ids.sort();
+                change_ids.dedup();
+                if change_ids.is_empty() {
+                    return Err(napi_error(
+                        "invalid-engine-payload",
+                        "Complete Canon history queries require changeIds.",
+                    ));
+                }
+                (None, Some(encode(&change_ids)?), None, None, i64::MAX)
             }
             _ => {
                 return Err(napi_error(
@@ -477,19 +479,25 @@ impl EngineProjectHandle {
                    select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'change' and link.value = ?1
                  ))
                  and (?2 is null or exists (
-                   select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'task' and link.value = ?2
+                   select 1 from canon_event_links link
+                   where link.event_id = event.id and link.kind = 'change'
+                     and link.value in (select value from json_each(?2))
                  ))
                  and (?3 is null or exists (
-                   select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'check' and link.value = ?3
+                   select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'task' and link.value = ?3
+                 ))
+                 and (?4 is null or exists (
+                   select 1 from canon_event_links link where link.event_id = event.id and link.kind = 'check' and link.value = ?4
                  ))
                  order by event.timestamp desc, event.id desc
-                 limit ?4",
+                 limit ?5",
             )
             .map_err(|error| sqlite_error("Could not prepare canon event list", error))?;
         let rows = statement
-            .query_map(params![change_id, task_id, check_id, limit], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_map(
+                params![change_id, change_ids_json, task_id, check_id, limit],
+                |row| row.get::<_, String>(0),
+            )
             .map_err(|error| sqlite_error("Could not list canon events", error))?;
         let mut events = Vec::new();
         for row in rows {

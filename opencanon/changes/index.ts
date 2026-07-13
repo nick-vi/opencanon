@@ -29,6 +29,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/client.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/cli-reporting.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/validator-runtime.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "tests/worktree.test.ts" },
     ],
     intent: {
       problem: "Bounded global Activity can hide older closure events from agent ready-work projections, brief uniquely forces HTTP, and CLI Doctor can claim Knowledge is verified without reading the running runtime's snapshot.",
@@ -45,8 +46,8 @@ export default [
       {
         id: "complete-activity-projection",
         title: "Batch complete Change Activity for state projections",
-        files: ["packages/core/src/contracts-governance.ts", "packages/engine/src/index.ts", "crates/opencanon-engine/src/**", "packages/runtime/src/server-canon-events.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/snapshot.ts", "packages/runtime/src/worktree-coordination.ts", "packages/runtime/test/client.test.ts"],
-        checks: ["engine-tests", "runtime-client-tests", "typecheck"],
+        files: ["packages/core/src/contracts-governance.ts", "packages/engine/src/index.ts", "crates/opencanon-engine/src/**", "packages/runtime/src/server-canon-events.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/snapshot.ts", "packages/runtime/src/worktree-coordination.ts", "packages/runtime/test/client.test.ts", "tests/worktree.test.ts"],
+        checks: ["engine-tests", "runtime-client-tests", "worktree-tests", "typecheck"],
         dependsOn: ["canon-contract"],
       },
       {
@@ -66,7 +67,7 @@ export default [
       {
         id: "full-proof",
         title: "Prove agent readiness integrity end to end",
-        checks: ["engine-tests", "runtime-client-tests", "cli-tests", "doctor-tests", "typecheck", "project-validation", "project-doctor", "full-ci"],
+        checks: ["engine-tests", "runtime-client-tests", "worktree-tests", "cli-tests", "doctor-tests", "typecheck", "project-validation", "project-doctor", "full-ci"],
         dependsOn: ["live-knowledge-doctor"],
       },
     ],
@@ -76,6 +77,7 @@ export default [
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
       { id: "cli-tests", kind: "test", target: "tests/cli-reporting.test.ts" },
       { id: "doctor-tests", kind: "test", target: "tests/validator-runtime.test.ts" },
+      { id: "worktree-tests", kind: "test", target: "tests/worktree.test.ts" },
       { id: "typecheck", kind: "command", command: "npm run check:types" },
       { id: "project-validation", kind: "command", command: "npm run opencanon -- validate --changed" },
       { id: "project-doctor", kind: "doctor" },

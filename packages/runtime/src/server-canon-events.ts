@@ -22,6 +22,19 @@ export function listChangeEvents(rootDir: string, store: ProjectStore, input: { 
   });
 }
 
-export function listCompleteChangeHistory(rootDir: string, store: ProjectStore, changeId: string): CanonEvent[] {
-  return listRuntimeEvents(rootDir, store, { mode: CanonEventQueryMode.ChangeHistory, changeId });
+export type CompleteChangeHistories = {
+  events: CanonEvent[];
+  byChangeId: ReadonlyMap<string, CanonEvent[]>;
+};
+
+export function listCompleteChangeHistories(rootDir: string, store: ProjectStore, changeIds: readonly string[]): CompleteChangeHistories {
+  const normalizedIds = [...new Set(changeIds.map((value) => value.trim()).filter(Boolean))].sort();
+  const byChangeId = new Map(normalizedIds.map((changeId) => [changeId, [] as CanonEvent[]]));
+  if (normalizedIds.length === 0) return { events: [], byChangeId };
+
+  const events = listRuntimeEvents(rootDir, store, { mode: CanonEventQueryMode.ChangeHistory, changeIds: normalizedIds });
+  for (const event of events) {
+    for (const changeId of event.changeIds) byChangeId.get(changeId)?.push(event);
+  }
+  return { events, byChangeId };
 }

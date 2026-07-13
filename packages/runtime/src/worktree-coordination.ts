@@ -319,7 +319,10 @@ export function listGlobalCanonEvents(rootDir: string, query: CanonEventQuery): 
   try {
     upsertRepository(db, repository);
     const completeHistory = query.mode === CanonEventQueryMode.ChangeHistory;
-    const changeId = completeHistory ? query.changeId : query.changeId ?? null;
+    const changeId = completeHistory ? null : query.changeId ?? null;
+    const changeIds = completeHistory ? normalizeChangeIds(query.changeIds) : [];
+    if (completeHistory && changeIds.length === 0) return [];
+    const changeIdsJson = completeHistory ? JSON.stringify(changeIds) : null;
     const taskId = completeHistory ? null : query.taskId ?? null;
     const checkId = completeHistory ? null : query.checkId ?? null;
     const limit = completeHistory ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.min(500, query.limit));
@@ -334,6 +337,11 @@ export function listGlobalCanonEvents(rootDir: string, query: CanonEventQuery): 
            ))
            and (? is null or exists (
              select 1 from activity_event_links link
+             where link.repo_key = event.repo_key and link.event_id = event.id and link.kind = 'change'
+               and link.value in (select value from json_each(?))
+           ))
+           and (? is null or exists (
+             select 1 from activity_event_links link
              where link.repo_key = event.repo_key and link.event_id = event.id and link.kind = 'task' and link.value = ?
            ))
            and (? is null or exists (
@@ -343,11 +351,15 @@ export function listGlobalCanonEvents(rootDir: string, query: CanonEventQuery): 
          order by event.timestamp desc, event.id desc
          limit ?`,
       )
-      .all(repository.repoKey, changeId, changeId, taskId, taskId, checkId, checkId, limit)
+      .all(repository.repoKey, changeId, changeId, changeIdsJson, changeIdsJson, taskId, taskId, checkId, checkId, limit)
       .map((row) => CanonEventSchema.parse(JSON.parse(String((row as { event_json: unknown }).event_json))));
   } finally {
     db.close();
   }
+}
+
+function normalizeChangeIds(changeIds: readonly string[]): string[] {
+  return [...new Set(changeIds.map((value) => value.trim()).filter(Boolean))].sort();
 }
 
 export function mergeCanonEvents(events: readonly CanonEvent[], limit: number): CanonEvent[] {

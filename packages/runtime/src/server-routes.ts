@@ -36,7 +36,7 @@ import {
 } from "./worktree-coordination.ts";
 import { buildContextPacket } from "./server-context-packet.ts";
 import { canonHistoryFromRuntime } from "./server-history.ts";
-import { listChangeEvents, listRuntimeEvents, writeRuntimeEvent } from "./server-canon-events.ts";
+import { listChangeEvents, listCompleteChangeHistories, listRuntimeEvents, writeRuntimeEvent } from "./server-canon-events.ts";
 import {
   ChangeEventType,
   applyTaskOwnershipEvent,
@@ -327,7 +327,8 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ChangeReady) {
         const project = await loadProjectContext(rootDir);
-        return json({ ok: true, data: deriveChangeWorkQueue(project.changes, listRuntimeEvents(rootDir, currentStore(), { mode: "recent", limit: 500 }), { leases: activeTaskLeaseSummaries(rootDir) }) });
+        const histories = listCompleteChangeHistories(rootDir, currentStore(), project.changes.map((change) => change.id));
+        return json({ ok: true, data: deriveChangeWorkQueue(project.changes, histories.events, { leases: activeTaskLeaseSummaries(rootDir) }) });
       }
       if (url.pathname === ApiRoute.Worktrees) {
         return json({ ok: true, data: listWorktreeOverview(rootDir) });
@@ -424,7 +425,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const transitionIssues = validateChangeLifecycleTransition({
           change,
           event: parsed.event,
-          events: listChangeEvents(rootDir, currentStore(), { changeId: change.id, limit: 500 }),
+          events: listCompleteChangeHistories(rootDir, currentStore(), [change.id]).events,
           leases,
         });
         if (transitionIssues.length > 0) {
