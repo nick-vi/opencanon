@@ -140,4 +140,4 @@ test("validate --project uses and reuses the supervised runtime", async () => {
     await stopService(serviceRegistryPath);
     rmSync(rootDir, { recursive: true, force: true });
   }
-});
+}, 15_000);

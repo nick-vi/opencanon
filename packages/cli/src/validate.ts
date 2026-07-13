@@ -29,7 +29,6 @@ import {
   unique,
   validateConfig,
 } from "@opencanon/core";
-import type { ProducerStatus } from "@opencanon/core";
 import { Format } from "@opencanon/core";
 import { applyFindingFixes } from "@opencanon/core";
 import type { FixMode } from "@opencanon/core";
@@ -39,8 +38,8 @@ import { createRuntime, createValidationContextFromFixture, createValidationCont
 import type { ValidationResult } from "@opencanon/core";
 import type { ResolvedCommitGate } from "@opencanon/core";
 import { selectValidators, validatorGraphHash, validatorMatchesFile } from "@opencanon/core";
-import { RuntimeApiRoute, fetchRunningRuntimeProducers, withRuntimeClient } from "./runtime-client.ts";
-import { DiagnosticSeverity, ProducerStatusKind, ValidatorDomain, ValidatorOutcomeStatus, resolveProducerStatuses } from "@opencanon/core";
+import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { DiagnosticSeverity, ProducerStatusKind, ValidatorDomain, ValidatorOutcomeStatus } from "@opencanon/core";
 import { BatchProducerPolicy, InteractiveProducerPolicy } from "@opencanon/core";
 
 // Single source of truth for fixture case names; reference members instead of inlining the strings.
@@ -80,7 +79,7 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
   }
 
   assertValidConfig(paths);
-  if (query.requireProducers.length > 0) await assertProducersReady(cwd, query.requireProducers);
+  assertProducerGateMode(query);
   resolveChangedFiles(query);
 
   if (query.list) {
@@ -162,6 +161,7 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
       : {},
   );
   result = query.changed ? resolveValidationCommitGates(result, true) : { ...result, commitGates: [] };
+  result = requireReadyProducers(result, query.requireProducers);
 
   if (query.format === Format.Json) writeJson(result);
   else console.log(renderFindings(result));
@@ -190,29 +190,23 @@ function assertValidConfig(paths: ReturnType<typeof createPaths>): void {
   process.exit(1);
 }
 
-async function assertProducersReady(cwd: string, required: string[]): Promise<void> {
-  // Authoritative producer status WITHOUT spawning an ephemeral runtime: a fresh
-  // runtime's lazy live producer is cold (`warming`) until first queried, so
-  // sampling it here would fail the gate spuriously. Prefer an already-running
-  // runtime (it owns the warm live producer); otherwise resolve in-process, which
-  // sees a fresh `opencanon analyze --typed` sidecar — the documented CI path.
-  const rootDir = resolveRootDir(cwd);
-  const producers =
-    (await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir, { warm: true })) ?? resolveProducerStatuses(rootDir);
-  const byLanguage = new Map(producers.map((status) => [status.language, status]));
-  const unmet = required
-    .map((language) => byLanguage.get(language) ?? { language, kind: "not-implemented" as const })
-    .filter((status) => status.kind !== ProducerStatusKind.Ready);
-  if (unmet.length === 0) return;
-  console.error("--require-producer: one or more required type producers are not ready:");
-  for (const status of unmet) {
-    const detail = "detail" in status && status.detail ? ` — ${status.detail}` : "";
-    console.error(`- ${status.language}: ${status.kind}${detail}`);
-  }
-  console.error(
-    "Install typescript + a tsconfig (live producer) or run `opencanon analyze --typed` (sidecar) so the producer reports ready.",
-  );
-  process.exit(1);
+function assertProducerGateMode(query: Query): void {
+  if (query.requireProducers.length === 0 || (!query.list && !query.checkFixtures)) return;
+  fail("--require-producer applies to validation runs and cannot be combined with --list or --check-fixtures.");
+}
+
+export function requireReadyProducers(result: ValidationResult, required: string[]): ValidationResult {
+  const diagnostics = required.flatMap((language) => {
+    const snapshot = result.producerSnapshot[language];
+    if (snapshot?.kind === ProducerStatusKind.Ready) return [];
+    const status = snapshot?.kind ?? ProducerStatusKind.NotImplemented;
+    const generation = snapshot ? ` at generation ${snapshot.generation}` : "";
+    return [
+      `Required producer ${language} did not back this validation result as ready (status: ${status}${generation}). ` +
+        "Install the language producer prerequisites or run `opencanon analyze --typed`, then validate again.",
+    ];
+  });
+  return diagnostics.length === 0 ? result : { ...result, diagnostics: [...result.diagnostics, ...diagnostics] };
 }
 
 function parseArgs(args: string[], cwd: string): Query {
@@ -226,7 +220,7 @@ function parseArgs(args: string[], cwd: string): Query {
   cli.option("--fix [mode]", "Apply structured fixes.");
   cli.option("--profile", "Show validation timing breakdown.");
   cli.option("--strict-warnings", "Exit nonzero when warnings are present.");
-  cli.option("--require-producer <langs>", "Fail unless the named type producers are ready (comma-separated).");
+  cli.option("--require-producer <langs>", "Fail unless this validation result used ready named type producers (comma-separated).");
   cli.option("--strict-producers", "Escalate every validator producer skip to an error (nonzero exit).");
   cli.option("--format <format>", "Output format.");
   cli.option("--topic <topic>", "Run validators for a topic.");
@@ -323,7 +317,7 @@ function resolveChangedFiles(query: Query): void {
 }
 
 async function resolveNoRuntimeFileValidation(query: Query): Promise<ValidationResult | undefined> {
-  if (query.project || query.files.length === 0 || query.fixMode || query.dryRun || query.profile) return undefined;
+  if (query.project || query.files.length === 0 || query.fixMode || query.dryRun || query.profile || query.requireProducers.length > 0) return undefined;
 
   const project = await loadProjectContext(rootDir);
   const selectedValidators = selectValidators(project.validators, {
@@ -786,7 +780,7 @@ Options:
                             Apply structured fixes. Default with --fix: safe.
   --dry-run                Show selected fixes without writing files.
   --strict-warnings        Exit nonzero when warnings are present.
-  --require-producer <langs>  Fail unless the named type producers are ready (comma-separated, e.g. typescript).
+  --require-producer <langs>  Fail unless this result used ready named type producers (comma-separated, e.g. typescript).
   --strict-producers       Escalate every validator producer skip to an error.
   --profile                Show validation timing breakdown.
   --check-fixtures         Validate validator fixtures. Combine with --validator or --topic to filter.

@@ -1156,7 +1156,7 @@ test("CRITICAL1: reading literal.surroundingType records consumption even when t
 
 test("--strict-producers exit code is driven by validatorOutcomes, not findings", async () => {
   const validateUrl = new URL("../packages/cli/src/validate.ts", import.meta.url).href;
-  const { validationExitCode } = (await import(validateUrl)) as typeof import("../packages/cli/src/validate.ts");
+  const { requireReadyProducers, validationExitCode } = (await import(validateUrl)) as typeof import("../packages/cli/src/validate.ts");
   const base = {
     files: [],
     validators: ["needs-ts"],
@@ -1186,6 +1186,22 @@ test("--strict-producers exit code is driven by validatorOutcomes, not findings"
   // A clean run with only `ran` outcomes exits 0.
   const ranResult = { ...base, validatorOutcomes: [{ validatorId: "needs-ts", status: "ran" as const }] };
   assert.equal(validationExitCode(ranResult, { changed: false, strictWarnings: false, strictProducers: true }), 0);
+
+  const requiredWarming = requireReadyProducers(skipResult, ["typescript"]);
+  assert.equal(validationExitCode(requiredWarming, { changed: false, strictWarnings: false, strictProducers: false }), 1);
+  assert.deepEqual(requiredWarming.producerSnapshot, skipResult.producerSnapshot);
+  assert.match(requiredWarming.diagnostics[0] ?? "", /typescript.*warming.*generation 0/);
+
+  const requiredMissing = requireReadyProducers(ranResult, ["python"]);
+  assert.equal(validationExitCode(requiredMissing, { changed: false, strictWarnings: false, strictProducers: false }), 1);
+  assert.match(requiredMissing.diagnostics[0] ?? "", /python.*not-implemented/);
+
+  const requiredReady = requireReadyProducers(
+    { ...ranResult, producerSnapshot: { typescript: { kind: "ready" as const, generation: 9 } } },
+    ["typescript"],
+  );
+  assert.equal(requiredReady.diagnostics.length, 0);
+  assert.equal(validationExitCode(requiredReady, { changed: false, strictWarnings: false, strictProducers: false }), 0);
 });
 
 test("single resolver: a ready live producer beats a stale sidecar candidate (precedence kills defect #2)", () => {
