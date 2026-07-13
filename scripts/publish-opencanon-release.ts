@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 
 const ReleaseRepo = "nick-vi/opencanon";
 const ReleaseWorkflow = "release.yml";
+const ReleaseBranch = "main";
 const ReleaseRunWaitMs = 180_000;
 const ReleaseRunPollMs = 5_000;
 
@@ -15,106 +16,78 @@ type WorkflowRun = {
   url: string;
 };
 
-type Options = {
-  check: boolean;
-  commit: boolean;
-  deleteExisting: boolean;
-  push: boolean;
-  tag: boolean;
-  verify: boolean;
-  watch: boolean;
-};
-
 const version = process.argv[2];
 const args = process.argv.slice(3);
 
-if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-  throw new Error("Usage: npm run release:publish -- <semver> [--no-check] [--no-commit] [--no-tag] [--no-push] [--delete-existing] [--no-watch] [--no-verify]");
+if (
+  !version ||
+  !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version) ||
+  args.length > 0
+) {
+  throw new Error("Usage: npm run release:publish -- <semver>");
 }
 
-const options = parseOptions(args);
 const tagName = `v${version}`;
+assertReleaseWorkspace();
+assertTagAvailable(tagName);
 
 run("npm", ["run", "release:prepare", "--", version]);
-if (options.check) run("npm", ["run", "check:ci"]);
-
-if (options.commit) {
-  run("git", ["add", "-A"]);
-  run("git", ["commit", "-m", `chore(release): prepare ${tagName}`]);
+const preparedWorktree = captureReleaseWorktree();
+if (!preparedWorktree.status) {
+  throw new Error(`Release preparation produced no changes for ${tagName}.`);
 }
-
-if (options.deleteExisting) {
-  run("gh", ["release", "delete", tagName, "--yes", "--cleanup-tag"], { optional: true });
-  run("git", ["tag", "-d", tagName], { optional: true });
+if (preparedWorktree.status.split("\n").some((line) => line.startsWith("?? "))) {
+  throw new Error(
+    `Release preparation produced untracked files, which are outside the version inventory:\n${preparedWorktree.status}`,
+  );
 }
-
-if (options.tag) {
-  run("git", ["tag", "-a", tagName, "-m", tagName]);
+run("npm", ["run", "check:ci"]);
+const verifiedWorktree = captureReleaseWorktree();
+if (
+  verifiedWorktree.status !== preparedWorktree.status ||
+  verifiedWorktree.diff !== preparedWorktree.diff
+) {
+  throw new Error(
+    "The release gate changed tracked or untracked source files. Review those changes and rerun from a clean worktree.",
+  );
 }
+run("git", ["add", "-A"]);
+run("git", ["commit", "-m", `chore(release): prepare ${tagName}`]);
+run("git", ["tag", "-a", tagName, "-m", tagName]);
+run("git", ["push", "--atomic", "origin", ReleaseBranch, tagName]);
 
-if (options.push) {
-  run("git", ["push", "origin", "HEAD"]);
-  run("git", ["push", "origin", tagName]);
-}
-
-if (options.watch) {
-  const headSha = output("git", ["rev-list", "-n", "1", tagName]);
-  const runId = waitForReleaseWorkflowRun(tagName, headSha);
-  run("gh", ["run", "watch", runId, "--repo", ReleaseRepo, "--exit-status", "--compact"]);
-}
-
-if (options.verify) {
-  const requiredAssets = [
-    "opencanon-runtime-manifest.json",
-    "latest.json",
-    "stable.json",
-    "SHA256SUMS",
-    "opencanon-install.mjs",
-    "opencanon-runtime-darwin-arm64.tar.gz",
-    "opencanon-runtime-darwin-x64.tar.gz",
-    "opencanon-runtime-linux-arm64.tar.gz",
-    "opencanon-runtime-linux-x64.tar.gz",
-    "opencanon-runtime-win32-x64.tar.gz",
-  ];
-  const assets = output("gh", ["release", "view", tagName, "--json", "assets", "--jq", ".assets[].name"]);
-  const assetNames = new Set(assets.split("\n").filter(Boolean));
-  const missing = requiredAssets.filter((asset) => !assetNames.has(asset));
-  if (missing.length > 0) {
-    throw new Error(`Release ${tagName} is missing assets: ${missing.join(", ")}`);
-  }
-}
+const headSha = output("git", ["rev-list", "-n", "1", tagName]);
+const previousRunIds = new Set(
+  listReleaseWorkflowRuns(headSha).map((run) => run.databaseId),
+);
+run("gh", [
+  "workflow",
+  "run",
+  ReleaseWorkflow,
+  "--repo",
+  ReleaseRepo,
+  "--ref",
+  tagName,
+  "--field",
+  `tag=${tagName}`,
+]);
+const runId = waitForReleaseWorkflowRun(tagName, headSha, previousRunIds);
+run("gh", [
+  "run",
+  "watch",
+  runId,
+  "--repo",
+  ReleaseRepo,
+  "--exit-status",
+  "--compact",
+]);
+verifyReleaseAssets(tagName);
 
 console.log(`Published OpenCanon ${tagName}.`);
 
-function parseOptions(values: string[]): Options {
-  const options: Options = {
-    check: true,
-    commit: true,
-    deleteExisting: false,
-    push: true,
-    tag: true,
-    verify: true,
-    watch: true,
-  };
-
-  for (const value of values) {
-    if (value === "--no-check") options.check = false;
-    else if (value === "--no-commit") options.commit = false;
-    else if (value === "--delete-existing") options.deleteExisting = true;
-    else if (value === "--no-push") options.push = false;
-    else if (value === "--no-tag") options.tag = false;
-    else if (value === "--no-watch") options.watch = false;
-    else if (value === "--no-verify") options.verify = false;
-    else throw new Error(`Unknown release option: ${value}`);
-  }
-
-  return options;
-}
-
-function run(command: string, args: string[], options: { optional?: boolean } = {}): void {
+function run(command: string, args: string[]): void {
   const result = spawnSync(command, args, { stdio: "inherit" });
   if (result.status === 0) return;
-  if (options.optional) return;
   throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}.`);
 }
 
@@ -126,14 +99,81 @@ function output(command: string, args: string[]): string {
   return result.stdout.trim();
 }
 
-function waitForReleaseWorkflowRun(tagName: string, headSha: string): string {
+function assertReleaseWorkspace(): void {
+  const branch = output("git", ["branch", "--show-current"]);
+  if (branch !== ReleaseBranch) {
+    throw new Error(
+      `Release publication requires branch ${ReleaseBranch}; current branch is ${branch || "detached"}.`,
+    );
+  }
+  const status = output("git", ["status", "--porcelain"]);
+  if (status) {
+    throw new Error(
+      `Release publication requires a clean worktree before version preparation:\n${status}`,
+    );
+  }
+}
+
+function assertTagAvailable(tagName: string): void {
+  const localTag = spawnSync("git", ["rev-parse", "--verify", `refs/tags/${tagName}`], {
+    encoding: "utf8",
+  });
+  if (localTag.status === 0) {
+    throw new Error(`Release tag ${tagName} already exists locally.`);
+  }
+  if (localTag.status !== 128) {
+    throw new Error(`Could not inspect local release tags:\n${localTag.stderr}`);
+  }
+
+  const remoteTag = spawnSync(
+    "git",
+    ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tagName}`],
+    { encoding: "utf8" },
+  );
+  if (remoteTag.status === 0) {
+    throw new Error(`Release tag ${tagName} already exists on origin.`);
+  }
+  if (remoteTag.status !== 2) {
+    throw new Error(`Could not inspect origin release tags:\n${remoteTag.stderr}`);
+  }
+
+  const release = spawnSync(
+    "gh",
+    ["api", `repos/${ReleaseRepo}/releases/tags/${tagName}`, "--silent"],
+    { encoding: "utf8" },
+  );
+  if (release.status === 0) {
+    throw new Error(`GitHub release ${tagName} already exists.`);
+  }
+  if (!/HTTP 404/i.test(release.stderr)) {
+    throw new Error(`Could not inspect GitHub releases:\n${release.stderr}`);
+  }
+}
+
+function captureReleaseWorktree(): { diff: string; status: string } {
+  return {
+    status: output("git", ["status", "--porcelain=v1", "--untracked-files=all"]),
+    diff: output("git", ["diff", "--no-ext-diff", "--binary"]),
+  };
+}
+
+function waitForReleaseWorkflowRun(
+  tagName: string,
+  headSha: string,
+  previousRunIds: ReadonlySet<number>,
+): string {
   const startedAt = Date.now();
   let lastRuns: WorkflowRun[] = [];
 
   while (Date.now() - startedAt < ReleaseRunWaitMs) {
     const runs = listReleaseWorkflowRuns(headSha);
     lastRuns = runs;
-    const match = runs.find((run) => run.event === "push" && run.headSha === headSha && (run.headBranch === tagName || run.headBranch === ""));
+    const match = runs.find(
+      (run) =>
+        run.event === "workflow_dispatch" &&
+        run.headSha === headSha &&
+        !previousRunIds.has(run.databaseId),
+    );
     if (match) return String(match.databaseId);
     sleep(ReleaseRunPollMs);
   }
@@ -155,7 +195,7 @@ function listReleaseWorkflowRuns(headSha: string): WorkflowRun[] {
     "--workflow",
     ReleaseWorkflow,
     "--event",
-    "push",
+    "workflow_dispatch",
     "--commit",
     headSha,
     "--limit",
@@ -169,6 +209,35 @@ function listReleaseWorkflowRuns(headSha: string): WorkflowRun[] {
     return Array.isArray(parsed) ? parsed.filter(isWorkflowRun) : [];
   } catch (error) {
     throw new Error(`Could not parse gh run list output: ${error instanceof Error ? error.message : String(error)}\n${raw}`);
+  }
+}
+
+function verifyReleaseAssets(tagName: string): void {
+  const requiredAssets = [
+    "opencanon-runtime-manifest.json",
+    "latest.json",
+    "stable.json",
+    "SHA256SUMS",
+    "opencanon-install.mjs",
+    "opencanon-runtime-darwin-arm64.tar.gz",
+    "opencanon-runtime-darwin-x64.tar.gz",
+    "opencanon-runtime-linux-arm64.tar.gz",
+    "opencanon-runtime-linux-x64.tar.gz",
+    "opencanon-runtime-win32-x64.tar.gz",
+  ];
+  const assets = output("gh", [
+    "release",
+    "view",
+    tagName,
+    "--json",
+    "assets",
+    "--jq",
+    ".assets[].name",
+  ]);
+  const assetNames = new Set(assets.split("\n").filter(Boolean));
+  const missing = requiredAssets.filter((asset) => !assetNames.has(asset));
+  if (missing.length > 0) {
+    throw new Error(`Release ${tagName} is missing assets: ${missing.join(", ")}`);
   }
 }
 

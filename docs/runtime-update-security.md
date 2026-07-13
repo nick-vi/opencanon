@@ -86,8 +86,8 @@ this makes remote installs fail (correctly, but they fail). Do all of it once:
    declares `environment: release`, so put `OPENCANON_RELEASE_PRIVATE_KEY` in a `release`
    Environment (repo Settings → Environments), not in plain repo secrets, and add
    **required reviewers** + a tag restriction. Each signed release then needs explicit
-   human approval, shrinking the blast radius of a leaked token. (Until you configure it,
-   the environment exists but is unprotected — harmless, just no gate.)
+   human approval, shrinking the blast radius of a leaked token. These repository settings
+   are a release precondition: workflow YAML cannot create or verify their protection rules.
 5. **Publish the public-key fingerprint out of band.** Each `release:keygen` prints a
    `keyId` (the full SHA-256 of the SPKI public key) — that IS the fingerprint. Put it in
    the README / docs site so users can confirm the baked-in key matches an
@@ -109,9 +109,13 @@ this makes remote installs fail (correctly, but they fail). Do all of it once:
 ## Build-side hardening
 - `npm ci` (lockfile-enforced) in all workflows.
 - `npm audit --omit=dev --audit-level=high` gates shipped dependencies (e.g. node-tar).
+- `cargo audit --deny unsound` gates every committed Rust dependency graph; explicitly
+  accepted unmaintained transitive crates remain visible without suppressing vulnerabilities.
 - `--require-signature` makes an unsigned release a hard CI failure.
 - GitHub build-provenance attestation (`actions/attest`) ties release assets to the
   workflow + commit; verify with `gh attestation verify`.
-- Release publishing resolves the pushed tag to its commit SHA and waits for the matching
-  GitHub Actions run before watching it, so the script does not mistake GitHub's workflow
-  visibility delay for a failed release.
+- Release publication is explicit: the local publisher creates one annotated tag, pushes
+  `main` and that tag atomically, dispatches the release workflow at the tag, and waits for
+  the workflow run whose commit exactly matches it. Every job checks out that dispatch SHA,
+  and publication aborts if the tag moves or the release already exists. Signed release
+  assets are immutable; the workflow never edits or clobbers an existing release.

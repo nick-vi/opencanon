@@ -1,9 +1,6 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -14,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   preflight:
     name: Release Preflight
@@ -22,12 +23,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+          ref: ${{ github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
+
+      - name: Verify release tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be v<semver>; got: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$head_commit" ]]; then
+            echo "Checked out commit $head_commit does not match $RELEASE_TAG ($tag_commit)." >&2
+            exit 1
+          fi
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "$RELEASE_TAG" != "v${package_version}" ]]; then
+            echo "Release tag $RELEASE_TAG does not match package version $package_version." >&2
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists and is immutable." >&2
+            exit 1
+          fi
 
       - name: Install Rust components
         run: rustup toolchain install 1.95.0 --profile minimal --component clippy,rustfmt
@@ -64,7 +93,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -131,10 +160,9 @@ jobs:
       - preflight
       - build-engine
     runs-on: ubuntu-24.04
-    # The signing secret (OPENCANON_RELEASE_PRIVATE_KEY) lives in this Environment. Configure
-    # required reviewers + a tag restriction on it in repo Settings -> Environments so each
-    # signed release needs explicit human approval. Until configured it is unprotected but
-    # harmless.
+    # The signing secret (OPENCANON_RELEASE_PRIVATE_KEY) lives in this Environment.
+    # Required reviewers and a tag restriction are release preconditions configured in
+    # repo Settings -> Environments; the repository cannot enforce those settings in YAML.
     environment: release
     permissions:
       attestations: write
@@ -145,7 +173,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+          ref: ${{ github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -174,7 +203,7 @@ jobs:
           # published unsigned. The emitted <manifest>.sig files ship via dist/release/*.
           OPENCANON_RELEASE_PRIVATE_KEY: ${{ secrets.OPENCANON_RELEASE_PRIVATE_KEY }}
         run: |
-          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          tag="${{ inputs.tag }}"
           runtime_version="${tag#v}"
           npm run release:manifest -- --asset-dir dist/engine --out-dir dist/release --asset-base-url . --channel stable --require-all --require-runtime --require-signature --clean --runtime-version "$runtime_version"
 
@@ -188,8 +217,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          set -euo pipefail
+          tag="${{ inputs.tag }}"
           version="${tag#v}"
+          tag_commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Release tag $tag moved from dispatched commit $GITHUB_SHA to $tag_commit." >&2
+            exit 1
+          fi
           notes_file="$(mktemp)"
           if [[ -f CHANGELOG.md ]]; then
             awk -v tag="$tag" -v version="$version" '
@@ -206,8 +241,7 @@ jobs:
           fi
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --title "$tag" --notes-file "$notes_file"
-            gh release upload "$tag" dist/release/* --clobber
-          else
-            gh release create "$tag" dist/release/* --verify-tag --title "$tag" --notes-file "$notes_file"
+            echo "Release $tag already exists and is immutable." >&2
+            exit 1
           fi
+          gh release create "$tag" dist/release/* --verify-tag --title "$tag" --notes-file "$notes_file"

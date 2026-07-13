@@ -182,25 +182,140 @@ test("install rehearsal stops isolated processes before applying updates", () =>
   assert(!source.includes("OPENCANON_RUNTIME_TRANSPORT"));
 });
 
-test("release publish watches the tag workflow by commit with backoff", () => {
+test("release publish dispatches and watches the exact tagged commit", () => {
   const source = readFileSync("scripts/publish-opencanon-release.ts", "utf8");
 
   assert.match(source, /function waitForReleaseWorkflowRun/);
   assert.match(source, /git", \["rev-list", "-n", "1", tagName\]/);
+  assert.match(source, /"workflow",\s*"run",\s*ReleaseWorkflow/s);
+  assert.match(source, /"--ref",\s*tagName/s);
+  assert.match(source, /`tag=\$\{tagName\}`/);
+  assert.match(source, /previousRunIds/);
+  assert.match(source, /run\.event === "workflow_dispatch"/);
   assert.match(source, /"--commit",\s*headSha/s);
   assert.match(source, /ReleaseRunWaitMs/);
   assert.match(source, /sleep\(ReleaseRunPollMs\)/);
-  assert(!source.includes('"--branch",\n    tagName'));
+  assert.match(source, /ReleaseBranch = "main"/);
+  assert.match(source, /assertReleaseWorkspace\(\)/);
+  assert.match(source, /assertTagAvailable\(tagName\)/);
+  assert.match(source, /captureReleaseWorktree/);
+  assert.match(source, /HTTP 404/);
+  assert.match(source, /"push", "--atomic", "origin", ReleaseBranch, tagName/);
+  assert(!source.includes("--no-check"));
+  assert(!source.includes("--delete-existing"));
 });
 
 test("release workflow runs the full gate before publishing assets", () => {
   const workflow = readFileSync(".github/workflows/release.yml", "utf8");
 
+  assert.match(workflow, /on:\s*\n\s*workflow_dispatch:/);
+  assert(!/^\s{2}push:/m.test(workflow));
+  assert.match(workflow, /concurrency:[\s\S]*group: release-\$\{\{ inputs\.tag \}\}/);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert(!workflow.includes("ref: ${{ inputs.tag }}"));
+  assert.match(workflow, /Verify release tag/);
+  assert.match(workflow, /refs\/tags\/\$\{RELEASE_TAG\}\^\{commit\}/);
   assert.match(workflow, /preflight:/);
   assert.match(workflow, /name: Release Preflight/);
   assert.match(workflow, /run: npm run check:ci/);
   assert.match(workflow, /build-engine:[\s\S]*needs:[\s\S]*- preflight/);
   assert.match(workflow, /publish-release:[\s\S]*needs:[\s\S]*- preflight[\s\S]*- build-engine/);
+  assert.match(workflow, /Release \$tag already exists and is immutable/);
+  assert(!workflow.includes("gh release edit"));
+  assert(!workflow.includes("--clobber"));
+});
+
+test("every hosted action is pinned to a full commit", () => {
+  const workflowDir = ".github/workflows";
+  const unpinned = readdirSync(workflowDir)
+    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+    .flatMap((name) => {
+      const source = readFileSync(path.join(workflowDir, name), "utf8");
+      return source
+        .split(/\r?\n/)
+        .filter((line) => /^\s*uses:\s*[^.]/.test(line))
+        .filter((line) => !/@[0-9a-f]{40}(?:\s+#.*)?$/.test(line))
+        .map((line) => `${name}: ${line.trim()}`);
+    });
+
+  assert.deepEqual(unpinned, []);
+});
+
+test("release preparation updates package locks and every Rust package", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-release-versions-"));
+  const write = (relativePath: string, contents: string) => {
+    const target = path.join(rootDir, relativePath);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, contents);
+  };
+  const cargoLock = (packages: string[]) =>
+    packages
+      .map((name) => `[[package]]\nname = "${name}"\nversion = "0.1.0"\n`)
+      .join("\n");
+
+  try {
+    write("package.json", JSON.stringify({ name: "fixture", version: "0.1.0" }, null, 2));
+    write("packages/core/package.json", JSON.stringify({ name: "core", version: "0.1.0" }, null, 2));
+    write(
+      "package-lock.json",
+      JSON.stringify(
+        {
+          name: "fixture",
+          version: "0.1.0",
+          lockfileVersion: 3,
+          packages: {
+            "": { name: "fixture", version: "0.1.0" },
+            "packages/core": { name: "core", version: "0.1.0" },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    for (const crate of ["opencanon-engine", "opencanon-inference", "opencanon-vector"]) {
+      write(`crates/${crate}/Cargo.toml`, `[package]\nname = "${crate}"\nversion = "0.1.0"\n`);
+    }
+    write("crates/opencanon-engine/Cargo.lock", cargoLock(["opencanon-engine", "opencanon-inference", "opencanon-vector"]));
+    write("crates/opencanon-inference/Cargo.lock", cargoLock(["opencanon-inference"]));
+    write("crates/opencanon-vector/Cargo.lock", cargoLock(["opencanon-vector"]));
+    write("crates/opencanon-engine/src/constants.rs", 'pub const ENGINE_VERSION: &str = "0.1.0";\n');
+    write("README.md", '{ "runtimeVersion": "0.1.0" }\n');
+    write("CHANGELOG.md", "# Changelog\n\n## v1.2.3\n\n- Authored release notes.\n\n## v0.1.0\n\n- Existing.\n");
+
+    const result = spawnSync(
+      process.execPath,
+      [path.resolve("scripts/prepare-opencanon-release.ts"), "1.2.3"],
+      { cwd: rootDir, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const packageLock = JSON.parse(readFileSync(path.join(rootDir, "package-lock.json"), "utf8")) as {
+      version: string;
+      packages: Record<string, { version: string }>;
+    };
+    assert.equal(packageLock.version, "1.2.3");
+    assert.equal(packageLock.packages[""].version, "1.2.3");
+    assert.equal(packageLock.packages["packages/core"].version, "1.2.3");
+    for (const crate of ["opencanon-engine", "opencanon-inference", "opencanon-vector"]) {
+      assert.match(readFileSync(path.join(rootDir, `crates/${crate}/Cargo.toml`), "utf8"), /version = "1\.2\.3"/);
+    }
+    assert(!readFileSync(path.join(rootDir, "crates/opencanon-engine/Cargo.lock"), "utf8").includes('version = "0.1.0"'));
+    assert.match(readFileSync(path.join(rootDir, "CHANGELOG.md"), "utf8"), /Authored release notes/);
+
+    const missingNotes = spawnSync(
+      process.execPath,
+      [path.resolve("scripts/prepare-opencanon-release.ts"), "2.0.0"],
+      { cwd: rootDir, encoding: "utf8" },
+    );
+    assert.notEqual(missingNotes.status, 0);
+    assert.match(missingNotes.stderr, /must contain an authored v2\.0\.0 heading/);
+    assert.equal(
+      (JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf8")) as { version: string }).version,
+      "1.2.3",
+      "missing release notes must fail before mutating versions",
+    );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
 });
 
 test("local and hosted gates audit every committed Rust lockfile", () => {

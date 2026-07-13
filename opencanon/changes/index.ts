@@ -455,6 +455,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "scripts/publish-opencanon-release.ts" },
       { kind: DefinitionTargetKind.File, path: ".github/workflows/release.yml" },
       { kind: DefinitionTargetKind.File, path: ".github/workflows/ci.yml" },
+      { kind: DefinitionTargetKind.File, path: ".github/workflows/deploy-site.yml" },
       { kind: DefinitionTargetKind.File, path: "package.json" },
       { kind: DefinitionTargetKind.Doc, path: "docs/language-support-foundation.md" },
       { kind: DefinitionTargetKind.Doc, path: "docs/runtime-update-security.md" },
@@ -541,7 +542,7 @@ export default [
       {
         id: "release-publication-integrity",
         title: "Lock versions and require explicit release dispatch",
-        files: ["scripts/check-release-consistency.ts", "scripts/prepare-opencanon-release.ts", "scripts/publish-opencanon-release.ts", ".github/workflows/release.yml", "tests/release.test.ts", "docs/runtime-update-security.md"],
+        files: ["scripts/check-release-consistency.ts", "scripts/prepare-opencanon-release.ts", "scripts/publish-opencanon-release.ts", "scripts/release-version-files.ts", ".github/workflows/release.yml", ".github/workflows/deploy-site.yml", "tests/release.test.ts", "docs/runtime-update-security.md"],
         checks: ["release-tests", "release-check"],
         dependsOn: ["dependency-security"],
       },

@@ -1,18 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  packageLockWorkspaceKey,
+  releasePackageJsonPaths,
+  ReleaseRustPackages,
+} from "./release-version-files.ts";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const packageJsonPaths = [
-  "package.json",
-  "packages/cli/package.json",
-  "packages/core/package.json",
-  "packages/distribution/package.json",
-  "packages/runtime/package.json",
-  "packages/engine/package.json",
-  "packages/validators/package.json",
-  "apps/site/package.json",
-];
+const packageJsonPaths = releasePackageJsonPaths(rootDir);
 
 const versionPattern = "\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?";
 
@@ -29,30 +25,47 @@ const checks: Check[] = packageJsonPaths.map((relativePath) => ({
 const expectedVersion = checks[0]?.value;
 if (!expectedVersion) fail(["package.json version is missing."]);
 
+const packageLock = readJson("package-lock.json");
+const packageLockWorkspaces = packageLock.packages as
+  | Record<string, { version?: string }>
+  | undefined;
+checks.push({
+  label: "package-lock.json version",
+  value: typeof packageLock.version === "string" ? packageLock.version : null,
+});
+for (const packageJsonPath of packageJsonPaths) {
+  const workspaceKey = packageLockWorkspaceKey(packageJsonPath);
+  checks.push({
+    label: `package-lock.json packages[${JSON.stringify(workspaceKey)}] version`,
+    value: packageLockWorkspaces?.[workspaceKey]?.version ?? null,
+  });
+}
+
+for (const rustPackage of ReleaseRustPackages) {
+  checks.push({
+    label: `${rustPackage.manifestPath} version`,
+    value: matchFile(
+      rustPackage.manifestPath,
+      new RegExp(`^version = "(${versionPattern})"$`, "m"),
+    ),
+  });
+  for (const lockPath of rustPackage.lockPaths) {
+    checks.push({
+      label: `${lockPath} ${rustPackage.name} version`,
+      value: matchFile(
+        lockPath,
+        new RegExp(
+          `\\[\\[package\\]\\]\\nname = "${rustPackage.name}"\\nversion = "(${versionPattern})"`,
+        ),
+      ),
+    });
+  }
+}
+
 checks.push(
-  {
-    label: "crates/opencanon-engine/Cargo.toml version",
-    value: matchFile("crates/opencanon-engine/Cargo.toml", new RegExp(`^version = "(${versionPattern})"$`, "m")),
-  },
-  {
-    label: "crates/opencanon-engine/Cargo.lock opencanon-engine version",
-    value: matchFile("crates/opencanon-engine/Cargo.lock", new RegExp(`\\[\\[package\\]\\]\\nname = "opencanon-engine"\\nversion = "(${versionPattern})"`)),
-  },
   {
     label: "crates/opencanon-engine/src/constants.rs ENGINE_VERSION",
     value: matchFile("crates/opencanon-engine/src/constants.rs", new RegExp(`ENGINE_VERSION: &str = "(${versionPattern})"`)),
-  },
-  {
-    label: "crates/opencanon-inference/Cargo.toml version",
-    value: matchFile("crates/opencanon-inference/Cargo.toml", new RegExp(`^version = "(${versionPattern})"$`, "m")),
-  },
-  {
-    label: "crates/opencanon-inference/Cargo.lock opencanon-inference version",
-    value: matchFile("crates/opencanon-inference/Cargo.lock", new RegExp(`\\[\\[package\\]\\]\\nname = "opencanon-inference"\\nversion = "(${versionPattern})"`)),
-  },
-  {
-    label: "crates/opencanon-engine/Cargo.lock opencanon-inference version",
-    value: matchFile("crates/opencanon-engine/Cargo.lock", new RegExp(`\\[\\[package\\]\\]\\nname = "opencanon-inference"\\nversion = "(${versionPattern})"`)),
   },
   {
     label: "README.md runtimeVersion",
