@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "vitest";
 import { ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, createPaths } from "@opencanon/core";
-import { openProjectStore } from "@opencanon/runtime";
+import {
+  compareAndSetRuntimeLifecycle,
+  openProjectStore,
+  ProcessLifecycleStatus,
+  projectRuntimeStatePath,
+  readProjectRuntimeEntry,
+  runtimeNamespaceForRegistry,
+} from "@opencanon/runtime";
 import { createAuthoringProject } from "../packages/runtime/test/support.ts";
 
 const script = path.join(process.cwd(), "packages/cli/src/index.ts");
@@ -84,6 +91,66 @@ test("search fails when Project Knowledge is not ready", () => {
     assert.equal(result.error, undefined, result.error ? result.error.message : "spawn failed");
     assert.notEqual(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stderr, /Project Knowledge search failed:/);
+  } finally {
+    removeTestRoot(rootDir);
+  }
+}, CliSpawnTimeoutMs);
+
+test("doctor waits for active project work before inspecting runtime state", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-ready-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  try {
+    createAuthoringProject(rootDir);
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = 'active';\n");
+
+    const started = spawnSync(process.execPath, [script, "project", "start", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    const entry = readProjectRuntimeEntry(rootDir, registryPath);
+    assert(entry, "project runtime was not registered");
+    const busy = compareAndSetRuntimeLifecycle(
+      entry,
+      {
+        ...entry.lifecycle,
+        status: ProcessLifecycleStatus.Busy,
+        updatedAt: new Date().toISOString(),
+        message: "Test project work is active.",
+      },
+      registryPath,
+    );
+    assert.equal(busy.applied, true, "project runtime did not enter the test busy state");
+
+    const doctorStartedAt = Date.now();
+    const doctorPromise = runCliProcess(rootDir, ["doctor", "--format", "json"]);
+    await delay(350);
+
+    const activeEntry = readProjectRuntimeEntry(rootDir, registryPath);
+    assert(activeEntry, "project runtime registration disappeared while Doctor waited");
+    const running = compareAndSetRuntimeLifecycle(
+      activeEntry,
+      {
+        ...activeEntry.lifecycle,
+        status: ProcessLifecycleStatus.Running,
+        updatedAt: new Date().toISOString(),
+        message: "Test project work completed.",
+      },
+      registryPath,
+    );
+    assert.equal(running.applied, true, "project runtime did not leave the test busy state");
+
+    const doctor = await doctorPromise;
+    assert(Date.now() - doctorStartedAt >= 300, "Doctor returned before active project work settled");
+    assert([0, 1].includes(doctor.status ?? -1), doctor.stderr || doctor.stdout);
+    const payload = JSON.parse(doctor.stdout) as { checks: Array<{ id: string; status: string; message: string }> };
+    assert.equal(payload.checks.find((check) => check.id === "runtime-health")?.status, "pass");
+    assert.notEqual(payload.checks.find((check) => check.id === "semantic-index")?.status, "fail");
   } finally {
     removeTestRoot(rootDir);
   }
@@ -270,7 +337,12 @@ test("changes runs watch pages replay beyond one event frame", () => {
       outputBytes: 2_099,
       outputTruncated: false,
     });
-    const store = openProjectStore({ rootDir, paths: createPaths(rootDir) });
+    const registryPath = path.join(rootDir, "global", "service.json");
+    const store = openProjectStore({
+      rootDir,
+      paths: createPaths(rootDir),
+      statePath: projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(registryPath)),
+    });
     try {
       store.writeJob(run);
       store.appendJobEvent({ runId: run.id, batchId: run.batchId, timestamp, type: ChangeCheckRunEventType.Queued });
@@ -327,4 +399,40 @@ function testEnv(rootDir: string): Record<string, string> {
   }
   env.OPENCANON_SERVICE_REGISTRY_PATH = path.join(rootDir, "global", "service.json");
   return env;
+}
+
+function runCliProcess(rootDir: string, args: string[]): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, ...args], {
+      cwd: rootDir,
+      env: testEnv(rootDir),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`OpenCanon CLI process timed out after ${CliSpawnTimeoutMs}ms.`));
+    }, CliSpawnTimeoutMs);
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("close", (status) => {
+      clearTimeout(timeout);
+      resolve({ status, stdout, stderr });
+    });
+  });
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

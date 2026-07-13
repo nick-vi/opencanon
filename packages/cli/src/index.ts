@@ -273,7 +273,7 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
 
 async function buildDoctorRuntimeHealth(rootDir: string): Promise<DoctorRuntimeHealth> {
   await reconcileProjectRuntimes();
-  await settleStartingRuntimeForDoctor(rootDir);
+  await settleRuntimeForDoctor(rootDir);
   const [service, project] = await Promise.all([inspectService(), inspectProjectRuntime(rootDir)]);
   return {
     service: {
@@ -290,9 +290,9 @@ async function buildDoctorRuntimeHealth(rootDir: string): Promise<DoctorRuntimeH
   };
 }
 
-async function settleStartingRuntimeForDoctor(rootDir: string): Promise<void> {
+async function settleRuntimeForDoctor(rootDir: string): Promise<void> {
   const inspection = await inspectProjectRuntime(rootDir);
-  if (inspection?.status !== RuntimeStatus.Starting) return;
+  if (inspection?.status !== RuntimeStatus.Starting && inspection?.status !== RuntimeStatus.Busy) return;
   try {
     await waitForProjectRuntimeReady(rootDir, { timeoutMs: DoctorProjectRuntimeReadyTimeoutMs });
   } catch {
