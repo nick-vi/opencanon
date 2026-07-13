@@ -485,6 +485,21 @@ export default [
         dependsOn: ["complete-source-governance"],
       },
       {
+        id: "semantic-publication-consistency",
+        title: "Publish complete Project Knowledge vector stores atomically",
+        files: [
+          "crates/opencanon-engine/src/project/semantic_store.rs",
+          "crates/opencanon-engine/src/project/semantic_delta_store.rs",
+          "crates/opencanon-engine/src/project/semantic_status.rs",
+          "crates/opencanon-engine/src/project/semantic_vector_store.rs",
+          "crates/opencanon-engine/src/tests/semantic_index.rs",
+          "packages/runtime/src/knowledge-index-manager.ts",
+          "packages/runtime/test/semantic-index.test.ts",
+        ],
+        checks: ["engine-tests", "semantic-index-tests", "project-doctor"],
+        dependsOn: ["current-vector-formats"],
+      },
+      {
         id: "owned-test-processes",
         title: "Retire every process owned by isolated tests",
         files: ["packages/runtime/src/service-check-runtime.ts", "packages/runtime/test/*.test.ts", "tests/setup-vitest.ts", "tests/mcp.test.ts", "tests/worktree.test.ts", "tests/validate-cli-fast-path.test.ts", "tests/cli-reporting.test.ts", "scripts/check-test-processes.ts", "package.json"],
@@ -540,7 +555,7 @@ export default [
         id: "full-proof",
         title: "Prove release integrity and clean steady state",
         checks: ["typecheck", "vector-tests", "engine-tests", "inference-tests", "service-tests", "runtime-client-tests", "mcp-tests", "worktree-tests", "release-tests", "dependency-audit", "project-validation", "project-doctor", "process-steady-state", "full-ci"],
-        dependsOn: ["proof-terminal-contracts", "durable-docs-only"],
+        dependsOn: ["proof-terminal-contracts", "semantic-publication-consistency", "durable-docs-only"],
       },
     ],
     checks: [
