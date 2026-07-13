@@ -53,7 +53,7 @@ export default [
       {
         id: "pipe-first-brief",
         title: "Restore pipe-first brief transport",
-        files: ["packages/cli/src/brief.ts", "tests/cli-reporting.test.ts"],
+        files: ["packages/cli/src/brief.ts", "packages/cli/src/runtime-client.ts", "tests/cli-reporting.test.ts"],
         checks: ["cli-tests", "typecheck"],
         dependsOn: ["complete-activity-projection"],
       },

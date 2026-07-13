@@ -1,7 +1,6 @@
 import {
   ensureProjectRuntimeViaService,
   inspectProjectRuntime,
-  LocalTransportKind,
   localProtocolEndpointFromEntry,
   requestLocalJson,
   streamLocalText,
@@ -97,7 +96,6 @@ export type RuntimeClient = {
 };
 
 export type RuntimeClientOptions = {
-  localTransport?: LocalTransportKind;
   requestTimeoutMs?: number;
 };
 
@@ -111,7 +109,7 @@ export async function withRuntimeClient<T>(
   let supervisedRuntimeRepair: Promise<RuntimeRegistryEntry> | undefined;
 
   const entry = await ensureSupervisedRuntimeReady(rootDir, registryPath);
-  let endpoint = localProtocolEndpointFromEntry(entry, { prefer: options.localTransport });
+  let endpoint = localProtocolEndpointFromEntry(entry);
 
   const requestWithRepair = async <T>(request: { method: "GET" | "POST"; path: string; body?: unknown }): Promise<T> => {
     if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
@@ -130,7 +128,7 @@ export async function withRuntimeClient<T>(
         }
         initialError = error;
         const repaired = await repairSupervisedRuntime();
-        endpoint = localProtocolEndpointFromEntry(repaired, { prefer: options.localTransport });
+        endpoint = localProtocolEndpointFromEntry(repaired);
       }
     }
     throw new Error("OpenCanon runtime request failed before it returned a response.");
@@ -174,7 +172,7 @@ export async function withRuntimeClient<T>(
           }
           initialError = error;
           const repaired = await repairSupervisedRuntime();
-          endpoint = localProtocolEndpointFromEntry(repaired, { prefer: options.localTransport });
+          endpoint = localProtocolEndpointFromEntry(repaired);
         }
       }
     },

@@ -1,4 +1,3 @@
-import { LocalTransportKind } from "@opencanon/runtime";
 import { cac } from "cac";
 import { fail, Format } from "@opencanon/core";
 import { booleanOption, formatOption, positiveIntegerOption, rejectUnknownOptions } from "./options.ts";
@@ -63,17 +62,13 @@ export async function runBriefCommand(args: string[], cwd: string): Promise<void
   if (parsed.args.length > 0) fail(`Unexpected opencanon brief arguments: ${parsed.args.join(", ")}`);
 
   const limit = positiveIntegerOption(options.limit, "--limit", 25);
-  const result = await withRuntimeClient(
-    cwd,
-    async (client) => {
-      const [queue, packet] = await Promise.all([
-        client.get<BriefReadyQueue>(RuntimeApiRoute.ChangeReady),
-        client.get<BriefPacket>(`${RuntimeApiRoute.ContextPacket}?mode=agent-brief&limit=${limit}`),
-      ]);
-      return { queue, packet, nextActions: briefNextActions(queue) };
-    },
-    { localTransport: LocalTransportKind.Http },
-  );
+  const result = await withRuntimeClient(cwd, async (client) => {
+    const [queue, packet] = await Promise.all([
+      client.get<BriefReadyQueue>(RuntimeApiRoute.ChangeReady),
+      client.get<BriefPacket>(`${RuntimeApiRoute.ContextPacket}?mode=agent-brief&limit=${limit}`),
+    ]);
+    return { queue, packet, nextActions: briefNextActions(queue) };
+  });
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(result, null, 2));
   else console.log(renderBriefMarkdown(result));
 }
