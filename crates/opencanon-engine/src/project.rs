@@ -40,6 +40,7 @@ mod product_model_store;
 mod semantic_delta_store;
 mod semantic_status;
 mod semantic_store;
+mod semantic_vector_store;
 
 use connection::open_project_connection;
 use json_fields::root_path;

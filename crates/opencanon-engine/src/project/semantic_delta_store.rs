@@ -1,5 +1,3 @@
-use std::fs;
-
 use opencanon_vector::{Config as VectorConfig, EmbeddingDb};
 use rusqlite::params;
 use serde_json::Value;
@@ -10,9 +8,12 @@ use crate::state::timestamp;
 
 use super::semantic_store::{
     assert_semantic_chunk_count, delete_semantic_nodes, read_knowledge_index_payload,
-    read_semantic_chunk_hashes, semantic_chunk_ids_for_paths, semantic_vector_dir,
-    upsert_semantic_chunk_rows, upsert_semantic_nodes, validate_knowledge_index_delta_request,
-    vector_error, write_semantic_vector_delta,
+    read_semantic_chunk_hashes, semantic_chunk_ids_for_paths, upsert_semantic_chunk_rows,
+    upsert_semantic_nodes, validate_knowledge_index_delta_request, vector_error,
+    write_semantic_vector_delta,
+};
+use super::semantic_vector_store::{
+    begin_semantic_vector_delta_publication, lock_semantic_vectors_exclusive,
 };
 use super::EngineProjectHandle;
 
@@ -23,15 +24,19 @@ pub(super) fn write_knowledge_index_delta_json(
     let request: WriteSemanticIndexDeltaRequest = decode(&request)?;
     validate_knowledge_index_delta_request(&request)?;
 
+    let vector_lock = lock_semantic_vectors_exclusive(&handle.state_path, &request.index.id)?;
     let mut conn = handle
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let previous_index = read_knowledge_index_payload(&conn, &handle.root_dir, &request.index.id)?;
-    let previous_identity = previous_index
-        .as_ref()
-        .and_then(|index| index.get("identityHash"))
-        .and_then(Value::as_str);
+    let previous_index = read_knowledge_index_payload(&conn, &handle.root_dir, &request.index.id)?
+        .ok_or_else(|| {
+            napi_error(
+                "invalid-engine-payload",
+                "Semantic index does not exist. Run a full Project Knowledge rebuild before applying deltas.",
+            )
+        })?;
+    let previous_identity = previous_index.get("identityHash").and_then(Value::as_str);
     if let Some(previous_identity) = previous_identity {
         if previous_identity != request.index.identity_hash {
             return Err(napi_error(
@@ -39,10 +44,10 @@ pub(super) fn write_knowledge_index_delta_json(
                 "Semantic index provider identity changed; run a full Project Knowledge rebuild before applying deltas.",
             ));
         }
-    } else if request.chunks.len() != request.index.chunk_count as usize {
+    } else {
         return Err(napi_error(
             "invalid-engine-payload",
-            "Initial semantic delta must include every chunk. Run a full Project Knowledge rebuild.",
+            "Semantic index identity is missing. Run a full Project Knowledge rebuild before applying deltas.",
         ));
     }
 
@@ -60,7 +65,6 @@ pub(super) fn write_knowledge_index_delta_json(
         }
     }
 
-    let vector_dir = semantic_vector_dir(&handle.state_path, &request.index.id);
     let vector_config = VectorConfig::with_dimensions(request.index.provider.dimensions as usize);
     let mut removed_ids = semantic_chunk_ids_for_paths(
         &conn,
@@ -71,32 +75,16 @@ pub(super) fn write_knowledge_index_delta_json(
     removed_ids.sort();
     removed_ids.dedup();
 
-    let mut vector_db = if previous_index.is_some() {
-        if !vector_dir.exists() {
-            return Err(napi_error(
-                "invalid-engine-payload",
-                "Semantic vector store is missing; run a full Project Knowledge rebuild.",
-            ));
-        }
-        EmbeddingDb::open_with_config(&vector_dir, Some(vector_config.clone()))
-            .map_err(vector_error)?
-    } else {
-        if vector_dir.exists() {
-            fs::remove_dir_all(&vector_dir).map_err(|error| {
-                napi_error(
-                    "invalid-engine-payload",
-                    &format!("Could not reset orphaned semantic vector store: {error}"),
-                )
-            })?;
-        }
-        fs::create_dir_all(&vector_dir).map_err(|error| {
-            napi_error(
-                "invalid-engine-payload",
-                &format!("Could not create semantic vector store: {error}"),
-            )
-        })?;
-        EmbeddingDb::create(&vector_dir, vector_config.clone()).map_err(vector_error)?
-    };
+    let publication = begin_semantic_vector_delta_publication(
+        vector_lock,
+        &handle.state_path,
+        &request.index.id,
+        &previous_index,
+        &request.index,
+    )?;
+    let mut vector_db =
+        EmbeddingDb::open_with_config(publication.vector_dir(), Some(vector_config.clone()))
+            .map_err(vector_error)?;
     write_semantic_vector_delta(
         &mut vector_db,
         &existing_chunks,
@@ -104,6 +92,8 @@ pub(super) fn write_knowledge_index_delta_json(
         &request.chunks,
     )
     .map_err(vector_error)?;
+    drop(vector_db);
+    publication.assert_vector_count()?;
 
     let indexed_at = request.index.indexed_at.clone();
     let diagnostics_json = serde_json::to_string(&request.index.diagnostics)
@@ -220,5 +210,5 @@ pub(super) fn write_knowledge_index_delta_json(
     tx.commit().map_err(|error| {
         sqlite_error("Could not commit semantic index delta transaction", error)
     })?;
-    Ok(())
+    publication.commit()
 }

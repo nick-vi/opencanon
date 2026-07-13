@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::{Path, PathBuf};
 
 use opencanon_inference::{GenerateOptions, InferenceError};
-use opencanon_vector::{Config as VectorConfig, EmbedDbError, EmbeddingDb};
+use opencanon_vector::{EmbedDbError, EmbeddingDb};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
@@ -16,35 +14,14 @@ use crate::json::{decode, encode, napi_error, sqlite_error};
 use crate::state::timestamp;
 
 use super::json_fields::{json_int_field, json_object_field};
+use super::semantic_vector_store::{
+    lock_semantic_vectors_shared, prepare_full_semantic_vector_publication, semantic_vector_dir,
+    semantic_vector_publication_failure_locked,
+};
 use super::EngineProjectHandle;
 
 pub(super) fn default_knowledge_index_id() -> &'static str {
     "project"
-}
-
-pub(super) fn semantic_vector_dir(state_path: &str, index_id: &str) -> PathBuf {
-    let parent = Path::new(state_path)
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    parent
-        .join("semantic-index")
-        .join(sanitize_state_segment(index_id))
-}
-
-fn sanitize_state_segment(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    for character in value.chars() {
-        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-            output.push(character);
-        } else {
-            output.push('_');
-        }
-    }
-    if output.is_empty() {
-        default_knowledge_index_id().to_string()
-    } else {
-        output
-    }
 }
 
 pub(super) fn validate_knowledge_index_request(
@@ -64,7 +41,17 @@ pub(super) fn validate_knowledge_index_request(
             ),
         ));
     }
-    validate_knowledge_chunks(&request.chunks, request.index.provider.dimensions)
+    validate_knowledge_chunks(&request.chunks, request.index.provider.dimensions)?;
+    if let Some(chunk) = request.chunks.iter().find(|chunk| chunk.vector.is_empty()) {
+        return Err(napi_error(
+            "invalid-engine-payload",
+            &format!(
+                "Complete semantic index writes require a vector for chunk {}.",
+                chunk.metadata.id
+            ),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_knowledge_index_delta_request(
@@ -281,36 +268,6 @@ pub(super) fn read_semantic_chunk_hashes(
     Ok(hashes)
 }
 
-pub(super) fn write_semantic_vectors(
-    vector_db: &mut EmbeddingDb,
-    existing_chunks: &HashMap<String, String>,
-    incoming_ids: &HashSet<String>,
-    chunks: &[SemanticChunkEmbeddingRequest],
-) -> Result<(), EmbedDbError> {
-    for existing_id in existing_chunks.keys() {
-        if !incoming_ids.contains(existing_id) {
-            vector_db.delete(existing_id)?;
-        }
-    }
-
-    let mut insert_ids = Vec::new();
-    let mut insert_vectors = Vec::new();
-    for chunk in chunks {
-        let existing_hash = existing_chunks.get(&chunk.metadata.id);
-        if existing_hash == Some(&chunk.metadata.embedding_hash) {
-            continue;
-        }
-        if existing_hash.is_some() {
-            vector_db.delete(&chunk.metadata.id)?;
-        }
-        insert_ids.push(chunk.metadata.id.clone());
-        insert_vectors.push(chunk.vector.clone());
-    }
-    vector_db.insert_batch(&insert_ids, &insert_vectors)?;
-    vector_db.flush()?;
-    Ok(())
-}
-
 pub(super) fn write_semantic_vector_delta(
     vector_db: &mut EmbeddingDb,
     existing_chunks: &HashMap<String, String>,
@@ -337,13 +294,6 @@ pub(super) fn write_semantic_vector_delta(
     vector_db.insert_batch(&insert_ids, &insert_vectors)?;
     vector_db.flush()?;
     Ok(())
-}
-
-pub(super) fn semantic_vector_error_is_recoverable(error: &EmbedDbError) -> bool {
-    matches!(
-        error,
-        EmbedDbError::Corrupted(_) | EmbedDbError::DuplicateId(_) | EmbedDbError::Io(_)
-    )
 }
 
 pub(super) fn semantic_chunk_ids_for_paths(
@@ -677,136 +627,29 @@ pub(super) fn write_knowledge_index_json(
     let request: WriteSemanticIndexRequest = decode(&request)?;
     validate_knowledge_index_request(&request)?;
 
+    let publication = prepare_full_semantic_vector_publication(
+        &handle.state_path,
+        &request.index,
+        &request.chunks,
+    )?;
     let mut conn = handle
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let previous_index = read_knowledge_index_payload(&conn, &handle.root_dir, &request.index.id)?;
-    let previous_identity = previous_index
-        .as_ref()
-        .and_then(|index| index.get("identityHash"))
-        .and_then(Value::as_str);
-    let mut existing_chunks =
-        read_semantic_chunk_hashes(&conn, &handle.root_dir, &request.index.id)?;
-    let incoming_ids = request
-        .chunks
-        .iter()
-        .map(|chunk| chunk.metadata.id.clone())
-        .collect::<HashSet<_>>();
-    let vector_dir = semantic_vector_dir(&handle.state_path, &request.index.id);
-    let reset_vectors =
-        previous_identity != Some(request.index.identity_hash.as_str()) || !vector_dir.exists();
-    let mut reset_sql_chunks = reset_vectors;
-    let vector_config = VectorConfig::with_dimensions(request.index.provider.dimensions as usize);
-    if reset_vectors && vector_dir.exists() {
-        fs::remove_dir_all(&vector_dir).map_err(|error| {
-            napi_error(
-                "invalid-engine-payload",
-                &format!("Could not reset semantic vector store: {error}"),
-            )
-        })?;
-    }
-    let mut vector_db = if reset_vectors {
-        fs::create_dir_all(&vector_dir).map_err(|error| {
-            napi_error(
-                "invalid-engine-payload",
-                &format!("Could not create semantic vector store: {error}"),
-            )
-        })?;
-        existing_chunks.clear();
-        EmbeddingDb::create(&vector_dir, vector_config.clone()).map_err(vector_error)?
-    } else {
-        match EmbeddingDb::open_with_config(&vector_dir, Some(vector_config.clone())) {
-            Ok(db) => db,
-            Err(error) => {
-                fs::remove_dir_all(&vector_dir).map_err(|remove_error| {
-                        napi_error(
-                            "invalid-engine-payload",
-                            &format!(
-                                "Could not recover corrupted semantic vector store after open error ({error}): {remove_error}"
-                            ),
-                        )
-                    })?;
-                fs::create_dir_all(&vector_dir).map_err(|create_error| {
-                        napi_error(
-                            "invalid-engine-payload",
-                            &format!(
-                                "Could not recreate semantic vector store after open error ({error}): {create_error}"
-                            ),
-                        )
-                    })?;
-                existing_chunks.clear();
-                reset_sql_chunks = true;
-                EmbeddingDb::create(&vector_dir, vector_config.clone()).map_err(vector_error)?
-            }
-        }
-    };
+    let had_previous_index =
+        read_knowledge_index_payload(&conn, &handle.root_dir, &request.index.id)?.is_some();
 
-    for chunk in request.chunks.iter() {
-        let existing_hash = existing_chunks.get(&chunk.metadata.id);
-        if existing_hash != Some(&chunk.metadata.embedding_hash) && chunk.vector.is_empty() {
-            return Err(napi_error(
-                "invalid-engine-payload",
-                &format!(
-                    "Semantic chunk {} cannot reuse a missing or changed vector.",
-                    chunk.metadata.id
-                ),
-            ));
-        }
-    }
+    let sql_result = (|| -> napi::Result<()> {
+        let indexed_at = request.index.indexed_at.clone();
+        let diagnostics_json = serde_json::to_string(&request.index.diagnostics)
+            .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
+        let index_payload = serde_json::to_string(&request.index)
+            .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
 
-    if let Err(error) = write_semantic_vectors(
-        &mut vector_db,
-        &existing_chunks,
-        &incoming_ids,
-        &request.chunks,
-    ) {
-        if !semantic_vector_error_is_recoverable(&error)
-            || request.chunks.iter().any(|chunk| chunk.vector.is_empty())
-        {
-            return Err(vector_error(error));
-        }
-        if vector_dir.exists() {
-            fs::remove_dir_all(&vector_dir).map_err(|remove_error| {
-                    napi_error(
-                        "invalid-engine-payload",
-                        &format!(
-                            "Could not recover corrupted semantic vector store after write error ({error}): {remove_error}"
-                        ),
-                    )
-                })?;
-        }
-        fs::create_dir_all(&vector_dir).map_err(|create_error| {
-                napi_error(
-                    "invalid-engine-payload",
-                    &format!(
-                        "Could not recreate semantic vector store after write error ({error}): {create_error}"
-                    ),
-                )
-            })?;
-        let mut recovered_vector_db =
-            EmbeddingDb::create(&vector_dir, vector_config.clone()).map_err(vector_error)?;
-        existing_chunks.clear();
-        reset_sql_chunks = true;
-        write_semantic_vectors(
-            &mut recovered_vector_db,
-            &existing_chunks,
-            &incoming_ids,
-            &request.chunks,
-        )
-        .map_err(vector_error)?;
-    }
-
-    let indexed_at = request.index.indexed_at.clone();
-    let diagnostics_json = serde_json::to_string(&request.index.diagnostics)
-        .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
-    let index_payload = serde_json::to_string(&request.index)
-        .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
-
-    let tx = conn
-        .transaction()
-        .map_err(|error| sqlite_error("Could not start semantic index transaction", error))?;
-    tx.execute(
+        let tx = conn
+            .transaction()
+            .map_err(|error| sqlite_error("Could not start semantic index transaction", error))?;
+        tx.execute(
             "insert into knowledge_snapshots(root_dir, id, version, status, provider_id,
                provider_display_name, model_id, model_digest, dimensions, distance, config_hash,
                chunker_version, producer_version, source_inventory_hash, identity_hash, chunk_count,
@@ -862,35 +705,22 @@ pub(super) fn write_knowledge_index_json(
         )
         .map_err(|error| sqlite_error("Could not write semantic index snapshot", error))?;
 
-    if reset_sql_chunks {
         tx.execute(
             "delete from knowledge_chunks where root_dir = ?1 and index_id = ?2",
             params![handle.root_dir, request.index.id],
         )
         .map_err(|error| sqlite_error("Could not reset semantic chunks", error))?;
-    } else {
-        for removed_id in existing_chunks.keys() {
-            if incoming_ids.contains(removed_id) {
-                continue;
-            }
-            tx.execute(
-                "delete from knowledge_chunks where root_dir = ?1 and index_id = ?2 and id = ?3",
-                params![handle.root_dir, request.index.id, removed_id],
-            )
-            .map_err(|error| sqlite_error("Could not delete stale semantic chunk", error))?;
-        }
-    }
-    tx.execute(
-        "delete from knowledge_chunks_fts where root_dir = ?1 and index_id = ?2",
-        params![handle.root_dir, request.index.id],
-    )
-    .map_err(|error| sqlite_error("Could not clear semantic search text", error))?;
-
-    for chunk in request.chunks.iter() {
-        let metadata = &chunk.metadata;
-        let payload = serde_json::to_string(metadata)
-            .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
         tx.execute(
+            "delete from knowledge_chunks_fts where root_dir = ?1 and index_id = ?2",
+            params![handle.root_dir, request.index.id],
+        )
+        .map_err(|error| sqlite_error("Could not clear semantic search text", error))?;
+
+        for chunk in request.chunks.iter() {
+            let metadata = &chunk.metadata;
+            let payload = serde_json::to_string(metadata)
+                .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
+            tx.execute(
                 "insert into knowledge_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
                    embedding_hash, kind, language, ordinal, start_line, start_column, start_byte,
                    end_line, end_column, end_byte, heading, symbol, token_estimate, preview, payload, indexed_at, text)
@@ -943,7 +773,7 @@ pub(super) fn write_knowledge_index_json(
                 ],
             )
             .map_err(|error| sqlite_error("Could not write semantic chunk metadata", error))?;
-        tx.execute(
+            tx.execute(
                 "insert into knowledge_chunks_fts(root_dir, index_id, id, path, heading, symbol, language, kind, preview, text)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
@@ -960,19 +790,35 @@ pub(super) fn write_knowledge_index_json(
                 ],
             )
             .map_err(|error| sqlite_error("Could not write semantic search text", error))?;
+        }
+
+        replace_semantic_nodes(&tx, &handle.root_dir, &request.index.id, &request.nodes)?;
+        assert_semantic_chunk_count(
+            &tx,
+            &handle.root_dir,
+            &request.index.id,
+            request.index.chunk_count,
+        )?;
+
+        tx.commit()
+            .map_err(|error| sqlite_error("Could not commit semantic index transaction", error))?;
+        Ok(())
+    })();
+
+    match sql_result {
+        Ok(()) => publication.commit(),
+        Err(error) => {
+            if let Err(rollback_error) = publication.rollback(had_previous_index) {
+                return Err(napi_error(
+                    "invalid-engine-payload",
+                    &format!(
+                        "Semantic index SQL publication failed ({error}); vector rollback also failed ({rollback_error})."
+                    ),
+                ));
+            }
+            Err(error)
+        }
     }
-
-    replace_semantic_nodes(&tx, &handle.root_dir, &request.index.id, &request.nodes)?;
-    assert_semantic_chunk_count(
-        &tx,
-        &handle.root_dir,
-        &request.index.id,
-        request.index.chunk_count,
-    )?;
-
-    tx.commit()
-        .map_err(|error| sqlite_error("Could not commit semantic index transaction", error))?;
-    Ok(())
 }
 
 pub(super) fn read_knowledge_index_status_json(
@@ -983,6 +829,7 @@ pub(super) fn read_knowledge_index_status_json(
     let index_id = request
         .index_id
         .unwrap_or_else(|| default_knowledge_index_id().to_string());
+    let _vector_lock = lock_semantic_vectors_shared(&handle.state_path, &index_id)?;
     let conn = handle
         .conn
         .lock()
@@ -1030,6 +877,11 @@ pub(super) fn search_knowledge_index_json(
         .index_id
         .unwrap_or_else(|| default_knowledge_index_id().to_string());
     let limit = request.limit.unwrap_or(20).clamp(1, 100) as usize;
+    let _vector_lock = if request.vector.is_some() {
+        Some(lock_semantic_vectors_shared(&handle.state_path, &index_id)?)
+    } else {
+        None
+    };
     let conn = handle
         .conn
         .lock()
@@ -1050,27 +902,37 @@ pub(super) fn search_knowledge_index_json(
             ));
         }
     }
+    if request.vector.is_some() {
+        if index.get("status").and_then(Value::as_str) != Some("ready") {
+            return Err(napi_error(
+                "invalid-engine-payload",
+                "Project Knowledge is not ready for semantic search. Run a full rebuild.",
+            ));
+        }
+        if let Some(message) =
+            semantic_vector_publication_failure_locked(&handle.state_path, &index_id, &index)
+        {
+            return Err(napi_error(
+                "invalid-engine-payload",
+                &format!("{message} Run a full Project Knowledge rebuild before semantic search."),
+            ));
+        }
+    }
 
     let candidate_limit = limit.saturating_mul(4).max(limit);
     let mut scores: HashMap<String, (Option<f32>, Option<f32>)> = HashMap::new();
     if let Some(vector) = request.vector.as_ref() {
         let vector_dir = semantic_vector_dir(&handle.state_path, &index_id);
-        if vector_dir.exists() {
-            let vector_db = EmbeddingDb::open(&vector_dir).map_err(vector_error)?;
-            let matches = if request.paths.is_empty() {
-                vector_db.search(vector, candidate_limit)
-            } else {
-                let allowed_ids = semantic_chunk_ids_for_paths(
-                    &conn,
-                    &handle.root_dir,
-                    &index_id,
-                    &request.paths,
-                )?;
-                vector_db.search_filtered(vector, candidate_limit, &allowed_ids)
-            };
-            for item in matches {
-                scores.entry(item.id).or_default().0 = Some(item.score);
-            }
+        let vector_db = EmbeddingDb::open(&vector_dir).map_err(vector_error)?;
+        let matches = if request.paths.is_empty() {
+            vector_db.search(vector, candidate_limit)
+        } else {
+            let allowed_ids =
+                semantic_chunk_ids_for_paths(&conn, &handle.root_dir, &index_id, &request.paths)?;
+            vector_db.search_filtered(vector, candidate_limit, &allowed_ids)
+        };
+        for item in matches {
+            scores.entry(item.id).or_default().0 = Some(item.score);
         }
     }
     if let Some(query) = request.query.as_deref() {

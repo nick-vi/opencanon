@@ -1429,6 +1429,7 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
       diagnostics: [{ code: "semantic-vector-rebuild-required", message: "Rebuild required.", severity: "warning" }],
     };
     const embedCalls: Array<{ task?: string; texts: string[]; modelId: string }> = [];
+    let publishedIndexReady = true;
     const engine = createEngine({
       versionJson: () =>
         JSON.stringify({
@@ -1461,7 +1462,14 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
         writeSemanticIndexDeltaJson: () => {
           throw new Error("stale vector state must not receive a delta write");
         },
-        readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? staleIndex }),
+        readSemanticIndexStatusJson: () => {
+          const written = writes.at(-1)?.index;
+          return JSON.stringify({
+            index: written
+              ? { ...written, status: publishedIndexReady ? "ready" : "stale" }
+              : staleIndex,
+          });
+        },
         listSemanticChunksJson: () => {
           if (writes.length === 0) throw new Error("stale vector chunks must not be reused");
           return JSON.stringify({ index: writes.at(-1)?.index ?? null, chunks: writes.at(-1)?.chunks.map((chunk) => chunk.metadata) ?? [] });
@@ -1506,6 +1514,11 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
     assert(embedCalls.some((call) => call.task === "document"));
     assert(embedCalls.some((call) => call.task === "query" && call.texts[0] === "Project Knowledge"));
     assert.deepEqual(progress, ["scan", "diff", "chunk", "embed", "write", "prewarm", "ready"]);
+    publishedIndexReady = false;
+    await assert.rejects(
+      () => manager.index({ force: true }),
+      /index write completed with status stale/,
+    );
     store.close();
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

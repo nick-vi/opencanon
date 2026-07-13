@@ -44,6 +44,10 @@ export type KnowledgeIndexManager = {
   index(options?: KnowledgeIndexRunOptions): Promise<KnowledgeIndexRunResult>;
 };
 
+const SemanticIndexStatus = {
+  Ready: "ready",
+} as const;
+
 export function createKnowledgeIndexManager(input: {
   rootDir: string;
   store: ProjectStore;
@@ -70,10 +74,10 @@ export function createKnowledgeIndexManager(input: {
         unit: "files",
       });
       const previousIndex = input.store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index;
-      const canApplyDelta = !options.force && previousIndex?.status === "ready";
+      const canApplyDelta = !options.force && previousIndex?.status === SemanticIndexStatus.Ready;
       const previousChunks = canApplyDelta ? listPreviousSemanticChunks(input.store) : [];
       let mode: KnowledgeIndexRunResult["mode"];
-      if (options.force || !previousIndex || previousIndex.status !== "ready") {
+      if (options.force || !previousIndex || previousIndex.status !== SemanticIndexStatus.Ready) {
         mode = "full";
         emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding Project Knowledge", current: 0, total: scan.files.length, unit: "files" });
         const request = buildProjectSemanticIndex({
@@ -107,6 +111,11 @@ export function createKnowledgeIndexManager(input: {
       }
       const index = input.store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index;
       if (!index) throw new Error("Project Knowledge index write completed without a readable index snapshot.");
+      if (index.status !== SemanticIndexStatus.Ready) {
+        throw new Error(
+          `Project Knowledge index write completed with status ${index.status}; the published index is not ready. Run a full rebuild.`,
+        );
+      }
       emit({ phase: KnowledgeIndexPhase.Prewarm, label: "Prewarming Project Knowledge query model" });
       semanticSearchVectorForProvider({
         query: "Project Knowledge",

@@ -1,9 +1,169 @@
+use opencanon_vector::{Config as VectorConfig, EmbeddingDb};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 
 use super::support::*;
+
+fn complete_semantic_request() -> Value {
+    json!({
+        "index": {
+            "id": "project",
+            "version": "semantic-index-v2",
+            "status": "ready",
+            "provider": {
+                "id": "opencanon-native-test",
+                "kind": "native",
+                "modelId": "test-native-embedding-2",
+                "dimensions": 2,
+                "distance": "cosine",
+                "configHash": "config"
+            },
+            "chunkerVersion": "chunker",
+            "producerVersion": "producer",
+            "sourceInventoryHash": "inventory",
+            "chunkTreeHash": "tree",
+            "identityHash": "identity",
+            "chunkCount": 2,
+            "vectorCount": 2,
+            "staleChunkCount": 0,
+            "indexedAt": "2026-06-06T00:00:00.000Z",
+            "diagnostics": []
+        },
+        "chunks": [
+            {
+                "metadata": {
+                    "id": "chunk:one",
+                    "path": "src/one.ts",
+                    "contentHash": "content-one",
+                    "chunkHash": "chunk-one",
+                    "embeddingHash": "embedding-one",
+                    "kind": "file",
+                    "language": "typescript",
+                    "ordinal": 0,
+                    "range": {
+                        "start": { "line": 1, "column": 1, "byte": 0 },
+                        "end": { "line": 1, "column": 10, "byte": 10 }
+                    },
+                    "tokenEstimate": 2,
+                    "preview": "first chunk"
+                },
+                "text": "first chunk",
+                "vector": [1.0, 0.0]
+            },
+            {
+                "metadata": {
+                    "id": "chunk:two",
+                    "path": "src/two.ts",
+                    "contentHash": "content-two",
+                    "chunkHash": "chunk-two",
+                    "embeddingHash": "embedding-two",
+                    "kind": "file",
+                    "language": "typescript",
+                    "ordinal": 0,
+                    "range": {
+                        "start": { "line": 1, "column": 1, "byte": 0 },
+                        "end": { "line": 1, "column": 10, "byte": 10 }
+                    },
+                    "tokenEstimate": 2,
+                    "preview": "second chunk"
+                },
+                "text": "second chunk",
+                "vector": [0.0, 1.0]
+            }
+        ]
+    })
+}
+
+#[test]
+fn full_write_replaces_an_incomplete_store_with_the_same_identity() {
+    let root = test_root("semantic-vector-complete-publication");
+    let project = open_test_project(&root);
+    let request = complete_semantic_request();
+    project
+        .write_semantic_index_json(request.to_string())
+        .unwrap();
+
+    let vector_dir = root.join(".opencanon/semantic-index/project");
+    let mut db =
+        EmbeddingDb::open_with_config(&vector_dir, Some(VectorConfig::with_dimensions(2))).unwrap();
+    db.delete("chunk:two").unwrap();
+    db.flush().unwrap();
+    drop(db);
+
+    let stale: Value = serde_json::from_str(
+        &project
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stale["index"]["status"], "stale");
+
+    project
+        .write_semantic_index_json(request.to_string())
+        .unwrap();
+    let ready: Value = serde_json::from_str(
+        &project
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ready["index"]["status"], "ready");
+    assert_eq!(ready["index"]["vectorCount"], 2);
+    let repaired =
+        EmbeddingDb::open_with_config(&vector_dir, Some(VectorConfig::with_dimensions(2))).unwrap();
+    assert_eq!(repaired.len(), 2);
+}
+
+#[test]
+fn publication_identity_and_pending_state_gate_semantic_reads() {
+    let root = test_root("semantic-vector-publication-marker");
+    let project = open_test_project(&root);
+    let request = complete_semantic_request();
+    project
+        .write_semantic_index_json(request.to_string())
+        .unwrap();
+
+    let vector_parent = root.join(".opencanon/semantic-index");
+    std::fs::remove_file(vector_parent.join("project/publication.json")).unwrap();
+    let stale: Value = serde_json::from_str(
+        &project
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stale["index"]["status"], "stale");
+    let search_error = project
+        .search_semantic_index_json(
+            json!({ "indexId": "project", "vector": [1.0, 0.0] }).to_string(),
+        )
+        .unwrap_err();
+    assert!(search_error
+        .to_string()
+        .contains("publication identity is missing"));
+
+    project
+        .write_semantic_index_json(request.to_string())
+        .unwrap();
+    std::fs::write(vector_parent.join(".project.pending.json"), "{}").unwrap();
+    let interrupted: Value = serde_json::from_str(
+        &project
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(interrupted["index"]["status"], "stale");
+    assert!(interrupted["index"]["diagnostics"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("interrupted"));
+
+    project
+        .write_semantic_index_json(request.to_string())
+        .unwrap();
+    assert!(!vector_parent.join(".project.pending.json").exists());
+}
 
 #[test]
 fn obsolete_vector_format_is_stale_and_full_write_rebuilds_it() {
@@ -319,44 +479,12 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
             }
         ]
     });
-    project
+    let reuse_error = project
         .write_semantic_index_json(reuse_request.to_string())
-        .unwrap();
-    let reused_search = project
-        .search_semantic_index_json(
-            json!({
-                "indexId": "project",
-                "vector": [1.0, 0.0],
-                "limit": 1
-            })
-            .to_string(),
-        )
-        .unwrap();
-    let reused_search: Value = serde_json::from_str(&reused_search).unwrap();
-    assert_eq!(
-        reused_search["results"][0]["chunk"]["path"],
-        "src/company.ts"
-    );
-    let reused_status = project
-        .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
-        .unwrap();
-    let reused_status: Value = serde_json::from_str(&reused_status).unwrap();
-    assert_eq!(
-        reused_status["index"]["embeddingStats"]["embeddedChunks"],
-        0
-    );
-    assert_eq!(reused_status["index"]["embeddingStats"]["reusedChunks"], 2);
-
-    let mut invalid_reuse = reuse_request.clone();
-    invalid_reuse["chunks"][0]["metadata"]["embeddingHash"] = json!("embedding-one-updated");
-    invalid_reuse["index"]["sourceInventoryHash"] = json!("inventory-invalid");
-    invalid_reuse["index"]["indexedAt"] = json!("2026-06-06T00:00:00.750Z");
-    let invalid_error = project
-        .write_semantic_index_json(invalid_reuse.to_string())
         .unwrap_err();
-    assert!(invalid_error
+    assert!(reuse_error
         .to_string()
-        .contains("cannot reuse a missing or changed vector"));
+        .contains("Complete semantic index writes require a vector"));
 
     project
         .write_semantic_index_json(
