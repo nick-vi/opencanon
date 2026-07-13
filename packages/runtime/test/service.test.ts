@@ -297,9 +297,9 @@ test("isolated check runtime pruning preserves live owners and removes dead or e
     mkdirSync(liveDir, { recursive: true });
     mkdirSync(orphanDir, { recursive: true });
     mkdirSync(expiredDir, { recursive: true });
-    writeFileSync(path.join(liveDir, "owner.json"), JSON.stringify({ version: 2, ownerPid: process.pid, createdAt: new Date().toISOString() }));
-    writeFileSync(path.join(orphanDir, "owner.json"), JSON.stringify({ version: 2, ownerPid: 999_999_999, createdAt: new Date().toISOString() }));
-    writeFileSync(path.join(expiredDir, "owner.json"), JSON.stringify({ version: 2, ownerPid: process.pid, createdAt: new Date(0).toISOString() }));
+    writeFileSync(path.join(liveDir, "owner.json"), JSON.stringify({ version: 3, ownerPid: process.pid, createdAt: new Date().toISOString() }));
+    writeFileSync(path.join(orphanDir, "owner.json"), JSON.stringify({ version: 3, ownerPid: 999_999_999, createdAt: new Date().toISOString() }));
+    writeFileSync(path.join(expiredDir, "owner.json"), JSON.stringify({ version: 3, ownerPid: process.pid, createdAt: new Date(0).toISOString() }));
 
     assert.equal(await pruneOrphanedCheckRuntimes(rootDir), 2);
     assert.equal(existsSync(liveDir), true);
@@ -379,6 +379,32 @@ test("an active check command exits when its runtime owner is killed", { timeout
     if (descendantPid && processIsRunning(descendantPid)) process.kill(descendantPid, "SIGKILL");
     if (guardianPid && processIsRunning(guardianPid)) process.kill(guardianPid, "SIGKILL");
     if (owner.pid && processIsRunning(owner.pid)) process.kill(owner.pid, "SIGKILL");
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("an active check command survives a bounded owner event-loop stall", { timeout: 20000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-check-command-stall-"));
+  const runtime = await createIsolatedCheckRuntime(rootDir);
+  const command = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  try {
+    if (!command.pid) throw new Error("check command did not start");
+    command.unref();
+    await runtime.ownCommand(command.pid, 12_000);
+
+    const stall = spawnSync(process.execPath, ["--input-type=module", "-e", "await new Promise((resolve) => setTimeout(resolve, 6000));"], {
+      stdio: "ignore",
+      timeout: 8_000,
+    });
+    assert.equal(stall.status, 0, stall.error?.message ?? "owner event-loop stall process failed");
+    assert.equal(processIsRunning(command.pid), true);
+  } finally {
+    if (command.pid) await runtime.releaseCommand(command.pid).catch(() => undefined);
+    await cleanupIsolatedCheckRuntime(runtime).catch(() => undefined);
+    if (command.pid && processIsRunning(command.pid)) process.kill(command.pid, "SIGKILL");
     rmSync(rootDir, { recursive: true, force: true });
   }
 });

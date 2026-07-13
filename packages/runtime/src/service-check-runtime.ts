@@ -6,8 +6,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  utimesSync,
-  writeFileSync,
 } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -25,11 +23,8 @@ import { ProjectRuntimeEnv, ServiceEnv } from "./service-types.ts";
 
 const CheckRuntimeDirectoryPrefix = "check-";
 const CheckRuntimeOwnerFile = "owner.json";
-const CheckRuntimeOwnerVersion = 2;
+const CheckRuntimeOwnerVersion = 3;
 const CheckRuntimeOwnerCleanupGraceMs = 60_000;
-const CheckCommandHeartbeatFile = "command.heartbeat";
-const CheckCommandHeartbeatIntervalMs = 1_000;
-const CheckCommandHeartbeatStaleMs = 5_000;
 const CheckCommandTerminationGraceMs = 10_000;
 
 type CheckCommandLease = {
@@ -52,7 +47,6 @@ export type IsolatedCheckRuntime = {
   env: NodeJS.ProcessEnv;
   ownCommand(commandPid: number, timeoutMs: number): Promise<void>;
   releaseCommand(commandPid: number): Promise<void>;
-  stopCommandHeartbeat(): void;
 };
 
 const IsolatedRuntimeEnvKeys = [
@@ -87,7 +81,6 @@ export async function createIsolatedCheckRuntime(rootDir: string): Promise<Isola
   env[ServiceEnv.OwnerPid] = String(process.pid);
   env[ProjectRuntimeEnv.StateOwnerRegistryPath] = registryPath;
   env[ProjectRuntimeEnv.StateRoot] = path.join(dir, "state");
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
   return {
     dir,
     registryPath,
@@ -97,15 +90,11 @@ export async function createIsolatedCheckRuntime(rootDir: string): Promise<Isola
       if (owner.command) throw new Error("An isolated check runtime can own only one active command.");
       const startedAt = new Date();
       const deadlineMs = startedAt.getTime() + timeoutMs + CheckCommandTerminationGraceMs;
-      const heartbeatPath = path.join(dir, CheckCommandHeartbeatFile);
-      writeFileSync(heartbeatPath, "", { mode: 0o600 });
       const guardian = spawn(process.execPath, [
         checkCommandGuardianEntrypoint(),
         String(commandPid),
         String(process.pid),
-        heartbeatPath,
         String(deadlineMs),
-        String(CheckCommandHeartbeatStaleMs),
       ], {
         cwd: rootDir,
         detached: true,
@@ -130,29 +119,19 @@ export async function createIsolatedCheckRuntime(rootDir: string): Promise<Isola
         },
       };
       writeCheckRuntimeOwner(dir, owner);
-      heartbeat = setInterval(() => touchHeartbeat(heartbeatPath), CheckCommandHeartbeatIntervalMs);
-      heartbeat.unref();
     },
     async releaseCommand(commandPid) {
       if (owner.command?.pid !== commandPid) return;
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = undefined;
       const guardianPid = owner.command.guardianPid;
       await terminateSpawnedProcess(commandPid);
       if (isProcessRunning(guardianPid)) await terminateSpawnedProcess(guardianPid);
       owner = { version: owner.version, ownerPid: owner.ownerPid, createdAt: owner.createdAt };
       writeCheckRuntimeOwner(dir, owner);
-      rmSync(path.join(dir, CheckCommandHeartbeatFile), { force: true });
-    },
-    stopCommandHeartbeat() {
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = undefined;
     },
   };
 }
 
 export async function cleanupIsolatedCheckRuntime(runtime: IsolatedCheckRuntime): Promise<void> {
-  runtime.stopCommandHeartbeat();
   await retireCheckRuntimeDirectory(runtime.dir, runtime.registryPath);
 }
 
@@ -227,15 +206,6 @@ function writeCheckRuntimeOwner(dir: string, owner: CheckRuntimeOwner): void {
   const file = path.join(dir, CheckRuntimeOwnerFile);
   writeAtomicJsonFileSync(file, owner);
   chmodSync(file, 0o600);
-}
-
-function touchHeartbeat(file: string): void {
-  try {
-    const now = new Date();
-    utimesSync(file, now, now);
-  } catch {
-    // Cleanup removes the heartbeat after command ownership ends.
-  }
 }
 
 function checkCommandGuardianEntrypoint(): string {
