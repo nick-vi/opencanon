@@ -1,7 +1,94 @@
 use rusqlite::Connection;
 use serde_json::{json, Value};
+use std::fs::OpenOptions;
+use std::io::{Seek, SeekFrom, Write};
 
 use super::support::*;
+
+#[test]
+fn obsolete_vector_format_is_stale_and_full_write_rebuilds_it() {
+    let root = test_root("semantic-vector-format");
+    let project = open_test_project(&root);
+    let request = json!({
+        "index": {
+            "id": "project",
+            "version": "semantic-index-v2",
+            "status": "ready",
+            "provider": {
+                "id": "opencanon-native-test",
+                "kind": "native",
+                "modelId": "test-native-embedding-2",
+                "dimensions": 2,
+                "distance": "cosine",
+                "configHash": "config"
+            },
+            "chunkerVersion": "chunker",
+            "producerVersion": "producer",
+            "sourceInventoryHash": "inventory",
+            "chunkTreeHash": "tree",
+            "identityHash": "identity",
+            "chunkCount": 1,
+            "vectorCount": 1,
+            "staleChunkCount": 0,
+            "indexedAt": "2026-06-06T00:00:00.000Z",
+            "diagnostics": []
+        },
+        "chunks": [{
+            "metadata": {
+                "id": "chunk:one",
+                "path": "src/company.ts",
+                "contentHash": "content-one",
+                "chunkHash": "chunk-one",
+                "embeddingHash": "embedding-one",
+                "kind": "file",
+                "language": "typescript",
+                "ordinal": 0,
+                "range": {
+                    "start": { "line": 1, "column": 1, "byte": 0 },
+                    "end": { "line": 1, "column": 10, "byte": 10 }
+                },
+                "tokenEstimate": 2,
+                "preview": "active company"
+            },
+            "text": "active company",
+            "vector": [1.0, 0.0]
+        }]
+    });
+    project
+        .write_semantic_index_json(request.to_string())
+        .unwrap();
+
+    let vector_path = root.join(".opencanon/semantic-index/project/vectors.bin");
+    let mut vectors = OpenOptions::new().write(true).open(&vector_path).unwrap();
+    vectors.seek(SeekFrom::Start(4)).unwrap();
+    vectors.write_all(&1u32.to_le_bytes()).unwrap();
+    vectors.sync_all().unwrap();
+
+    let stale: Value = serde_json::from_str(
+        &project
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stale["index"]["status"], "stale");
+    assert_eq!(stale["index"]["vectorCount"], 0);
+    assert_eq!(
+        stale["index"]["diagnostics"][0]["code"],
+        "semantic-vector-rebuild-required"
+    );
+
+    project
+        .write_semantic_index_json(request.to_string())
+        .unwrap();
+    let ready: Value = serde_json::from_str(
+        &project
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ready["index"]["status"], "ready");
+    assert_eq!(ready["index"]["vectorCount"], 1);
+}
 
 #[test]
 fn knowledge_index_round_trips_metadata_and_searches_vectors() {

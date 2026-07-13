@@ -5,6 +5,7 @@ use crate::{
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -302,33 +303,7 @@ impl EmbeddingDb {
         // We need approximately the same space for the new files, plus some buffer
         let required = current_size + (current_size / 10); // 10% buffer
 
-        // Get available space on the filesystem
-        #[cfg(unix)]
-        let available = {
-            // Use statvfs to get available space
-            unsafe {
-                let mut stat: libc::statvfs = std::mem::zeroed();
-                let path_cstr =
-                    std::ffi::CString::new(self.path.to_string_lossy().as_bytes()).unwrap();
-                if libc::statvfs(path_cstr.as_ptr(), &mut stat) == 0 {
-                    stat.f_bavail as u64 * stat.f_bsize
-                } else {
-                    // If statvfs fails, assume we have enough space
-                    // (better to try and fail than to refuse)
-                    u64::MAX
-                }
-            }
-        };
-
-        #[cfg(windows)]
-        let available = {
-            // On Windows, use GetDiskFreeSpaceExW
-            // For now, assume we have enough space
-            u64::MAX
-        };
-
-        #[cfg(not(any(unix, windows)))]
-        let available = u64::MAX;
+        let available = filesystem_available_bytes(&self.path)?;
 
         if available < required {
             return Err(EmbedDbError::InsufficientSpace {
@@ -596,4 +571,57 @@ impl EmbeddingDb {
 
         Ok(())
     }
+}
+
+#[cfg(unix)]
+pub(crate) fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "filesystem path contains a NUL byte",
+        )
+    })?;
+    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    let result = unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let stat = unsafe { stat.assume_init() };
+    Ok(u64::from(stat.f_bavail).saturating_mul(stat.f_frsize))
+}
+
+#[cfg(windows)]
+pub(crate) fn filesystem_available_bytes(path: &Path) -> io::Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut available = 0u64;
+    let result = unsafe {
+        GetDiskFreeSpaceExW(
+            path.as_ptr(),
+            &mut available,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(available)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn filesystem_available_bytes(_path: &Path) -> io::Result<u64> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "filesystem capacity checks are not implemented for this platform",
+    ))
 }

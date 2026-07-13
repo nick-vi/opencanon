@@ -233,8 +233,8 @@ impl QuantizationHeader {
         if self.magic != QUANTIZATION_MAGIC {
             return Err("invalid magic number");
         }
-        if self.version > QUANTIZATION_VERSION {
-            return Err("unsupported version");
+        if self.version != QUANTIZATION_VERSION {
+            return Err("format version mismatch");
         }
         Ok(())
     }
@@ -444,6 +444,12 @@ mod tests {
             ..header
         };
         assert!(bad_version.validate().is_err());
+
+        let obsolete_version = QuantizationHeader {
+            version: 0,
+            ..header
+        };
+        assert!(obsolete_version.validate().is_err());
     }
 
     #[test]

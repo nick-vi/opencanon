@@ -127,10 +127,10 @@ impl QuantizedVectorStore {
                 QUANTIZATION_MAGIC, header.magic
             )));
         }
-        if header.version > QUANTIZATION_VERSION {
+        if header.version != QUANTIZATION_VERSION {
             return Err(EmbedDbError::Corrupted(format!(
-                "unsupported quantization version: {}",
-                header.version
+                "quantization format version mismatch: expected {}, got {}",
+                QUANTIZATION_VERSION, header.version
             )));
         }
 

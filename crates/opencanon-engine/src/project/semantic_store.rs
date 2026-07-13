@@ -987,7 +987,9 @@ pub(super) fn read_knowledge_index_status_json(
         .conn
         .lock()
         .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let index = read_knowledge_index_payload(&conn, &handle.root_dir, &index_id)?;
+    let index = read_knowledge_index_payload(&conn, &handle.root_dir, &index_id)?.map(|index| {
+        super::semantic_status::inspect_semantic_vector_health(handle, &index_id, index)
+    });
     encode(&json!({ "index": index }))
 }
 

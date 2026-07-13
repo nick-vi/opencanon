@@ -111,19 +111,9 @@ impl HnswIndex {
         file.read_exact(&mut header_bytes)?;
         let header: HnswHeader = *bytemuck::from_bytes(&header_bytes);
 
-        // Validate header
-        if header.magic != HNSW_MAGIC {
-            return Err(EmbedDbError::Corrupted(format!(
-                "Invalid HNSW magic: 0x{:08X}",
-                header.magic
-            )));
-        }
-        if header.version > HNSW_VERSION {
-            return Err(EmbedDbError::Corrupted(format!(
-                "Unsupported HNSW version: {}",
-                header.version
-            )));
-        }
+        header
+            .validate()
+            .map_err(|error| EmbedDbError::Corrupted(error.to_string()))?;
 
         let count = header.count as usize;
         let config = HnswConfig {

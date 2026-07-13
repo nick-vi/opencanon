@@ -70,9 +70,10 @@ export function createKnowledgeIndexManager(input: {
         unit: "files",
       });
       const previousIndex = input.store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index;
-      const previousChunks = options.force || !previousIndex ? [] : listPreviousSemanticChunks(input.store);
+      const canApplyDelta = !options.force && previousIndex?.status === "ready";
+      const previousChunks = canApplyDelta ? listPreviousSemanticChunks(input.store) : [];
       let mode: KnowledgeIndexRunResult["mode"];
-      if (options.force || !previousIndex) {
+      if (options.force || !previousIndex || previousIndex.status !== "ready") {
         mode = "full";
         emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding Project Knowledge", current: 0, total: scan.files.length, unit: "files" });
         const request = buildProjectSemanticIndex({

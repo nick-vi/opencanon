@@ -1,7 +1,7 @@
 //! File headers for persistent storage
 //!
 //! All headers are 64 bytes with explicit padding to ensure
-//! bytemuck compatibility and forward compatibility.
+//! bytemuck compatibility and stable current-format validation.
 
 use bytemuck::{Pod, Zeroable};
 
@@ -30,7 +30,7 @@ pub const HEADER_SIZE: usize = 64;
 pub struct VectorHeader {
     /// Magic number to identify file type
     pub magic: u32,
-    /// Format version for migrations
+    /// Current persisted format version
     pub version: u32,
     /// Vector dimensions
     pub dimensions: u32,
@@ -81,10 +81,6 @@ impl VectorHeader {
 
     /// Verify the checksum matches the header contents
     pub fn verify_checksum(&self) -> bool {
-        // Version 1 headers don't have checksums (reserved1 was always 0)
-        if self.version < 2 {
-            return true;
-        }
         self.checksum == self.calculate_checksum()
     }
 
@@ -96,9 +92,9 @@ impl VectorHeader {
                 got: self.magic,
             });
         }
-        if self.version > VECTOR_VERSION {
-            return Err(HeaderError::UnsupportedVersion {
-                max_supported: VECTOR_VERSION,
+        if self.version != VECTOR_VERSION {
+            return Err(HeaderError::FormatVersionMismatch {
+                expected: VECTOR_VERSION,
                 got: self.version,
             });
         }
@@ -173,9 +169,9 @@ impl HnswHeader {
                 got: self.magic,
             });
         }
-        if self.version > HNSW_VERSION {
-            return Err(HeaderError::UnsupportedVersion {
-                max_supported: HNSW_VERSION,
+        if self.version != HNSW_VERSION {
+            return Err(HeaderError::FormatVersionMismatch {
+                expected: HNSW_VERSION,
                 got: self.version,
             });
         }
@@ -224,9 +220,9 @@ impl IdMapHeader {
                 got: self.magic,
             });
         }
-        if self.version > IDMAP_VERSION {
-            return Err(HeaderError::UnsupportedVersion {
-                max_supported: IDMAP_VERSION,
+        if self.version != IDMAP_VERSION {
+            return Err(HeaderError::FormatVersionMismatch {
+                expected: IDMAP_VERSION,
                 got: self.version,
             });
         }
@@ -245,8 +241,8 @@ impl Default for IdMapHeader {
 pub enum HeaderError {
     #[error("invalid magic number: expected 0x{expected:08X}, got 0x{got:08X}")]
     InvalidMagic { expected: u32, got: u32 },
-    #[error("unsupported version: max supported {max_supported}, got {got}")]
-    UnsupportedVersion { max_supported: u32, got: u32 },
+    #[error("format version mismatch: expected {expected}, got {got}")]
+    FormatVersionMismatch { expected: u32, got: u32 },
     #[error(
         "checksum mismatch: expected 0x{expected:08X}, got 0x{got:08X} (file may be corrupted)"
     )]
@@ -274,6 +270,29 @@ mod tests {
     }
 
     #[test]
+    fn test_auxiliary_headers_require_current_format() {
+        let mut hnsw = HnswHeader::new(16, 32, 200);
+        hnsw.version = 0;
+        assert!(matches!(
+            hnsw.validate(),
+            Err(HeaderError::FormatVersionMismatch {
+                expected: HNSW_VERSION,
+                got: 0
+            })
+        ));
+
+        let mut id_map = IdMapHeader::new();
+        id_map.version = 0;
+        assert!(matches!(
+            id_map.validate(),
+            Err(HeaderError::FormatVersionMismatch {
+                expected: IDMAP_VERSION,
+                got: 0
+            })
+        ));
+    }
+
+    #[test]
     fn test_vector_header_validation() {
         let header = VectorHeader::new(384);
         assert!(header.validate().is_ok());
@@ -289,6 +308,18 @@ mod tests {
             ..header
         };
         assert!(future_version.validate().is_err());
+
+        let obsolete_version = VectorHeader {
+            version: VECTOR_VERSION - 1,
+            ..header
+        };
+        assert!(matches!(
+            obsolete_version.validate(),
+            Err(HeaderError::FormatVersionMismatch {
+                expected: VECTOR_VERSION,
+                got
+            }) if got == VECTOR_VERSION - 1
+        ));
     }
 
     #[test]
@@ -338,22 +369,5 @@ mod tests {
         header.count = 0;
         assert_eq!(header.checksum, original_checksum);
         assert!(header.verify_checksum());
-    }
-
-    #[test]
-    fn test_v1_header_checksum_bypass() {
-        // Simulate a v1 header (checksum field was reserved1 = 0)
-        let v1_header = VectorHeader {
-            magic: VECTOR_MAGIC,
-            version: 1,
-            dimensions: 384,
-            checksum: 0, // v1 had this as _reserved1
-            count: 100,
-            deleted_count: 5,
-            _reserved2: [0; 32],
-        };
-
-        // v1 headers should pass checksum verification (backwards compatibility)
-        assert!(v1_header.verify_checksum());
     }
 }

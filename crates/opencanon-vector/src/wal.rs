@@ -75,8 +75,8 @@ pub enum WalError {
     Io(String),
     /// Invalid magic number in segment header
     InvalidMagic(u32),
-    /// Unsupported WAL version
-    UnsupportedVersion(u16),
+    /// WAL format does not match the current version
+    FormatVersionMismatch { expected: u16, got: u16 },
     /// Checksum mismatch in WAL record
     ChecksumMismatch {
         lsn: u64,
@@ -104,7 +104,13 @@ impl std::fmt::Display for WalError {
                     WAL_MAGIC, magic
                 )
             }
-            WalError::UnsupportedVersion(v) => write!(f, "unsupported WAL version: {}", v),
+            WalError::FormatVersionMismatch { expected, got } => {
+                write!(
+                    f,
+                    "WAL format version mismatch: expected {}, got {}",
+                    expected, got
+                )
+            }
             WalError::ChecksumMismatch {
                 lsn,
                 expected,
@@ -308,8 +314,11 @@ impl WalHeader {
         if self.magic != WAL_MAGIC {
             return Err(WalError::InvalidMagic(self.magic));
         }
-        if self.version > WAL_VERSION {
-            return Err(WalError::UnsupportedVersion(self.version));
+        if self.version != WAL_VERSION {
+            return Err(WalError::FormatVersionMismatch {
+                expected: WAL_VERSION,
+                got: self.version,
+            });
         }
         Ok(())
     }
@@ -1090,12 +1099,25 @@ mod tests {
             Err(WalError::InvalidMagic(0x12345678))
         ));
 
-        // Unsupported version
+        // Future version
         header.magic = WAL_MAGIC;
         header.version = 99;
         assert!(matches!(
             header.validate(),
-            Err(WalError::UnsupportedVersion(99))
+            Err(WalError::FormatVersionMismatch {
+                expected: WAL_VERSION,
+                got: 99
+            })
+        ));
+
+        // Obsolete version
+        header.version = 0;
+        assert!(matches!(
+            header.validate(),
+            Err(WalError::FormatVersionMismatch {
+                expected: WAL_VERSION,
+                got: 0
+            })
         ));
     }
 

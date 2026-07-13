@@ -1349,7 +1349,7 @@ test("semantic index delta embeds only changed file chunks", () => {
   }
 });
 
-test("KnowledgeIndexManager writes a full index, progress, and query prewarm", async () => {
+test("KnowledgeIndexManager rebuilds stale vector state with a full index", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-manager-full-"));
   try {
     createAuthoringProject(rootDir);
@@ -1404,6 +1404,30 @@ test("KnowledgeIndexManager writes a full index, progress, and query prewarm", a
       diagnostics: [],
     }];
     const writes: WriteSemanticIndexRequest[] = [];
+    const staleIndex = {
+      id: "project",
+      version: "semantic-index-v2",
+      status: "stale",
+      provider: {
+        id: "opencanon-native-jina-code-v2",
+        kind: "native",
+        modelId: "jina-code-v2",
+        modelDigest: "digest",
+        dimensions: 896,
+        distance: "cosine",
+        configHash: "config",
+      },
+      chunkerVersion: "chunker",
+      producerVersion: "producer",
+      sourceInventoryHash: "stale-inventory",
+      chunkTreeHash: "stale-tree",
+      identityHash: "stale-identity",
+      chunkCount: 1,
+      vectorCount: 0,
+      staleChunkCount: 1,
+      indexedAt: "2026-06-06T00:00:00.000Z",
+      diagnostics: [{ code: "semantic-vector-rebuild-required", message: "Rebuild required.", severity: "warning" }],
+    };
     const embedCalls: Array<{ task?: string; texts: string[]; modelId: string }> = [];
     const engine = createEngine({
       versionJson: () =>
@@ -1434,9 +1458,14 @@ test("KnowledgeIndexManager writes a full index, progress, and query prewarm", a
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
-        writeSemanticIndexDeltaJson: () => undefined,
-        readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null }),
-        listSemanticChunksJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null, chunks: writes.at(-1)?.chunks.map((chunk) => chunk.metadata) ?? [] }),
+        writeSemanticIndexDeltaJson: () => {
+          throw new Error("stale vector state must not receive a delta write");
+        },
+        readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? staleIndex }),
+        listSemanticChunksJson: () => {
+          if (writes.length === 0) throw new Error("stale vector chunks must not be reused");
+          return JSON.stringify({ index: writes.at(-1)?.index ?? null, chunks: writes.at(-1)?.chunks.map((chunk) => chunk.metadata) ?? [] });
+        },
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
         embedSemanticTextsJson: (requestJson: string) => {
           const request = JSON.parse(requestJson) as { modelId: string; texts: string[]; task?: string };

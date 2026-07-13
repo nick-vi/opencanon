@@ -121,19 +121,9 @@ impl IdMapData {
         reader.read_exact(&mut header_bytes)?;
         let header: IdMapHeader = *bytemuck::from_bytes(&header_bytes);
 
-        // Validate header
-        if header.magic != IDMAP_MAGIC {
-            return Err(EmbedDbError::Corrupted(format!(
-                "Invalid ID map magic: 0x{:08X}",
-                header.magic
-            )));
-        }
-        if header.version > IDMAP_VERSION {
-            return Err(EmbedDbError::Corrupted(format!(
-                "Unsupported ID map version: {}",
-                header.version
-            )));
-        }
+        header
+            .validate()
+            .map_err(|error| EmbedDbError::Corrupted(error.to_string()))?;
 
         let count = header.count as usize;
         let mut id_map = HashMap::with_capacity(count);

@@ -399,6 +399,14 @@ fn test_disk_space_check_passes() {
 }
 
 #[test]
+fn test_disk_space_check_reports_inspection_failure() {
+    let dir = tempdir().unwrap();
+    let missing = dir.path().join("missing");
+
+    assert!(crate::compaction::filesystem_available_bytes(&missing).is_err());
+}
+
+#[test]
 fn test_insufficient_space_error() {
     // Test that the error type exists and formats correctly
     let err = EmbedDbError::InsufficientSpace {

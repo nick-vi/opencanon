@@ -162,11 +162,6 @@ impl HnswIndex {
         &self.neighbors
     }
 
-    /// Create with legacy parameters (for backwards compatibility)
-    pub fn with_params(m: usize, ef_construction: usize) -> Self {
-        Self::new(HnswConfig::new(m, ef_construction, 50))
-    }
-
     /// Get the configuration
     pub fn config(&self) -> &HnswConfig {
         &self.config

@@ -38,6 +38,7 @@ mod json_fields;
 mod observability_store;
 mod product_model_store;
 mod semantic_delta_store;
+mod semantic_status;
 mod semantic_store;
 
 use connection::open_project_connection;

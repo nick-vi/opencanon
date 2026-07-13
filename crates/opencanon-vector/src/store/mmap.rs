@@ -3,7 +3,7 @@
 //! Provides efficient access to vectors through memory mapping,
 //! allowing the OS to handle paging and caching.
 
-use super::header::{VectorHeader, HEADER_SIZE, VECTOR_MAGIC, VECTOR_VERSION};
+use super::header::{VectorHeader, HEADER_SIZE};
 use crate::{EmbedDbError, Result};
 use bytemuck;
 use memmap2::{MmapMut, MmapOptions};
@@ -80,28 +80,9 @@ impl MmapVectorStore {
 
         let header: VectorHeader = *bytemuck::from_bytes(&mmap[..HEADER_SIZE]);
 
-        // Validate header (including checksum for v2+)
-        if header.magic != VECTOR_MAGIC {
-            return Err(EmbedDbError::Corrupted(format!(
-                "invalid magic: expected 0x{:08X}, got 0x{:08X}",
-                VECTOR_MAGIC, header.magic
-            )));
-        }
-        if header.version > VECTOR_VERSION {
-            return Err(EmbedDbError::Corrupted(format!(
-                "unsupported version: {}",
-                header.version
-            )));
-        }
-
-        // Verify checksum for v2+ headers
-        if !header.verify_checksum() {
-            return Err(EmbedDbError::Corrupted(format!(
-                "header checksum mismatch: expected 0x{:08X}, got 0x{:08X} (file may be corrupted)",
-                header.calculate_checksum(),
-                header.checksum
-            )));
-        }
+        header
+            .validate_with_checksum()
+            .map_err(|error| EmbedDbError::Corrupted(error.to_string()))?;
 
         self.dimensions = header.dimensions as usize;
         self.count = header.count as usize;
