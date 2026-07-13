@@ -2,7 +2,7 @@
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import { inspectProjectRuntime, inspectService, projectRuntimeStatePath, projectRuntimeStatePathInRoot, ProjectRuntimeEnv, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, runtimeNamespaceForRegistry, RuntimeStatus, serviceRegistryPath, stopProjectRuntime, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
+import { inspectProjectRuntime, inspectService, privateProjectRuntimeStatePath, projectRuntimeStatePath, ProjectRuntimeEnv, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, runtimeNamespaceForRegistry, RuntimeStatus, serviceRegistryPath, stopProjectRuntime, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
 import { fail, formatOpenCanonProblem, Format, parseOpenCanonProblemFromError, resolveRootDir } from "@opencanon/core";
 import { applyDoctorFixes, buildDoctorReport, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
 import type { DoctorRuntimeHealth, ProducerStatus } from "@opencanon/core";
@@ -420,10 +420,12 @@ async function runStateCommand(args: string[], cwd: string): Promise<void> {
 function currentProjectStatePath(rootDir: string, registryPath: string): string {
   const configuredPath = process.env[ProjectRuntimeEnv.StatePath]?.trim();
   if (configuredPath) return path.resolve(configuredPath);
-  const configuredRoot = process.env[ProjectRuntimeEnv.StateRoot]?.trim();
-  return configuredRoot
-    ? projectRuntimeStatePathInRoot(rootDir, configuredRoot)
-    : projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(registryPath));
+  return privateProjectRuntimeStatePath({
+    rootDir,
+    registryPath,
+    stateRoot: process.env[ProjectRuntimeEnv.StateRoot],
+    ownerRegistryPath: process.env[ProjectRuntimeEnv.StateOwnerRegistryPath],
+  }) ?? projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(registryPath));
 }
 
 function printStateHelp(): void {

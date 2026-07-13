@@ -63,6 +63,7 @@ const IsolatedRuntimeEnvKeys = [
   ProjectRuntimeEnv.AuthToken,
   ProjectRuntimeEnv.LeaseId,
   ProjectRuntimeEnv.PipeEndpoint,
+  ProjectRuntimeEnv.StateOwnerRegistryPath,
   ProjectRuntimeEnv.StateRoot,
   ProjectRuntimeEnv.StatePath,
 ] as const;
@@ -84,6 +85,7 @@ export async function createIsolatedCheckRuntime(rootDir: string): Promise<Isola
   const env: NodeJS.ProcessEnv = { ...process.env, [ServiceEnv.RegistryPath]: registryPath };
   for (const key of IsolatedRuntimeEnvKeys) delete env[key];
   env[ServiceEnv.OwnerPid] = String(process.pid);
+  env[ProjectRuntimeEnv.StateOwnerRegistryPath] = registryPath;
   env[ProjectRuntimeEnv.StateRoot] = path.join(dir, "state");
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   return {

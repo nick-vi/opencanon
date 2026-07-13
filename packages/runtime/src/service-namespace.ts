@@ -48,6 +48,28 @@ export function projectRuntimeStatePathInRoot(rootDir: string, stateRoot: string
   return path.join(path.resolve(stateRoot), shortHash(rootDir), "state.sqlite");
 }
 
+export function privateProjectRuntimeStatePath(input: {
+  rootDir: string;
+  registryPath: string;
+  stateRoot?: string;
+  ownerRegistryPath?: string;
+}): string | undefined {
+  const stateRoot = input.stateRoot?.trim();
+  if (!stateRoot) return undefined;
+  const ownerRegistryPath = input.ownerRegistryPath?.trim();
+  if (!ownerRegistryPath) throw new Error("OpenCanon private Project State root requires an owning service registry.");
+  const resolvedRegistryPath = path.resolve(input.registryPath);
+  const resolvedOwnerRegistryPath = path.resolve(ownerRegistryPath);
+  if (resolvedOwnerRegistryPath !== resolvedRegistryPath) return undefined;
+  const resolvedRoot = path.resolve(stateRoot);
+  const registryDir = path.dirname(resolvedOwnerRegistryPath);
+  const relative = path.relative(registryDir, resolvedRoot);
+  if (!relative || path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+    throw new Error("OpenCanon private Project State root must stay inside its service registry directory.");
+  }
+  return projectRuntimeStatePathInRoot(input.rootDir, resolvedRoot);
+}
+
 function sourceCheckoutRoot(cliPath: string): string | undefined {
   const normalized = path.resolve(cliPath || ".").replace(/\\/g, "/");
   if (!normalized.endsWith(SourceCliSuffix)) return undefined;

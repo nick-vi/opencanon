@@ -160,6 +160,7 @@ test("a private service state root isolates every project", { timeout: 20000 }, 
   const stateRoot = path.join(path.dirname(registryPath), "state");
   const fakeCliPath = path.join(fixtureDir, "ready-opencanon.mjs");
   const originalCli = process.env.OPENCANON_CLI;
+  const originalOwnerRegistryPath = process.env[ProjectRuntimeEnv.StateOwnerRegistryPath];
   const originalStateRoot = process.env[ProjectRuntimeEnv.StateRoot];
   try {
     for (const projectDir of [projectA, projectB]) {
@@ -168,6 +169,7 @@ test("a private service state root isolates every project", { timeout: 20000 }, 
     }
     writeFileSync(fakeCliPath, readyFakeRuntimeCliSource({ writeStateMarker: true }));
     process.env.OPENCANON_CLI = fakeCliPath;
+    process.env[ProjectRuntimeEnv.StateOwnerRegistryPath] = registryPath;
     process.env[ProjectRuntimeEnv.StateRoot] = stateRoot;
 
     const runtimeA = await startProjectRuntime({ cwd: projectA, registryPath, idleTimeoutMs: 0 });
@@ -185,6 +187,8 @@ test("a private service state root isolates every project", { timeout: 20000 }, 
     await stopProjectRuntime(projectB, registryPath).catch(() => undefined);
     if (originalCli === undefined) delete process.env.OPENCANON_CLI;
     else process.env.OPENCANON_CLI = originalCli;
+    if (originalOwnerRegistryPath === undefined) delete process.env[ProjectRuntimeEnv.StateOwnerRegistryPath];
+    else process.env[ProjectRuntimeEnv.StateOwnerRegistryPath] = originalOwnerRegistryPath;
     if (originalStateRoot === undefined) delete process.env[ProjectRuntimeEnv.StateRoot];
     else process.env[ProjectRuntimeEnv.StateRoot] = originalStateRoot;
     rmSync(fixtureDir, { recursive: true, force: true });
@@ -194,15 +198,51 @@ test("a private service state root isolates every project", { timeout: 20000 }, 
 test("a private service rejects state outside its registry directory", async () => {
   const fixtureDir = mkdtempSync(path.join(tmpdir(), "opencanon-private-state-boundary-"));
   const registryPath = path.join(fixtureDir, "check", "service.json");
+  const originalOwnerRegistryPath = process.env[ProjectRuntimeEnv.StateOwnerRegistryPath];
   const originalStateRoot = process.env[ProjectRuntimeEnv.StateRoot];
   try {
     writeFileSync(path.join(fixtureDir, "opencanon.config.json"), "{}\n");
+    process.env[ProjectRuntimeEnv.StateOwnerRegistryPath] = registryPath;
     process.env[ProjectRuntimeEnv.StateRoot] = path.join(fixtureDir, "outside");
     await assert.rejects(
       startProjectRuntime({ cwd: fixtureDir, registryPath, idleTimeoutMs: 0 }),
       /private Project State root must stay inside its service registry directory/,
     );
   } finally {
+    if (originalOwnerRegistryPath === undefined) delete process.env[ProjectRuntimeEnv.StateOwnerRegistryPath];
+    else process.env[ProjectRuntimeEnv.StateOwnerRegistryPath] = originalOwnerRegistryPath;
+    if (originalStateRoot === undefined) delete process.env[ProjectRuntimeEnv.StateRoot];
+    else process.env[ProjectRuntimeEnv.StateRoot] = originalStateRoot;
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test("a private state root does not leak into an explicitly nested registry", { timeout: 20000 }, async () => {
+  const fixtureDir = mkdtempSync(path.join(tmpdir(), "opencanon-private-state-nested-"));
+  const ownerRegistryPath = path.join(fixtureDir, "owner", "service.json");
+  const nestedRegistryPath = path.join(fixtureDir, "nested", "service.json");
+  const stateRoot = path.join(path.dirname(ownerRegistryPath), "state");
+  const fakeCliPath = path.join(fixtureDir, "ready-opencanon.mjs");
+  const originalCli = process.env.OPENCANON_CLI;
+  const originalOwnerRegistryPath = process.env[ProjectRuntimeEnv.StateOwnerRegistryPath];
+  const originalStateRoot = process.env[ProjectRuntimeEnv.StateRoot];
+  try {
+    writeFileSync(path.join(fixtureDir, "opencanon.config.json"), "{}\n");
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource({ writeStateMarker: true }));
+    process.env.OPENCANON_CLI = fakeCliPath;
+    process.env[ProjectRuntimeEnv.StateOwnerRegistryPath] = ownerRegistryPath;
+    process.env[ProjectRuntimeEnv.StateRoot] = stateRoot;
+
+    const runtime = await startProjectRuntime({ cwd: fixtureDir, registryPath: nestedRegistryPath, idleTimeoutMs: 0 });
+    const nestedStatePath = projectRuntimeStatePath(fixtureDir, runtimeNamespaceForRegistry(nestedRegistryPath));
+    assert.equal(readFileSync(nestedStatePath, "utf8"), String(runtime.entry.pid));
+    assert.equal(existsSync(projectRuntimeStatePathInRoot(fixtureDir, stateRoot)), false);
+  } finally {
+    await stopProjectRuntime(fixtureDir, nestedRegistryPath).catch(() => undefined);
+    if (originalCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalCli;
+    if (originalOwnerRegistryPath === undefined) delete process.env[ProjectRuntimeEnv.StateOwnerRegistryPath];
+    else process.env[ProjectRuntimeEnv.StateOwnerRegistryPath] = originalOwnerRegistryPath;
     if (originalStateRoot === undefined) delete process.env[ProjectRuntimeEnv.StateRoot];
     else process.env[ProjectRuntimeEnv.StateRoot] = originalStateRoot;
     rmSync(fixtureDir, { recursive: true, force: true });

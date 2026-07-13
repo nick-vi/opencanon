@@ -24,7 +24,7 @@ import {
 import { errorMessage, isLocalProtocolTransportFailure, projectNotFoundProblem } from "./service-http.ts";
 import { runtimeCliInvocation } from "./service-entrypoint.ts";
 import { clearRuntimeStartupResults, readRuntimeStartupFailure, removeRuntimeStartupResult, runtimeStartupResultPath } from "./service-startup-result.ts";
-import { projectRuntimeStatePath, projectRuntimeStatePathInRoot, runtimeNamespaceForRegistry } from "./service-namespace.ts";
+import { privateProjectRuntimeStatePath, projectRuntimeStatePath, runtimeNamespaceForRegistry } from "./service-namespace.ts";
 import {
   appendLifecycleEvent,
   closeFileDescriptor,
@@ -260,15 +260,12 @@ export async function startProjectRuntime(input: {
 }
 
 function resolvedProjectRuntimeStatePath(rootDir: string, registryPath: string, namespace: string): string {
-  const configuredRoot = process.env[ProjectRuntimeEnv.StateRoot]?.trim();
-  if (!configuredRoot) return projectRuntimeStatePath(rootDir, namespace);
-  const resolvedRoot = path.resolve(configuredRoot);
-  const registryDir = path.dirname(path.resolve(registryPath));
-  const relative = path.relative(registryDir, resolvedRoot);
-  if (!relative || path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
-    throw new Error("OpenCanon private Project State root must stay inside its service registry directory.");
-  }
-  return projectRuntimeStatePathInRoot(rootDir, resolvedRoot);
+  return privateProjectRuntimeStatePath({
+    rootDir,
+    registryPath,
+    stateRoot: process.env[ProjectRuntimeEnv.StateRoot],
+    ownerRegistryPath: process.env[ProjectRuntimeEnv.StateOwnerRegistryPath],
+  }) ?? projectRuntimeStatePath(rootDir, namespace);
 }
 
 export async function startService(input: {
