@@ -175,7 +175,11 @@ fn watcher_path_filter_normalizes_project_files_and_ignores_generated_paths() {
         Some("tests/company.test.ts".to_string())
     );
     assert_eq!(
-        normalize_watcher_path(&root, &filter, &root.join(".opencanon/state/test/state.sqlite")),
+        normalize_watcher_path(
+            &root,
+            &filter,
+            &root.join(".opencanon/state/test/state.sqlite")
+        ),
         None
     );
     assert_eq!(
