@@ -454,6 +454,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "scripts/prepare-opencanon-release.ts" },
       { kind: DefinitionTargetKind.File, path: "scripts/publish-opencanon-release.ts" },
       { kind: DefinitionTargetKind.File, path: ".github/workflows/release.yml" },
+      { kind: DefinitionTargetKind.File, path: ".github/workflows/ci.yml" },
       { kind: DefinitionTargetKind.File, path: "package.json" },
       { kind: DefinitionTargetKind.Doc, path: "docs/language-support-foundation.md" },
       { kind: DefinitionTargetKind.Doc, path: "docs/runtime-update-security.md" },
@@ -533,7 +534,7 @@ export default [
       {
         id: "dependency-security",
         title: "Patch Rust soundness advisories and gate all lockfiles",
-        files: ["package.json", "crates/*/Cargo.toml", "crates/*/Cargo.lock", ".github/workflows/release.yml", "tests/release.test.ts"],
+        files: ["package.json", "crates/*/Cargo.toml", "crates/*/Cargo.lock", ".github/workflows/ci.yml", ".github/workflows/release.yml", "tests/release.test.ts"],
         checks: ["dependency-audit", "engine-tests", "inference-tests", "vector-tests", "release-tests"],
         dependsOn: ["current-vector-formats"],
       },

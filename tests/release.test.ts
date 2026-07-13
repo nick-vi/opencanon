@@ -203,6 +203,27 @@ test("release workflow runs the full gate before publishing assets", () => {
   assert.match(workflow, /publish-release:[\s\S]*needs:[\s\S]*- preflight[\s\S]*- build-engine/);
 });
 
+test("local and hosted gates audit every committed Rust lockfile", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const audit = packageJson.scripts?.["security:audit:rust"] ?? "";
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const release = readFileSync(".github/workflows/release.yml", "utf8");
+
+  for (const lockfile of [
+    "crates/opencanon-engine/Cargo.lock",
+    "crates/opencanon-inference/Cargo.lock",
+    "crates/opencanon-vector/Cargo.lock",
+  ]) {
+    assert(audit.includes(`cargo audit --file ${lockfile} --deny unsound`));
+  }
+  assert.equal(packageJson.scripts?.["security:audit"], "npm run security:audit:npm && npm run security:audit:rust");
+  assert.equal(packageJson.scripts?.["security:audit:npm"], "npm audit --omit=dev --audit-level=high");
+  assert.match(ci, /cargo \+1\.95\.0 install cargo-audit --version 0\.22\.2 --locked/);
+  assert.match(release, /cargo \+1\.95\.0 install cargo-audit --version 0\.22\.2 --locked/);
+});
+
 test("native embedding smoke is required unless explicitly optional", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts?: Record<string, string>;
