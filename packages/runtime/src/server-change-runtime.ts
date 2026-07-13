@@ -22,7 +22,7 @@ import {
   type ValidationResultCache,
 } from "@opencanon/core";
 import { cleanupIsolatedCheckRuntime, createIsolatedCheckRuntime } from "./service-check-runtime.ts";
-import { terminateSpawnedProcess } from "./service-process.ts";
+import { terminateSpawnedProcess } from "./process-tree.ts";
 import type { ProjectStore } from "./state.ts";
 import { validateRelativePaths } from "./server-fs.ts";
 import {
@@ -261,7 +261,7 @@ async function runShellCheck(
 ): Promise<RunChangeCheckResult> {
   const checkRuntime = await createIsolatedCheckRuntime(rootDir);
   try {
-    return await spawnShellCheck({ rootDir, changeId, taskId, checkId, kind, command, timeoutMs, env: checkRuntime.env, options });
+    return await spawnShellCheck({ rootDir, changeId, taskId, checkId, kind, command, timeoutMs, runtime: checkRuntime, options });
   } finally {
     await cleanupIsolatedCheckRuntime(checkRuntime);
   }
@@ -275,13 +275,13 @@ function spawnShellCheck(input: {
   kind: ChangeCheck["kind"];
   command: string;
   timeoutMs: number;
-  env: NodeJS.ProcessEnv;
+  runtime: Awaited<ReturnType<typeof createIsolatedCheckRuntime>>;
   options: RunChangeCheckOptions;
 }): Promise<RunChangeCheckResult> {
   return new Promise((resolve) => {
     const child = spawn(input.command, {
       cwd: input.rootDir,
-      env: input.env,
+      env: input.runtime.env,
       shell: true,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
@@ -290,6 +290,8 @@ function spawnShellCheck(input: {
     let stderr = "";
     let timedOut = false;
     let settled = false;
+    let ownershipError: Error | undefined;
+    let ownership = Promise.resolve();
     const append = (stream: ChangeCheckOutputStream, chunk: string) => {
       if (!chunk) return;
       if (stream === ChangeCheckOutputStream.Stdout) stdout = boundedCheckOutput(stdout, chunk);
@@ -300,6 +302,14 @@ function spawnShellCheck(input: {
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => append(ChangeCheckOutputStream.Stdout, chunk));
     child.stderr?.on("data", (chunk: string) => append(ChangeCheckOutputStream.Stderr, chunk));
+    child.once("spawn", () => {
+      if (!child.pid) return;
+      ownership = input.runtime.ownCommand(child.pid, input.timeoutMs).catch((error: unknown) => {
+        ownershipError = error instanceof Error ? error : new Error(String(error));
+        append(ChangeCheckOutputStream.Stderr, `${ownershipError.message}\n`);
+        void terminateSpawnedProcess(child.pid!);
+      });
+    });
 
     const terminate = () => {
       if (child.pid) void terminateSpawnedProcess(child.pid);
@@ -315,27 +325,38 @@ function spawnShellCheck(input: {
     const finish = (exitCode: number | null, signal: NodeJS.Signals | null, error?: Error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
-      input.options.signal?.removeEventListener("abort", onAbort);
-      if (error) append("stderr", `${error.message}\n`);
-      const output = trimCheckOutput([stdout, stderr].filter(Boolean).join("\n"));
-      const base = {
-        changeId: input.changeId,
-        ...(input.taskId ? { taskId: input.taskId } : {}),
-        checkId: input.checkId,
-        kind: input.kind,
-        output,
-        ...(exitCode === null ? {} : { exitCode }),
-      };
-      if (input.options.signal?.aborted) {
-        resolve({ ...base, status: ChangeCheckResultStatus.Cancelled, summary: `Check ${input.checkId} cancelled.` });
-      } else if (timedOut) {
-        resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed: timed out after ${input.timeoutMs}ms.` });
-      } else if (exitCode === 0 && !error) {
-        resolve({ ...base, status: ChangeCheckResultStatus.Passed, summary: `Check ${input.checkId} passed.` });
-      } else {
-        resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed${signal ? ` (${signal})` : ""}.` });
-      }
+      void (async () => {
+        clearTimeout(timeout);
+        input.options.signal?.removeEventListener("abort", onAbort);
+        let releaseError: Error | undefined;
+        try {
+          await ownership;
+          if (child.pid) await input.runtime.releaseCommand(child.pid);
+        } catch (caught) {
+          releaseError = caught instanceof Error ? caught : new Error(String(caught));
+          append(ChangeCheckOutputStream.Stderr, `${releaseError.message}\n`);
+        }
+        const finalError = error ?? ownershipError ?? releaseError;
+        if (error) append(ChangeCheckOutputStream.Stderr, `${error.message}\n`);
+        const output = trimCheckOutput([stdout, stderr].filter(Boolean).join("\n"));
+        const base = {
+          changeId: input.changeId,
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+          checkId: input.checkId,
+          kind: input.kind,
+          output,
+          ...(exitCode === null ? {} : { exitCode }),
+        };
+        if (input.options.signal?.aborted) {
+          resolve({ ...base, status: ChangeCheckResultStatus.Cancelled, summary: `Check ${input.checkId} cancelled.` });
+        } else if (timedOut) {
+          resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed: timed out after ${input.timeoutMs}ms.` });
+        } else if (exitCode === 0 && !finalError) {
+          resolve({ ...base, status: ChangeCheckResultStatus.Passed, summary: `Check ${input.checkId} passed.` });
+        } else {
+          resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed${signal ? ` (${signal})` : ""}.` });
+        }
+      })();
     };
     child.once("error", (error) => finish(null, null, error));
     child.once("close", (exitCode, signal) => finish(exitCode, signal));

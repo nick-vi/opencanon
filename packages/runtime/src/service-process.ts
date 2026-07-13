@@ -5,6 +5,7 @@ import net from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 import { cleanupLocalPipeEndpoints } from "./local-protocol.ts";
+import { isProcessRunning, terminateSpawnedProcess } from "./process-tree.ts";
 import { discoverProjectRuntimeRunPeers, discoverServiceRunPeers } from "./service-peer-discovery.ts";
 import { directoryExists } from "./service-discovery.ts";
 import { runtimeCliInvocation } from "./service-entrypoint.ts";
@@ -12,7 +13,6 @@ import {
   appendLifecycleEvent,
   forgetRuntimeEntryIfPid,
   forgetServiceEntryIfPid,
-  isProcessRunning,
   isRegistryEntry,
   isServiceEntry,
   projectRuntimePath,
@@ -25,7 +25,6 @@ import {
   readServiceEntry,
   removeInactiveStartupLock,
   serviceRegistryPath,
-  sleep,
 } from "./service-storage.ts";
 import {
   LocalPipeCleanupAgeMs,
@@ -41,7 +40,7 @@ import {
   type ServiceRepairResult,
 } from "./service-types.ts";
 
-export { isProcessRunning } from "./service-storage.ts";
+export { isProcessRunning, terminateSpawnedProcess } from "./process-tree.ts";
 
 export async function retireUnsupportedRegistry(registryPath: string): Promise<void> {
   if (!existsSync(registryPath)) return;
@@ -290,18 +289,6 @@ export async function setupOpenCanonProject(rootDir: string): Promise<{ status: 
   };
 }
 
-export async function terminateSpawnedProcess(pid: number): Promise<void> {
-  if (process.platform === PlatformName.Win32) {
-    await terminateWindowsProcessTree(pid);
-    return;
-  }
-  signalPosixProcessTree(pid, "SIGTERM");
-  const stopped = await waitForProcessExit(pid, 1500);
-  if (stopped || !isProcessRunning(pid)) return;
-  signalPosixProcessTree(pid, "SIGKILL");
-  await waitForProcessExit(pid, 1500);
-}
-
 export function removeInactiveLocalPipeEndpoint(endpoint: string | undefined, pid: number): void {
   if (!endpoint || process.platform === PlatformName.Win32 || isProcessRunning(pid)) return;
   rmSync(endpoint, { force: true });
@@ -512,45 +499,4 @@ function parseJsonObject(value: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isProcessRunning(pid)) return true;
-    await sleep(50);
-  }
-  return !isProcessRunning(pid);
-}
-
-function signalPosixProcessTree(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-    return;
-  } catch {
-    // The child may not be a process-group leader in tests or embedded callers; fall back to the pid.
-  }
-  try {
-    process.kill(pid, signal);
-  } catch {
-    // Process exited between the liveness check and the signal.
-  }
-}
-
-async function terminateWindowsProcessTree(pid: number): Promise<void> {
-  if (!isProcessRunning(pid)) return;
-  await new Promise<void>((resolve) => {
-    const child = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-    child.once("exit", () => resolve());
-    child.once("error", () => {
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        // Process already exited or the platform rejected the signal.
-      }
-      resolve();
-    });
-  });
-  if (!isProcessRunning(pid)) return;
-  await waitForProcessExit(pid, 1500);
 }

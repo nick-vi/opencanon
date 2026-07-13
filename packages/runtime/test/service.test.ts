@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "vitest";
 import {
   runtimeAuthHeaders,
@@ -78,7 +79,7 @@ import {
 } from "./service-support.ts";
 import { createAuthoringProject } from "./support.ts";
 import { parseOpenCanonProblemFromError } from "@opencanon/core";
-import { pruneOrphanedCheckRuntimes } from "../src/service-check-runtime.ts";
+import { cleanupIsolatedCheckRuntime, createIsolatedCheckRuntime, pruneOrphanedCheckRuntimes } from "../src/service-check-runtime.ts";
 
 test("runtime namespaces isolate installed, source, and explicit registries", () => {
   const previous = process.env[RuntimeNamespaceEnv];
@@ -191,15 +192,129 @@ test("isolated check runtime pruning preserves live owners and removes dead or e
     mkdirSync(liveDir, { recursive: true });
     mkdirSync(orphanDir, { recursive: true });
     mkdirSync(expiredDir, { recursive: true });
-    writeFileSync(path.join(liveDir, "owner.json"), JSON.stringify({ version: 1, ownerPid: process.pid, createdAt: new Date().toISOString() }));
-    writeFileSync(path.join(orphanDir, "owner.json"), JSON.stringify({ version: 1, ownerPid: 999_999_999, createdAt: new Date().toISOString() }));
-    writeFileSync(path.join(expiredDir, "owner.json"), JSON.stringify({ version: 1, ownerPid: process.pid, createdAt: new Date(0).toISOString() }));
+    writeFileSync(path.join(liveDir, "owner.json"), JSON.stringify({ version: 2, ownerPid: process.pid, createdAt: new Date().toISOString() }));
+    writeFileSync(path.join(orphanDir, "owner.json"), JSON.stringify({ version: 2, ownerPid: 999_999_999, createdAt: new Date().toISOString() }));
+    writeFileSync(path.join(expiredDir, "owner.json"), JSON.stringify({ version: 2, ownerPid: process.pid, createdAt: new Date(0).toISOString() }));
 
     assert.equal(await pruneOrphanedCheckRuntimes(rootDir), 2);
     assert.equal(existsSync(liveDir), true);
     assert.equal(existsSync(orphanDir), false);
     assert.equal(existsSync(expiredDir), false);
   } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("an active check command exits when its runtime owner is killed", { timeout: 20000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-check-command-owner-"));
+  const resultPath = path.join(rootDir, "owner-result.json");
+  const descendantPath = path.join(rootDir, "descendant.pid");
+  const runtimeModule = pathToFileURL(path.resolve("packages/runtime/src/service-check-runtime.ts")).href;
+  const ownerSource = `
+    import { spawn } from "node:child_process";
+    import { existsSync, readFileSync, writeFileSync } from "node:fs";
+    const { createIsolatedCheckRuntime } = await import(${JSON.stringify(runtimeModule)});
+    const runtime = await createIsolatedCheckRuntime(${JSON.stringify(rootDir)});
+    const commandSource = ${JSON.stringify(`
+      import { spawn } from "node:child_process";
+      import { writeFileSync } from "node:fs";
+      const descendant = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], { stdio: "ignore" });
+      if (!descendant.pid) throw new Error("check command descendant did not start");
+      descendant.unref();
+      writeFileSync(${JSON.stringify(descendantPath)}, String(descendant.pid));
+      setInterval(() => {}, 1000);
+    `)};
+    const command = spawn(process.execPath, ["--input-type=module", "-e", commandSource], {
+      detached: true,
+      stdio: "ignore",
+    });
+    if (!command.pid) throw new Error("check command did not start");
+    command.unref();
+    await runtime.ownCommand(command.pid, 30000);
+    const descendantDeadline = Date.now() + 5000;
+    while (!existsSync(${JSON.stringify(descendantPath)}) && Date.now() < descendantDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (!existsSync(${JSON.stringify(descendantPath)})) throw new Error("check command descendant was not published");
+    const owner = JSON.parse(readFileSync(runtime.dir + "/owner.json", "utf8"));
+    writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
+      dir: runtime.dir,
+      commandPid: command.pid,
+      descendantPid: Number(readFileSync(${JSON.stringify(descendantPath)}, "utf8")),
+      guardianPid: owner.command.guardianPid,
+    }));
+    setInterval(() => {}, 1000);
+  `;
+  const owner = spawn(process.execPath, ["--input-type=module", "-e", ownerSource], {
+    cwd: process.cwd(),
+    stdio: "ignore",
+  });
+  let commandPid: number | undefined;
+  let descendantPid: number | undefined;
+  let guardianPid: number | undefined;
+  try {
+    if (!owner.pid) throw new Error("check runtime owner did not start");
+    const result = await waitForJsonFile<{ dir: string; commandPid: number; descendantPid: number; guardianPid: number }>(resultPath, 5000);
+    commandPid = result.commandPid;
+    descendantPid = result.descendantPid;
+    guardianPid = result.guardianPid;
+    assert.equal(processIsRunning(commandPid), true);
+    assert.equal(processIsRunning(descendantPid), true);
+    assert.equal(processIsRunning(guardianPid), true);
+
+    process.kill(owner.pid, "SIGKILL");
+    assert.equal(await waitUntilProcessStops(owner.pid, 3000), true);
+    assert.equal(await waitUntilProcessStops(commandPid, 8000), true);
+    assert.equal(await waitUntilProcessStops(descendantPid, 8000), true);
+    assert.equal(await waitUntilProcessStops(guardianPid, 8000), true);
+    assert.equal(await pruneOrphanedCheckRuntimes(path.join(rootDir, ".opencanon")), 1);
+    assert.equal(existsSync(result.dir), false);
+  } finally {
+    if (commandPid && processIsRunning(commandPid)) process.kill(commandPid, "SIGKILL");
+    if (descendantPid && processIsRunning(descendantPid)) process.kill(descendantPid, "SIGKILL");
+    if (guardianPid && processIsRunning(guardianPid)) process.kill(guardianPid, "SIGKILL");
+    if (owner.pid && processIsRunning(owner.pid)) process.kill(owner.pid, "SIGKILL");
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("releasing a completed check command retires its remaining process tree", { timeout: 10000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-check-command-release-"));
+  const descendantPath = path.join(rootDir, "descendant.pid");
+  const runtime = await createIsolatedCheckRuntime(rootDir);
+  const commandSource = `
+    import { spawn } from "node:child_process";
+    import { writeFileSync } from "node:fs";
+    const descendant = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], { stdio: "ignore" });
+    if (!descendant.pid) throw new Error("check command descendant did not start");
+    descendant.unref();
+    writeFileSync(${JSON.stringify(descendantPath)}, JSON.stringify(descendant.pid));
+  `;
+  const command = spawn(process.execPath, ["--input-type=module", "-e", commandSource], {
+    detached: true,
+    stdio: "ignore",
+  });
+  let descendantPid: number | undefined;
+  let guardianPid: number | undefined;
+  try {
+    if (!command.pid) throw new Error("check command did not start");
+    command.unref();
+    await runtime.ownCommand(command.pid, 30_000);
+    const owner = await waitForJsonFile<{ command: { guardianPid: number } }>(path.join(runtime.dir, "owner.json"), 3_000);
+    guardianPid = owner.command.guardianPid;
+    descendantPid = await waitForJsonFile<number>(descendantPath, 3_000);
+    assert.equal(await waitUntilProcessStops(command.pid, 3_000), true);
+    assert.equal(processIsRunning(descendantPid), true);
+    assert.equal(processIsRunning(guardianPid), true);
+
+    await runtime.releaseCommand(command.pid);
+    assert.equal(await waitUntilProcessStops(descendantPid, 3_000), true);
+    assert.equal(await waitUntilProcessStops(guardianPid, 3_000), true);
+  } finally {
+    await cleanupIsolatedCheckRuntime(runtime).catch(() => undefined);
+    if (descendantPid && processIsRunning(descendantPid)) process.kill(descendantPid, "SIGKILL");
+    if (guardianPid && processIsRunning(guardianPid)) process.kill(guardianPid, "SIGKILL");
+    if (command.pid && processIsRunning(command.pid)) process.kill(command.pid, "SIGKILL");
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -1618,3 +1733,18 @@ test("runtime status renders runtime health and state details", () => {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+async function waitForJsonFile<T>(file: string, timeoutMs: number): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(file)) {
+      try {
+        return JSON.parse(readFileSync(file, "utf8")) as T;
+      } catch {
+        // The writer may still be completing the JSON write; retry until it is readable.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for test result ${file}.`);
+}

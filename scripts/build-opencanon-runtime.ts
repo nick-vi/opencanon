@@ -36,6 +36,11 @@ for (const [source, target] of builds) {
   });
 }
 
+await buildRuntimeEntry(
+  path.join(rootDir, "packages/runtime/src/check-command-guardian.ts"),
+  path.join(runtimeRoot, "check-command-guardian.js"),
+);
+
 // The live type-producer is spawned as a SEPARATE child process by the runtime
 // runtime, so it needs its own bundled entry next to runtime.js. `typescript`
 // stays external — the producer must load the TARGET repo's TS, not ours.

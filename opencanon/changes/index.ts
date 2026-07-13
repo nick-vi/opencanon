@@ -565,6 +565,7 @@ export default [
         title: "Preserve active Proof ownership across lifecycle races",
         files: [
           "packages/runtime/src/service-storage.ts",
+          "packages/runtime/src/process-tree.ts",
           "packages/runtime/src/service-monitor.ts",
           "packages/runtime/src/service-start.ts",
           "packages/runtime/src/service-reconcile.ts",

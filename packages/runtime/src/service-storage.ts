@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
@@ -23,8 +24,10 @@ import {
   type RuntimeRegistryEntry,
   type ServiceRegistryEntry,
 } from "./service-types.ts";
-import type { ChildProcess } from "node:child_process";
+import { isProcessRunning } from "./process-tree.ts";
 import { defaultServiceRegistryPath, projectProcessStateDirectory, runtimeNamespaceForRegistry } from "./service-namespace.ts";
+
+export { isProcessRunning } from "./process-tree.ts";
 
 const RegistryLockStaleMs = 5000;
 const RegistryLockTimeoutMs = 7000;
@@ -404,15 +407,6 @@ export function projectWorkerLeaseHeartbeatStale(lockPath: string, nowMs = Date.
     return nowMs - statSync(lockPath).mtimeMs > ProjectWorkerLeaseStaleMs;
   } catch {
     return true;
-  }
-}
-
-export function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
   }
 }
 

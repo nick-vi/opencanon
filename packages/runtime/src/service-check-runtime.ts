@@ -1,37 +1,58 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
+import { spawn } from "node:child_process";
 import path from "node:path";
-import { ChangeCheckTimeout } from "@opencanon/core";
+import { fileURLToPath } from "node:url";
+import { ChangeCheckTimeout, writeAtomicJsonFileSync } from "@opencanon/core";
+import { isSpawnedProcessTreeRunning, terminateSpawnedProcess } from "./process-tree.ts";
 import { stopService } from "./service-control.ts";
 import {
   isProcessRunning,
   readRuntimeRegistry,
   readServiceEntry,
+  waitForChildSpawn,
 } from "./service-storage.ts";
 import { ProjectRuntimeEnv, ServiceEnv } from "./service-types.ts";
 
 const CheckRuntimeDirectoryPrefix = "check-";
 const CheckRuntimeOwnerFile = "owner.json";
-const CheckRuntimeOwnerVersion = 1;
+const CheckRuntimeOwnerVersion = 2;
 const CheckRuntimeOwnerCleanupGraceMs = 60_000;
+const CheckCommandHeartbeatFile = "command.heartbeat";
+const CheckCommandHeartbeatIntervalMs = 1_000;
+const CheckCommandHeartbeatStaleMs = 5_000;
+const CheckCommandTerminationGraceMs = 10_000;
+
+type CheckCommandLease = {
+  pid: number;
+  guardianPid: number;
+  startedAt: string;
+  deadlineAt: string;
+};
 
 type CheckRuntimeOwner = {
   version: typeof CheckRuntimeOwnerVersion;
   ownerPid: number;
   createdAt: string;
+  command?: CheckCommandLease;
 };
 
 export type IsolatedCheckRuntime = {
   dir: string;
   registryPath: string;
   env: NodeJS.ProcessEnv;
+  ownCommand(commandPid: number, timeoutMs: number): Promise<void>;
+  releaseCommand(commandPid: number): Promise<void>;
+  stopCommandHeartbeat(): void;
 };
 
 const IsolatedRuntimeEnvKeys = [
@@ -50,23 +71,83 @@ export async function createIsolatedCheckRuntime(rootDir: string): Promise<Isola
   await pruneOrphanedCheckRuntimes(parentDir);
 
   const dir = mkdtempSync(path.join(parentDir, CheckRuntimeDirectoryPrefix));
-  writeFileSync(
-    path.join(dir, CheckRuntimeOwnerFile),
-    `${JSON.stringify({
-      version: CheckRuntimeOwnerVersion,
-      ownerPid: process.pid,
-      createdAt: new Date().toISOString(),
-    } satisfies CheckRuntimeOwner, null, 2)}\n`,
-    { mode: 0o600 },
-  );
+  chmodSync(dir, 0o700);
+  let owner: CheckRuntimeOwner = {
+    version: CheckRuntimeOwnerVersion,
+    ownerPid: process.pid,
+    createdAt: new Date().toISOString(),
+  };
+  writeCheckRuntimeOwner(dir, owner);
   const registryPath = path.join(dir, "service.json");
   const env: NodeJS.ProcessEnv = { ...process.env, [ServiceEnv.RegistryPath]: registryPath };
   for (const key of IsolatedRuntimeEnvKeys) delete env[key];
   env[ServiceEnv.OwnerPid] = String(process.pid);
-  return { dir, registryPath, env };
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  return {
+    dir,
+    registryPath,
+    env,
+    async ownCommand(commandPid, timeoutMs) {
+      if (!Number.isInteger(commandPid) || commandPid <= 0) throw new Error("Cannot own a check command without a valid process id.");
+      if (owner.command) throw new Error("An isolated check runtime can own only one active command.");
+      const startedAt = new Date();
+      const deadlineMs = startedAt.getTime() + timeoutMs + CheckCommandTerminationGraceMs;
+      const heartbeatPath = path.join(dir, CheckCommandHeartbeatFile);
+      writeFileSync(heartbeatPath, "", { mode: 0o600 });
+      const guardian = spawn(process.execPath, [
+        checkCommandGuardianEntrypoint(),
+        String(commandPid),
+        String(process.pid),
+        heartbeatPath,
+        String(deadlineMs),
+        String(CheckCommandHeartbeatStaleMs),
+      ], {
+        cwd: rootDir,
+        detached: true,
+        stdio: "ignore",
+        env: checkCommandGuardianEnvironment(),
+      });
+      let guardianPid: number;
+      try {
+        guardianPid = await waitForChildSpawn(guardian, "OpenCanon check command guardian");
+        guardian.unref();
+      } catch (error) {
+        await terminateSpawnedProcess(commandPid);
+        throw error;
+      }
+      owner = {
+        ...owner,
+        command: {
+          pid: commandPid,
+          guardianPid,
+          startedAt: startedAt.toISOString(),
+          deadlineAt: new Date(deadlineMs).toISOString(),
+        },
+      };
+      writeCheckRuntimeOwner(dir, owner);
+      heartbeat = setInterval(() => touchHeartbeat(heartbeatPath), CheckCommandHeartbeatIntervalMs);
+      heartbeat.unref();
+    },
+    async releaseCommand(commandPid) {
+      if (owner.command?.pid !== commandPid) return;
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = undefined;
+      const guardianPid = owner.command.guardianPid;
+      await terminateSpawnedProcess(commandPid);
+      if (isProcessRunning(guardianPid)) await terminateSpawnedProcess(guardianPid);
+      owner = { version: owner.version, ownerPid: owner.ownerPid, createdAt: owner.createdAt };
+      writeCheckRuntimeOwner(dir, owner);
+      rmSync(path.join(dir, CheckCommandHeartbeatFile), { force: true });
+    },
+    stopCommandHeartbeat() {
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = undefined;
+    },
+  };
 }
 
 export async function cleanupIsolatedCheckRuntime(runtime: IsolatedCheckRuntime): Promise<void> {
+  runtime.stopCommandHeartbeat();
   await retireCheckRuntimeDirectory(runtime.dir, runtime.registryPath);
 }
 
@@ -86,6 +167,11 @@ export async function pruneOrphanedCheckRuntimes(parentDir: string): Promise<num
 }
 
 async function retireCheckRuntimeDirectory(dir: string, registryPath: string): Promise<void> {
+  const owner = readCheckRuntimeOwner(dir);
+  if (owner?.command && checkCommandLeaseMayStillOwnProcess(owner.command)) {
+    if (isSpawnedProcessTreeRunning(owner.command.pid)) await terminateSpawnedProcess(owner.command.pid);
+    if (isProcessRunning(owner.command.guardianPid)) await terminateSpawnedProcess(owner.command.guardianPid);
+  }
   await stopService(registryPath);
   const activePids = [
     readServiceEntry(registryPath)?.pid,
@@ -105,7 +191,8 @@ function readCheckRuntimeOwner(dir: string): CheckRuntimeOwner | undefined {
       !Number.isInteger(parsed.ownerPid) ||
       (parsed.ownerPid ?? 0) <= 0 ||
       typeof parsed.createdAt !== "string" ||
-      !Number.isFinite(Date.parse(parsed.createdAt))
+      !Number.isFinite(Date.parse(parsed.createdAt)) ||
+      (parsed.command !== undefined && !isCheckCommandLease(parsed.command))
     ) return undefined;
     return parsed as CheckRuntimeOwner;
   } catch {
@@ -113,7 +200,50 @@ function readCheckRuntimeOwner(dir: string): CheckRuntimeOwner | undefined {
   }
 }
 
+function isCheckCommandLease(value: unknown): value is CheckCommandLease {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return Number.isInteger(record.pid) && Number(record.pid) > 0 &&
+    Number.isInteger(record.guardianPid) && Number(record.guardianPid) > 0 &&
+    typeof record.startedAt === "string" && Number.isFinite(Date.parse(record.startedAt)) &&
+    typeof record.deadlineAt === "string" && Number.isFinite(Date.parse(record.deadlineAt));
+}
+
 function checkRuntimeOwnerIsActive(owner: CheckRuntimeOwner): boolean {
   const ageMs = Date.now() - Date.parse(owner.createdAt);
   return ageMs <= ChangeCheckTimeout.MaximumMs + CheckRuntimeOwnerCleanupGraceMs && isProcessRunning(owner.ownerPid);
+}
+
+function checkCommandLeaseMayStillOwnProcess(lease: CheckCommandLease): boolean {
+  return Date.now() <= Date.parse(lease.deadlineAt) + CheckRuntimeOwnerCleanupGraceMs;
+}
+
+function writeCheckRuntimeOwner(dir: string, owner: CheckRuntimeOwner): void {
+  const file = path.join(dir, CheckRuntimeOwnerFile);
+  writeAtomicJsonFileSync(file, owner);
+  chmodSync(file, 0o600);
+}
+
+function touchHeartbeat(file: string): void {
+  try {
+    const now = new Date();
+    utimesSync(file, now, now);
+  } catch {
+    // Cleanup removes the heartbeat after command ownership ends.
+  }
+}
+
+function checkCommandGuardianEntrypoint(): string {
+  const source = fileURLToPath(new URL("./check-command-guardian.ts", import.meta.url));
+  if (existsSync(source)) return source;
+  const bundled = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-command-guardian.js");
+  if (existsSync(bundled)) return bundled;
+  throw new Error("OpenCanon check command guardian is missing from the runtime.");
+}
+
+function checkCommandGuardianEnvironment(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of IsolatedRuntimeEnvKeys) delete env[key];
+  delete env[ServiceEnv.RegistryPath];
+  return env;
 }
