@@ -54,6 +54,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - `engine-tests` command `npm run check:engine`
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
 - `change-run-tests` test `packages/runtime/test/change-runs.test.ts`
+- `runtime-supervision-tests` test `packages/runtime/test/runtime-supervision.test.ts`
 - `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
 - `cli-tests` test `tests/cli-reporting.test.ts`
 - `doctor-tests` test `tests/validator-runtime.test.ts`
@@ -91,7 +92,7 @@ Rule `operation-resources-are-bounded`: A project runtime bounds active operatio
 - terminal history is pruned by age and count
 - run events cascade when their run is removed
 - active operations hold the supervised runtime busy lifecycle
-Checks: `change-run-tests`, `engine-tests`
+Checks: `change-run-tests`, `runtime-supervision-tests`, `engine-tests`
 
 Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and cancel persisted runs independently of the process that created them.
 - list and show responses are bounded

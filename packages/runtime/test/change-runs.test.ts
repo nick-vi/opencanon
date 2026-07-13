@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, ChangeCheckTimeout, createPaths, resolveChangeCheckTimeoutMs, type ChangeCheckRunEvent } from "@opencanon/core";
-import { openProjectStore, readRuntimeRegistry, runtimeAuthHeaders, startOpenCanonRuntime, upsertRuntimeEntry } from "@opencanon/runtime";
+import { openProjectStore, runtimeAuthHeaders, startOpenCanonRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
+import { createChangeRunProject, quotedNode, readRunEvents, shellQuote, startRun } from "./change-run-test-support.ts";
 import { ChangeCheckRunPolicy } from "../src/change-check-runner.ts";
 
 const IntegrationTimeoutMs = 60_000;
@@ -162,56 +163,6 @@ test("runtime idle shutdown waits for active Change checks", { timeout: Integrat
   }
 });
 
-test("active Change checks hold the supervised runtime busy lifecycle", { timeout: IntegrationTimeoutMs }, async () => {
-  const rootDir = createChangeRunProject(
-    "busy",
-    `${quotedNode()} -e ${shellQuote("setTimeout(() => console.log('finished'), 700)")}`,
-  );
-  const registryPath = path.join(rootDir, "service.json");
-  const leaseId = `runtime-${process.pid}-busy-test`;
-  const previousRegistry = process.env.OPENCANON_SERVICE_REGISTRY_PATH;
-  const previousLease = process.env.OPENCANON_RUNTIME_LEASE_ID;
-  process.env.OPENCANON_SERVICE_REGISTRY_PATH = registryPath;
-  process.env.OPENCANON_RUNTIME_LEASE_ID = leaseId;
-  let server: Awaited<ReturnType<typeof startOpenCanonRuntime>> | undefined;
-  try {
-    server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
-    const url = new URL(server.url);
-    upsertRuntimeEntry({
-      rootDir,
-      host: url.hostname,
-      port: Number(url.port),
-      url: server.url,
-      pipeEndpoint: server.pipeEndpoint,
-      pid: process.pid,
-      leaseId,
-      startedAt: new Date().toISOString(),
-      logPath: path.join(rootDir, "runtime.log"),
-      authToken: server.authToken,
-      lifecycle: { status: "running", updatedAt: new Date().toISOString(), message: "Runtime health endpoint is ready.", restart: { attempts: 0 } },
-      transport: "pipe",
-      protocolVersion: 1,
-      runtimeVersion: "test",
-      runtimeFingerprint: "test",
-      cliPath: process.argv[1] ?? "test",
-    }, registryPath);
-
-    const headers = runtimeAuthHeaders(server.authToken);
-    const started = await startRun(server.url, headers, "busy-change", "stream");
-    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, "busy");
-    const events = await readRunEvents(server.url, headers, started.id);
-    assert.equal(events.at(-1)?.type, ChangeCheckRunEventType.Passed);
-    await waitForRuntimeLifecycle(registryPath, "running");
-  } finally {
-    await server?.stop();
-    if (previousRegistry === undefined) delete process.env.OPENCANON_SERVICE_REGISTRY_PATH;
-    else process.env.OPENCANON_SERVICE_REGISTRY_PATH = previousRegistry;
-    if (previousLease === undefined) delete process.env.OPENCANON_RUNTIME_LEASE_ID;
-    else process.env.OPENCANON_RUNTIME_LEASE_ID = previousLease;
-    rmSync(rootDir, { recursive: true, force: true });
-  }
-});
-
 test("Change check output preserves UTF-8 at persisted and tail byte limits", { timeout: IntegrationTimeoutMs }, async () => {
   const characterCount = 300_000;
   const rootDir = createChangeRunProject(
@@ -352,40 +303,6 @@ test("runtime startup finalizes persisted non-terminal Change check runs as inte
   }
 });
 
-function createChangeRunProject(name: string, command: string, timeoutMs?: number): string {
-  const rootDir = mkdtempSync(path.join(tmpdir(), `opencanon-change-run-${name}-`));
-  createAuthoringProject(rootDir);
-  mkdirSync(path.join(rootDir, "src"), { recursive: true });
-  mkdirSync(path.join(rootDir, "opencanon/changes"), { recursive: true });
-  writeFileSync(path.join(rootDir, "src/example.ts"), "export const example = true;\n");
-  writeFileSync(
-    path.join(rootDir, "opencanon/changes/index.ts"),
-    [
-      'import { defineChange } from "@opencanon/core";',
-      "",
-      "export default defineChange({",
-      `  id: ${JSON.stringify(`${name}-change`)},`,
-      `  title: ${JSON.stringify(`${name} change`)},`,
-      '  kind: "feature",',
-      `  intent: { problem: ${JSON.stringify(`No ${name} proof`)}, outcome: ${JSON.stringify(`${name} proof runs`)} },`,
-      `  checks: [{ id: ${JSON.stringify(name === "cancel" ? "long" : "stream")}, kind: "command", command: ${JSON.stringify(command)}${timeoutMs === undefined ? "" : `, timeoutMs: ${timeoutMs}`} }],`,
-      '  render: { kind: "none" },',
-      "});",
-      "",
-    ].join("\n"),
-  );
-  return rootDir;
-}
-
-async function waitForRuntimeLifecycle(registryPath: string, expected: "running"): Promise<void> {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    if (readRuntimeRegistry(registryPath)[0]?.lifecycle.status === expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`runtime lifecycle did not become ${expected}`);
-}
-
 function createCapacityProject(checkCount: number): string {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-change-run-capacity-"));
   createAuthoringProject(rootDir);
@@ -436,75 +353,10 @@ function terminalRun(id: string, timestamp: string) {
   });
 }
 
-async function startRun(url: string, headers: Record<string, string>, changeId: string, checkId: string) {
-  const response = await fetch(`${url}/api/changes/check-runs`, {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify({ changeId, checkId, actor: "test" }),
-  });
-  const text = await response.text();
-  assert.equal(response.status, 202, text);
-  const payload = JSON.parse(text) as { data: { runs: unknown[] } };
-  return ChangeCheckRunSchema.parse(payload.data.runs[0]);
-}
-
 async function readRun(url: string, headers: Record<string, string>, runId: string) {
   const response = await fetch(`${url}/api/changes/check-runs?runId=${encodeURIComponent(runId)}`, { headers });
   const text = await response.text();
   assert.equal(response.status, 200, text);
   const payload = JSON.parse(text) as { data: { run: unknown } };
   return ChangeCheckRunSchema.parse(payload.data.run);
-}
-
-async function readRunEvents(
-  url: string,
-  headers: Record<string, string>,
-  runId: string,
-  after = 0,
-  onEvent?: (event: ChangeCheckRunEvent) => void | Promise<void>,
-): Promise<ChangeCheckRunEvent[]> {
-  const response = await fetch(`${url}/api/events/stream?runId=${encodeURIComponent(runId)}&after=${after}`, { headers });
-  if (response.status !== 200) throw new Error(await response.text());
-  const body = response.body;
-  assert(body);
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  const events: ChangeCheckRunEvent[] = [];
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      while (true) {
-        const boundary = buffer.indexOf("\n\n");
-        if (boundary < 0) break;
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const data = frame.split("\n").find((line) => line.startsWith("data:"))?.slice(5).trimStart();
-        if (!data) continue;
-        const payload = JSON.parse(data) as { operation?: unknown };
-        if (!payload.operation) continue;
-        const event = ChangeCheckRunEventSchema.parse(payload.operation);
-        if (event.runId !== runId) continue;
-        events.push(event);
-        await onEvent?.(event);
-        if (event.type === ChangeCheckRunEventType.Passed || event.type === ChangeCheckRunEventType.Failed || event.type === ChangeCheckRunEventType.Cancelled) {
-          await reader.cancel();
-          return events;
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  throw new Error(`Change check run ${runId} stream ended without a terminal event.`);
-}
-
-function quotedNode(): string {
-  return shellQuote(process.execPath);
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }

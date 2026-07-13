@@ -67,7 +67,7 @@ export default [
         id: "operation-resources-are-bounded",
         statement: "A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.",
         acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations hold the supervised runtime busy lifecycle"],
-        checks: ["change-run-tests", "engine-tests"],
+        checks: ["change-run-tests", "runtime-supervision-tests", "engine-tests"],
       },
       {
         id: "persisted-runs-remain-operable",
@@ -129,6 +129,7 @@ export default [
       { id: "engine-tests", kind: "command", command: "npm run check:engine" },
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
       { id: "change-run-tests", kind: "test", target: "packages/runtime/test/change-runs.test.ts" },
+      { id: "runtime-supervision-tests", kind: "test", target: "packages/runtime/test/runtime-supervision.test.ts" },
       { id: "service-lifecycle-tests", kind: "test", target: "packages/runtime/test/service.test.ts" },
       { id: "cli-tests", kind: "test", target: "tests/cli-reporting.test.ts" },
       { id: "doctor-tests", kind: "test", target: "tests/validator-runtime.test.ts" },
