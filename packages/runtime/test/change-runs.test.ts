@@ -125,6 +125,43 @@ test("Change check runs stream output, persist terminal state, and replay from a
   }
 });
 
+test("runtime idle shutdown waits for active Change checks", { timeout: IntegrationTimeoutMs }, async () => {
+  const rootDir = createChangeRunProject(
+    "idle",
+    `${quotedNode()} -e ${shellQuote("setTimeout(() => console.log('finished'), 700)")}`,
+  );
+  let resolveIdle!: () => void;
+  let idleCalled = false;
+  const idle = new Promise<void>((resolve) => {
+    resolveIdle = () => {
+      idleCalled = true;
+      resolve();
+    };
+  });
+  const server = await startOpenCanonRuntime({
+    cwd: rootDir,
+    port: 0,
+    idleTimeoutMs: 500,
+    onIdle: resolveIdle,
+  });
+  try {
+    const headers = runtimeAuthHeaders(server.authToken);
+    const started = await startRun(server.url, headers, "idle-change", "stream");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.equal(idleCalled, false, "active work must prevent idle shutdown");
+
+    const events = await readRunEvents(server.url, headers, started.id);
+    assert.equal(events.at(-1)?.type, ChangeCheckRunEventType.Passed);
+    await Promise.race([
+      idle,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("runtime did not stop after becoming idle")), 2_000)),
+    ]);
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("Change check output preserves UTF-8 at persisted and tail byte limits", { timeout: IntegrationTimeoutMs }, async () => {
   const characterCount = 300_000;
   const rootDir = createChangeRunProject(

@@ -69,6 +69,7 @@ export async function createChangeCheckRunner(input: {
   stateManager: RuntimeStateManager;
   store(): ProjectStore;
   validationResultCache(): ValidationResultCache;
+  onActivity?(): void;
 }) {
   const queue: QueuedCheck[] = [];
   const controllers = new Map<string, AbortController>();
@@ -115,6 +116,7 @@ export async function createChangeCheckRunner(input: {
         input.events.broadcast(operationEvent(event));
         queue.push({ project: request.project, change: request.change, task: request.task, check: request.checks[index]!, runId: run.id });
       }
+      input.onActivity?.();
       scheduleDrain();
       return { ok: true as const, batchId, runs };
     },
@@ -132,6 +134,9 @@ export async function createChangeCheckRunner(input: {
     },
     listEvents(runId: string, afterSequence = 0): ChangeCheckRunEvent[] {
       return input.store().listJobEvents({ jobId: runId, afterSequence, limit: ReplayEventLimit, order: "asc" });
+    },
+    hasActiveWork(): boolean {
+      return queue.length > 0 || controllers.size > 0 || drainPromise !== undefined;
     },
     async cancel(runId: string): Promise<ChangeCheckRun | null> {
       return cancelRun(runId);
@@ -390,6 +395,7 @@ export async function createChangeCheckRunner(input: {
     if (!completion) return;
     completions.delete(run.id);
     completion.resolve(run);
+    input.onActivity?.();
   }
 }
 

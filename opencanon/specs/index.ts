@@ -71,7 +71,7 @@ export default [
       {
         id: "persisted-runs-remain-operable",
         statement: "Clients can list, inspect, watch, and cancel persisted runs independently of the process that created them.",
-        acceptance: ["list and show responses are bounded", "watch resumes from an event cursor without polling", "terminal cancellation is idempotent", "shell checks use explicit bounded timeout budgets"],
+        acceptance: ["list and show responses are bounded", "watch resumes from an event cursor without polling", "terminal cancellation is idempotent", "shell checks use explicit bounded timeout budgets", "active runs prevent lazy runtime shutdown and receive a full idle window after completion"],
         checks: ["change-run-tests", "runtime-client-tests"],
       },
       {

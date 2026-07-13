@@ -285,6 +285,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     stateManager,
     store: () => store,
     validationResultCache: () => stateManager.validationResultCache(),
+    onActivity: resetIdleTimer,
   });
   validatorGraphRuntime = createValidatorGraphRuntime({
     rootDir,
@@ -621,6 +622,10 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
 
   async function stopForIdle(): Promise<void> {
     if (stopped) return;
+    if (currentWorkerJob || changeCheckRunner.hasActiveWork()) {
+      resetIdleTimer();
+      return;
+    }
     try {
       await options.onIdle?.();
     } finally {

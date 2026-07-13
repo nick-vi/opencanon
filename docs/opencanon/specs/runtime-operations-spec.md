@@ -96,6 +96,7 @@ Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and can
 - watch resumes from an event cursor without polling
 - terminal cancellation is idempotent
 - shell checks use explicit bounded timeout budgets
+- active runs prevent lazy runtime shutdown and receive a full idle window after completion
 Checks: `change-run-tests`, `runtime-client-tests`
 
 Rule `state-projections-use-complete-activity`: Correctness-sensitive Change state is derived from complete indexed Activity for the relevant Changes, while browsing feeds remain bounded.
