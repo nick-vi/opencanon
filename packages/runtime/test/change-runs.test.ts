@@ -3,12 +3,25 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, createPaths, type ChangeCheckRunEvent } from "@opencanon/core";
+import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, ChangeCheckTimeout, createPaths, resolveChangeCheckTimeoutMs, type ChangeCheckRunEvent } from "@opencanon/core";
 import { openProjectStore, runtimeAuthHeaders, startOpenCanonRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 import { ChangeCheckRunPolicy } from "../src/change-check-runner.ts";
 
 const IntegrationTimeoutMs = 60_000;
+
+test("Change check timeout budgets are bounded", () => {
+  assert.equal(resolveChangeCheckTimeoutMs({ id: "default", kind: "command", command: "true" }), ChangeCheckTimeout.DefaultMs);
+  assert.equal(resolveChangeCheckTimeoutMs({ id: "custom", kind: "test", target: "tests/example.test.ts", timeoutMs: 600_000 }), 600_000);
+  assert.throws(
+    () => resolveChangeCheckTimeoutMs({ id: "short", kind: "command", command: "true", timeoutMs: ChangeCheckTimeout.MinimumMs - 1 }),
+    /timeoutMs must be an integer/,
+  );
+  assert.throws(
+    () => resolveChangeCheckTimeoutMs({ id: "long", kind: "command", command: "true", timeoutMs: ChangeCheckTimeout.MaximumMs + 1 }),
+    /timeoutMs must be an integer/,
+  );
+});
 
 test("Change check admission rejects an oversized batch without persisting a partial run", { timeout: IntegrationTimeoutMs }, async () => {
   const rootDir = createCapacityProject(ChangeCheckRunPolicy.activeCapacity + 1);
@@ -197,6 +210,30 @@ test("Change check command failures preserve stderr and exit code", { timeout: I
   }
 });
 
+test("Change check commands honor their declared timeout budget", { timeout: IntegrationTimeoutMs }, async () => {
+  const rootDir = createChangeRunProject(
+    "timeout",
+    `${quotedNode()} -e ${shellQuote("setTimeout(() => process.exit(0), 1000)")}`,
+    100,
+  );
+  const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+  try {
+    const headers = runtimeAuthHeaders(server.authToken);
+    const started = await startRun(server.url, headers, "timeout-change", "stream");
+    const events = await readRunEvents(server.url, headers, started.id);
+    const terminal = events.at(-1);
+    assert.equal(terminal?.type, ChangeCheckRunEventType.Failed);
+    assert(terminal && "run" in terminal);
+    if (terminal && "run" in terminal) {
+      assert.equal(terminal.run.status, ChangeCheckRunStatus.Failed);
+      assert.match(terminal.run.summary, /timed out after 100ms/);
+    }
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime startup finalizes persisted non-terminal Change check runs as interrupted", { timeout: IntegrationTimeoutMs }, async () => {
   const rootDir = createChangeRunProject("interrupted", `${quotedNode()} -e ${shellQuote("process.exit(0)")}`);
   const run = ChangeCheckRunSchema.parse({
@@ -228,7 +265,7 @@ test("runtime startup finalizes persisted non-terminal Change check runs as inte
   }
 });
 
-function createChangeRunProject(name: string, command: string): string {
+function createChangeRunProject(name: string, command: string, timeoutMs?: number): string {
   const rootDir = mkdtempSync(path.join(tmpdir(), `opencanon-change-run-${name}-`));
   createAuthoringProject(rootDir);
   mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -244,7 +281,7 @@ function createChangeRunProject(name: string, command: string): string {
       `  title: ${JSON.stringify(`${name} change`)},`,
       '  kind: "feature",',
       `  intent: { problem: ${JSON.stringify(`No ${name} proof`)}, outcome: ${JSON.stringify(`${name} proof runs`)} },`,
-      `  checks: [{ id: ${JSON.stringify(name === "cancel" ? "long" : "stream")}, kind: "command", command: ${JSON.stringify(command)} }],`,
+      `  checks: [{ id: ${JSON.stringify(name === "cancel" ? "long" : "stream")}, kind: "command", command: ${JSON.stringify(command)}${timeoutMs === undefined ? "" : `, timeoutMs: ${timeoutMs}`} }],`,
       '  render: { kind: "none" },',
       "});",
       "",

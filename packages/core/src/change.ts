@@ -38,6 +38,12 @@ export const ChangeCheckKind = {
 } as const;
 export type ChangeCheckKind = (typeof ChangeCheckKind)[keyof typeof ChangeCheckKind];
 
+export const ChangeCheckTimeout = {
+  DefaultMs: 2 * 60 * 1000,
+  MinimumMs: 100,
+  MaximumMs: 30 * 60 * 1000,
+} as const;
+
 export type ChangeRender =
   | { kind: "generated"; docs: string; style: ChangeRenderStyle }
   | { kind: "none" };
@@ -59,10 +65,20 @@ export type ChangeIntent = {
 };
 
 export type ChangeCheck =
-  | { id: string; kind: "command"; command: string; description?: string }
+  | { id: string; kind: "command"; command: string; description?: string; timeoutMs?: number }
   | { id: string; kind: "doctor"; description?: string }
   | { id: string; kind: "validator"; validatorId: string; description?: string }
-  | { id: string; kind: "test"; target: string; description?: string };
+  | { id: string; kind: "test"; target: string; description?: string; timeoutMs?: number };
+
+export function resolveChangeCheckTimeoutMs(check: Extract<ChangeCheck, { kind: "command" | "test" }>): number {
+  const timeoutMs = check.timeoutMs ?? ChangeCheckTimeout.DefaultMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < ChangeCheckTimeout.MinimumMs || timeoutMs > ChangeCheckTimeout.MaximumMs) {
+    throw new Error(
+      `Change check ${check.id} timeoutMs must be an integer from ${ChangeCheckTimeout.MinimumMs} to ${ChangeCheckTimeout.MaximumMs}.`,
+    );
+  }
+  return timeoutMs;
+}
 
 export type ChangePlanItem = {
   id: string;

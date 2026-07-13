@@ -14,6 +14,7 @@ import {
   definitionTargetFiles,
   getOpenCanonErrorDiagnostics,
   loadProjectContext,
+  resolveChangeCheckTimeoutMs,
   resolveProducerStatuses,
   runValidation,
   type CanonEvent,
@@ -37,7 +38,6 @@ import {
   requireTaskLeaseOwner,
 } from "./worktree-coordination.ts";
 
-const CheckCommandTimeoutMs = 2 * 60 * 1000;
 const CheckCommandMaxBuffer = 1024 * 1024;
 
 const FindingSeverityValue = {
@@ -225,10 +225,10 @@ export async function runChangeCheck(
   }
 
   if (check.kind === ChangeCheckKind.Command) {
-    return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, check.command, options);
+    return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, check.command, resolveChangeCheckTimeoutMs(check), options);
   }
 
-  return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, testCommandForTarget(check.target), options);
+  return runShellCheck(rootDir, change.id, task?.id, check.id, check.kind, testCommandForTarget(check.target), resolveChangeCheckTimeoutMs(check), options);
 }
 
 function cancelledCheckResult(changeId: string, taskId: string | undefined, check: ChangeCheck): RunChangeCheckResult {
@@ -257,11 +257,12 @@ async function runShellCheck(
   checkId: string,
   kind: ChangeCheck["kind"],
   command: string,
+  timeoutMs: number,
   options: RunChangeCheckOptions,
 ): Promise<RunChangeCheckResult> {
   const checkRuntime = createIsolatedShellCheckRuntime(rootDir);
   try {
-    return await spawnShellCheck({ rootDir, changeId, taskId, checkId, kind, command, env: checkRuntime.env, options });
+    return await spawnShellCheck({ rootDir, changeId, taskId, checkId, kind, command, timeoutMs, env: checkRuntime.env, options });
   } finally {
     await cleanupIsolatedShellCheckRuntime(checkRuntime);
   }
@@ -274,6 +275,7 @@ function spawnShellCheck(input: {
   checkId: string;
   kind: ChangeCheck["kind"];
   command: string;
+  timeoutMs: number;
   env: NodeJS.ProcessEnv;
   options: RunChangeCheckOptions;
 }): Promise<RunChangeCheckResult> {
@@ -308,7 +310,7 @@ function spawnShellCheck(input: {
     const timeout = setTimeout(() => {
       timedOut = true;
       terminate();
-    }, CheckCommandTimeoutMs);
+    }, input.timeoutMs);
     timeout.unref();
 
     const finish = (exitCode: number | null, signal: NodeJS.Signals | null, error?: Error) => {
@@ -329,7 +331,7 @@ function spawnShellCheck(input: {
       if (input.options.signal?.aborted) {
         resolve({ ...base, status: ChangeCheckResultStatus.Cancelled, summary: `Check ${input.checkId} cancelled.` });
       } else if (timedOut) {
-        resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed: timed out after ${CheckCommandTimeoutMs}ms.` });
+        resolve({ ...base, status: ChangeCheckResultStatus.Failed, summary: `Check ${input.checkId} failed: timed out after ${input.timeoutMs}ms.` });
       } else if (exitCode === 0 && !error) {
         resolve({ ...base, status: ChangeCheckResultStatus.Passed, summary: `Check ${input.checkId} passed.` });
       } else {

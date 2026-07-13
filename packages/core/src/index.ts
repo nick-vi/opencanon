@@ -136,7 +136,7 @@ export {
 } from "./spec-render.ts";
 export type { LoadedSpecGraph, SpecGraphMetadata } from "./spec-loader.ts";
 export { loadSpecGraph } from "./spec-loader.ts";
-export { ChangeCheckKind, ChangeKind, ChangeRenderKind, ChangeRenderStyle, defineChange, resolveChanges } from "./change.ts";
+export { ChangeCheckKind, ChangeCheckTimeout, ChangeKind, ChangeRenderKind, ChangeRenderStyle, defineChange, resolveChangeCheckTimeoutMs, resolveChanges } from "./change.ts";
 export type { Change, ChangeCheck, ChangeId, ChangeIntent, ChangeKind as ChangeKindType, ChangeLinks, ChangePlanItem, ChangeRender, ChangeRenderStyle as ChangeRenderStyleType, ChangeResolution, ChangeScope, ChangeTask, ChangeUpdates } from "./change.ts";
 export {
   ChangeCheckEventType,
