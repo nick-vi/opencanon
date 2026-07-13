@@ -24,6 +24,7 @@ import {
 } from "@opencanon/core";
 import { stopService } from "./service.ts";
 import { terminateSpawnedProcess } from "./service-process.ts";
+import { ServiceEnv } from "./service-types.ts";
 import type { ProjectStore } from "./state.ts";
 import { validateRelativePaths } from "./server-fs.ts";
 import {
@@ -372,6 +373,7 @@ function createIsolatedShellCheckRuntime(rootDir: string): IsolatedShellCheckRun
   const registryPath = path.join(dir, "service.json");
   const env: NodeJS.ProcessEnv = { ...process.env, OPENCANON_SERVICE_REGISTRY_PATH: registryPath };
   for (const key of ShellCheckRuntimeEnvKeys) delete env[key];
+  env[ServiceEnv.OwnerPid] = String(process.pid);
   return { dir, registryPath, env };
 }
 

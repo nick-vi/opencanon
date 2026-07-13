@@ -140,6 +140,37 @@ test("two runtime namespaces can own the same project concurrently", { timeout: 
   }
 });
 
+test("an owner-bound service exits when its owner process stops", { timeout: 20000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-owned-service-"));
+  const registryPath = path.join(rootDir, "service.json");
+  const owner = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], { stdio: "ignore" });
+  const previousCli = process.env.OPENCANON_CLI;
+  const previousOwnerPid = process.env.OPENCANON_SERVICE_OWNER_PID;
+  let servicePid: number | undefined;
+  try {
+    if (!owner.pid) throw new Error("test owner process did not start");
+    process.env.OPENCANON_CLI = path.resolve("packages/cli/src/index.ts");
+    process.env.OPENCANON_SERVICE_OWNER_PID = String(owner.pid);
+    const started = await startService({ cwd: rootDir, registryPath });
+    servicePid = started.entry.pid;
+    assert.equal(readServiceEntry(registryPath)?.ownerPid, owner.pid);
+
+    owner.kill("SIGTERM");
+    assert.equal(await waitUntilProcessStops(owner.pid, 3000), true);
+    assert.equal(await waitUntilProcessStops(servicePid, 5000), true);
+    assert.equal(readServiceEntry(registryPath), undefined);
+  } finally {
+    await stopService(registryPath).catch(() => undefined);
+    if (servicePid && processIsRunning(servicePid)) process.kill(servicePid, "SIGKILL");
+    if (owner.pid && processIsRunning(owner.pid)) process.kill(owner.pid, "SIGKILL");
+    if (previousCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = previousCli;
+    if (previousOwnerPid === undefined) delete process.env.OPENCANON_SERVICE_OWNER_PID;
+    else process.env.OPENCANON_SERVICE_OWNER_PID = previousOwnerPid;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime CLI resolution ignores project-local runtime paths", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-cli-resolution-"));
   const originalOverride = process.env.OPENCANON_CLI;

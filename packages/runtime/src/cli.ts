@@ -38,6 +38,7 @@ import {
   inspectAllRuntimes,
   inspectService,
   inspectProjectRuntime,
+  isProcessRunning,
   waitForProjectRuntimeReady,
   openRuntimeUrl,
   readRuntimeLifecycleEvents,
@@ -81,6 +82,8 @@ const BindAllHost = {
   Ipv4: "0.0.0.0",
   Ipv6: "::",
 } as const;
+
+const OwnedServiceOwnerPollIntervalMs = 250;
 
 type ProjectRuntimeCliSurface = {
   command: string;
@@ -486,6 +489,7 @@ async function runServiceServeCommand(args: string[]): Promise<void> {
   }
   const registryPath = typeof options.registry === "string" ? options.registry : process.env[RuntimeEnv.RegistryPath] ?? serviceRegistryPath();
   const leaseId = process.env.OPENCANON_SERVICE_LEASE_ID?.trim() || `service-${process.pid}`;
+  const ownerPid = serviceOwnerPidFromEnv();
   let resolveStopped: () => void = () => undefined;
   const stoppedPromise = new Promise<void>((resolve) => {
     resolveStopped = resolve;
@@ -516,14 +520,17 @@ async function runServiceServeCommand(args: string[]): Promise<void> {
         restart: { attempts: 0 },
       },
       ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(process.cwd())),
-      ownerPid: serviceOwnerPidFromEnv(),
+      ownerPid,
     },
     registryPath,
   );
   let stopping = false;
+  let ownerTimer: ReturnType<typeof setInterval> | undefined;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    if (ownerTimer) clearInterval(ownerTimer);
+    ownerTimer = undefined;
     forgetServiceEntryForPid(process.pid, registryPath);
     try {
       await server.stop();
@@ -533,6 +540,12 @@ async function runServiceServeCommand(args: string[]): Promise<void> {
   };
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
+  if (ownerPid !== undefined) {
+    ownerTimer = setInterval(() => {
+      if (!isProcessRunning(ownerPid)) void stop();
+    }, OwnedServiceOwnerPollIntervalMs);
+    ownerTimer.unref();
+  }
   console.log(`OpenCanon service listening at ${server.url}`);
   console.log(`OpenCanon service pipe at ${server.pipeEndpoint}`);
   await stoppedPromise;

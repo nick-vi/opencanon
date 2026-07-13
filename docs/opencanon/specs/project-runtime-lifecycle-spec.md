@@ -57,6 +57,7 @@ Rule `service-owns-startup-state`: The local service owns project startup waitin
 - CLI and runtime client share the same ensure path
 - one startup lock serializes a project start
 - failed starts leave no registered or orphaned worker
+- owner-bound temporary services terminate when their owner exits
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 Rule `process-control-is-namespaced`: Each runtime distribution owns a deterministic namespace for global and project-local process-control artifacts.

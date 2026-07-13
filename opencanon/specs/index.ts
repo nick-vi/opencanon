@@ -396,7 +396,7 @@ export default [
       {
         id: "service-owns-startup-state",
         statement: "The local service owns project startup waiting, process cleanup, and repair; clients consume its result instead of implementing a second startup state machine.",
-        acceptance: ["CLI and runtime client share the same ensure path", "one startup lock serializes a project start", "failed starts leave no registered or orphaned worker"],
+        acceptance: ["CLI and runtime client share the same ensure path", "one startup lock serializes a project start", "failed starts leave no registered or orphaned worker", "owner-bound temporary services terminate when their owner exits"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
       {

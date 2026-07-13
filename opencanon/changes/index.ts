@@ -71,7 +71,7 @@ export default [
       {
         id: "full-proof",
         title: "Prove agent readiness integrity end to end",
-        files: ["packages/core/src/change.ts", "packages/core/src/index.ts", "packages/runtime/src/change-check-runner.ts", "packages/runtime/src/server.ts", "packages/runtime/src/server-change-runtime.ts", "packages/runtime/test/change-runs.test.ts", "opencanon/specs/index.ts", "opencanon/changes/index.ts", "docs/opencanon/specs/runtime-operations-spec.md"],
+        files: ["packages/core/src/change.ts", "packages/core/src/index.ts", "packages/runtime/src/change-check-runner.ts", "packages/runtime/src/cli.ts", "packages/runtime/src/server.ts", "packages/runtime/src/server-change-runtime.ts", "packages/runtime/test/change-runs.test.ts", "packages/runtime/test/service.test.ts", "opencanon/specs/index.ts", "opencanon/changes/index.ts", "docs/opencanon/specs/project-runtime-lifecycle-spec.md", "docs/opencanon/specs/runtime-operations-spec.md"],
         checks: ["change-run-tests", "engine-tests", "runtime-client-tests", "worktree-tests", "cli-tests", "doctor-tests", "typecheck", "project-validation", "project-doctor", "full-ci"],
         dependsOn: ["live-knowledge-doctor"],
       },
