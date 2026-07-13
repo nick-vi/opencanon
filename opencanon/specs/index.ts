@@ -435,8 +435,8 @@ export default [
       },
       {
         id: "process-control-is-namespaced",
-        statement: "Each runtime distribution owns a deterministic namespace for global and project-local process-control artifacts.",
-        acceptance: ["installed and source services use different registries", "runtime registrations and worker leases use the same namespace as their service", "namespace values cannot escape process-state directories"],
+        statement: "Each runtime distribution owns a deterministic namespace for global control state, project processes, SQLite state, and vector state.",
+        acceptance: ["installed and source services use different registries", "runtime registrations, worker leases, SQLite state, and vector state use the same namespace as their service", "namespace values cannot escape generated-state directories", "ephemeral Proof state is removed with its owned workspace"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
       {
@@ -465,7 +465,7 @@ export default [
         id: "source-and-installed-runtime-coexist",
         given: ["an installed runtime and a source checkout target the same project"],
         when: "each starts its own service and project runtime",
-        then: ["neither replaces the other service registry", "neither retires the other worker lease", "schema compatibility is evaluated independently"],
+        then: ["neither replaces the other service registry", "neither retires the other worker lease", "each opens namespace-owned SQLite and vector state", "schema compatibility and indexing are evaluated independently without writer contention"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
     ],

@@ -63,10 +63,11 @@ Rule `service-owns-startup-state`: The local service owns project startup waitin
 - owner-bound temporary services terminate when their owner exits
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
-Rule `process-control-is-namespaced`: Each runtime distribution owns a deterministic namespace for global and project-local process-control artifacts.
+Rule `process-control-is-namespaced`: Each runtime distribution owns a deterministic namespace for global control state, project processes, SQLite state, and vector state.
 - installed and source services use different registries
-- runtime registrations and worker leases use the same namespace as their service
-- namespace values cannot escape process-state directories
+- runtime registrations, worker leases, SQLite state, and vector state use the same namespace as their service
+- namespace values cannot escape generated-state directories
+- ephemeral Proof state is removed with its owned workspace
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 Rule `isolated-clients-retire-owned-processes`: Tests and ephemeral clients that create private service registries must retire every service and project process they own before deleting their workspace.
@@ -100,7 +101,8 @@ Scenario `source-and-installed-runtime-coexist`
 - When each starts its own service and project runtime
 - Then neither replaces the other service registry
 - Then neither retires the other worker lease
-- Then schema compatibility is evaluated independently
+- Then each opens namespace-owned SQLite and vector state
+- Then schema compatibility and indexing are evaluated independently without writer contention
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 ## Governance
