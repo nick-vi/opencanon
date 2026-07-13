@@ -16,6 +16,8 @@ The local service owns a ready-only, typed, and retry-aware lifecycle for isolat
 - Files: `packages/runtime/test/service-reconcile.test.ts`
 - Files: `packages/runtime/test/client-test-sources.ts`
 - Files: `packages/runtime/test/client.test.ts`
+- Files: `tests/mcp.test.ts`
+- Files: `tests/worktree.test.ts`
 - Docs: `docs/opencanon/specs/project-runtime-lifecycle-spec.md`
 
 ## Impact surfaces
@@ -65,6 +67,12 @@ Rule `process-control-is-namespaced`: Each runtime distribution owns a determini
 - installed and source services use different registries
 - runtime registrations and worker leases use the same namespace as their service
 - namespace values cannot escape process-state directories
+Checks: `service-lifecycle-tests`, `runtime-client-tests`
+
+Rule `isolated-clients-retire-owned-processes`: Tests and ephemeral clients that create private service registries must retire every service and project process they own before deleting their workspace.
+- teardown stops project runtimes before the service
+- stop failures fail the test
+- a completed suite leaves no process for a deleted private registry
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 ## Scenarios

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Release publication is gated by the same proof path used for local readiness, including runtime build, validation, doctor, install rehearsal, and native embedding smoke coverage.
+Release publication is an explicit, version-locked operation gated by the same proof path used for local readiness, dependency security, runtime build, validation, Doctor, install rehearsal, and native embedding smoke coverage.
 
 ## Scope
 
@@ -10,11 +10,15 @@ Release publication is gated by the same proof path used for local readiness, in
 - Files: `.github/workflows/ci.yml`
 - Files: `package.json`
 - Files: `scripts/native-embedding-smoke.ts`
+- Files: `scripts/prepare-opencanon-release.ts`
 - Files: `scripts/publish-opencanon-release.ts`
 - Files: `scripts/check-release-consistency.ts`
 - Files: `scripts/create-opencanon-release.ts`
 - Files: `scripts/rehearse-opencanon-install.ts`
+- Files: `crates/*/Cargo.toml`
+- Files: `crates/*/Cargo.lock`
 - Files: `tests/release.test.ts`
+- Docs: `docs/runtime-update-security.md`
 - Docs: `docs/opencanon/specs/release-integrity-spec.md`
 
 ## Impact surfaces
@@ -35,7 +39,8 @@ Release publication is gated by the same proof path used for local readiness, in
 
 ## Rules
 
-Rule `release-workflow-runs-proof`: A tag or manual release workflow must run the full release gate before it can publish runtime assets.
+Rule `release-workflow-runs-proof`: Only an explicit workflow dispatch for an existing tag may run the full release gate and publish runtime assets.
+- pushing a tag does not start publication
 - release.yml has a preflight job
 - publish-release depends on preflight
 - engine builds depend on preflight
@@ -43,8 +48,22 @@ Checks: `release-tests`, `release-check`
 
 Rule `release-helper-runs-same-proof`: The local release helper must run the same check:ci proof before creating and pushing a release tag.
 - release publish runs check:ci before commit and tag
-- release publish watches the tag workflow by commit
+- release publish dispatches the release workflow explicitly
+- release publish watches the dispatched workflow by tagged commit
 Checks: `release-tests`
+
+Rule `release-versions-move-together`: Every release-owned TypeScript package, Rust crate, engine constant, and committed lockfile must advertise the same runtime version and be updated by one preparation command.
+- release check covers every workspace package
+- release check covers every OpenCanon crate and lock entry
+- release prepare updates the complete version set
+Checks: `release-tests`, `release-check`
+
+Rule `release-supply-chain-is-audited`: The local and release gates audit shipped npm dependencies and every committed Cargo lockfile, reject vulnerable or unsound dependencies, and pin third-party workflow actions to immutable commits.
+- npm shipped dependencies are audited
+- all Cargo lockfiles are audited
+- unsound advisories fail
+- workflow actions use immutable SHAs
+Checks: `release-tests`, `release-check`
 
 Rule `native-embedding-smoke-is-explicit`: Native embedding smoke coverage must either run and fail on error or be invoked through an explicitly optional command.
 - check:ci invokes the required native embedding smoke
@@ -59,6 +78,14 @@ Scenario `manual-release-cannot-bypass-proof`
 - When the release job runs
 - Then the preflight job checks the tagged commit
 - Then asset publication waits for preflight success
+Checks: `release-tests`, `release-check`
+
+Scenario `tag-push-is-inert`
+- Given a release tag is created or pushed
+- When no maintainer explicitly dispatches the Release workflow
+- Then no release build starts
+- Then no signing secret is requested
+- Then no assets are published
 Checks: `release-tests`, `release-check`
 
 Scenario `embedding-config-regression-is-caught`
