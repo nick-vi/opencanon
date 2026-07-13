@@ -66,7 +66,7 @@ export default [
       {
         id: "operation-resources-are-bounded",
         statement: "A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.",
-        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed"],
+        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations hold the supervised runtime busy lifecycle"],
         checks: ["change-run-tests", "engine-tests"],
       },
       {

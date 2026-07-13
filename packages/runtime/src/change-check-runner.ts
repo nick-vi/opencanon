@@ -70,6 +70,7 @@ export async function createChangeCheckRunner(input: {
   store(): ProjectStore;
   validationResultCache(): ValidationResultCache;
   onActivity?(): void;
+  onActiveWorkChanged?(active: boolean): void;
 }) {
   const queue: QueuedCheck[] = [];
   const controllers = new Map<string, AbortController>();
@@ -117,6 +118,7 @@ export async function createChangeCheckRunner(input: {
         queue.push({ project: request.project, change: request.change, task: request.task, check: request.checks[index]!, runId: run.id });
       }
       input.onActivity?.();
+      input.onActiveWorkChanged?.(true);
       scheduleDrain();
       return { ok: true as const, batchId, runs };
     },
@@ -169,7 +171,11 @@ export async function createChangeCheckRunner(input: {
     if (drainPromise) return;
     drainPromise = drain().finally(() => {
       drainPromise = undefined;
-      if (!stopping && queue.length > 0) scheduleDrain();
+      if (!stopping && queue.length > 0) {
+        scheduleDrain();
+        return;
+      }
+      if (queue.length === 0 && controllers.size === 0) input.onActiveWorkChanged?.(false);
     });
   }
 

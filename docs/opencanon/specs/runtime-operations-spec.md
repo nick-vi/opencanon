@@ -90,6 +90,7 @@ Rule `operation-resources-are-bounded`: A project runtime bounds active operatio
 - admission rejects a whole batch before capacity is exceeded
 - terminal history is pruned by age and count
 - run events cascade when their run is removed
+- active operations hold the supervised runtime busy lifecycle
 Checks: `change-run-tests`, `engine-tests`
 
 Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and cancel persisted runs independently of the process that created them.

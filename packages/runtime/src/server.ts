@@ -265,6 +265,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     throw error;
   }
   let stopped = false;
+  const runtimeBusyActivities = new Map<symbol, string>();
+  const changeCheckBusyActivity = Symbol("change-checks");
   let validatorGraphRuntime: ReturnType<typeof createValidatorGraphRuntime> | undefined;
   const stateManager = createRuntimeStateManager({
     initialSnapshot: snapshot,
@@ -286,6 +288,9 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     store: () => store,
     validationResultCache: () => stateManager.validationResultCache(),
     onActivity: resetIdleTimer,
+    onActiveWorkChanged(active) {
+      setRuntimeBusyActivity(changeCheckBusyActivity, "Change checks are running.", active);
+    },
   });
   validatorGraphRuntime = createValidatorGraphRuntime({
     rootDir,
@@ -726,19 +731,36 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
 
   async function withRuntimeBusyLifecycle<T>(message: string, work: () => Promise<T>): Promise<T> {
-    const registryPath = process.env[RuntimeEnv.RegistryPath]?.trim();
-    if (!registryPath) return await work();
-    const activeRegistryPath: string = registryPath;
-    const entry = currentRuntimeRegistryEntry(activeRegistryPath);
-    if (!entry) return await work();
-    updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), activeRegistryPath);
+    const activity = Symbol(message);
+    setRuntimeBusyActivity(activity, message, true);
     try {
       return await work();
     } finally {
-      const latest = currentRuntimeRegistryEntry(activeRegistryPath);
-      if (latest?.lifecycle.status === ProcessLifecycleStatus.Busy) {
-        updateRuntimeLifecycle(latest, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", latest.lifecycle.restart), activeRegistryPath);
+      setRuntimeBusyActivity(activity, message, false);
+    }
+  }
+
+  function setRuntimeBusyActivity(activity: symbol, message: string, active: boolean): void {
+    if (active) runtimeBusyActivities.set(activity, message);
+    else runtimeBusyActivities.delete(activity);
+    syncRuntimeBusyLifecycle();
+  }
+
+  function syncRuntimeBusyLifecycle(): void {
+    const registryPath = process.env[RuntimeEnv.RegistryPath]?.trim();
+    if (!registryPath) return;
+    const entry = currentRuntimeRegistryEntry(registryPath);
+    if (!entry) return;
+    const messages = [...runtimeBusyActivities.values()];
+    if (messages.length > 0) {
+      const message = messages[messages.length - 1]!;
+      if (entry.lifecycle.status !== ProcessLifecycleStatus.Busy || entry.lifecycle.message !== message) {
+        updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), registryPath);
       }
+      return;
+    }
+    if (entry.lifecycle.status === ProcessLifecycleStatus.Busy) {
+      updateRuntimeLifecycle(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", entry.lifecycle.restart), registryPath);
     }
   }
 

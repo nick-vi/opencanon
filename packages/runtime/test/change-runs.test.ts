@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, ChangeCheckTimeout, createPaths, resolveChangeCheckTimeoutMs, type ChangeCheckRunEvent } from "@opencanon/core";
-import { openProjectStore, runtimeAuthHeaders, startOpenCanonRuntime } from "@opencanon/runtime";
+import { openProjectStore, readRuntimeRegistry, runtimeAuthHeaders, startOpenCanonRuntime, upsertRuntimeEntry } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 import { ChangeCheckRunPolicy } from "../src/change-check-runner.ts";
 
@@ -158,6 +158,56 @@ test("runtime idle shutdown waits for active Change checks", { timeout: Integrat
     ]);
   } finally {
     await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("active Change checks hold the supervised runtime busy lifecycle", { timeout: IntegrationTimeoutMs }, async () => {
+  const rootDir = createChangeRunProject(
+    "busy",
+    `${quotedNode()} -e ${shellQuote("setTimeout(() => console.log('finished'), 700)")}`,
+  );
+  const registryPath = path.join(rootDir, "service.json");
+  const leaseId = `runtime-${process.pid}-busy-test`;
+  const previousRegistry = process.env.OPENCANON_SERVICE_REGISTRY_PATH;
+  const previousLease = process.env.OPENCANON_RUNTIME_LEASE_ID;
+  process.env.OPENCANON_SERVICE_REGISTRY_PATH = registryPath;
+  process.env.OPENCANON_RUNTIME_LEASE_ID = leaseId;
+  let server: Awaited<ReturnType<typeof startOpenCanonRuntime>> | undefined;
+  try {
+    server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+    const url = new URL(server.url);
+    upsertRuntimeEntry({
+      rootDir,
+      host: url.hostname,
+      port: Number(url.port),
+      url: server.url,
+      pipeEndpoint: server.pipeEndpoint,
+      pid: process.pid,
+      leaseId,
+      startedAt: new Date().toISOString(),
+      logPath: path.join(rootDir, "runtime.log"),
+      authToken: server.authToken,
+      lifecycle: { status: "running", updatedAt: new Date().toISOString(), message: "Runtime health endpoint is ready.", restart: { attempts: 0 } },
+      transport: "pipe",
+      protocolVersion: 1,
+      runtimeVersion: "test",
+      runtimeFingerprint: "test",
+      cliPath: process.argv[1] ?? "test",
+    }, registryPath);
+
+    const headers = runtimeAuthHeaders(server.authToken);
+    const started = await startRun(server.url, headers, "busy-change", "stream");
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, "busy");
+    const events = await readRunEvents(server.url, headers, started.id);
+    assert.equal(events.at(-1)?.type, ChangeCheckRunEventType.Passed);
+    await waitForRuntimeLifecycle(registryPath, "running");
+  } finally {
+    await server?.stop();
+    if (previousRegistry === undefined) delete process.env.OPENCANON_SERVICE_REGISTRY_PATH;
+    else process.env.OPENCANON_SERVICE_REGISTRY_PATH = previousRegistry;
+    if (previousLease === undefined) delete process.env.OPENCANON_RUNTIME_LEASE_ID;
+    else process.env.OPENCANON_RUNTIME_LEASE_ID = previousLease;
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -325,6 +375,15 @@ function createChangeRunProject(name: string, command: string, timeoutMs?: numbe
     ].join("\n"),
   );
   return rootDir;
+}
+
+async function waitForRuntimeLifecycle(registryPath: string, expected: "running"): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (readRuntimeRegistry(registryPath)[0]?.lifecycle.status === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`runtime lifecycle did not become ${expected}`);
 }
 
 function createCapacityProject(checkCount: number): string {
