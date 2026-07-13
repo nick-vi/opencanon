@@ -634,11 +634,25 @@ export default [
         dependsOn: ["namespace-project-state"],
       },
       {
+        id: "proof-guardian-liveness",
+        title: "Keep Proof commands alive through valid owner work",
+        files: [
+          "packages/runtime/src/service-check-runtime.ts",
+          "packages/runtime/src/check-command-guardian.ts",
+          "packages/runtime/test/service.test.ts",
+          "opencanon/specs/index.ts",
+          "opencanon/changes/index.ts",
+          "docs/opencanon/specs/runtime-operations-spec.md",
+        ],
+        checks: ["service-tests", "change-run-tests", "runtime-build", "typecheck", "process-steady-state"],
+        dependsOn: ["doctor-ready-inspection"],
+      },
+      {
         id: "full-proof",
         title: "Prove release integrity and clean steady state",
         files: ["opencanon/changes/index.ts"],
         checks: ["typecheck", "vector-tests", "engine-tests", "inference-tests", "service-tests", "runtime-client-tests", "mcp-tests", "worktree-tests", "release-tests", "dependency-audit", "project-validation", "project-doctor", "process-steady-state", "full-ci"],
-        dependsOn: ["doctor-ready-inspection", "semantic-publication-consistency", "durable-docs-only"],
+        dependsOn: ["proof-guardian-liveness", "semantic-publication-consistency", "durable-docs-only"],
       },
     ],
     checks: [

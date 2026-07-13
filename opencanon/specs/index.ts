@@ -20,6 +20,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-http.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-server.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/check-command-guardian.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-change-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/change-check-runner.ts" },
@@ -80,6 +81,12 @@ export default [
         statement: "Shell-backed Proof uses isolated service namespaces whose service, project runtimes, and generated workspace share one explicit owner lifecycle.",
         acceptance: ["owner death stops the isolated service, every child project runtime, and the active shell process tree", "completed checks remove their generated workspace", "a later check reaps an orphaned workspace only after its owner is dead"],
         checks: ["change-run-tests", "service-lifecycle-tests"],
+      },
+      {
+        id: "proof-guardians-use-process-liveness",
+        statement: "A Proof command guardian distinguishes actual owner-process death from a temporarily blocked owner event loop and always enforces the declared command deadline.",
+        acceptance: ["owner-process death terminates the complete command process tree", "an owner event-loop stall within the command budget does not cancel healthy work", "the external guardian enforces the deadline even when the owner event loop cannot run"],
+        checks: ["service-lifecycle-tests", "change-run-tests"],
       },
       {
         id: "state-projections-use-complete-activity",

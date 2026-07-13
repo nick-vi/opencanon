@@ -19,6 +19,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `packages/runtime/src/service-http.ts`
 - Files: `packages/runtime/src/service-server.ts`
 - Files: `packages/runtime/src/service*.ts`
+- Files: `packages/runtime/src/check-command-guardian.ts`
 - Files: `packages/runtime/src/index.ts`
 - Files: `packages/runtime/src/server-change-runtime.ts`
 - Files: `packages/runtime/src/change-check-runner.ts`
@@ -110,6 +111,12 @@ Rule `isolated-check-runtimes-follow-owner-lifecycle`: Shell-backed Proof uses i
 - completed checks remove their generated workspace
 - a later check reaps an orphaned workspace only after its owner is dead
 Checks: `change-run-tests`, `service-lifecycle-tests`
+
+Rule `proof-guardians-use-process-liveness`: A Proof command guardian distinguishes actual owner-process death from a temporarily blocked owner event loop and always enforces the declared command deadline.
+- owner-process death terminates the complete command process tree
+- an owner event-loop stall within the command budget does not cancel healthy work
+- the external guardian enforces the deadline even when the owner event loop cannot run
+Checks: `service-lifecycle-tests`, `change-run-tests`
 
 Rule `state-projections-use-complete-activity`: Correctness-sensitive Change state is derived from complete indexed Activity for the relevant Changes, while browsing feeds remain bounded.
 - unrelated Activity cannot reopen closed work
