@@ -27,7 +27,7 @@
     "scripts/**/*.{ts,js,mjs}",
     "opencanon/**/*.{ts,md,json}",
     ".agents/skills/**/*.md",
-    "crates/opencanon-engine/src/**/*.rs"
+    "crates/*/src/**/*.rs"
   ],
   "publicSurfaces": [
     "src/api/routes/**/*.ts"

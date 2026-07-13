@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
+import { createPaths, discoverProjectFiles } from "@opencanon/core";
 import { OpenCanonSkillArtifacts } from "../packages/core/src/opencanon-skill.ts";
 import { createOpenCanonRelease } from "../scripts/create-opencanon-release.ts";
 
@@ -43,6 +44,20 @@ test("test:tree includes every repo test file", () => {
     .filter((filePath) => !isCoveredByTestTree(script, filePath));
 
   assert.deepEqual(missing, []);
+});
+
+test("project discovery governs every authored Rust crate source", () => {
+  const tracked = spawnSync("git", ["ls-files", "--", "crates"], { encoding: "utf8" });
+  assert.equal(tracked.status, 0, tracked.stderr);
+  const authoredRust = tracked.stdout
+    .split(/\r?\n/)
+    .filter((filePath) => /^crates\/[^/]+\/src\/.*\.rs$/.test(filePath))
+    .sort();
+  const discovery = discoverProjectFiles(createPaths(process.cwd()));
+
+  assert.equal(discovery.failed, false, discovery.diagnostics.join("\n"));
+  const discovered = new Set(discovery.files);
+  assert.deepEqual(authoredRust.filter((filePath) => !discovered.has(filePath)), []);
 });
 
 test("repo tracks managed OpenCanon skill artifacts required by doctor", () => {
