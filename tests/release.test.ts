@@ -34,11 +34,15 @@ function isCoveredByTestTree(script: string, filePath: string): boolean {
   return false;
 }
 
+function expandedScript(packageJson: { scripts?: Record<string, string> }, names: string[]): string {
+  return names.map((name) => packageJson.scripts?.[name] ?? "").join(" && ");
+}
+
 test("test:tree includes every repo test file", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts?: Record<string, string>;
   };
-  const script = packageJson.scripts?.["test:tree"] ?? "";
+  const script = expandedScript(packageJson, ["test:tree", "test:tree:parallel", "test:runtime-integration"]);
   const missing = TestTreeCoverageRoots.flatMap((root) => collectTestFiles(root))
     .sort()
     .filter((filePath) => !isCoveredByTestTree(script, filePath));
@@ -345,7 +349,7 @@ test("native embedding smoke is required unless explicitly optional", () => {
   };
   const source = readFileSync("scripts/native-embedding-smoke.ts", "utf8");
 
-  assert.match(packageJson.scripts?.["check:ci"] ?? "", /npm run smoke:native-embedding/);
+  assert.match(expandedScript(packageJson, ["check:ci", "check:ci:quality"]), /npm run smoke:native-embedding/);
   assert.equal(packageJson.scripts?.["smoke:native-embedding"], "node scripts/native-embedding-smoke.ts");
   assert.equal(packageJson.scripts?.["smoke:native-embedding:optional"], "node scripts/native-embedding-smoke.ts --optional");
   assert.match(source, /process\.argv\.includes\("--optional"\)/);
@@ -356,7 +360,7 @@ test("CI separates fixture checks from required project producers", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts?: Record<string, string>;
   };
-  const checkCi = packageJson.scripts?.["check:ci"] ?? "";
+  const checkCi = expandedScript(packageJson, ["check:ci", "check:ci:quality"]);
 
   assert.match(checkCi, /validate --check-fixtures(?:\s|&&)/);
   assert.doesNotMatch(checkCi, /validate --check-fixtures --require-producer/);
@@ -367,7 +371,8 @@ test("CI relies on doctor for managed skill drift instead of retired launcher pa
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const releaseCheck = readFileSync("scripts/check-release-consistency.ts", "utf8");
 
-  assert.match(workflow, /npm run check:ci/);
+  assert.match(workflow, /npm run check:ci:quality/);
+  assert.match(workflow, /npm run test:runtime-integration/);
   assert(!workflow.includes("opencanon.mjs"));
   assert(!workflow.includes(".agents/skills/opencanon/scripts/opencanon.mjs"));
   assert.match(releaseCheck, /build:skill-runtime/);
