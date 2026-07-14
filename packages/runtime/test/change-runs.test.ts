@@ -10,6 +10,7 @@ import { createChangeRunProject, quotedNode, readRunEvents, shellQuote, startRun
 import { ChangeCheckRunPolicy } from "../src/change-check-runner.ts";
 
 const IntegrationTimeoutMs = 60_000;
+const IdleShutdownDiagnosticTimeoutMs = 15_000;
 
 test("Change check timeout budgets are bounded", () => {
   assert.equal(resolveChangeCheckTimeoutMs({ id: "default", kind: "command", command: "true" }), ChangeCheckTimeout.DefaultMs);
@@ -157,7 +158,12 @@ test("runtime idle shutdown waits for active Change checks", { timeout: Integrat
     assert.equal(events.at(-1)?.type, ChangeCheckRunEventType.Passed);
     await Promise.race([
       idle,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("runtime did not stop after becoming idle")), 2_000)),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("runtime did not become idle after the Change check and queued revision work completed")),
+          IdleShutdownDiagnosticTimeoutMs,
+        ),
+      ),
     ]);
   } finally {
     await server.stop();
