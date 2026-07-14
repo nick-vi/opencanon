@@ -47,16 +47,39 @@ export async function repairServiceProcessState(input: {
 }
 
 export async function stopService(registryPath = serviceRegistryPath()): Promise<StopServiceResult> {
-  const runtimeStops = await stopAllProjectRuntimes(registryPath);
   const entry = readServiceEntry(registryPath);
+  let wasRunning = false;
+  if (entry) {
+    wasRunning = isProcessRunning(entry.pid);
+    if (wasRunning) {
+      upsertServiceEntry(withLifecycle(entry, ProcessLifecycleStatus.Stopping, "Stopping OpenCanon service."), registryPath);
+      await terminateSpawnedProcess(entry.pid);
+    }
+    removeInactiveLocalPipeEndpoint(entry.pipeEndpoint, entry.pid);
+    forgetServiceEntry(registryPath);
+    appendLifecycleEvent(registryPath, {
+      kind: ProcessLifecycleEventKind.ServiceStopped,
+      scope: ProcessLifecycleScope.Service,
+      pid: entry.pid,
+      leaseId: entry.leaseId,
+      message: wasRunning ? "Stopped OpenCanon service." : "Removed stale OpenCanon service registration.",
+    });
+  }
+
+  const runtimeStops = await stopAllProjectRuntimes(registryPath);
+  const repair = await repairServiceProcessArtifacts({
+    registryPath,
+    keepPids: new Set([process.pid]),
+    cleanupPipeMaxAgeMs: 0,
+  }).catch((error): ServiceRepairResult => ({
+    retiredServiceProcesses: 0,
+    retiredProjectRuntimes: 0,
+    removedPipeEndpoints: 0,
+    diagnostics: [error instanceof Error ? error.message : String(error)],
+  }));
+
   if (!entry) {
     const removedStartupLock = removeInactiveStartupLock(registryPath, startupLockScope("service", registryPath));
-    const repair = await repairServiceProcessState({ registryPath, cleanupPipeMaxAgeMs: 0 }).catch((error): ServiceRepairResult => ({
-      retiredServiceProcesses: 0,
-      retiredProjectRuntimes: 0,
-      removedPipeEndpoints: 0,
-      diagnostics: [error instanceof Error ? error.message : String(error)],
-    }));
     return {
       status: removedStartupLock || repair.retiredServiceProcesses > 0 || repair.retiredProjectRuntimes > 0 || repair.removedPipeEndpoints > 0 || runtimeStops.length > 0 ? "stale" : "not-running",
       message: serviceStopMessage({
@@ -68,27 +91,6 @@ export async function stopService(registryPath = serviceRegistryPath()): Promise
       }),
     };
   }
-
-  const wasRunning = isProcessRunning(entry.pid);
-  if (wasRunning) {
-    upsertServiceEntry(withLifecycle(entry, ProcessLifecycleStatus.Stopping, "Stopping OpenCanon service."), registryPath);
-    await terminateSpawnedProcess(entry.pid);
-  }
-  removeInactiveLocalPipeEndpoint(entry.pipeEndpoint, entry.pid);
-  forgetServiceEntry(registryPath);
-  appendLifecycleEvent(registryPath, {
-    kind: ProcessLifecycleEventKind.ServiceStopped,
-    scope: ProcessLifecycleScope.Service,
-    pid: entry.pid,
-    leaseId: entry.leaseId,
-    message: wasRunning ? "Stopped OpenCanon service." : "Removed stale OpenCanon service registration.",
-  });
-  const repair = await repairServiceProcessState({ registryPath, cleanupPipeMaxAgeMs: 0 }).catch((error): ServiceRepairResult => ({
-    retiredServiceProcesses: 0,
-    retiredProjectRuntimes: 0,
-    removedPipeEndpoints: 0,
-    diagnostics: [error instanceof Error ? error.message : String(error)],
-  }));
   return {
     status: wasRunning ? "stopped" : "stale",
     message: serviceStopMessage({

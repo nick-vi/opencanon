@@ -553,6 +553,69 @@ test("service stop also terminates registered project runtimes", async () => {
   }
 });
 
+test.skipIf(process.platform === "win32")("service stop closes service admission before retiring project runtimes", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-stop-order-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const orderPath = path.join(rootDir, "shutdown-order.log");
+  const childSource = `
+    import { appendFileSync } from "node:fs";
+    const [label, output] = process.argv.slice(1);
+    process.once("SIGTERM", () => {
+      appendFileSync(output, label + "\\n");
+      process.exit(0);
+    });
+    setInterval(() => {}, 1000);
+  `;
+  const service = spawn(process.execPath, ["--input-type=module", "-e", childSource, "service", orderPath], {
+    detached: true,
+    stdio: "ignore",
+  });
+  const runtime = spawn(process.execPath, ["--input-type=module", "-e", childSource, "runtime", orderPath], {
+    detached: true,
+    stdio: "ignore",
+  });
+
+  try {
+    if (!service.pid || !runtime.pid) throw new Error("test processes did not start");
+    upsertServiceEntry({
+      host: "127.0.0.1",
+      port: 9,
+      url: "http://127.0.0.1:9",
+      pipeEndpoint: testServicePipeEndpoint(registryPath),
+      pid: service.pid,
+      startedAt: "2026-05-01T00:00:00.000Z",
+      logPath: path.join(rootDir, "service.log"),
+      authToken: "test-service-token",
+      ...testServiceLease("service-stop-order-lease"),
+      ...testRuntimeIdentity,
+    }, registryPath);
+    upsertRuntimeEntry({
+      rootDir,
+      host: "127.0.0.1",
+      port: 10,
+      url: "http://127.0.0.1:10",
+      pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
+      pid: runtime.pid,
+      startedAt: "2026-05-01T00:00:00.000Z",
+      logPath: path.join(rootDir, "runtime.log"),
+      authToken: "test-runtime-token",
+      ...testRuntimeLease("runtime-stop-order-lease"),
+      ...testRuntimeIdentity,
+    }, registryPath);
+
+    await stopService(registryPath);
+
+    assert.deepEqual(readFileSync(orderPath, "utf8").trim().split("\n"), ["service", "runtime"]);
+    assert.equal(processIsRunning(service.pid), false);
+    assert.equal(processIsRunning(runtime.pid), false);
+    assert.equal(readRuntimeRegistry(registryPath).length, 0);
+  } finally {
+    if (service.pid && processIsRunning(service.pid)) process.kill(service.pid, "SIGKILL");
+    if (runtime.pid && processIsRunning(runtime.pid)) process.kill(runtime.pid, "SIGKILL");
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("service stop terminates every registered project runtime", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-stop-all-runtimes-"));
   const registryPath = path.join(rootDir, "global", "service.json");
