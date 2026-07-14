@@ -212,7 +212,7 @@ export async function createChangeCheckRunner(input: {
       summary: item.task ? `Task ${item.task.id} check ${item.check.id} started.` : `Check ${item.check.id} started.`,
     });
     writeRuntimeEvent(input.rootDir, input.store(), started);
-    await input.stateManager.rebuildAndPublish(started.summary);
+    scheduleProjectionRefresh(started.summary);
 
     const pendingOutput: Array<{ stream: ChangeCheckOutputStream; text: string }> = [];
     let pendingOutputBytes = 0;
@@ -280,7 +280,7 @@ export async function createChangeCheckRunner(input: {
       input.store().writeJob(terminal);
       appendEvent(terminal, terminalEventType(terminal));
       completedRun = terminal;
-      await recordTerminalCanonEvent(item, terminal);
+      recordTerminalCanonEvent(item, terminal);
     } catch (error) {
       flushOutput();
       const latest = input.store().readJob(run.id) ?? run;
@@ -296,7 +296,7 @@ export async function createChangeCheckRunner(input: {
       input.store().writeJob(failed);
       appendEvent(failed, ChangeCheckRunEventType.Failed);
       completedRun = failed;
-      await recordTerminalCanonEvent(item, failed);
+      recordTerminalCanonEvent(item, failed);
     } finally {
       if (outputFlushTimer) clearTimeout(outputFlushTimer);
       controllers.delete(run.id);
@@ -333,7 +333,7 @@ export async function createChangeCheckRunner(input: {
     return input.store().listJobEvents({ jobId: runId, afterSequence: 0, limit: 1, order: "desc" })[0]?.sequence ?? 0;
   }
 
-  async function recordTerminalCanonEvent(item: QueuedCheck, run: ChangeCheckRun): Promise<void> {
+  function recordTerminalCanonEvent(item: QueuedCheck, run: ChangeCheckRun): void {
     const passed = run.status === ChangeCheckRunStatus.Passed;
     const finished = createChangeCheckEvent({
       changeId: item.change.id,
@@ -346,7 +346,11 @@ export async function createChangeCheckRunner(input: {
       summary: "summary" in run ? run.summary : `Check ${item.check.id} ${run.status}.`,
     });
     writeRuntimeEvent(input.rootDir, input.store(), finished);
-    await input.stateManager.rebuildAndPublish(finished.summary);
+    scheduleProjectionRefresh(finished.summary);
+  }
+
+  function scheduleProjectionRefresh(summary: string): void {
+    if (!stopping) input.stateManager.scheduleRebuild(summary);
   }
 
   function finishCancelled(run: ChangeCheckRun): ChangeCheckRun {

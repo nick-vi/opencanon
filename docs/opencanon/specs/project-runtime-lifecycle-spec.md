@@ -43,6 +43,7 @@ The local service and project runtime expose revision-driven readiness, typed fa
 - `contracts-tests` test `tests/contracts.test.ts`
 - `coordinator-tests` test `packages/runtime/test/state-manager.test.ts`
 - `activity-tests` test `packages/runtime/test/activity-tracker.test.ts`
+- `change-run-tests` test `packages/runtime/test/change-runs.test.ts`
 - `project-doctor` doctor
 
 ## Rules
@@ -51,8 +52,9 @@ Rule `readiness-is-revision-driven`: Project readiness is determined by publishe
 - every accepted refresh has a monotonic revision
 - queued filesystem refreshes coalesce to the newest revision
 - superseded rebuilds cannot publish
+- durable Change check results do not wait for a full snapshot rebuild
 - summary responses expose observed, accepted, and published revisions
-Checks: `coordinator-tests`, `runtime-client-tests`, `contracts-tests`
+Checks: `coordinator-tests`, `change-run-tests`, `runtime-client-tests`, `contracts-tests`
 
 Rule `transport-and-project-readiness-are-distinct`: Transport liveness, project snapshot readiness, and Project Knowledge readiness are independently observable states.
 - transport can accept status requests while project refresh is active

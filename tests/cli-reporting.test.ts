@@ -242,7 +242,7 @@ test("changes ready and brief expose agent-ready task work", () => {
       env: testEnv(rootDir),
       timeout: CliSpawnTimeoutMs,
     });
-    assert.equal(check.error, undefined, check.error?.message);
+    assert.equal(check.error, undefined, check.error?.message ?? "Change check process failed to spawn.");
     assert.equal(check.status, 0, check.stderr || check.stdout);
     const checkPayload = JSON.parse(check.stdout) as { runs: Array<{ id: string; taskId?: string; checkId: string; status: string }> };
     assert.deepEqual(checkPayload.runs.map((item) => `${item.taskId}:${item.checkId}:${item.status}`), ["model:smoke:passed"]);

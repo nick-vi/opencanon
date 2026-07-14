@@ -425,8 +425,8 @@ export default [
       {
         id: "readiness-is-revision-driven",
         statement: "Project readiness is determined by published and observed revisions rather than timing or a momentary process status.",
-        acceptance: ["every accepted refresh has a monotonic revision", "queued filesystem refreshes coalesce to the newest revision", "superseded rebuilds cannot publish", "summary responses expose observed, accepted, and published revisions"],
-        checks: ["coordinator-tests", "runtime-client-tests", "contracts-tests"],
+        acceptance: ["every accepted refresh has a monotonic revision", "queued filesystem refreshes coalesce to the newest revision", "superseded rebuilds cannot publish", "durable Change check results do not wait for a full snapshot rebuild", "summary responses expose observed, accepted, and published revisions"],
+        checks: ["coordinator-tests", "change-run-tests", "runtime-client-tests", "contracts-tests"],
       },
       {
         id: "transport-and-project-readiness-are-distinct",
@@ -526,6 +526,7 @@ export default [
       { id: "contracts-tests", kind: "test", target: "tests/contracts.test.ts" },
       { id: "coordinator-tests", kind: "test", target: "packages/runtime/test/state-manager.test.ts" },
       { id: "activity-tests", kind: "test", target: "packages/runtime/test/activity-tracker.test.ts" },
+      { id: "change-run-tests", kind: "test", target: "packages/runtime/test/change-runs.test.ts" },
       { id: "project-doctor", kind: "doctor" },
     ],
     governedBy: { inferFromScope: true, conventions: ["explicit-error-contracts", "state-ownership-current", "tests-follow-risk"] },
