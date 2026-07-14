@@ -29,6 +29,7 @@ The local service and project runtime expose revision-driven readiness, typed fa
 ## Impact surfaces
 
 - [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
+- [Release and update path](../areas/runtime-release-update.md#runtime-updates)
 
 ## Areas
 

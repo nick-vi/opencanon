@@ -398,7 +398,7 @@ export default [
     id: "project-runtime-lifecycle-spec",
     title: "Project Runtime Lifecycle Spec",
     summary: "The local service and project runtime expose revision-driven readiness, typed failure, and deterministic shutdown.",
-    surfaces: ["local-service-control"],
+    surfaces: ["local-service-control", "release-update"],
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/cli.ts" },
