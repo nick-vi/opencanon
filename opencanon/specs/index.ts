@@ -397,11 +397,14 @@ export default [
   defineSpec({
     id: "project-runtime-lifecycle-spec",
     title: "Project Runtime Lifecycle Spec",
-    summary: "The local service owns a ready-only, typed, and retry-aware lifecycle for isolated project runtimes.",
+    summary: "The local service and project runtime expose revision-driven readiness, typed failure, and deterministic shutdown.",
     surfaces: ["local-service-control"],
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service*.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/cli.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/state-manager.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/activity-tracker.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/src/contracts-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/runtime-client.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/problem.ts" },
@@ -413,10 +416,30 @@ export default [
       { kind: DefinitionTargetKind.File, path: "tests/cli-reporting.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/mcp.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/worktree.test.ts" },
+      { kind: DefinitionTargetKind.File, path: ".github/workflows/ci.yml" },
+      { kind: DefinitionTargetKind.File, path: "package.json" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/specs/project-runtime-lifecycle-spec.md" },
     ],
     areas: ["local-service-and-runtimes", "explicit-error-contracts"],
     rules: [
+      {
+        id: "readiness-is-revision-driven",
+        statement: "Project readiness is determined by published and observed revisions rather than timing or a momentary process status.",
+        acceptance: ["every accepted refresh has a monotonic revision", "queued filesystem refreshes coalesce to the newest revision", "superseded rebuilds cannot publish", "summary responses expose observed, accepted, and published revisions"],
+        checks: ["coordinator-tests", "runtime-client-tests", "contracts-tests"],
+      },
+      {
+        id: "transport-and-project-readiness-are-distinct",
+        statement: "Transport liveness, project snapshot readiness, and Project Knowledge readiness are independently observable states.",
+        acceptance: ["transport can accept status requests while project refresh is active", "project summary reports freshness without pretending transient work is failure", "Knowledge routes reject missing, indexing, stale, or failed indexes explicitly"],
+        checks: ["runtime-client-tests", "contracts-tests"],
+      },
+      {
+        id: "idle-shutdown-requires-quiescence",
+        statement: "A runtime can stop for idleness only after transport leases, Change checks, queued refreshes, and active refreshes are all complete.",
+        acceptance: ["transport leases release exactly once", "stream cancellation releases its lease", "queued coordinator work prevents idle shutdown", "completed work receives a full idle window"],
+        checks: ["activity-tests", "runtime-client-tests"],
+      },
       {
         id: "ensure-means-ready",
         statement: "A successful project ensure or start result must reference a runtime whose process identity and health endpoint have been verified.",
@@ -462,6 +485,13 @@ export default [
     ],
     scenarios: [
       {
+        id: "refresh-during-refresh",
+        given: ["a project refresh is running", "the watcher observes a newer source revision"],
+        when: "the older refresh completes",
+        then: ["the older result is not published as current", "the queued work coalesces to the newest revision", "waiters complete only after that revision is published"],
+        checks: ["coordinator-tests"],
+      },
+      {
         id: "start-healthy-project",
         given: ["an initialized project has valid Project Canon definitions", "no project runtime is running"],
         when: "a client starts or first queries the project",
@@ -494,6 +524,8 @@ export default [
       { id: "service-lifecycle-tests", kind: "test", target: "packages/runtime/test/service.test.ts" },
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
       { id: "contracts-tests", kind: "test", target: "tests/contracts.test.ts" },
+      { id: "coordinator-tests", kind: "test", target: "packages/runtime/test/state-manager.test.ts" },
+      { id: "activity-tests", kind: "test", target: "packages/runtime/test/activity-tracker.test.ts" },
       { id: "project-doctor", kind: "doctor" },
     ],
     governedBy: { inferFromScope: true, conventions: ["explicit-error-contracts", "state-ownership-current", "tests-follow-risk"] },

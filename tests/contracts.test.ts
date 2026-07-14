@@ -286,7 +286,14 @@ test("public runtime summaries replace validator dependency paths with a bounded
   assert.equal("dependencyFiles" in (summary.validatorGraph ?? {}), false);
   assert.equal("entrypoint" in (summary.validatorGraph ?? {}), false);
   assert.equal(RuntimeHealthSummarySchema.safeParse(summary).success, true);
-  const project = RuntimeProjectSummarySchema.parse({ rootDir: "/repo", health: summary, files: 1, findings: 0, staleFiles: 0 });
+  const project = RuntimeProjectSummarySchema.parse({
+    rootDir: "/repo",
+    lifecycle: { phase: "ready", revision: { observed: 1, accepted: 1, published: 1 }, settled: true },
+    health: summary,
+    files: 1,
+    findings: 0,
+    staleFiles: 0,
+  });
   assert(JSON.stringify(project).length < 4_096);
 });
 

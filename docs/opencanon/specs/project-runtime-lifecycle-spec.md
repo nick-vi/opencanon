@@ -2,12 +2,15 @@
 
 ## Summary
 
-The local service owns a ready-only, typed, and retry-aware lifecycle for isolated project runtimes.
+The local service and project runtime expose revision-driven readiness, typed failure, and deterministic shutdown.
 
 ## Scope
 
 - Files: `packages/runtime/src/service*.ts`
 - Files: `packages/runtime/src/cli.ts`
+- Files: `packages/runtime/src/state-manager.ts`
+- Files: `packages/runtime/src/activity-tracker.ts`
+- Files: `packages/core/src/contracts-runtime.ts`
 - Files: `packages/cli/src/runtime-client.ts`
 - Files: `packages/cli/src/index.ts`
 - Files: `packages/core/src/problem.ts`
@@ -19,6 +22,8 @@ The local service owns a ready-only, typed, and retry-aware lifecycle for isolat
 - Files: `tests/cli-reporting.test.ts`
 - Files: `tests/mcp.test.ts`
 - Files: `tests/worktree.test.ts`
+- Files: `.github/workflows/ci.yml`
+- Files: `package.json`
 - Docs: `docs/opencanon/specs/project-runtime-lifecycle-spec.md`
 
 ## Impact surfaces
@@ -35,9 +40,31 @@ The local service owns a ready-only, typed, and retry-aware lifecycle for isolat
 - `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
 - `contracts-tests` test `tests/contracts.test.ts`
+- `coordinator-tests` test `packages/runtime/test/state-manager.test.ts`
+- `activity-tests` test `packages/runtime/test/activity-tracker.test.ts`
 - `project-doctor` doctor
 
 ## Rules
+
+Rule `readiness-is-revision-driven`: Project readiness is determined by published and observed revisions rather than timing or a momentary process status.
+- every accepted refresh has a monotonic revision
+- queued filesystem refreshes coalesce to the newest revision
+- superseded rebuilds cannot publish
+- summary responses expose observed, accepted, and published revisions
+Checks: `coordinator-tests`, `runtime-client-tests`, `contracts-tests`
+
+Rule `transport-and-project-readiness-are-distinct`: Transport liveness, project snapshot readiness, and Project Knowledge readiness are independently observable states.
+- transport can accept status requests while project refresh is active
+- project summary reports freshness without pretending transient work is failure
+- Knowledge routes reject missing, indexing, stale, or failed indexes explicitly
+Checks: `runtime-client-tests`, `contracts-tests`
+
+Rule `idle-shutdown-requires-quiescence`: A runtime can stop for idleness only after transport leases, Change checks, queued refreshes, and active refreshes are all complete.
+- transport leases release exactly once
+- stream cancellation releases its lease
+- queued coordinator work prevents idle shutdown
+- completed work receives a full idle window
+Checks: `activity-tests`, `runtime-client-tests`
 
 Rule `ensure-means-ready`: A successful project ensure or start result must reference a runtime whose process identity and health endpoint have been verified.
 - process spawn is not returned as command success
@@ -84,6 +111,15 @@ Rule `isolated-clients-retire-owned-processes`: Tests and ephemeral clients that
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 ## Scenarios
+
+Scenario `refresh-during-refresh`
+- Given a project refresh is running
+- Given the watcher observes a newer source revision
+- When the older refresh completes
+- Then the older result is not published as current
+- Then the queued work coalesces to the newest revision
+- Then waiters complete only after that revision is published
+Checks: `coordinator-tests`
 
 Scenario `start-healthy-project`
 - Given an initialized project has valid Project Canon definitions

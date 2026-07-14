@@ -90,6 +90,7 @@ import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
 import { createRuntimeStateManager, type RuntimeRebuildOptions } from "./state-manager.ts";
 import { createChangeCheckRunner } from "./change-check-runner.ts";
 import { createKnowledgeIndexManager, type KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
+import { createRuntimeActivityTracker } from "./activity-tracker.ts";
 import { ProjectFileLanguage, setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
 import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-facts-provider.ts";
 import { createProjectObservabilityExporter } from "./observability.ts";
@@ -123,7 +124,6 @@ const RuntimeHealthStatusValue = {
 
 const CoordinationRefreshDebounceMs = 150;
 const KnowledgeWatchDebounceMs = 1_000;
-const MaxQueuedWatchRebuilds = 32;
 const KnowledgeIndexStatus = {
   Failed: "failed",
   Missing: "missing",
@@ -270,7 +270,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     initialSnapshot: snapshot,
     initialProjectInventory: listProjectInventory(rootDir),
     initialValidationResultCache: validationResultCache,
-    maxQueuedRebuilds: MaxQueuedWatchRebuilds,
     isStopped: () => stopped,
     rebuildNow: rebuildAndPublishNow,
     readProjectInventory: () => listProjectInventory(rootDir),
@@ -309,7 +308,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let knowledgeWatchQueue: Promise<void> = Promise.resolve();
   const idleTimeoutMs = options.idleTimeoutMs && options.idleTimeoutMs > 0 ? options.idleTimeoutMs : undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  let activeTransportRequests = 0;
+  const transportActivity = createRuntimeActivityTracker(resetIdleTimer);
   // Producer warming->ready refresh state. `latestReadyGeneration` is the newest
   // generation observed; a debounced refresh fires after quiescence and the
   // generation-guard drops it if a newer generation arrived meanwhile.
@@ -627,20 +626,17 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
 
   function beginTransportActivity(): () => void {
-    activeTransportRequests += 1;
     resetIdleTimer();
-    let ended = false;
+    const release = transportActivity.begin("runtime-request");
     return () => {
-      if (ended) return;
-      ended = true;
-      activeTransportRequests = Math.max(0, activeTransportRequests - 1);
+      release();
       resetIdleTimer();
     };
   }
 
   async function stopForIdle(): Promise<void> {
     if (stopped) return;
-    if (activeTransportRequests > 0 || currentWorkerJob || changeCheckRunner.hasActiveWork()) {
+    if (transportActivity.count() > 0 || currentWorkerJob || changeCheckRunner.hasActiveWork() || stateManager.hasPendingWork()) {
       resetIdleTimer();
       return;
     }

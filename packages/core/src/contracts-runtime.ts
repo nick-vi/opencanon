@@ -59,6 +59,45 @@ export const RuntimeWorkerJobSchema = z.object({
 });
 export type RuntimeWorkerJob = z.infer<typeof RuntimeWorkerJobSchema>;
 
+export const RuntimeLifecyclePhaseValue = {
+  TransportReady: "transport-ready",
+  Refreshing: "refreshing",
+  Ready: "ready",
+  Failed: "failed",
+  Stopping: "stopping",
+  Stopped: "stopped",
+} as const;
+export type RuntimeLifecyclePhaseValue = (typeof RuntimeLifecyclePhaseValue)[keyof typeof RuntimeLifecyclePhaseValue];
+
+export const RuntimeRevisionSchema = z.object({
+  observed: z.number().int().positive(),
+  accepted: z.number().int().positive(),
+  published: z.number().int().positive(),
+});
+export type RuntimeRevision = z.infer<typeof RuntimeRevisionSchema>;
+
+const RuntimeLifecycleOperationSchema = z.object({
+  revision: z.number().int().positive(),
+  summary: z.string().min(1),
+});
+
+export const RuntimeLifecycleStateSchema = z.object({
+  phase: z.enum([
+    RuntimeLifecyclePhaseValue.TransportReady,
+    RuntimeLifecyclePhaseValue.Refreshing,
+    RuntimeLifecyclePhaseValue.Ready,
+    RuntimeLifecyclePhaseValue.Failed,
+    RuntimeLifecyclePhaseValue.Stopping,
+    RuntimeLifecyclePhaseValue.Stopped,
+  ]),
+  revision: RuntimeRevisionSchema,
+  settled: z.boolean(),
+  active: RuntimeLifecycleOperationSchema.optional(),
+  queued: RuntimeLifecycleOperationSchema.optional(),
+  failure: z.object({ revision: z.number().int().positive(), message: z.string().min(1) }).optional(),
+});
+export type RuntimeLifecycleState = z.infer<typeof RuntimeLifecycleStateSchema>;
+
 export const RuntimeHealthSchema = z.object({
   status: z.enum(["ready", "missing", "indexing", "stale", "failed"]),
   process: z
@@ -134,6 +173,7 @@ export type RuntimeState = z.infer<typeof RuntimeStateSchema>;
 
 export const RuntimeProjectSummarySchema = z.object({
   rootDir: z.string().min(1),
+  lifecycle: RuntimeLifecycleStateSchema,
   health: RuntimeHealthSummarySchema,
   files: z.number().int().min(0),
   findings: z.number().int().min(0),

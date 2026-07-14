@@ -150,7 +150,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.State) {
         const snapshot = await refreshCurrentSnapshot();
-        return json({ ok: true, data: snapshot.state });
+        return json({ ok: true, data: { ...snapshot.state, lifecycle: stateManager.lifecycle() } });
       }
       if (url.pathname === ApiRoute.Snapshot) {
         const snapshot = await ensureProjectSnapshot("Snapshot requested current project state.");
@@ -158,7 +158,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ProjectSummary) {
         const snapshot = await refreshCurrentSnapshot();
-        return json({ ok: true, data: buildProjectSummary({ rootDir, snapshot, store: currentStore() }) });
+        return json({ ok: true, data: buildProjectSummary({ rootDir, snapshot, store: currentStore(), lifecycle: stateManager.lifecycle() }) });
       }
       if (url.pathname === ApiRoute.ContextStatus) {
         const snapshot = await refreshCurrentSnapshot();

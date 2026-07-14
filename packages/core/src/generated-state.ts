@@ -6,6 +6,11 @@ export const GeneratedStateIgnoreEntries = [
   ".opencanon/check-*/",
   ".opencanon/state/",
   ".opencanon/*.log",
+  ".opencanon/*.sqlite",
+  ".opencanon/*.sqlite-shm",
+  ".opencanon/*.sqlite-wal",
+  ".opencanon/runtime.json",
+  ".opencanon/worker.lock",
   InitStateFilePath,
 ];
 

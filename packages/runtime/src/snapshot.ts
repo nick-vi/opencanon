@@ -103,7 +103,7 @@ export type RuntimeSnapshot = {
   }>;
 };
 
-export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeSnapshot; store: ProjectStore }): RuntimeProjectSummary {
+export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeSnapshot; store: ProjectStore; lifecycle: RuntimeProjectSummary["lifecycle"] }): RuntimeProjectSummary {
   const storeState = input.store.readState();
   const latestQuery = { mode: CanonEventQueryMode.Recent, limit: 1 } as const;
   const latestEvent = mergeCanonEvents([...input.store.listEvents(latestQuery), ...listGlobalCanonEvents(input.rootDir, latestQuery)], 1)[0];
@@ -111,6 +111,7 @@ export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeS
   const productModel = input.snapshot.state.productModel ?? storeState.productModel;
   return {
     rootDir: input.rootDir,
+    lifecycle: input.lifecycle,
     health: summarizeRuntimeHealth(input.snapshot.health),
     files: storeState.files,
     findings: storeState.findings,
