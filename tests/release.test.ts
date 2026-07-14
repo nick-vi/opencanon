@@ -28,9 +28,9 @@ function collectTestFiles(dir: string): string[] {
   });
 }
 
-function isCoveredByTestTree(script: string, filePath: string): boolean {
-  if (script.includes(filePath)) return true;
-  if (filePath.startsWith("packages/observability/test/") && script.includes("packages/observability/test/*.test.ts")) return true;
+function isCoveredByTestTopology(topology: string, filePath: string): boolean {
+  if (topology.includes(filePath)) return true;
+  if (filePath.startsWith("packages/observability/test/") && topology.includes("packages/observability/test/*.test.ts")) return true;
   return false;
 }
 
@@ -38,14 +38,17 @@ function expandedScript(packageJson: { scripts?: Record<string, string> }, names
   return names.map((name) => packageJson.scripts?.[name] ?? "").join(" && ");
 }
 
-test("test:tree includes every repo test file", () => {
+test("test topology includes every repo test file", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts?: Record<string, string>;
   };
-  const script = expandedScript(packageJson, ["test:tree", "test:tree:parallel", "test:runtime-integration"]);
+  const topology = [
+    expandedScript(packageJson, ["test:tree", "test:tree:parallel", "test:runtime-integration"]),
+    readFileSync("scripts/run-runtime-integration-tests.ts", "utf8"),
+  ].join("\n");
   const missing = TestTreeCoverageRoots.flatMap((root) => collectTestFiles(root))
     .sort()
-    .filter((filePath) => !isCoveredByTestTree(script, filePath));
+    .filter((filePath) => !isCoveredByTestTopology(topology, filePath));
 
   assert.deepEqual(missing, []);
 });
