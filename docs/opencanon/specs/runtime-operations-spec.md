@@ -92,8 +92,8 @@ Rule `operation-resources-are-bounded`: A project runtime bounds active operatio
 - admission rejects a whole batch before capacity is exceeded
 - terminal history is pruned by age and count
 - run events cascade when their run is removed
-- active operations hold the supervised runtime busy lifecycle
-- stale inspection cannot overwrite or replace active work
+- active operations leave process readiness running and expose work through operation resources
+- process inspection cannot overwrite a concurrent lifecycle transition
 - Project State allocates monotonic run-event sequences atomically across runtime connections
 Checks: `contracts-tests`, `change-run-tests`, `runtime-supervision-tests`, `engine-tests`
 

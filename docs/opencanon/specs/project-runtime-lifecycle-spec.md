@@ -59,6 +59,7 @@ Checks: `coordinator-tests`, `change-run-tests`, `runtime-client-tests`, `contra
 Rule `transport-and-project-readiness-are-distinct`: Transport liveness, project snapshot readiness, and Project Knowledge readiness are independently observable states.
 - transport can accept status requests while project refresh is active
 - project summary reports freshness without pretending transient work is failure
+- project selection is independent from process and revision status
 - Knowledge routes reject missing, indexing, stale, or failed indexes explicitly
 Checks: `runtime-client-tests`, `contracts-tests`
 
@@ -101,10 +102,10 @@ Rule `process-control-is-namespaced`: Each runtime distribution owns a determini
 - ephemeral Proof state is removed with its owned workspace
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
-Rule `doctor-inspects-settled-runtime`: Doctor waits within a bounded lifecycle budget for expected project startup or active work before inspecting runtime health, producers, and Project Knowledge.
-- Doctor immediately after validation does not report transient busy work as unhealthy
-- all live checks observe the settled matching runtime
-- work that exceeds the budget remains an explicit nonzero lifecycle failure
+Rule `doctor-inspects-live-runtime`: Doctor waits only for process startup, then inspects runtime health, producers, and Project Knowledge without blocking on an unrelated project-state revision.
+- Doctor immediately after validation does not report active refresh work as unhealthy
+- a responsive matching runtime remains process-ready while revisions refresh
+- failed revision state remains explicitly observable through runtime state
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 Rule `isolated-clients-retire-owned-processes`: Tests and ephemeral clients that create private service registries must retire every service and project process they own before deleting their workspace.
@@ -155,9 +156,9 @@ Scenario `doctor-after-project-work`
 - Given a matching project runtime is registered
 - Given validation or refresh work is still active
 - When Doctor runs immediately after that project work
-- Then Doctor waits for the runtime to settle within its bounded budget
-- Then health, producer, and Knowledge checks use the ready runtime
-- Then transient busy state is not rendered as a false failure
+- Then Doctor confirms the responsive running process
+- Then health, producer, and Knowledge checks use the matching runtime
+- Then revision progress remains visible without becoming a false health failure
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 ## Governance

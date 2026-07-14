@@ -86,7 +86,7 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
 export async function inspectRunningRuntimeKnowledge(cwd: string): Promise<DoctorKnowledgeInspection> {
   const rootDir = resolveRootDir(cwd);
   const inspection = await inspectProjectRuntime(rootDir);
-  if (inspection?.status !== RuntimeStatus.Running && inspection?.status !== RuntimeStatus.Busy) {
+  if (inspection?.status !== RuntimeStatus.Running) {
     return { kind: DoctorKnowledgeInspectionKind.NotInspected };
   }
   try {

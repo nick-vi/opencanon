@@ -80,9 +80,6 @@ import { listProjects } from "./project-summary.ts";
 import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, validateRuntimeAuth, validateMethod, type RuntimeError } from "./routes.ts";
 import { localPipeEndpoint, serveLocalProtocolPipe, type LocalProtocolPipeServer } from "./local-protocol.ts";
 import { acquireProjectWorkerLease, stopService } from "./service.ts";
-import { createLifecycle } from "./service-lifecycle.ts";
-import { readProjectRuntimeEntry, readRuntimeRegistry, setRuntimeLifecycleForLease } from "./service-storage.ts";
-import { ProcessLifecycleStatus, type RuntimeRegistryEntry } from "./service-types.ts";
 import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
@@ -263,8 +260,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     throw error;
   }
   let stopped = false;
-  const runtimeBusyActivities = new Map<symbol, string>();
-  const changeCheckBusyActivity = Symbol("change-checks");
   let validatorGraphRuntime: ReturnType<typeof createValidatorGraphRuntime> | undefined;
   const stateManager = createRuntimeStateManager({
     initialSnapshot: snapshot,
@@ -286,9 +281,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     store: () => store,
     validationResultCache: () => stateManager.validationResultCache(),
     onActivity: resetIdleTimer,
-    onActiveWorkChanged(active) {
-      setRuntimeBusyActivity(changeCheckBusyActivity, "Change checks are running.", active);
-    },
   });
   validatorGraphRuntime = createValidatorGraphRuntime({
     rootDir,
@@ -423,15 +415,13 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       label: options.force ? "Rebuilding Project Knowledge" : "Indexing Project Knowledge",
       message: summary,
     });
-    await withRuntimeBusyLifecycle(options.force ? "Project Knowledge rebuild is running." : "Project Knowledge indexing is running.", async () => {
-      const manager = createKnowledgeIndexManager({ rootDir, store });
-      await manager.index({
-        force: options.force,
-        changedPaths: options.changedPaths,
-        onProgress(progress) {
-          publishKnowledgeIndexProgress(jobId, progress);
-        },
-      });
+    const manager = createKnowledgeIndexManager({ rootDir, store });
+    await manager.index({
+      force: options.force,
+      changedPaths: options.changedPaths,
+      onProgress(progress) {
+        publishKnowledgeIndexProgress(jobId, progress);
+      },
     }).then(
       () =>
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
@@ -662,115 +652,64 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       label: "Refreshing Project State",
       message: summary,
     });
-    return withRuntimeBusyLifecycle(
-      "Project state refresh is running.",
-      () => tracer.span("runtime.snapshot.rebuild", { kind: SpanKind.TASK, attributes: { summary } }, async (span) => {
-        try {
-          updateWorkerJob(jobId, {
-            label: "Discovering project files",
-            message: "Indexing repository.",
-          });
-          events.broadcast(indexingEvent("Indexing repository.", {
-            phase: "file-discovery",
-            label: "Discovering project files",
-            indeterminate: true,
-          }));
-          const next = await rebuildSnapshot({ cwd: rootDir, store });
-          updateWorkerJob(jobId, {
-            label: "Linking definitions and context",
-            current: next.definitionGraph.nodes.length,
-            total: next.definitionGraph.nodes.length,
-            unit: "nodes",
-            message: "Building project map and reading Project Knowledge state.",
-          });
-          events.broadcast(indexingEvent("Building project map and reading Project Knowledge state.", {
-            phase: "product-graph",
-            label: "Linking definitions and context",
-            current: next.definitionGraph.nodes.length,
-            total: next.definitionGraph.nodes.length,
-            unit: "nodes",
-          }));
-          validatorGraphRuntime?.recordCurrentSourceSignature();
-          store.writeEvent(indexedEvent(next, summary));
-          finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
-            label: "Project state ready",
-            current: next.files.length,
-            total: next.files.length,
-            unit: "files",
-            message: summary,
-          });
-          const publishedSnapshot = withProcessIdentity(next);
-          events.broadcast(indexingEvent(summary, {
-            phase: "ready",
-            label: "Project state ready",
-            current: next.files.length,
-            total: next.files.length,
-            unit: "files",
-          }));
-          events.broadcast(snapshotEvent(publishedSnapshot, summary));
-          span.setOutput({
-            files: next.files.length,
-            findings: next.findings.length,
-            validators: next.validators.length,
-          });
-          return publishedSnapshot;
-        } catch (error) {
-          finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
-            label: "Project state refresh failed",
-            message: errorMessage(error),
-          });
-          throw error;
-        }
-      }),
-    );
-  }
-
-  async function withRuntimeBusyLifecycle<T>(message: string, work: () => Promise<T>): Promise<T> {
-    const activity = Symbol(message);
-    setRuntimeBusyActivity(activity, message, true);
-    try {
-      return await work();
-    } finally {
-      setRuntimeBusyActivity(activity, message, false);
-    }
-  }
-
-  function setRuntimeBusyActivity(activity: symbol, message: string, active: boolean): void {
-    if (active) runtimeBusyActivities.set(activity, message);
-    else runtimeBusyActivities.delete(activity);
-    syncRuntimeBusyLifecycle();
-  }
-
-  function syncRuntimeBusyLifecycle(): void {
-    if (!runtimeRegistryPath) return;
-    const entry = currentRuntimeRegistryEntry(runtimeRegistryPath);
-    if (!entry) return;
-    const messages = [...runtimeBusyActivities.values()];
-    if (messages.length > 0) {
-      const message = messages[messages.length - 1]!;
-      if (entry.lifecycle.status !== ProcessLifecycleStatus.Busy || entry.lifecycle.message !== message) {
-        setRuntimeLifecycleForLease(entry, createLifecycle(ProcessLifecycleStatus.Busy, message, entry.lifecycle.restart), runtimeRegistryPath);
+    return tracer.span("runtime.snapshot.rebuild", { kind: SpanKind.TASK, attributes: { summary } }, async (span) => {
+      try {
+        updateWorkerJob(jobId, {
+          label: "Discovering project files",
+          message: "Indexing repository.",
+        });
+        events.broadcast(indexingEvent("Indexing repository.", {
+          phase: "file-discovery",
+          label: "Discovering project files",
+          indeterminate: true,
+        }));
+        const next = await rebuildSnapshot({ cwd: rootDir, store });
+        updateWorkerJob(jobId, {
+          label: "Linking definitions and context",
+          current: next.definitionGraph.nodes.length,
+          total: next.definitionGraph.nodes.length,
+          unit: "nodes",
+          message: "Building project map and reading Project Knowledge state.",
+        });
+        events.broadcast(indexingEvent("Building project map and reading Project Knowledge state.", {
+          phase: "product-graph",
+          label: "Linking definitions and context",
+          current: next.definitionGraph.nodes.length,
+          total: next.definitionGraph.nodes.length,
+          unit: "nodes",
+        }));
+        validatorGraphRuntime?.recordCurrentSourceSignature();
+        store.writeEvent(indexedEvent(next, summary));
+        finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
+          label: "Project state ready",
+          current: next.files.length,
+          total: next.files.length,
+          unit: "files",
+          message: summary,
+        });
+        const publishedSnapshot = withProcessIdentity(next);
+        events.broadcast(indexingEvent(summary, {
+          phase: "ready",
+          label: "Project state ready",
+          current: next.files.length,
+          total: next.files.length,
+          unit: "files",
+        }));
+        events.broadcast(snapshotEvent(publishedSnapshot, summary));
+        span.setOutput({
+          files: next.files.length,
+          findings: next.findings.length,
+          validators: next.validators.length,
+        });
+        return publishedSnapshot;
+      } catch (error) {
+        finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
+          label: "Project state refresh failed",
+          message: errorMessage(error),
+        });
+        throw error;
       }
-      return;
-    }
-    if (entry.lifecycle.status === ProcessLifecycleStatus.Busy) {
-      setRuntimeLifecycleForLease(entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready.", entry.lifecycle.restart), runtimeRegistryPath);
-    }
-  }
-
-  function currentRuntimeRegistryEntry(registryPath: string): RuntimeRegistryEntry | undefined {
-    return (
-      readRuntimeRegistry(registryPath).find(runtimeEntryMatchesCurrentProcess) ??
-      maybeCurrentRuntimeEntry(readProjectRuntimeEntry(rootDir))
-    );
-  }
-
-  function maybeCurrentRuntimeEntry(entry: RuntimeRegistryEntry | undefined): RuntimeRegistryEntry | undefined {
-    return entry && runtimeEntryMatchesCurrentProcess(entry) ? entry : undefined;
-  }
-
-  function runtimeEntryMatchesCurrentProcess(entry: RuntimeRegistryEntry): boolean {
-    return entry.rootDir === rootDir && entry.pid === process.pid && entry.leaseId === processIdentity.leaseId;
+    });
   }
 
   async function rebuildSnapshot(input: { cwd: string; store: ProjectStore }): Promise<RuntimeSnapshot> {

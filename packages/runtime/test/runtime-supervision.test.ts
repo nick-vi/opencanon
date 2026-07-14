@@ -19,16 +19,14 @@ import {
 } from "./change-run-test-support.ts";
 
 const IntegrationTimeoutMs = 60_000;
-const LifecycleTransitionTimeoutMs = 30_000;
-
-test("active Change checks hold the supervised runtime busy lifecycle", { timeout: IntegrationTimeoutMs }, async () => {
+test("active Change checks leave process readiness running", { timeout: IntegrationTimeoutMs }, async () => {
   const rootDir = createChangeRunProject(
-    "busy",
+    "process-readiness",
     `${quotedNode()} -e ${shellQuote("setTimeout(() => console.log('finished'), 700)")}`,
   );
   const registryDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-registry-"));
   const registryPath = path.join(registryDir, "service.json");
-  const leaseId = `runtime-${process.pid}-busy-test`;
+  const leaseId = `runtime-${process.pid}-readiness-test`;
   const previousRegistry = process.env.OPENCANON_SERVICE_REGISTRY_PATH;
   const previousLease = process.env.OPENCANON_RUNTIME_LEASE_ID;
   process.env.OPENCANON_SERVICE_REGISTRY_PATH = registryPath;
@@ -57,11 +55,11 @@ test("active Change checks hold the supervised runtime busy lifecycle", { timeou
     }, registryPath);
 
     const headers = runtimeAuthHeaders(server.authToken);
-    const started = await startRun(server.url, headers, "busy-change", "stream");
-    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, "busy");
+    const started = await startRun(server.url, headers, "process-readiness-change", "stream");
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, "running");
     const events = await readRunEvents(server.url, headers, started.id);
     assert.equal(events.at(-1)?.type, ChangeCheckRunEventType.Passed);
-    await waitForRuntimeLifecycle(registryPath, "running");
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, "running");
   } finally {
     await server?.stop();
     restoreEnvironment("OPENCANON_SERVICE_REGISTRY_PATH", previousRegistry);
@@ -70,15 +68,6 @@ test("active Change checks hold the supervised runtime busy lifecycle", { timeou
     rmSync(registryDir, { recursive: true, force: true });
   }
 });
-
-async function waitForRuntimeLifecycle(registryPath: string, expected: "running"): Promise<void> {
-  const deadline = Date.now() + LifecycleTransitionTimeoutMs;
-  while (Date.now() < deadline) {
-    if (readRuntimeRegistry(registryPath)[0]?.lifecycle.status === expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`runtime lifecycle did not become ${expected}`);
-}
 
 function restoreEnvironment(name: string, previous: string | undefined): void {
   if (previous === undefined) delete process.env[name];

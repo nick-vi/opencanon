@@ -1,4 +1,4 @@
-import { RuntimeHealthSchema, RuntimeStateSchema, resolveRootDir, type RuntimeHealth, type RuntimeState } from "@opencanon/core";
+import { RuntimeHealthSchema, RuntimeLiveStateSchema, resolveRootDir, type RuntimeHealth, type RuntimeLiveState } from "@opencanon/core";
 import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
 import { ServiceApiRoute } from "./service-types.ts";
 import {
@@ -41,7 +41,6 @@ const ServiceStartupHealthAttempts = Math.ceil(ServiceStartupHealthBudgetMs / Se
 const LocalHealthProbeTimeoutMs = 2_000;
 const ServiceReconcileIntervalMs = 30_000;
 export const RuntimeStartupGraceMs = RuntimeStartupHealthBudgetMs + ServiceReconcileIntervalMs;
-export const RuntimeBusyBudgetMs = 30 * 60_000;
 
 export async function inspectProjectRuntime(rootDir: string, registryPath = serviceRegistryPath()): Promise<RuntimeInspection | undefined> {
   const resolvedRoot = resolveRootDir(rootDir);
@@ -109,9 +108,6 @@ export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryP
     return { entry, status: RuntimeStatus.Stale, message: "Registered process is not running." };
   }
   const nowMs = Date.now();
-  if (runtimeBusyStillWithinBudget(entry, nowMs)) {
-    return { entry, status: RuntimeStatus.Busy, message: entry.lifecycle.message ?? "Runtime is busy with project work." };
-  }
   if (!projectRuntimeIdentityMatches(entry)) {
     return {
       entry,
@@ -159,7 +155,6 @@ export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryP
 
 function inspectionFromCurrentLifecycle(entry: RuntimeRegistryEntry): RuntimeInspection {
   const message = entry.lifecycle.problem?.detail ?? entry.lifecycle.message ?? "Runtime lifecycle changed while health was inspected.";
-  if (runtimeBusyStillWithinBudget(entry, Date.now())) return { entry, status: RuntimeStatus.Busy, message };
   if (entry.lifecycle.status === ProcessLifecycleStatus.Failed) {
     return { entry, status: RuntimeStatus.Failed, message, ...(entry.lifecycle.problem ? { problem: entry.lifecycle.problem } : {}) };
   }
@@ -180,12 +175,6 @@ export function runtimeStartupStillWithinGrace(entry: RuntimeRegistryEntry, nowM
   if (entry.lifecycle.status !== ProcessLifecycleStatus.Starting) return false;
   const startedAtMs = Date.parse(entry.startedAt || entry.lifecycle.updatedAt);
   return Number.isFinite(startedAtMs) && nowMs - startedAtMs < RuntimeStartupGraceMs;
-}
-
-export function runtimeBusyStillWithinBudget(entry: RuntimeRegistryEntry, nowMs: number): boolean {
-  if (entry.lifecycle.status !== ProcessLifecycleStatus.Busy) return false;
-  const updatedAtMs = Date.parse(entry.lifecycle.updatedAt);
-  return Number.isFinite(updatedAtMs) && nowMs - updatedAtMs < RuntimeBusyBudgetMs;
 }
 
 export async function waitForRuntimeHealth(entry: RuntimeRegistryEntry): Promise<boolean> {
@@ -242,7 +231,7 @@ async function serviceStatus(entry: ServiceRegistryEntry): Promise<{ ok: true; h
 
 async function projectRuntimeStatus(
   entry: RuntimeRegistryEntry,
-): Promise<{ ok: true; health: RuntimeHealth; state?: RuntimeState } | { ok: false; message: string }> {
+): Promise<{ ok: true; health: RuntimeHealth; state?: RuntimeLiveState } | { ok: false; message: string }> {
   try {
     const healthPayload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(entry), {
       method: "GET",
@@ -295,14 +284,14 @@ function serviceHealthFromValue(value: unknown): ServiceHealth | undefined {
   };
 }
 
-async function runtimeState(entry: RuntimeRegistryEntry): Promise<{ ok: true; state: RuntimeState } | { ok: false }> {
+async function runtimeState(entry: RuntimeRegistryEntry): Promise<{ ok: true; state: RuntimeLiveState } | { ok: false }> {
   try {
     const statePayload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(entry), {
       method: "GET",
       path: "/api/state",
       timeoutMs: LocalHealthProbeTimeoutMs,
     });
-    const state = RuntimeStateSchema.safeParse(statePayload);
+    const state = RuntimeLiveStateSchema.safeParse(statePayload);
     return state.success ? { ok: true, state: state.data } : { ok: false };
   } catch {
     return { ok: false };

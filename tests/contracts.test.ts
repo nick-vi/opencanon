@@ -6,6 +6,7 @@ import {
   ChangeCheckRunEventDraftSchema,
   ChangeCheckRunEventSchema,
   RuntimeHealthSummarySchema,
+  RuntimeLiveStateSchema,
   RuntimeProjectSummarySchema,
   RuntimeResponseSchema,
   RuntimeWorkerJobKindValue,
@@ -294,6 +295,17 @@ test("public runtime summaries replace validator dependency paths with a bounded
     findings: 0,
     staleFiles: 0,
   });
+  const liveState = RuntimeLiveStateSchema.parse({
+    lifecycle: { phase: "refreshing", revision: { observed: 2, accepted: 2, published: 1 }, settled: false, active: { revision: 2, summary: "Refreshing project state." } },
+    health,
+    files: 1,
+    findings: 0,
+    staleFiles: 0,
+    cacheHits: 1,
+    cacheMisses: 0,
+  });
+  assert.equal(liveState.lifecycle.revision.published, 1);
+  assert.equal(liveState.lifecycle.settled, false);
   assert(JSON.stringify(project).length < 4_096);
 });
 

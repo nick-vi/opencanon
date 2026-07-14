@@ -1,13 +1,14 @@
 import path from "node:path";
 import type { RuntimeSnapshot } from "./snapshot.ts";
-import { RuntimeStatus, inspectAllRuntimes, inspectProjectRuntime, type RuntimeRegistryEntry, type RuntimeStatus as RuntimeStatusType } from "./service.ts";
+import { RuntimeStatus, inspectAllRuntimes, type RuntimeRegistryEntry, type RuntimeStatus as RuntimeStatusType } from "./service.ts";
 import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
 
 export type ProjectSummary = {
   id: string;
   rootDir: string;
   url: string;
-  status: RuntimeStatusType | "current";
+  status: RuntimeStatusType;
+  selected: boolean;
   pid?: number;
   port?: number;
   files?: number;
@@ -22,20 +23,19 @@ export async function listProjects(cwd: string, snapshot: RuntimeSnapshot): Prom
     id: inspection.entry.rootDir,
     rootDir: inspection.entry.rootDir,
     url: inspection.entry.url,
-    status: inspection.entry.rootDir === root ? "current" : inspection.status,
+    status: inspection.status,
+    selected: inspection.entry.rootDir === root,
     pid: inspection.entry.pid,
     port: inspection.entry.port,
   }));
   const hasCurrent = summaries.some((p) => p.rootDir === root);
   if (!hasCurrent) {
-    const self = await inspectProjectRuntime(root).catch(() => undefined);
     summaries.unshift({
       id: root,
       rootDir: root,
-      url: self?.entry.url ?? "",
-      status: "current",
-      pid: self?.entry.pid,
-      port: self?.entry.port,
+      url: "",
+      status: RuntimeStatus.Running,
+      selected: true,
     });
   }
   for (const summary of summaries) {

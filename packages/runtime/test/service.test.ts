@@ -1426,15 +1426,18 @@ test("service registry stores project runtime entries and lazily starts isolated
     const overviewPayload = JSON.parse(overviewText) as {
       data?: {
         currentRootDir?: string;
-        projects?: Array<{ rootDir: string; status: string; files?: number; findings?: number }>;
+        projects?: Array<{ rootDir: string; status: string; selected: boolean; lifecycle?: { phase?: string }; files?: number; findings?: number }>;
         actions?: Array<{ id: string; enabled: boolean; disabledReason?: string }>;
         activity?: Array<{ id: string; kind: string }>;
       };
     };
     assert.equal(overviewPayload.data?.currentRootDir, realpathSync(projectA));
     const overviewProjects = overviewPayload.data?.projects ?? [];
-    assert.equal(overviewProjects.find((project) => project.rootDir === realpathSync(projectA))?.status, ServiceProjectStatusValue.Current);
+    assert.equal(overviewProjects.find((project) => project.rootDir === realpathSync(projectA))?.status, ServiceProjectStatusValue.Running);
+    assert.equal(overviewProjects.find((project) => project.rootDir === realpathSync(projectA))?.selected, true);
+    assert.equal(typeof overviewProjects.find((project) => project.rootDir === realpathSync(projectA))?.lifecycle?.phase, "string");
     assert.equal(overviewProjects.find((project) => project.rootDir === realpathSync(projectB))?.status, ServiceProjectStatusValue.Running);
+    assert.equal(overviewProjects.find((project) => project.rootDir === realpathSync(projectB))?.selected, false);
     assert.equal(typeof overviewProjects.find((project) => project.rootDir === realpathSync(projectA))?.files, "number");
     const reindexAction = overviewPayload.data?.actions?.find((action) => action.id === ServiceActionId.ProjectReindex);
     assert.equal(reindexAction?.enabled, true);
@@ -1538,58 +1541,6 @@ test("runtime stop waits for killed runtimes and removes inactive pipe endpoints
   }
 });
 
-test("service reconciliation preserves runtimes busy with project work", async () => {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-busy-runtime-"));
-  const registryPath = path.join(rootDir, "global", "service.json");
-  const child = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], {
-    stdio: "ignore",
-  });
-
-  try {
-    const pid = await waitForSpawnedPid(child, "busy runtime");
-    const entry = {
-      rootDir,
-      host: "127.0.0.1",
-      port: 9,
-      url: "http://127.0.0.1:9",
-      pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
-      pid,
-      startedAt: "2026-05-01T00:00:00.000Z",
-      logPath: path.join(rootDir, ".opencanon", "runtime.log"),
-      authToken: "test-token",
-      leaseId: "busy-runtime-lease",
-      lifecycle: {
-        ...testLifecycle(ProcessLifecycleStatus.Busy),
-        updatedAt: new Date().toISOString(),
-        message: "Manual reindex is running.",
-      },
-      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
-      runtimeFingerprint: "outdated-runtime-identity",
-    };
-    upsertRuntimeEntry(entry, registryPath);
-
-    const inspection = await inspectRuntimeEntry(entry, registryPath);
-    assert.equal(inspection.status, "busy");
-
-    const result = await reconcileProjectRuntimes({ registryPath });
-    assert.equal(result.busy, 1);
-    assert.equal(result.restarted, 0);
-    assert.equal(result.unhealthy, 0);
-    assert.equal(readRuntimeRegistry(registryPath)[0]?.pid, pid);
-    assert.equal(processIsRunning(pid), true);
-
-    const started = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
-    assert.equal(started.status, "already-running");
-    assert.equal(started.entry.pid, pid);
-    assert.equal(readRuntimeRegistry(registryPath)[0]?.pid, pid);
-    assert.equal(processIsRunning(pid), true);
-  } finally {
-    if (child.pid && processIsRunning(child.pid)) process.kill(child.pid, "SIGKILL");
-    forgetRuntimeEntry(rootDir, registryPath);
-    rmSync(rootDir, { recursive: true, force: true });
-  }
-});
-
 test("runtime lifecycle transitions reject stale revisions and replaced leases", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-lifecycle-cas-"));
   const registryPath = path.join(rootDir, "global", "service.json");
@@ -1610,17 +1561,17 @@ test("runtime lifecycle transitions reject stale revisions and replaced leases",
 
   try {
     upsertRuntimeEntry(original, registryPath);
-    const busy = setRuntimeLifecycleForLease(original, {
-      ...testLifecycle(ProcessLifecycleStatus.Busy),
+    const stopping = setRuntimeLifecycleForLease(original, {
+      ...testLifecycle(ProcessLifecycleStatus.Stopping),
       updatedAt: new Date(Date.now() + 1_000).toISOString(),
     }, registryPath);
-    assert.equal(busy.applied, true);
+    assert.equal(stopping.applied, true);
 
     const staleTransition = compareAndSetRuntimeLifecycle(original, testLifecycle(ProcessLifecycleStatus.Running), registryPath);
     assert.equal(staleTransition.applied, false);
-    assert.equal(staleTransition.current?.lifecycle.status, ProcessLifecycleStatus.Busy);
-    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, ProcessLifecycleStatus.Busy);
-    assert.equal(readProjectRuntimeEntry(rootDir, registryPath)?.lifecycle.status, ProcessLifecycleStatus.Busy);
+    assert.equal(staleTransition.current?.lifecycle.status, ProcessLifecycleStatus.Stopping);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, ProcessLifecycleStatus.Stopping);
+    assert.equal(readProjectRuntimeEntry(rootDir, registryPath)?.lifecycle.status, ProcessLifecycleStatus.Stopping);
 
     const replacement = {
       ...original,
@@ -1645,7 +1596,7 @@ test("runtime lifecycle transitions reject stale revisions and replaced leases",
   }
 });
 
-test("runtime inspection cannot overwrite work that becomes busy during a health probe", async () => {
+test("runtime inspection cannot overwrite a process that begins stopping during a health probe", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-inspection-cas-"));
   const registryPath = path.join(rootDir, "global", "service.json");
   const pipeEndpoint = testRuntimePipeEndpoint(rootDir, registryPath);
@@ -1694,18 +1645,18 @@ test("runtime inspection cannot overwrite work that becomes busy during a health
     upsertRuntimeEntry(entry, registryPath);
     const inspectionPromise = inspectRuntimeEntry(entry, registryPath);
     await healthProbeStarted;
-    const busy = setRuntimeLifecycleForLease(entry, {
-      ...testLifecycle(ProcessLifecycleStatus.Busy),
+    const stopping = setRuntimeLifecycleForLease(entry, {
+      ...testLifecycle(ProcessLifecycleStatus.Stopping),
       updatedAt: new Date().toISOString(),
-      message: "Full Proof is running.",
+      message: "Runtime is stopping.",
     }, registryPath);
-    assert.equal(busy.applied, true);
+    assert.equal(stopping.applied, true);
     releaseHealthProbe();
 
     const inspection = await inspectionPromise;
-    assert.equal(inspection.status, RuntimeStatus.Busy, inspection.message);
-    assert.equal(inspection.entry.lifecycle.status, ProcessLifecycleStatus.Busy);
-    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, ProcessLifecycleStatus.Busy);
+    assert.equal(inspection.status, RuntimeStatus.Unhealthy, inspection.message);
+    assert.equal(inspection.entry.lifecycle.status, ProcessLifecycleStatus.Stopping);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.lifecycle.status, ProcessLifecycleStatus.Stopping);
   } finally {
     releaseHealthProbe();
     await pipeServer.stop(true).catch(() => undefined);
@@ -1834,6 +1785,11 @@ test("runtime status renders runtime health and state details", () => {
           startedAt: "2026-05-01T00:00:00.000Z",
         },
         state: {
+          lifecycle: {
+            phase: "ready",
+            revision: { observed: 1, accepted: 1, published: 1 },
+            settled: true,
+          },
           health: {
             status: "ready",
             engine: {

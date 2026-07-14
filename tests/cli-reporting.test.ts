@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "vitest";
 import { ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, createPaths } from "@opencanon/core";
 import {
-  compareAndSetRuntimeLifecycle,
   openProjectStore,
-  ProcessLifecycleStatus,
   projectRuntimeStatePath,
-  readProjectRuntimeEntry,
   runtimeNamespaceForRegistry,
 } from "@opencanon/runtime";
 import { createAuthoringProject } from "../packages/runtime/test/support.ts";
@@ -96,7 +93,7 @@ test("search fails when Project Knowledge is not ready", () => {
   }
 }, CliSpawnTimeoutMs);
 
-test("doctor waits for active project work before inspecting runtime state", async () => {
+test("doctor treats a responsive runtime as healthy without waiting for background refresh", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-ready-"));
   const registryPath = path.join(rootDir, "global", "service.json");
   try {
@@ -113,48 +110,14 @@ test("doctor waits for active project work before inspecting runtime state", asy
     });
     assert.equal(started.status, 0, started.stderr || started.stdout);
 
-    const entry = readProjectRuntimeEntry(rootDir, registryPath);
-    assert(entry, "project runtime was not registered");
-    const busy = compareAndSetRuntimeLifecycle(
-      entry,
-      {
-        ...entry.lifecycle,
-        status: ProcessLifecycleStatus.Busy,
-        updatedAt: new Date().toISOString(),
-        message: "Test project work is active.",
-      },
-      registryPath,
-    );
-    assert.equal(busy.applied, true, "project runtime did not enter the test busy state");
-
     const doctorStartedAt = Date.now();
-    const doctorPromise = runCliProcess(rootDir, ["doctor", "--format", "json"]);
-    await delay(350);
-
-    let completed = false;
-    for (let attempt = 0; attempt < 20 && !completed; attempt += 1) {
-      const activeEntry = readProjectRuntimeEntry(rootDir, registryPath);
-      assert(activeEntry, "project runtime registration disappeared while Doctor waited");
-      if (activeEntry.lifecycle.status === ProcessLifecycleStatus.Running) {
-        completed = true;
-        break;
-      }
-      completed = compareAndSetRuntimeLifecycle(
-        activeEntry,
-        {
-          ...activeEntry.lifecycle,
-          status: ProcessLifecycleStatus.Running,
-          updatedAt: new Date().toISOString(),
-          message: "Test project work completed.",
-        },
-        registryPath,
-      ).applied;
-      if (!completed) await delay(25);
-    }
-    assert.equal(completed, true, "project runtime did not leave the test busy state");
-
-    const doctor = await doctorPromise;
-    assert(Date.now() - doctorStartedAt >= 300, "Doctor returned before active project work settled");
+    const doctor = spawnSync(process.execPath, [script, "doctor", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert(Date.now() - doctorStartedAt < 30_000, "Doctor blocked on background project-state work");
     assert([0, 1].includes(doctor.status ?? -1), doctor.stderr || doctor.stdout);
     const payload = JSON.parse(doctor.stdout) as { checks: Array<{ id: string; status: string; message: string }> };
     assert.equal(payload.checks.find((check) => check.id === "runtime-health")?.status, "pass");
@@ -395,40 +358,4 @@ function testEnv(rootDir: string): Record<string, string> {
   }
   env.OPENCANON_SERVICE_REGISTRY_PATH = path.join(rootDir, "global", "service.json");
   return env;
-}
-
-function runCliProcess(rootDir: string, args: string[]): Promise<{ status: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script, ...args], {
-      cwd: rootDir,
-      env: testEnv(rootDir),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error(`OpenCanon CLI process timed out after ${CliSpawnTimeoutMs}ms.`));
-    }, CliSpawnTimeoutMs);
-    child.once("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-    child.once("close", (status) => {
-      clearTimeout(timeout);
-      resolve({ status, stdout, stderr });
-    });
-  });
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

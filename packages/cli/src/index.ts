@@ -290,7 +290,7 @@ async function buildDoctorRuntimeHealth(rootDir: string): Promise<DoctorRuntimeH
 
 async function settleRuntimeForDoctor(rootDir: string): Promise<void> {
   const inspection = await inspectProjectRuntime(rootDir);
-  if (inspection?.status !== RuntimeStatus.Starting && inspection?.status !== RuntimeStatus.Busy) return;
+  if (inspection?.status !== RuntimeStatus.Starting) return;
   try {
     await waitForProjectRuntimeReady(rootDir, { timeoutMs: RuntimeStartupHealthBudgetMs });
   } catch {

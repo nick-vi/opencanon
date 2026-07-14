@@ -9,7 +9,7 @@ import { stopProjectRuntime, stopService } from "./service-control.ts";
 import { discoverOpenCanonProject } from "./service-discovery.ts";
 import { runtimeIdentityForEntrypoint, runtimeIdentityMatches, ownerPidFromEnv, createProcessLeaseId } from "./service-identity.ts";
 import { createLifecycle, withLifecycle } from "./service-lifecycle.ts";
-import { inspectProjectRuntime, inspectService, runtimeBusyStillWithinBudget, runtimeStartupStillWithinGrace, waitForRuntimeHealth, waitForRuntimeHealthResult, waitForServiceHealthResult } from "./service-monitor.ts";
+import { inspectProjectRuntime, inspectService, runtimeStartupStillWithinGrace, waitForRuntimeHealth, waitForRuntimeHealthResult, waitForServiceHealthResult } from "./service-monitor.ts";
 import {
   chooseAvailablePort,
   portRangeKeyForRegistry,
@@ -92,15 +92,8 @@ export async function startProjectRuntime(input: {
     const existing = await inspectProjectRuntime(rootDir, registryPath);
     const nowMs = Date.now();
     await retireConflictingProjectWorkerLease(rootDir, registryPath, existing?.entry.pid, {
-      allowStaleAllowedPid: existing ? runtimeStartupStillWithinGrace(existing.entry, nowMs) || runtimeBusyStillWithinBudget(existing.entry, nowMs) : false,
+      allowStaleAllowedPid: existing ? runtimeStartupStillWithinGrace(existing.entry, nowMs) : false,
     });
-    if (existing?.status === RuntimeStatus.Busy) {
-      return {
-        status: StartProjectRuntimeStatus.AlreadyRunning,
-        entry: existing.entry,
-        message: `OpenCanon project runtime is busy for ${rootDir}.`,
-      };
-    }
     if (existing && !runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
       await stopProjectRuntime(rootDir, registryPath);
     } else if (existing?.status === RuntimeStatus.Starting) {
@@ -108,13 +101,6 @@ export async function startProjectRuntime(input: {
       if (ready) {
         const transition = compareAndSetRuntimeLifecycle(existing.entry, createLifecycle(ProcessLifecycleStatus.Running, "Runtime health endpoint is ready."), registryPath);
         if (!transition.applied) {
-          if (transition.current && runtimeBusyStillWithinBudget(transition.current, Date.now())) {
-            return {
-              status: StartProjectRuntimeStatus.AlreadyRunning,
-              entry: transition.current,
-              message: `OpenCanon project runtime is busy for ${rootDir}.`,
-            };
-          }
           throw new Error(`Project runtime registration changed while startup health was being confirmed for ${rootDir}.`);
         }
         return {

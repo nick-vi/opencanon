@@ -67,7 +67,7 @@ export default [
       {
         id: "operation-resources-are-bounded",
         statement: "A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.",
-        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations hold the supervised runtime busy lifecycle", "stale inspection cannot overwrite or replace active work", "Project State allocates monotonic run-event sequences atomically across runtime connections"],
+        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations leave process readiness running and expose work through operation resources", "process inspection cannot overwrite a concurrent lifecycle transition", "Project State allocates monotonic run-event sequences atomically across runtime connections"],
         checks: ["contracts-tests", "change-run-tests", "runtime-supervision-tests", "engine-tests"],
       },
       {
@@ -431,7 +431,7 @@ export default [
       {
         id: "transport-and-project-readiness-are-distinct",
         statement: "Transport liveness, project snapshot readiness, and Project Knowledge readiness are independently observable states.",
-        acceptance: ["transport can accept status requests while project refresh is active", "project summary reports freshness without pretending transient work is failure", "Knowledge routes reject missing, indexing, stale, or failed indexes explicitly"],
+        acceptance: ["transport can accept status requests while project refresh is active", "project summary reports freshness without pretending transient work is failure", "project selection is independent from process and revision status", "Knowledge routes reject missing, indexing, stale, or failed indexes explicitly"],
         checks: ["runtime-client-tests", "contracts-tests"],
       },
       {
@@ -471,9 +471,9 @@ export default [
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
       {
-        id: "doctor-inspects-settled-runtime",
-        statement: "Doctor waits within a bounded lifecycle budget for expected project startup or active work before inspecting runtime health, producers, and Project Knowledge.",
-        acceptance: ["Doctor immediately after validation does not report transient busy work as unhealthy", "all live checks observe the settled matching runtime", "work that exceeds the budget remains an explicit nonzero lifecycle failure"],
+        id: "doctor-inspects-live-runtime",
+        statement: "Doctor waits only for process startup, then inspects runtime health, producers, and Project Knowledge without blocking on an unrelated project-state revision.",
+        acceptance: ["Doctor immediately after validation does not report active refresh work as unhealthy", "a responsive matching runtime remains process-ready while revisions refresh", "failed revision state remains explicitly observable through runtime state"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
       {
@@ -516,7 +516,7 @@ export default [
         id: "doctor-after-project-work",
         given: ["a matching project runtime is registered", "validation or refresh work is still active"],
         when: "Doctor runs immediately after that project work",
-        then: ["Doctor waits for the runtime to settle within its bounded budget", "health, producer, and Knowledge checks use the ready runtime", "transient busy state is not rendered as a false failure"],
+        then: ["Doctor confirms the responsive running process", "health, producer, and Knowledge checks use the matching runtime", "revision progress remains visible without becoming a false health failure"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
     ],

@@ -1,6 +1,6 @@
 import { createLifecycle, restartDue, runtimeFailureLifecycle } from "./service-lifecycle.ts";
 import { parseOpenCanonProblemFromError } from "@opencanon/core";
-import { inspectAllRuntimes, runtimeBusyStillWithinBudget, runtimeStartupStillWithinGrace } from "./service-monitor.ts";
+import { inspectAllRuntimes, runtimeStartupStillWithinGrace } from "./service-monitor.ts";
 import { repairRegisteredServiceProcessArtifacts, retireConflictingProjectWorkerLease } from "./service-process.ts";
 import { startProjectRuntime } from "./service-start.ts";
 import {
@@ -25,7 +25,6 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
   const repair = await repairRegisteredServiceProcessArtifacts(registryPath);
   const result: ReconcileProjectRuntimesResult = {
     inspected: 0,
-    busy: 0,
     running: 0,
     starting: 0,
     restarted: 0,
@@ -40,17 +39,11 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
   for (const inspection of inspections) {
     result.inspected += 1;
     const withinStartupGrace = runtimeStartupStillWithinGrace(inspection.entry, nowMs);
-    const withinBusyBudget = runtimeBusyStillWithinBudget(inspection.entry, nowMs);
     await retireConflictingProjectWorkerLease(inspection.entry.rootDir, registryPath, inspection.entry.pid, {
-      allowStaleAllowedPid: withinStartupGrace || withinBusyBudget,
+      allowStaleAllowedPid: withinStartupGrace,
     });
     if (inspection.status === RuntimeStatus.Running) {
       result.running += 1;
-      continue;
-    }
-
-    if (inspection.status === RuntimeStatus.Busy || withinBusyBudget) {
-      result.busy += 1;
       continue;
     }
 
@@ -81,7 +74,7 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
     const failedLifecycle = runtimeFailureLifecycle(inspection.entry, inspection.message, nowMs);
     const failureTransition = compareAndSetRuntimeLifecycle(inspection.entry, failedLifecycle, registryPath);
     if (!failureTransition.applied) {
-      countConcurrentLifecycle(result, failureTransition.current, nowMs);
+      countConcurrentLifecycle(result, failureTransition.current);
       continue;
     }
     const failedEntry = failureTransition.entry;
@@ -155,14 +148,9 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
 function countConcurrentLifecycle(
   result: ReconcileProjectRuntimesResult,
   entry: RuntimeRegistryEntry | undefined,
-  nowMs: number,
 ): void {
   if (!entry) {
     result.stale += 1;
-    return;
-  }
-  if (runtimeBusyStillWithinBudget(entry, nowMs)) {
-    result.busy += 1;
     return;
   }
   if (entry.lifecycle.status === ProcessLifecycleStatus.Running) result.running += 1;

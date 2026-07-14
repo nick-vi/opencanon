@@ -40,7 +40,7 @@ export async function buildServiceOverview(input: ServiceOverviewRequest & { reg
     pushProject(serviceProjectSummaryFromRoot(rootDir, discoverOpenCanonProject(rootDir) ? ServiceProjectStatusValue.Recent : ServiceProjectStatusValue.Stale, currentRootDir));
   }
 
-  projects.sort((left, right) => projectStatusRank(left.status) - projectStatusRank(right.status) || left.rootDir.localeCompare(right.rootDir));
+  projects.sort((left, right) => Number(right.selected) - Number(left.selected) || projectStatusRank(left.status) - projectStatusRank(right.status) || left.rootDir.localeCompare(right.rootDir));
   return {
     service: service ? serviceSummaryFromInspection(service) : unavailableServiceSummary(registryPath),
     ...(currentRootDir ? { currentRootDir } : {}),
@@ -116,7 +116,9 @@ function serviceProjectSummaryFromInspection(inspection: RuntimeInspection, curr
     id: rootDir,
     rootDir,
     url: inspection.entry.url,
-    status: currentRootDir === rootDir ? ServiceProjectStatusValue.Current : inspection.status,
+    status: inspection.status,
+    selected: currentRootDir === rootDir,
+    ...(inspection.state?.lifecycle ? { lifecycle: inspection.state.lifecycle } : {}),
     pid: inspection.entry.pid,
     port: inspection.entry.port,
     pipeEndpoint: inspection.entry.pipeEndpoint,
@@ -135,7 +137,8 @@ function serviceProjectSummaryFromRoot(rootDir: string, status: ServiceProjectSt
     id: rootDir,
     rootDir,
     url: "",
-    status: currentRootDir === rootDir ? ServiceProjectStatusValue.Current : status,
+    status,
+    selected: currentRootDir === rootDir,
   };
 }
 
@@ -151,15 +154,13 @@ function canonicalOverviewRootDir(rootDir: string | undefined): string | undefin
 }
 
 function projectStatusRank(status: ServiceProjectStatus): number {
-  if (status === ServiceProjectStatusValue.Current) return 0;
-  if (status === ServiceProjectStatusValue.Busy) return 1;
-  if (status === ServiceProjectStatusValue.Running) return 2;
-  if (status === ServiceProjectStatusValue.Starting) return 3;
-  if (status === ServiceProjectStatusValue.Failed) return 4;
-  if (status === ServiceProjectStatusValue.Discovered) return 5;
-  if (status === ServiceProjectStatusValue.Recent) return 6;
-  if (status === ServiceProjectStatusValue.Unhealthy) return 7;
-  return 8;
+  if (status === ServiceProjectStatusValue.Running) return 0;
+  if (status === ServiceProjectStatusValue.Starting) return 1;
+  if (status === ServiceProjectStatusValue.Failed) return 2;
+  if (status === ServiceProjectStatusValue.Discovered) return 3;
+  if (status === ServiceProjectStatusValue.Recent) return 4;
+  if (status === ServiceProjectStatusValue.Unhealthy) return 5;
+  return 6;
 }
 
 function serviceActivityItemFromLifecycleEvent(event: ProcessLifecycleEvent): ServiceActivityItem {

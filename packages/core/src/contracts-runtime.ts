@@ -171,6 +171,11 @@ export const RuntimeStateSchema = z.object({
 });
 export type RuntimeState = z.infer<typeof RuntimeStateSchema>;
 
+export const RuntimeLiveStateSchema = RuntimeStateSchema.extend({
+  lifecycle: RuntimeLifecycleStateSchema,
+});
+export type RuntimeLiveState = z.infer<typeof RuntimeLiveStateSchema>;
+
 export const RuntimeProjectSummarySchema = z.object({
   rootDir: z.string().min(1),
   lifecycle: RuntimeLifecycleStateSchema,
