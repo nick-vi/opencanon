@@ -31,6 +31,10 @@ export type RuntimeStreamEvent = {
   snapshot?: RuntimeSnapshot;
 };
 
+export type EventStreamOptions = {
+  closeWhen?(event: RuntimeStreamEvent): boolean;
+};
+
 export function eventStream(stream: ReadableStream<Uint8Array>): Response {
   return new Response(stream, {
     headers: {
@@ -46,7 +50,7 @@ const StreamHighWaterMark = 32;
 
 export function createEventBroadcaster() {
   const encoder = new TextEncoder();
-  const clients = new Map<ReadableStreamDefaultController<Uint8Array>, { heartbeat?: ReturnType<typeof setInterval> }>();
+  const clients = new Map<ReadableStreamDefaultController<Uint8Array>, { heartbeat?: ReturnType<typeof setInterval>; closeWhen?: EventStreamOptions["closeWhen"] }>();
 
   function encode(event: RuntimeStreamEvent): Uint8Array {
     return encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
@@ -59,15 +63,22 @@ export function createEventBroadcaster() {
   }
 
   return {
-    connect(initial: RuntimeStreamEvent | RuntimeStreamEvent[] | (() => RuntimeStreamEvent[])): ReadableStream<Uint8Array> {
+    connect(initial: RuntimeStreamEvent | RuntimeStreamEvent[] | (() => RuntimeStreamEvent[]), options: EventStreamOptions = {}): ReadableStream<Uint8Array> {
       let activeController: ReadableStreamDefaultController<Uint8Array> | undefined;
       return new ReadableStream<Uint8Array>(
         {
           start(controller) {
             activeController = controller;
-            clients.set(controller, {});
+            clients.set(controller, { closeWhen: options.closeWhen });
             const initialEvents = typeof initial === "function" ? initial() : Array.isArray(initial) ? initial : [initial];
-            for (const event of initialEvents) controller.enqueue(encode(event));
+            for (const event of initialEvents) {
+              controller.enqueue(encode(event));
+              if (options.closeWhen?.(event)) {
+                removeClient(controller);
+                controller.close();
+                return;
+              }
+            }
             const heartbeat = setInterval(() => {
               try {
                 controller.enqueue(encoder.encode(": heartbeat\n\n"));
@@ -77,7 +88,7 @@ export function createEventBroadcaster() {
             }, 30_000);
             // Don't keep the runtime event loop alive solely for a client heartbeat.
             if (typeof heartbeat === "object" && "unref" in heartbeat) (heartbeat as { unref: () => void }).unref();
-            clients.set(controller, { heartbeat });
+            clients.set(controller, { heartbeat, closeWhen: options.closeWhen });
           },
           cancel() {
             if (activeController) removeClient(activeController);
@@ -93,6 +104,7 @@ export function createEventBroadcaster() {
     broadcast(event: RuntimeStreamEvent): void {
       const payload = encode(event);
       for (const controller of [...clients.keys()]) {
+        const client = clients.get(controller);
         const desiredSize = controller.desiredSize;
         if (desiredSize === null || desiredSize <= 0) {
           removeClient(controller);
@@ -106,6 +118,10 @@ export function createEventBroadcaster() {
         }
         try {
           controller.enqueue(payload);
+          if (client?.closeWhen?.(event)) {
+            removeClient(controller);
+            controller.close();
+          }
         } catch {
           removeClient(controller);
         }

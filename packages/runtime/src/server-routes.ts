@@ -1,6 +1,7 @@
 import { SpanKind, type SimpleTracer } from "@opencanon/observability";
 import {
   createOpenCanonDiagnostic,
+  ChangeCheckRunEventType,
   ChangeCheckRunStatusSchema,
   ChangeTaskEventType,
   createPaths,
@@ -482,13 +483,25 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.EventsStream) {
+        const runIds = [...new Set(url.searchParams.getAll(UrlSearchParam.RunId).filter(Boolean))];
+        const unknownRunId = runIds.find((runId) => !changeCheckRunner.describe(runId));
+        if (unknownRunId) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${unknownRunId}.`)]), 404);
+        const pendingRunIds = new Set(runIds);
         return eventStream(events.connect(() => {
           const initial = [snapshotEvent(stateManager.currentSnapshot(), "Connected to runtime stream.")];
-          for (const runId of url.searchParams.getAll(UrlSearchParam.RunId).filter(Boolean)) {
+          for (const runId of runIds) {
             const after = streamCursor(url, runId);
             for (const event of changeCheckRunner.listEvents(runId, after)) initial.push(operationEvent(event));
           }
           return initial;
+        }, runIds.length === 0 ? {} : {
+          closeWhen(event) {
+            const operation = event.operation;
+            if (operation && pendingRunIds.has(operation.runId) && isTerminalChangeCheckEvent(operation.type)) {
+              pendingRunIds.delete(operation.runId);
+            }
+            return pendingRunIds.size === 0;
+          },
         }));
       }
       if (url.pathname === ApiRoute.Events)
@@ -673,6 +686,10 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
   };
 
   return routeRequest;
+}
+
+function isTerminalChangeCheckEvent(type: ChangeCheckRunEventType): boolean {
+  return type === ChangeCheckRunEventType.Passed || type === ChangeCheckRunEventType.Failed || type === ChangeCheckRunEventType.Cancelled;
 }
 
 function streamCursor(url: URL, _runId: string): number {

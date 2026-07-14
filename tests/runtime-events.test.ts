@@ -51,6 +51,24 @@ test("event broadcaster emits the typed SSE envelope", async () => {
   assert.match(text, /"phase":"runtime-start"/);
 });
 
+test("event broadcaster closes finite streams on their declared terminal event", async () => {
+  const broadcaster = createEventBroadcaster();
+  const stream = broadcaster.connect(
+    indexingEvent("Connected.", { phase: "runtime-start", indeterminate: true }),
+    { closeWhen: (event) => event.summary === "Complete." },
+  );
+  const reader = stream.getReader();
+
+  assert.equal((await reader.read()).done, false);
+  broadcaster.broadcast(indexingEvent("Working.", { phase: "validation", indeterminate: true }));
+  assert.equal((await reader.read()).done, false);
+  broadcaster.broadcast(indexingEvent("Complete.", { phase: "ready", indeterminate: false }));
+  assert.equal((await reader.read()).done, false);
+  assert.equal((await reader.read()).done, true);
+
+  broadcaster.close();
+});
+
 test("event broadcaster disconnects a stalled consumer at its buffer bound", async () => {
   const broadcaster = createEventBroadcaster();
   const stream = broadcaster.connect(indexingEvent("Connected.", { phase: "runtime-start", indeterminate: true }));
