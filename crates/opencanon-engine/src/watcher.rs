@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use globset::{Glob, GlobSet};
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
-use notify::Event;
+use notify::{Event, EventKind};
 
 use crate::contracts::{ResolvedProjectSettings, WatcherEventBatch};
 use crate::json::napi_error;
@@ -142,7 +142,14 @@ fn emit_watcher_batch(
     }
 }
 
-fn watcher_event_paths(root_dir: &Path, filter: &WatcherPathFilter, event: Event) -> Vec<String> {
+pub(crate) fn watcher_event_paths(
+    root_dir: &Path,
+    filter: &WatcherPathFilter,
+    event: Event,
+) -> Vec<String> {
+    if matches!(event.kind, EventKind::Access(_) | EventKind::Other) {
+        return Vec::new();
+    }
     event
         .paths
         .iter()

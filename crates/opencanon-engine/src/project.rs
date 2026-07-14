@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use napi_derive::napi;
-use notify::{Event, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKindMask, RecursiveMode, Watcher};
 use opencanon_inference::{Embedder, EmbedderConfig, Generator, GeneratorConfig};
 use rusqlite::{params, Connection};
 use serde_json::json;
@@ -309,7 +309,8 @@ impl EngineProjectHandle {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_for_thread = stop.clone();
         let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
-        let mut watcher = notify::recommended_watcher(tx)
+        let watcher_config = Config::default().with_event_kinds(EventKindMask::CORE);
+        let mut watcher = notify::RecommendedWatcher::new(tx, watcher_config)
             .map_err(|error| notify_error("Could not create engine watcher", error))?;
         watcher
             .watch(&root_dir, RecursiveMode::Recursive)

@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use super::support::*;
 use crate::open_project_json;
-use crate::watcher::{build_watcher_filter, normalize_watcher_path};
+use crate::watcher::{build_watcher_filter, normalize_watcher_path, watcher_event_paths};
 
 #[test]
 fn hashes_files_with_blake3() {
@@ -189,5 +189,33 @@ fn watcher_path_filter_normalizes_project_files_and_ignores_generated_paths() {
     assert_eq!(
         normalize_watcher_path(&root, &filter, &root.join("coverage/report.json")),
         None
+    );
+}
+
+#[test]
+fn watcher_events_ignore_non_mutating_access_and_meta_events() {
+    use notify::event::{AccessKind, CreateKind};
+    use notify::{Event, EventKind};
+
+    let root = test_root("watcher-event-kinds");
+    let filter = build_watcher_filter(&test_settings()).unwrap();
+    let source_path = root.join("src/company.ts");
+
+    let access = Event::new(EventKind::Access(AccessKind::Read)).add_path(source_path.clone());
+    assert!(watcher_event_paths(&root, &filter, access).is_empty());
+
+    let meta = Event::new(EventKind::Other).add_path(source_path.clone());
+    assert!(watcher_event_paths(&root, &filter, meta).is_empty());
+
+    let unknown = Event::new(EventKind::Any).add_path(source_path.clone());
+    assert_eq!(
+        watcher_event_paths(&root, &filter, unknown),
+        vec!["src/company.ts".to_string()]
+    );
+
+    let create = Event::new(EventKind::Create(CreateKind::File)).add_path(source_path);
+    assert_eq!(
+        watcher_event_paths(&root, &filter, create),
+        vec!["src/company.ts".to_string()]
     );
 }
