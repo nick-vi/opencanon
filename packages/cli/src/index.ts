@@ -2,7 +2,7 @@
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import { inspectProjectRuntime, inspectService, privateProjectRuntimeStatePath, projectRuntimeStatePath, ProjectRuntimeEnv, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, runtimeNamespaceForRegistry, RuntimeStatus, serviceRegistryPath, stopProjectRuntime, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
+import { inspectProjectRuntime, inspectService, privateProjectRuntimeStatePath, projectRuntimeStatePath, ProjectRuntimeEnv, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, runtimeNamespaceForRegistry, RuntimeStartupHealthBudgetMs, RuntimeStatus, serviceRegistryPath, stopProjectRuntime, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
 import { fail, formatOpenCanonProblem, Format, parseOpenCanonProblemFromError, resolveRootDir } from "@opencanon/core";
 import { applyDoctorFixes, buildDoctorReport, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
 import type { DoctorRuntimeHealth, ProducerStatus } from "@opencanon/core";
@@ -32,8 +32,6 @@ import { runAnalyzeCommand } from "./analyze.ts";
 import { runValidateCommand } from "./validate.ts";
 import { runWorktreeCommand } from "./worktree.ts";
 import { readCliPackageVersion } from "./package-version.ts";
-
-const DoctorProjectRuntimeReadyTimeoutMs = 60_000;
 
 export { OpenCanonPlugin } from "./opencode-plugin.ts";
 
@@ -294,7 +292,7 @@ async function settleRuntimeForDoctor(rootDir: string): Promise<void> {
   const inspection = await inspectProjectRuntime(rootDir);
   if (inspection?.status !== RuntimeStatus.Starting && inspection?.status !== RuntimeStatus.Busy) return;
   try {
-    await waitForProjectRuntimeReady(rootDir, { timeoutMs: DoctorProjectRuntimeReadyTimeoutMs });
+    await waitForProjectRuntimeReady(rootDir, { timeoutMs: RuntimeStartupHealthBudgetMs });
   } catch {
     // Doctor reports the final inspected runtime state below; it should not crash
     // before rendering the actionable runtime-health check.

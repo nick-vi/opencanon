@@ -356,6 +356,14 @@ test("native embedding smoke is required unless explicitly optional", () => {
   assert(!source.includes("OPENCANON_NATIVE_EMBEDDING_SMOKE"));
 });
 
+test("CI quality includes TypeScript contract checking", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+
+  assert.match(packageJson.scripts?.["check:ci:quality"] ?? "", /npm run check:types/);
+});
+
 test("CI separates fixture checks from required project producers", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts?: Record<string, string>;

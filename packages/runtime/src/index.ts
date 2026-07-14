@@ -129,6 +129,7 @@ export {
   inspectRuntimeEntry,
   inspectService,
   inspectProjectRuntime,
+  RuntimeStartupHealthBudgetMs,
   waitForProjectRuntimeReady,
   isProcessRunning,
   openRuntimeUrl,

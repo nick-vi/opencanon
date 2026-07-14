@@ -68,6 +68,7 @@ export {
   inspectProjectRuntime,
   inspectRuntimeEntry,
   inspectService,
+  RuntimeStartupHealthBudgetMs,
   waitForProjectRuntimeReady,
 } from "./service-monitor.ts";
 export { repairServiceProcessState, stopProjectRuntime, stopService } from "./service-control.ts";
