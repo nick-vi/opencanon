@@ -557,20 +557,22 @@ test.skipIf(process.platform === "win32")("service stop closes service admission
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-stop-order-"));
   const registryPath = path.join(rootDir, "global", "service.json");
   const orderPath = path.join(rootDir, "shutdown-order.log");
+  const readyPrefix = path.join(rootDir, "shutdown-ready");
   const childSource = `
-    import { appendFileSync } from "node:fs";
-    const [label, output] = process.argv.slice(1);
+    import { appendFileSync, writeFileSync } from "node:fs";
+    const [label, output, readyPrefix] = process.argv.slice(1);
     process.once("SIGTERM", () => {
       appendFileSync(output, label + "\\n");
       process.exit(0);
     });
+    writeFileSync(readyPrefix + "." + label, String(process.pid));
     setInterval(() => {}, 1000);
   `;
-  const service = spawn(process.execPath, ["--input-type=module", "-e", childSource, "service", orderPath], {
+  const service = spawn(process.execPath, ["--input-type=module", "-e", childSource, "service", orderPath, readyPrefix], {
     detached: true,
     stdio: "ignore",
   });
-  const runtime = spawn(process.execPath, ["--input-type=module", "-e", childSource, "runtime", orderPath], {
+  const runtime = spawn(process.execPath, ["--input-type=module", "-e", childSource, "runtime", orderPath, readyPrefix], {
     detached: true,
     stdio: "ignore",
   });
@@ -602,6 +604,16 @@ test.skipIf(process.platform === "win32")("service stop closes service admission
       ...testRuntimeLease("runtime-stop-order-lease"),
       ...testRuntimeIdentity,
     }, registryPath);
+
+    const readyDeadline = Date.now() + 2_000;
+    while (
+      Date.now() < readyDeadline &&
+      !(existsSync(`${readyPrefix}.service`) && existsSync(`${readyPrefix}.runtime`))
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(existsSync(`${readyPrefix}.service`), true, "service did not install its shutdown handler");
+    assert.equal(existsSync(`${readyPrefix}.runtime`), true, "runtime did not install its shutdown handler");
 
     await stopService(registryPath);
 
