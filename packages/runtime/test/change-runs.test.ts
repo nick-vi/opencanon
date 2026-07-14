@@ -156,20 +156,28 @@ test("runtime idle shutdown waits for active Change checks", { timeout: Integrat
 
     const events = await readRunEvents(server.url, headers, started.id);
     assert.equal(events.at(-1)?.type, ChangeCheckRunEventType.Passed);
-    await Promise.race([
-      idle,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("runtime did not become idle after the Change check and queued revision work completed")),
-          IdleShutdownDiagnosticTimeoutMs,
-        ),
-      ),
-    ]);
+    await waitForRuntimeIdle(idle, server);
   } finally {
     await server.stop();
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+async function waitForRuntimeIdle(idle: Promise<void>, server: Awaited<ReturnType<typeof startOpenCanonRuntime>>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      idle,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`runtime did not become idle after the Change check completed: ${JSON.stringify(server.idleStatus())}`));
+        }, IdleShutdownDiagnosticTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 test("Change check output preserves UTF-8 at persisted and tail byte limits", { timeout: IntegrationTimeoutMs }, async () => {
   const characterCount = 300_000;

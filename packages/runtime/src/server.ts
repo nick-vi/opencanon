@@ -62,6 +62,7 @@ import {
   type DefinitionHistoryKind,
   type DefinitionHistoryTarget,
   type ProducerPolicy,
+  type RuntimeLifecycleState,
   type RuntimeWorkerJob,
   type ValidationResultCache,
   type WatcherEventBatch,
@@ -144,7 +145,16 @@ export type RuntimeServer = {
   url: string;
   pipeEndpoint: string;
   authToken: string;
+  idleStatus(): RuntimeIdleStatus;
   stop(): Promise<void>;
+};
+
+export type RuntimeIdleStatus = {
+  idle: boolean;
+  transportActivities: string[];
+  workerJob?: RuntimeWorkerJob;
+  changeChecks: boolean;
+  lifecycle: RuntimeLifecycleState;
 };
 
 export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}): Promise<RuntimeServer> {
@@ -626,7 +636,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
 
   async function stopForIdle(): Promise<void> {
     if (stopped) return;
-    if (transportActivity.count() > 0 || currentWorkerJob || changeCheckRunner.hasActiveWork() || stateManager.hasPendingWork()) {
+    if (!runtimeIdleStatus().idle) {
       resetIdleTimer();
       return;
     }
@@ -796,10 +806,24 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     url: formatHttpBaseUrl(host, activeServer.port),
     pipeEndpoint: activePipeServer.endpoint,
     authToken,
+    idleStatus: runtimeIdleStatus,
     async stop() {
       await stopInternal();
     },
   };
+
+  function runtimeIdleStatus(): RuntimeIdleStatus {
+    const transportActivities = transportActivity.labels();
+    const changeChecks = changeCheckRunner.hasActiveWork();
+    const lifecycle = stateManager.lifecycle();
+    return {
+      idle: transportActivities.length === 0 && !currentWorkerJob && !changeChecks && !stateManager.hasPendingWork(),
+      transportActivities,
+      ...(currentWorkerJob ? { workerJob: currentWorkerJob } : {}),
+      changeChecks,
+      lifecycle,
+    };
+  }
 
   async function stopInternal(): Promise<void> {
     if (stopped) return;
