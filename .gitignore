@@ -19,3 +19,5 @@ packages/engine/binaries/
 crates/*/target/
 apps/site/.wrangler/
 .claude/
+.opencanon/runtime.log
+.opencanon/semantic-index/
