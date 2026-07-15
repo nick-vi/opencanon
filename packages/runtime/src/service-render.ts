@@ -130,6 +130,7 @@ export function formatRefreshStatus(refresh: RuntimeHealth["refresh"]): string {
 function formatLifecycle(lifecycle: ProcessLifecycleState): string {
   const details: string[] = [lifecycle.status];
   if (lifecycle.message) details.push(lifecycle.message);
+  if (lifecycle.healthConfirmation) details.push(`confirm health after ${lifecycle.healthConfirmation.confirmationDueAt}`);
   if (lifecycle.restart.attempts > 0) details.push(`restart attempts ${lifecycle.restart.attempts}`);
   if (lifecycle.restart.nextRestartAt) details.push(`next restart ${lifecycle.restart.nextRestartAt}`);
   return details.join("; ");

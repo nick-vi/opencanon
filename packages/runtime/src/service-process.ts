@@ -16,7 +16,6 @@ import {
   isRegistryEntry,
   isServiceEntry,
   projectRuntimePath,
-  projectWorkerLeaseHeartbeatStale,
   projectWorkerLeasePath,
   readProjectRuntimeEntry,
   readProjectWorkerLeaseFile,
@@ -73,8 +72,7 @@ export async function retireUnusableProjectRuntimeEntry(rootDir: string, registr
 export async function retireConflictingProjectWorkerLease(
   rootDir: string,
   registryPath: string,
-  allowedPid?: number,
-  options: { allowStaleAllowedPid?: boolean } = {},
+  registeredPid?: number,
 ): Promise<boolean> {
   const lockPath = projectWorkerLeasePath(rootDir, registryPath);
   const lease = readProjectWorkerLeaseFile(lockPath);
@@ -82,12 +80,7 @@ export async function retireConflictingProjectWorkerLease(
     rmSync(lockPath, { force: true });
     return false;
   }
-  if (
-    allowedPid !== undefined &&
-    lease.pid === allowedPid &&
-    isProcessRunning(lease.pid) &&
-    (options.allowStaleAllowedPid || !projectWorkerLeaseHeartbeatStale(lockPath))
-  ) return false;
+  if (registeredPid !== undefined && lease.pid === registeredPid && isProcessRunning(lease.pid)) return false;
 
   const running = isProcessRunning(lease.pid);
   if (running && lease.pid !== process.pid) await terminateSpawnedProcess(lease.pid);

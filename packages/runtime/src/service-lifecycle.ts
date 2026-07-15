@@ -60,6 +60,29 @@ export function runtimeFailureLifecycle(
   return createLifecycle(terminal ? ProcessLifecycleStatus.Failed : ProcessLifecycleStatus.BackingOff, message, restart, problem);
 }
 
+export function runtimeHealthConfirmationLifecycle(
+  message: string,
+  confirmationMs: number,
+  nowMs = Date.now(),
+): ProcessLifecycleState {
+  const firstFailureAt = new Date(nowMs).toISOString();
+  return {
+    ...createLifecycle(ProcessLifecycleStatus.Unhealthy, message),
+    healthConfirmation: {
+      firstFailureAt,
+      confirmationDueAt: new Date(nowMs + confirmationMs).toISOString(),
+      reason: message,
+    },
+  };
+}
+
+export function healthConfirmationDue(lifecycle: ProcessLifecycleState, nowMs = Date.now()): boolean {
+  const dueAt = lifecycle.healthConfirmation?.confirmationDueAt
+    ? Date.parse(lifecycle.healthConfirmation.confirmationDueAt)
+    : Number.NaN;
+  return !Number.isFinite(dueAt) || dueAt <= nowMs;
+}
+
 export function restartDue(lifecycle: ProcessLifecycleState, nowMs = Date.now()): boolean {
   if (lifecycle.status === ProcessLifecycleStatus.Failed) return false;
   const nextRestartAt = lifecycle.restart.nextRestartAt ? Date.parse(lifecycle.restart.nextRestartAt) : Number.NaN;

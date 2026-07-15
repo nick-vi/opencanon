@@ -34,7 +34,6 @@ const RegistryLockTimeoutMs = 7000;
 const StartupLockStaleMs = 30000;
 const StartupLockTimeoutMs = 45000;
 const ProjectWorkerLeaseHeartbeatMs = 5_000;
-const ProjectWorkerLeaseStaleMs = 15_000;
 const MaxLifecycleEvents = 200;
 
 export type StartupLockMetadata = {
@@ -402,14 +401,6 @@ export function readProjectWorkerLeaseFile(lockPath: string): ProjectWorkerLease
   return isProjectWorkerLease(parsed) ? parsed : undefined;
 }
 
-export function projectWorkerLeaseHeartbeatStale(lockPath: string, nowMs = Date.now()): boolean {
-  try {
-    return nowMs - statSync(lockPath).mtimeMs > ProjectWorkerLeaseStaleMs;
-  } catch {
-    return true;
-  }
-}
-
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -632,7 +623,18 @@ function isLifecycleState(value: unknown): value is ProcessLifecycleState {
     typeof record.updatedAt === "string" &&
     (record.message === undefined || typeof record.message === "string") &&
     (record.problem === undefined || isOpenCanonProblem(record.problem)) &&
-    isRestartState(record.restart)
+    isRestartState(record.restart) &&
+    (record.healthConfirmation === undefined || isHealthConfirmationState(record.healthConfirmation))
+  );
+}
+
+function isHealthConfirmationState(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.firstFailureAt === "string" &&
+    typeof record.confirmationDueAt === "string" &&
+    typeof record.reason === "string"
   );
 }
 

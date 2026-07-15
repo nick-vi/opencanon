@@ -90,10 +90,7 @@ export async function startProjectRuntime(input: {
     const cli = runtimeCliInvocation(rootDir, ["project", "start", "--foreground", "--host", host, "--port", String(input.port ?? defaultRuntimePort)]);
     const runtimeIdentity = runtimeIdentityForEntrypoint(cli.entrypoint);
     const existing = await inspectProjectRuntime(rootDir, registryPath);
-    const nowMs = Date.now();
-    await retireConflictingProjectWorkerLease(rootDir, registryPath, existing?.entry.pid, {
-      allowStaleAllowedPid: existing ? runtimeStartupStillWithinGrace(existing.entry, nowMs) : false,
-    });
+    await retireConflictingProjectWorkerLease(rootDir, registryPath, existing?.entry.pid);
     if (existing && !runtimeIdentityMatches(existing.entry, runtimeIdentity)) {
       await stopProjectRuntime(rootDir, registryPath);
     } else if (existing?.status === RuntimeStatus.Starting) {

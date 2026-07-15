@@ -192,6 +192,10 @@ export const ProcessLifecycleEventKind = {
   RuntimeStopped: "runtime-stopped",
   RuntimeStartupFailed: "runtime-startup-failed",
   RuntimeUnhealthy: "runtime-unhealthy",
+  RuntimeHealthConfirmationScheduled: "runtime-health-confirmation-scheduled",
+  RuntimeHealthConfirmationFailed: "runtime-health-confirmation-failed",
+  RuntimeRecovered: "runtime-recovered",
+  RuntimeRestarted: "runtime-restarted",
   RuntimeStale: "runtime-stale",
   RuntimeRestartScheduled: "runtime-restart-scheduled",
   RuntimeRestartSkipped: "runtime-restart-skipped",
@@ -212,12 +216,19 @@ export type ProcessRestartState = {
   lastReason?: string;
 };
 
+export type ProcessHealthConfirmationState = {
+  firstFailureAt: string;
+  confirmationDueAt: string;
+  reason: string;
+};
+
 export type ProcessLifecycleState = {
   status: ProcessLifecycleStatus;
   updatedAt: string;
   message?: string;
   problem?: OpenCanonProblem;
   restart: ProcessRestartState;
+  healthConfirmation?: ProcessHealthConfirmationState;
 };
 
 export type ProcessLifecycleEvent = {

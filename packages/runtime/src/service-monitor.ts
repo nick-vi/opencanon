@@ -4,6 +4,7 @@ import { ServiceApiRoute } from "./service-types.ts";
 import {
   LocalControlProtocolVersion,
   LocalHealthWaitFailure,
+  ProcessLifecycleEventKind,
   ProcessLifecycleScope,
   ProcessLifecycleStatus,
   RuntimeStatus,
@@ -18,6 +19,7 @@ import {
 } from "./service-types.ts";
 import {
   isProcessRunning,
+  appendLifecycleEvent,
   compareAndSetRuntimeLifecycle,
   compactRuntimeRegistry,
   readProjectRuntimeEntry,
@@ -119,7 +121,7 @@ export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryP
   if (runtime.ok) {
     const message = runtime.state ? "Runtime health and state endpoints are ready." : "Runtime health endpoint is ready.";
     const lifecycleCurrent = entry.lifecycle.status === ProcessLifecycleStatus.Running && entry.lifecycle.message === message;
-    const normalizedEntry = lifecycleCurrent ? entry : withLifecycle(entry, ProcessLifecycleStatus.Running, message);
+    const normalizedEntry = lifecycleCurrent ? entry : withLifecycle(entry, ProcessLifecycleStatus.Running, message, { attempts: 0 });
     if (registryPath && !lifecycleCurrent) {
       const transition = compareAndSetRuntimeLifecycle(entry, normalizedEntry.lifecycle, registryPath);
       if (!transition.applied) {
@@ -130,6 +132,19 @@ export async function inspectRuntimeEntry(entry: RuntimeRegistryEntry, registryP
           return await inspectRuntimeEntry(transition.current, registryPath);
         }
         return inspectionFromCurrentLifecycle(transition.current);
+      }
+      if (
+        entry.lifecycle.status === ProcessLifecycleStatus.Unhealthy ||
+        entry.lifecycle.status === ProcessLifecycleStatus.BackingOff
+      ) {
+        appendLifecycleEvent(registryPath, {
+          kind: ProcessLifecycleEventKind.RuntimeRecovered,
+          scope: ProcessLifecycleScope.Runtime,
+          rootDir: transition.entry.rootDir,
+          pid: transition.entry.pid,
+          leaseId: transition.entry.leaseId,
+          message: "Runtime health recovered before replacement.",
+        });
       }
       return {
         entry: transition.entry,

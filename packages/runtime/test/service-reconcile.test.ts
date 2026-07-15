@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,6 +15,7 @@ import {
   LocalTransportKind,
   ProcessLifecycleEventKind,
   ProcessLifecycleStatus,
+  projectWorkerLeasePath,
   readRuntimeLifecycleEvents,
   readRuntimeRegistry,
   readServiceEntry,
@@ -48,8 +49,9 @@ import {
   testServicePipeEndpoint,
   waitForSpawnedPid,
   waitUntilProcessStops,
+  writeProjectWorkerLease,
 } from "./service-support.ts";
-import { runtimeFailureLifecycle } from "../src/service-lifecycle.ts";
+import { runtimeFailureLifecycle, runtimeHealthConfirmationLifecycle } from "../src/service-lifecycle.ts";
 
 test("reconciler restarts a stale registered project runtime and records lifecycle events", { timeout: 20000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-stale-"));
@@ -313,18 +315,154 @@ test("reconciler confirms a live runtime health failure before replacing it", { 
 
     const result = await reconcileProjectRuntimes({ registryPath, nowMs });
     const registered = readRuntimeRegistry(registryPath)[0];
+    const events = readRuntimeLifecycleEvents(registryPath);
 
     assert.equal(result.unhealthy, 1);
-    assert.equal(result.backingOff, 1);
+    assert.equal(result.backingOff, 0);
     assert.equal(result.restarted, 0);
     assert.equal(registered?.pid, runtime.pid);
-    assert.equal(registered?.lifecycle.status, ProcessLifecycleStatus.BackingOff);
-    assert.equal(registered?.lifecycle.restart.attempts, 1);
-    assert.equal(registered?.lifecycle.restart.nextRestartAt, "2026-05-01T00:00:30.000Z");
+    assert.equal(registered?.lifecycle.status, ProcessLifecycleStatus.Unhealthy);
+    assert.equal(registered?.lifecycle.restart.attempts, 0);
+    assert.equal(registered?.lifecycle.restart.nextRestartAt, undefined);
+    assert.equal(registered?.lifecycle.healthConfirmation?.confirmationDueAt, "2026-05-01T00:00:30.000Z");
+    assert(events.some((event) => event.kind === ProcessLifecycleEventKind.RuntimeHealthConfirmationScheduled));
+    assert(!events.some((event) => event.kind === ProcessLifecycleEventKind.RuntimeRestartScheduled));
     assert(processIsRunning(runtime.pid));
   } finally {
     if (runtime.pid && processIsRunning(runtime.pid)) process.kill(runtime.pid, "SIGKILL");
     forgetRuntimeEntry(rootDir, registryPath);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("reconciler replaces a runtime only after health confirmation fails", { timeout: 20000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-confirmed-unhealthy-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const fakeCliPath = path.join(rootDir, "ready-opencanon.mjs");
+  const originalCli = process.env.OPENCANON_CLI;
+  const unhealthy = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], {
+    stdio: "ignore",
+  });
+  const nowMs = Date.parse("2026-05-01T00:00:00.000Z");
+  let replacementPid: number | undefined;
+
+  try {
+    if (!unhealthy.pid) throw new Error("test child did not start");
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
+    process.env.OPENCANON_CLI = fakeCliPath;
+    const port = await chooseRuntimePort({ host: "127.0.0.1" });
+    upsertRuntimeEntry({
+      rootDir,
+      host: "127.0.0.1",
+      port,
+      url: `http://127.0.0.1:${port}`,
+      pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
+      pid: unhealthy.pid,
+      startedAt: "2026-04-30T23:00:00.000Z",
+      logPath: path.join(rootDir, ".opencanon", "runtime.log"),
+      authToken: "test-token",
+      ...testRuntimeLease("confirmed-unhealthy-runtime-lease"),
+      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
+    }, registryPath);
+
+    const confirmation = await reconcileProjectRuntimes({ registryPath, nowMs });
+    assert.equal(confirmation.restarted, 0);
+    assert.equal(readRuntimeRegistry(registryPath)[0]?.pid, unhealthy.pid);
+
+    const replacement = await reconcileProjectRuntimes({ registryPath, nowMs: nowMs + 30_000 });
+    const registered = readRuntimeRegistry(registryPath)[0];
+    replacementPid = registered?.pid;
+    const events = readRuntimeLifecycleEvents(registryPath);
+
+    assert.equal(replacement.restarted, 1);
+    assert(registered);
+    assert.notEqual(registered.pid, unhealthy.pid);
+    assert.equal(registered.lifecycle.status, ProcessLifecycleStatus.Running);
+    assert.equal(registered.lifecycle.restart.attempts, 0);
+    assert.equal(registered.lifecycle.healthConfirmation, undefined);
+    assert.equal(await waitUntilProcessStops(unhealthy.pid, 2000), true);
+    assert(events.some((event) => event.kind === ProcessLifecycleEventKind.RuntimeHealthConfirmationFailed));
+    assert(events.some((event) => event.kind === ProcessLifecycleEventKind.RuntimeRestartScheduled));
+    assert(events.some((event) => event.kind === ProcessLifecycleEventKind.RuntimeRestarted));
+  } finally {
+    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
+    if (replacementPid && processIsRunning(replacementPid)) process.kill(replacementPid, "SIGKILL");
+    if (unhealthy.pid && processIsRunning(unhealthy.pid)) process.kill(unhealthy.pid, "SIGKILL");
+    if (originalCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalCli;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("reconciler records recovery and clears pending health state", { timeout: 20000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-health-recovery-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const fakeCliPath = path.join(rootDir, "ready-opencanon.mjs");
+  const originalCli = process.env.OPENCANON_CLI;
+  let runtimePid: number | undefined;
+
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
+    process.env.OPENCANON_CLI = fakeCliPath;
+    const started = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
+    runtimePid = started.entry.pid;
+    upsertRuntimeEntry({
+      ...started.entry,
+      lifecycle: runtimeHealthConfirmationLifecycle("Transient health failure.", 30_000),
+    }, registryPath);
+
+    const result = await reconcileProjectRuntimes({ registryPath });
+    const registered = readRuntimeRegistry(registryPath)[0];
+    const events = readRuntimeLifecycleEvents(registryPath);
+
+    assert.equal(result.running, 1);
+    assert.equal(result.restarted, 0);
+    assert.equal(registered?.pid, runtimePid);
+    assert.equal(registered?.lifecycle.status, ProcessLifecycleStatus.Running);
+    assert.deepEqual(registered?.lifecycle.restart, { attempts: 0 });
+    assert.equal(registered?.lifecycle.healthConfirmation, undefined);
+    assert(events.some((event) => event.kind === ProcessLifecycleEventKind.RuntimeRecovered));
+  } finally {
+    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
+    if (runtimePid && processIsRunning(runtimePid)) process.kill(runtimePid, "SIGKILL");
+    if (originalCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalCli;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("reconciler preserves the registered runtime when its worker heartbeat is delayed", { timeout: 10000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-delayed-heartbeat-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const fakeCliPath = path.join(rootDir, "ready-opencanon.mjs");
+  const originalCli = process.env.OPENCANON_CLI;
+  let runtimePid: number | undefined;
+
+  try {
+    writeFileSync(path.join(rootDir, "opencanon.config.json"), "{}\n");
+    writeFileSync(fakeCliPath, readyFakeRuntimeCliSource());
+    process.env.OPENCANON_CLI = fakeCliPath;
+    const started = await startProjectRuntime({ cwd: rootDir, registryPath, idleTimeoutMs: 0 });
+    runtimePid = started.entry.pid;
+    writeProjectWorkerLease(rootDir, runtimePid, started.entry.leaseId, registryPath);
+    const staleAt = new Date(Date.now() - 60_000);
+    utimesSync(projectWorkerLeasePath(rootDir, registryPath), staleAt, staleAt);
+
+    const result = await reconcileProjectRuntimes({ registryPath });
+    const registered = readRuntimeRegistry(registryPath)[0];
+
+    assert.equal(result.running, 1);
+    assert.equal(result.restarted, 0);
+    assert.equal(result.stale, 0);
+    assert.equal(registered?.pid, runtimePid);
+    assert(processIsRunning(runtimePid));
+  } finally {
+    await stopProjectRuntime(rootDir, registryPath).catch(() => undefined);
+    if (runtimePid && processIsRunning(runtimePid)) process.kill(runtimePid, "SIGKILL");
+    if (originalCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = originalCli;
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
