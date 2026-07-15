@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.7 - 2026-07-15
+
+- Removed a redundant recursive project-types watcher so atomic Project Knowledge publication cannot trigger an unhandled filesystem race on Linux.
+- Preserved reusable semantic vectors during changed-path publication so incremental Project Knowledge indexes keep metadata and vector counts consistent.
+- Confirmed transient health failures before replacing a live project runtime while continuing to repair dead runtimes immediately.
+
 ## v0.4.6 - 2026-07-15
 
 - Isolated native Project Knowledge indexing and semantic query inference from the serving project runtime so model work cannot close runtime connections or destabilize validation and context requests.
