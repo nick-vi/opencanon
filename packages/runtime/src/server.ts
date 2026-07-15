@@ -296,6 +296,9 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     store: () => store,
     validationResultCache: () => stateManager.validationResultCache(),
     onActivity: resetIdleTimer,
+    onError(error) {
+      events.broadcast(streamErrorEvent(`Change check runtime failed: ${errorMessage(error)}`));
+    },
   });
   validatorGraphRuntime = createValidatorGraphRuntime({
     rootDir,

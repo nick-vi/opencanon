@@ -74,6 +74,7 @@ export async function createChangeCheckRunner(input: {
   store(): ProjectStore;
   validationResultCache(): ValidationResultCache;
   onActivity?(): void;
+  onError?(error: unknown): void;
 }) {
   const queue: QueuedCheck[] = [];
   const controllers = new Map<string, AbortController>();
@@ -185,7 +186,11 @@ export async function createChangeCheckRunner(input: {
     while (!stopping && queue.length > 0) {
       const item = queue.shift();
       if (!item) return;
-      await execute(item);
+      try {
+        await execute(item);
+      } catch (error) {
+        recoverUnexpectedRunFailure(item, error);
+      }
     }
   }
 
@@ -214,6 +219,7 @@ export async function createChangeCheckRunner(input: {
     const pendingOutput: Array<{ stream: ChangeCheckOutputStream; text: string }> = [];
     let pendingOutputBytes = 0;
     let outputFlushTimer: ReturnType<typeof setTimeout> | undefined;
+    let outputPersistenceError: unknown;
     const flushOutput = () => {
       if (outputFlushTimer) clearTimeout(outputFlushTimer);
       outputFlushTimer = undefined;
@@ -230,7 +236,14 @@ export async function createChangeCheckRunner(input: {
         return;
       }
       if (!outputFlushTimer) {
-        outputFlushTimer = setTimeout(flushOutput, OutputFlushIntervalMs);
+        outputFlushTimer = setTimeout(() => {
+          try {
+            flushOutput();
+          } catch (error) {
+            outputPersistenceError = error;
+            controller.abort();
+          }
+        }, OutputFlushIntervalMs);
         outputFlushTimer.unref();
       }
     };
@@ -257,6 +270,7 @@ export async function createChangeCheckRunner(input: {
           return checked;
         },
       );
+      if (outputPersistenceError) throw outputPersistenceError;
       flushOutput();
       const latest = input.store().readJob(run.id) ?? run;
       const finishedAt = new Date().toISOString();
@@ -300,6 +314,35 @@ export async function createChangeCheckRunner(input: {
       if (completedRun) completeRun(completedRun);
     }
     await recordRetention("terminal-run", 0);
+  }
+
+  function recoverUnexpectedRunFailure(item: QueuedCheck, error: unknown): void {
+    let current: ChangeCheckRun | null = null;
+    try {
+      current = input.store().readJob(item.runId);
+    } catch (persistenceError) {
+      input.onError?.(persistenceError);
+    }
+    if (current && !isTerminal(current)) {
+      const finishedAt = new Date().toISOString();
+      const failed = ChangeCheckRunSchema.parse({
+        ...current,
+        status: ChangeCheckRunStatus.Failed,
+        startedAt: "startedAt" in current ? current.startedAt : current.createdAt,
+        finishedAt,
+        updatedAt: finishedAt,
+        summary: `Check ${current.checkId} failed because its runtime state could not be persisted.`,
+      });
+      try {
+        input.store().writeJob(failed);
+        appendEvent(failed, ChangeCheckRunEventType.Failed);
+        recordTerminalCanonEvent(item, failed);
+      } catch (persistenceError) {
+        input.onError?.(persistenceError);
+      }
+      completeRun(failed);
+    }
+    input.onError?.(error);
   }
 
   function appendOutput(run: ChangeCheckRun, stream: ChangeCheckOutputStream, text: string): ChangeCheckRun {
