@@ -108,9 +108,15 @@ export default [
       },
       {
         id: "knowledge-builds-are-explicit-and-isolated",
-        statement: "Project Knowledge reads never start indexing, while explicit index operations execute with bounded memory and cannot terminate the serving runtime.",
-        acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed bounds", "index worker failure preserves runtime availability and the last published index"],
+        statement: "Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.",
+        acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed bounds", "index and query worker failures preserve runtime availability and the last published index", "native embedding models are never loaded into the serving runtime"],
         checks: ["semantic-index-tests", "runtime-client-tests", "service-lifecycle-tests"],
+      },
+      {
+        id: "mutating-runtime-requests-are-idempotent",
+        statement: "A repaired client may retry a mutating runtime request with the same request identity without duplicating or contradicting committed Activity.",
+        acceptance: ["an identical event retry returns the committed event", "reusing an event id for different content fails explicitly", "asynchronous check persistence failures terminate the run rather than the runtime"],
+        checks: ["change-run-tests", "runtime-client-tests"],
       },
     ],
     scenarios: [

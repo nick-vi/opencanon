@@ -696,7 +696,9 @@ export default [
     },
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-routes.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-canon-events.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/change-check-runner.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/knowledge-index-manager.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/knowledge-index-operation.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/knowledge-index-worker.ts" },
@@ -732,14 +734,16 @@ export default [
     tasks: [
       { id: "explicit-read-contract", title: "Make Knowledge reads fail fast", files: ["packages/runtime/src/server-routes.ts", "packages/runtime/src/routes.ts", "packages/cli/src/search.ts", "packages/cli/src/context.ts", "tests/cli-reporting.test.ts"], checks: ["runtime-client-tests", "cli-tests"] },
       { id: "bounded-index-pipeline", title: "Bound source, fact, chunk, and embedding batches", files: ["packages/core/src/context.ts", "packages/core/src/index.ts", "packages/core/src/semantic-models.ts", "packages/runtime/src/knowledge-index-manager.ts", "packages/runtime/src/project-source-snapshot.ts", "packages/runtime/src/semantic-index.ts", "packages/runtime/test/semantic-index.test.ts"], checks: ["semantic-index-tests", "typecheck"], dependsOn: ["explicit-read-contract"] },
-      { id: "isolated-index-operation", title: "Run indexing outside the serving runtime", files: ["packages/core/src/errors.ts", "packages/runtime/src/server.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/routes.ts", "packages/runtime/src/snapshot.ts", "packages/runtime/src/cli.ts", "packages/runtime/src/local-protocol.ts", "packages/runtime/src/knowledge-index-manager.ts", "packages/runtime/src/knowledge-index-progress.ts", "packages/runtime/src/knowledge-index-operation.ts", "packages/runtime/src/knowledge-index-worker.ts", "packages/runtime/src/knowledge-index-worker-main.ts", "packages/runtime/test/client.test.ts", "packages/runtime/test/client-test-sources.ts", "tests/runtime-events.test.ts", "scripts/build-opencanon-runtime.ts"], checks: ["runtime-client-tests", "service-tests", "process-steady-state"], dependsOn: ["bounded-index-pipeline"] },
-      { id: "large-project-proof", title: "Prove Knowledge on representative repositories", files: ["opencanon/changes/index.ts"], checks: ["semantic-index-tests", "runtime-client-tests", "project-validation", "project-doctor", "full-ci"], dependsOn: ["isolated-index-operation"] },
+      { id: "isolated-index-operation", title: "Run native Knowledge work outside the serving runtime", files: ["packages/core/src/errors.ts", "packages/runtime/src/server.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/routes.ts", "packages/runtime/src/snapshot.ts", "packages/runtime/src/cli.ts", "packages/runtime/src/local-protocol.ts", "packages/runtime/src/knowledge-index-manager.ts", "packages/runtime/src/knowledge-index-progress.ts", "packages/runtime/src/knowledge-index-operation.ts", "packages/runtime/src/knowledge-index-worker.ts", "packages/runtime/src/knowledge-index-worker-main.ts", "packages/runtime/src/project-context.ts", "packages/runtime/test/client.test.ts", "packages/runtime/test/client-test-sources.ts", "tests/runtime-events.test.ts", "scripts/build-opencanon-runtime.ts"], checks: ["runtime-client-tests", "service-tests", "process-steady-state"], dependsOn: ["bounded-index-pipeline"] },
+      { id: "runtime-failure-containment", title: "Contain repairable runtime persistence failures", files: ["packages/runtime/src/server-canon-events.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/change-check-runner.ts", "packages/runtime/src/server.ts", "packages/runtime/test/change-runs.test.ts", "packages/runtime/test/client-test-sources.ts"], checks: ["runtime-client-tests", "change-run-tests"], dependsOn: ["isolated-index-operation"] },
+      { id: "large-project-proof", title: "Prove Knowledge on representative repositories", files: ["opencanon/changes/index.ts"], checks: ["semantic-index-tests", "runtime-client-tests", "project-validation", "project-doctor", "full-ci"], dependsOn: ["runtime-failure-containment"] },
     ],
     checks: [
       { id: "canon-render", kind: "command", command: "npm run opencanon -- canon render specs --dry-run" },
       { id: "typecheck", kind: "command", command: "npm run check:types" },
       { id: "semantic-index-tests", kind: "test", target: "packages/runtime/test/semantic-index.test.ts" },
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
+      { id: "change-run-tests", kind: "test", target: "packages/runtime/test/change-runs.test.ts" },
       { id: "service-tests", kind: "test", target: "packages/runtime/test/service.test.ts" },
       { id: "cli-tests", kind: "test", target: "tests/cli-reporting.test.ts" },
       { id: "project-validation", kind: "command", command: "npm run opencanon -- validate --changed" },

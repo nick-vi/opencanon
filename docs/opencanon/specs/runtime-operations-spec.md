@@ -137,12 +137,19 @@ Rule `doctor-reports-live-knowledge`: Doctor reports current Project Knowledge r
 - no running runtime is described as uninspected
 Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`
 
-Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while explicit index operations execute with bounded memory and cannot terminate the serving runtime.
+Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.
 - missing or stale Knowledge fails read commands immediately
 - only project index starts a build
 - source and embedding batches have fixed bounds
-- index worker failure preserves runtime availability and the last published index
+- index and query worker failures preserve runtime availability and the last published index
+- native embedding models are never loaded into the serving runtime
 Checks: `semantic-index-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+
+Rule `mutating-runtime-requests-are-idempotent`: A repaired client may retry a mutating runtime request with the same request identity without duplicating or contradicting committed Activity.
+- an identical event retry returns the committed event
+- reusing an event id for different content fails explicitly
+- asynchronous check persistence failures terminate the run rather than the runtime
+Checks: `change-run-tests`, `runtime-client-tests`
 
 ## Scenarios
 
