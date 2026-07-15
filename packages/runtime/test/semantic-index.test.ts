@@ -323,10 +323,10 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         },
         extractFactsJson: () => JSON.stringify({ files: [], diagnostics: [] }),
         indexCodeGraphJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { files: Array<{ path: string }>; deletedFiles: string[]; parserVersion: string };
+          const request = JSON.parse(requestJson) as { files: Array<{ path: string }>; parserVersion: string };
           return JSON.stringify({
             indexed: request.files.map((file) => ({ path: file.path, nodes: 0, unresolved: 0, supported: true })),
-            deleted: request.deletedFiles,
+            deleted: [],
             diagnostics: [],
             parserVersion: request.parserVersion,
             extractorVersion: "test",

@@ -27,7 +27,7 @@ test("engine loader fails fast when binary is missing", () => {
   );
 });
 
-test("engine JSON binding is wrapped in typed contracts", () => {
+test("engine JSON binding is wrapped in typed contracts", async () => {
   let productModelProjection: unknown = null;
   let observabilityRecords: { traces: unknown[]; spans: unknown[]; events: unknown[] } = { traces: [], spans: [], events: [] };
   let semanticIndex: unknown = null;
@@ -70,7 +70,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
           diagnostics: [],
         }),
       buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir: "/repo", graphHash: "graph", files: ["src/company.ts"] } }),
-      indexCodeGraphJson: () =>
+      indexCodeGraphJson: async () =>
         JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
       searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
       searchReferencesJson: () => JSON.stringify({ references: [] }),
@@ -208,6 +208,7 @@ test("engine JSON binding is wrapped in typed contracts", () => {
     "oxc",
   );
   assert.equal(project.buildRepoGraph({ facts: [], packageManifests: [] }).graph.graphHash, "graph");
+  assert.deepEqual((await project.indexCodeGraph({ files: [], parserVersion: "oxc-0.128.0" })).indexed, []);
   assert.deepEqual(project.searchReferences({ query: "findCompany" }).references, []);
   project.writeProductModelProjection({
     indexedAt: "2026-06-06T00:00:00.000Z",

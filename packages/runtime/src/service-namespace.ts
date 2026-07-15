@@ -70,7 +70,7 @@ export function privateProjectRuntimeStatePath(input: {
   return projectRuntimeStatePathInRoot(input.rootDir, resolvedRoot);
 }
 
-function sourceCheckoutRoot(cliPath: string): string | undefined {
+export function sourceCheckoutRoot(cliPath: string): string | undefined {
   const normalized = path.resolve(cliPath || ".").replace(/\\/g, "/");
   if (!normalized.endsWith(SourceCliSuffix)) return undefined;
   return normalized.slice(0, -SourceCliSuffix.length);

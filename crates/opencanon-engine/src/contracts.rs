@@ -543,8 +543,6 @@ pub(crate) struct FactDiagnostic {
 pub(crate) struct IndexCodeGraphRequest {
     pub(crate) files: Vec<IndexCodeGraphFile>,
     #[serde(default)]
-    pub(crate) deleted_files: Vec<String>,
-    #[serde(default)]
     pub(crate) parser_version: String,
     #[serde(default)]
     pub(crate) extractor_version: String,

@@ -111,7 +111,7 @@ export type EngineProject = {
   scanAndDiff(request: ScanAndDiffRequest): ScanAndDiffResult;
   extractFacts(request: ProjectExtractFactsRequest): ExtractFactsResult;
   buildRepoGraph(request: ProjectBuildRepoGraphRequest): BuildRepoGraphResult;
-  indexCodeGraph(request: IndexCodeGraphRequest): IndexCodeGraphResult;
+  indexCodeGraph(request: IndexCodeGraphRequest): Promise<IndexCodeGraphResult>;
   searchSymbols(request: SearchSymbolsRequest): SearchSymbolsResult;
   searchReferences(request: SearchReferencesRequest): SearchReferencesResult;
   searchGraphEdges(request: SearchGraphEdgesRequest): SearchGraphEdgesResult;
@@ -168,7 +168,7 @@ type EngineProjectJsonBinding = {
   scanAndDiffJson(request: string): string;
   extractFactsJson(request: string): string;
   buildRepoGraphJson(request: string): string;
-  indexCodeGraphJson(request: string): string;
+  indexCodeGraphJson(request: string): string | Promise<string>;
   searchSymbolsJson(request: string): string;
   searchReferencesJson(request: string): string;
   searchGraphEdgesJson(request: string): string;
@@ -281,8 +281,8 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     extractFacts: (request) => ExtractFactsResultSchema.parse(parseJson(callEngine(() => project.extractFactsJson(JSON.stringify(ExtractFactsRequestSchema.parse(request)))))),
     buildRepoGraph: (request) =>
       BuildRepoGraphResultSchema.parse(parseJson(callEngine(() => project.buildRepoGraphJson(JSON.stringify(BuildRepoGraphRequestSchema.parse(request)))))),
-    indexCodeGraph: (request) =>
-      IndexCodeGraphResultSchema.parse(parseJson(callEngine(() => project.indexCodeGraphJson(JSON.stringify(IndexCodeGraphRequestSchema.parse(request)))))),
+    indexCodeGraph: async (request) =>
+      IndexCodeGraphResultSchema.parse(parseJson(await callEngineAsync(() => project.indexCodeGraphJson(JSON.stringify(IndexCodeGraphRequestSchema.parse(request)))))),
     searchSymbols: (request) =>
       SearchSymbolsResultSchema.parse(parseJson(callEngine(() => project.searchSymbolsJson(JSON.stringify(SearchSymbolsRequestSchema.parse(request)))))),
     searchReferences: (request) =>
@@ -476,20 +476,32 @@ function callEngine<T>(callback: () => T): T {
   try {
     return callback();
   } catch (error) {
-    if (error instanceof OpenCanonError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    const match = message.match(/^\[([a-z0-9-]+)\]\s*(.*)$/);
-    if (match) {
-      const code = OpenCanonErrorCodeSchema.safeParse(match[1]);
-      if (code.success) {
-        throw new OpenCanonError([
-          createOpenCanonDiagnostic({
-            code: code.data,
-            message: match[2] || message,
-          }),
-        ]);
-      }
-    }
-    throw error;
+    throwEngineError(error);
   }
+}
+
+async function callEngineAsync<T>(callback: () => T | Promise<T>): Promise<T> {
+  try {
+    return await callback();
+  } catch (error) {
+    throwEngineError(error);
+  }
+}
+
+function throwEngineError(error: unknown): never {
+  if (error instanceof OpenCanonError) throw error;
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^\[([a-z0-9-]+)\]\s*(.*)$/);
+  if (match) {
+    const code = OpenCanonErrorCodeSchema.safeParse(match[1]);
+    if (code.success) {
+      throw new OpenCanonError([
+        createOpenCanonDiagnostic({
+          code: code.data,
+          message: match[2] || message,
+        }),
+      ]);
+    }
+  }
+  throw error;
 }

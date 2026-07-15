@@ -98,7 +98,7 @@ fn migration_011_discards_pre_executor_jobs_without_touching_canon_events() {
         ),
     )
     .unwrap();
-    conn.execute("delete from migrations where version = 11", [])
+    conn.execute("delete from migrations where version >= 11", [])
         .unwrap();
     drop(conn);
 

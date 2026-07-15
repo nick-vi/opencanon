@@ -5,6 +5,8 @@ use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use napi::bindgen_prelude::AsyncTask;
+use napi::{Env, Task};
 use napi_derive::napi;
 use notify::{Config, Event, EventKindMask, RecursiveMode, Watcher};
 use opencanon_inference::{Embedder, EmbedderConfig, Generator, GeneratorConfig};
@@ -30,6 +32,7 @@ use crate::watcher::{
     WatcherThreadInput,
 };
 
+mod code_graph_connection;
 mod code_graph_resolver;
 mod code_graph_store;
 mod connection;
@@ -42,6 +45,7 @@ mod semantic_status;
 mod semantic_store;
 mod semantic_vector_store;
 
+use code_graph_connection::open_code_graph_connection;
 use connection::open_project_connection;
 use json_fields::root_path;
 use observability_store::{list_observability_payloads, SqliteObservationSink};
@@ -54,10 +58,35 @@ pub struct EngineProjectHandle {
     settings: ResolvedProjectSettings,
     migrations_applied: Vec<u32>,
     conn: Mutex<Connection>,
+    graph_conn: Mutex<Connection>,
     watcher_queue: WatcherQueue,
     watcher: Mutex<Option<NativeWatcher>>,
     embedding_cache: Mutex<HashMap<String, Embedder>>,
     generation_cache: Mutex<HashMap<String, Generator>>,
+}
+
+pub struct IndexCodeGraphTask {
+    root_dir: String,
+    state_path: String,
+    request: String,
+}
+
+impl Task for IndexCodeGraphTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        let mut conn = open_code_graph_connection(&self.state_path)?;
+        code_graph_store::index_code_graph_with_connection(
+            &self.root_dir,
+            &mut conn,
+            std::mem::take(&mut self.request),
+        )
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(output)
+    }
 }
 
 fn canon_event_links(event: &serde_json::Value) -> napi::Result<Vec<(&'static str, String)>> {
@@ -263,7 +292,16 @@ impl EngineProjectHandle {
     }
 
     #[napi(js_name = "indexCodeGraphJson")]
-    pub fn index_code_graph_json(&self, request: String) -> napi::Result<String> {
+    pub fn index_code_graph_json(&self, request: String) -> AsyncTask<IndexCodeGraphTask> {
+        AsyncTask::new(IndexCodeGraphTask {
+            root_dir: self.root_dir.clone(),
+            state_path: self.state_path.clone(),
+            request,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn index_code_graph_json_sync(&self, request: String) -> napi::Result<String> {
         code_graph_store::index_code_graph_json(self, request)
     }
 
@@ -675,6 +713,7 @@ impl EngineProjectHandle {
             settings,
         } = request;
         let (conn, migrations_applied) = open_project_connection(&state_path, &settings)?;
+        let graph_conn = open_code_graph_connection(&state_path)?;
 
         Ok(Self {
             root_dir,
@@ -682,6 +721,7 @@ impl EngineProjectHandle {
             settings,
             migrations_applied,
             conn: Mutex::new(conn),
+            graph_conn: Mutex::new(graph_conn),
             watcher_queue: Arc::new(Mutex::new(VecDeque::new())),
             watcher: Mutex::new(None),
             embedding_cache: Mutex::new(HashMap::new()),

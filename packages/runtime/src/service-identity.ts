@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { LocalTransportKind } from "./local-protocol.ts";
 import { RuntimeCliInvocationKind, ancestorPaths, nodeCommandForCliInvocation, nonEmptyString, type RuntimeCliEntrypoint } from "./service-entrypoint.ts";
+import { sourceCheckoutRoot } from "./service-namespace.ts";
 import { LocalControlProtocolVersion, ServiceEnv, type RuntimeRegistryEntry } from "./service-types.ts";
 
 export type RuntimeIdentity = Pick<RuntimeRegistryEntry, "transport" | "protocolVersion" | "runtimeVersion" | "runtimeFingerprint" | "cliPath">;
@@ -46,7 +47,7 @@ export function createProcessLeaseId(): string {
 
 function runtimeFingerprintForEntrypoint(entrypoint: RuntimeCliEntrypoint): string {
   const hash = createHash("sha256");
-  hash.update("opencanon-runtime-v1\0");
+  hash.update("opencanon-runtime-v2\0");
   hash.update(`${openCanonRuntimeVersion()}\0`);
   hash.update(`${entrypoint.kind}\0`);
   hash.update("cli\0");
@@ -54,8 +55,51 @@ function runtimeFingerprintForEntrypoint(entrypoint: RuntimeCliEntrypoint): stri
   if (entrypoint.kind === RuntimeCliInvocationKind.NodeScript) {
     hash.update("\0node\0");
     hashPathIdentity(hash, nodeCommandForCliInvocation());
+    const sourceRoot = sourceCheckoutRoot(entrypoint.path);
+    if (sourceRoot) hashSourceRuntime(hash, sourceRoot);
   }
   return `sha256:${hash.digest("hex")}`;
+}
+
+function hashSourceRuntime(hash: ReturnType<typeof createHash>, rootDir: string): void {
+  hash.update("\0source-runtime\0");
+  const files = ["package.json", "package-lock.json", "tsconfig.json"]
+    .map((file) => path.join(rootDir, file))
+    .filter(existsSync);
+  const packagesDir = path.join(rootDir, "packages");
+  if (existsSync(packagesDir)) {
+    for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const packageDir = path.join(packagesDir, entry.name);
+      const manifest = path.join(packageDir, "package.json");
+      if (existsSync(manifest)) files.push(manifest);
+      collectFiles(path.join(packageDir, "src"), files);
+      collectFiles(path.join(packageDir, "binaries"), files);
+    }
+  }
+  files.sort();
+  for (const file of files) {
+    const relative = path.relative(rootDir, file).replaceAll(path.sep, "/");
+    hash.update(`${relative}\0`);
+    if (relative.includes("/binaries/")) hashPathIdentity(hash, file);
+    else {
+      try {
+        hash.update(readFileSync(file));
+      } catch {
+        hashPathIdentity(hash, file);
+      }
+    }
+    hash.update("\0");
+  }
+}
+
+function collectFiles(directory: string, files: string[]): void {
+  if (!existsSync(directory)) return;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const candidate = path.join(directory, entry.name);
+    if (entry.isDirectory()) collectFiles(candidate, files);
+    else if (entry.isFile()) files.push(candidate);
+  }
 }
 
 function hashPathIdentity(hash: ReturnType<typeof createHash>, entrypointPath: string): void {

@@ -357,5 +357,6 @@ function testEnv(rootDir: string): Record<string, string> {
     if (typeof value === "string") env[key] = value;
   }
   env.OPENCANON_SERVICE_REGISTRY_PATH = path.join(rootDir, "global", "service.json");
+  env.OPENCANON_CLI = script;
   return env;
 }

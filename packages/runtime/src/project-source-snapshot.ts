@@ -121,14 +121,12 @@ export function extractRuntimeFacts(input: {
   return { files: result.files, diagnostics };
 }
 
-export function indexRuntimeCodeGraph(input: {
+export async function indexRuntimeCodeGraph(input: {
   store: ProjectStore;
   factFiles: RuntimeFactFile[];
-  deletedFiles: string[];
-}): void {
-  input.store.project.indexCodeGraph({
+}): Promise<void> {
+  await input.store.project.indexCodeGraph({
     files: input.factFiles.filter((file) => isCodeGraphIndexableFile(file.path)),
-    deletedFiles: input.deletedFiles.filter(isCodeGraphIndexableFile),
     parserVersion: ENGINE_PARSER_VERSION,
   });
 }

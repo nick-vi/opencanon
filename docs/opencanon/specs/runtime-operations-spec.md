@@ -144,6 +144,16 @@ Rule `diagnostics-do-not-start-project-work`: Doctor and status surfaces inspect
 - typed validation starts its required producer and publishes the generation it consumed
 Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`, `service-lifecycle-tests`
 
+Rule `source-refresh-preserves-transports`: Project source refresh keeps pipe and HTTP responsive while native graph work runs asynchronously in dedicated derived state.
+- native graph writes do not run on the JavaScript event loop
+- graph readers use independent SQLite WAL connections while graph writes are pending
+- Activity and other Project State writes do not contend with graph transactions
+- complete source identity derives changed and deleted graph files inside the graph store
+- missing or incompatible graph state rebuilds from source
+- cold graph extraction bounds memory by streaming files into one transaction
+- a long refresh does not replace the serving runtime
+Checks: `engine-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+
 Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.
 - missing or stale Knowledge fails read commands immediately
 - only project index starts a build

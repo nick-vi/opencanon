@@ -47,7 +47,6 @@ export const IndexCodeGraphRequestSchema = z.object({
       content: z.string().optional(),
     }),
   ),
-  deletedFiles: z.array(z.string().min(1)).default([]),
   parserVersion: z.string().default(""),
   extractorVersion: z.string().default(""),
 });

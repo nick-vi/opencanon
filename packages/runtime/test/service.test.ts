@@ -528,6 +528,27 @@ test("runtime identity includes the invocation kind for node-script entrypoints"
   }
 });
 
+test("source runtime identity changes when imported runtime source changes", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-source-runtime-identity-"));
+  try {
+    const cli = path.join(rootDir, "packages", "cli", "src", "index.ts");
+    const runtimeSource = path.join(rootDir, "packages", "runtime", "src", "service.ts");
+    mkdirSync(path.dirname(cli), { recursive: true });
+    mkdirSync(path.dirname(runtimeSource), { recursive: true });
+    writeFileSync(cli, "import '@opencanon/runtime';\n");
+    writeFileSync(runtimeSource, "export const generation = 1;\n");
+    const entrypoint = { path: realpathSync(cli), kind: RuntimeCliInvocationKind.NodeScript, source: "test" } as const;
+
+    const first = runtimeIdentityForEntrypoint(entrypoint);
+    writeFileSync(runtimeSource, "export const generation = 2;\n");
+    const second = runtimeIdentityForEntrypoint(entrypoint);
+
+    assert.notEqual(first.runtimeFingerprint, second.runtimeFingerprint);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("project runtime inspection reports live identity mismatch as stale", { timeout: 10000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-identity-stale-"));
   const registryPath = path.join(rootDir, "global", "service.json");

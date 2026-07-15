@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use rusqlite::params;
@@ -171,8 +172,21 @@ pub(super) fn fts_match_query(value: &str) -> String {
     tokens.join(" ")
 }
 
+#[cfg(test)]
 pub(super) fn index_code_graph_json(
     handle: &EngineProjectHandle,
+    request: String,
+) -> napi::Result<String> {
+    let mut conn = handle
+        .graph_conn
+        .lock()
+        .map_err(|_| napi_error("sqlite-error", "Code graph state lock is poisoned."))?;
+    index_code_graph_with_connection(&handle.root_dir, &mut conn, request)
+}
+
+pub(super) fn index_code_graph_with_connection(
+    root_dir: &str,
+    conn: &mut rusqlite::Connection,
     request: String,
 ) -> napi::Result<String> {
     let request: IndexCodeGraphRequest = decode(&request)?;
@@ -189,15 +203,57 @@ pub(super) fn index_code_graph_json(
     let indexed_at = timestamp();
     let oxc_extractor = OxcExtractor;
     let python_extractor = PythonExtractor;
+    let existing = existing_code_extractions(conn)?;
+    let requested_paths = request
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<HashSet<_>>();
+    let mut deleted = existing
+        .keys()
+        .filter(|path| !requested_paths.contains(path.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    deleted.sort();
+    let changed_files = request
+        .files
+        .iter()
+        .filter(|file| {
+            existing.get(&file.path).is_none_or(|entry| {
+                entry.content_hash != file.content_hash
+                    || entry.parser_version != parser_version
+                    || entry.extractor_version != extractor_version
+            })
+        })
+        .collect::<Vec<_>>();
 
-    let mut prepared = Vec::with_capacity(request.files.len());
+    if changed_files.is_empty() && deleted.is_empty() {
+        return encode(&json!({
+          "indexed": [],
+          "deleted": [],
+          "diagnostics": [],
+          "parserVersion": parser_version,
+          "extractorVersion": extractor_version,
+        }));
+    }
+
     let mut diagnostics = Vec::new();
-    for file in request.files.iter() {
-        // Prefer caller-supplied content (the exact scanned bytes — no
-        // scan->index disk-reread TOCTOU); read disk only when absent.
+    let tx = conn
+        .transaction()
+        .map_err(|error| sqlite_error("Could not start graph index transaction", error))?;
+
+    for path in deleted.iter() {
+        tx.execute("delete from files where path = ?1", params![path])
+            .map_err(|error| sqlite_error("Could not delete graph file state", error))?;
+    }
+
+    let mut indexed = Vec::new();
+    for file in changed_files {
+        // Stream extraction into the transaction one file at a time. A cold
+        // project index must not retain every parsed graph in memory at once.
         let text = match file.content.as_deref() {
             Some(content) => content.to_string(),
-            None => match fs::read_to_string(root_path(&handle.root_dir, &file.path)) {
+            None => match fs::read_to_string(root_path(root_dir, &file.path)) {
                 Ok(text) => text,
                 Err(error) => {
                     diagnostics.push(json!({
@@ -210,7 +266,7 @@ pub(super) fn index_code_graph_json(
                 }
             },
         };
-        let input = CodeExtractionInput {
+        let extraction_input = CodeExtractionInput {
             path: &file.path,
             language: &file.language,
             text: &text,
@@ -218,43 +274,18 @@ pub(super) fn index_code_graph_json(
             extractor_version: &extractor_version,
         };
         let result = if !language_is_supported(&file.language) {
-            oxc_extractor.extract(input)
+            oxc_extractor.extract(extraction_input)
         } else {
             match file.language.as_str() {
-                "python" => python_extractor.extract(input),
-                _ => oxc_extractor.extract(input),
+                "python" => python_extractor.extract(extraction_input),
+                _ => oxc_extractor.extract(extraction_input),
             }
         };
-        prepared.push((file, result));
-    }
-
-    let mut conn = handle
-        .conn
-        .lock()
-        .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let tx = conn
-        .transaction()
-        .map_err(|error| sqlite_error("Could not start graph index transaction", error))?;
-
-    for path in request.deleted_files.iter() {
-        tx.execute("delete from code_edges where path = ?1", params![path])
-            .map_err(|error| sqlite_error("Could not delete code edges", error))?;
-        tx.execute("delete from code_nodes where path = ?1", params![path])
-            .map_err(|error| sqlite_error("Could not delete code nodes", error))?;
         tx.execute(
-            "delete from unresolved_references where path = ?1",
-            params![path],
+            "insert into files(path) values (?1) on conflict(path) do nothing",
+            params![file.path],
         )
-        .map_err(|error| sqlite_error("Could not delete unresolved references", error))?;
-        tx.execute(
-            "delete from code_extractions where path = ?1",
-            params![path],
-        )
-        .map_err(|error| sqlite_error("Could not delete code extraction", error))?;
-    }
-
-    let mut indexed = Vec::new();
-    for (file, result) in prepared.iter() {
+        .map_err(|error| sqlite_error("Could not record graph file state", error))?;
         tx.execute("delete from code_edges where path = ?1", params![file.path])
             .map_err(|error| sqlite_error("Could not clear prior code edges", error))?;
         tx.execute("delete from code_nodes where path = ?1", params![file.path])
@@ -314,20 +345,57 @@ pub(super) fn index_code_graph_json(
             }));
         }
     }
-    tx.execute("delete from code_edges", [])
-        .map_err(|error| sqlite_error("Could not clear resolved code edges", error))?;
-    resolve_exact_code_edges(&tx, &handle.root_dir)?;
+    if !indexed.is_empty() || !deleted.is_empty() {
+        tx.execute("delete from code_edges", [])
+            .map_err(|error| sqlite_error("Could not clear resolved code edges", error))?;
+        resolve_exact_code_edges(&tx, root_dir)?;
+    }
 
     tx.commit()
         .map_err(|error| sqlite_error("Could not commit graph index transaction", error))?;
 
     encode(&json!({
       "indexed": indexed,
-      "deleted": request.deleted_files,
+      "deleted": deleted,
       "diagnostics": diagnostics,
       "parserVersion": parser_version,
       "extractorVersion": extractor_version,
     }))
+}
+
+struct ExistingCodeExtraction {
+    content_hash: String,
+    parser_version: String,
+    extractor_version: String,
+}
+
+fn existing_code_extractions(
+    conn: &rusqlite::Connection,
+) -> napi::Result<HashMap<String, ExistingCodeExtraction>> {
+    let mut statement = conn
+        .prepare(
+            "select path, content_hash, parser_version, extractor_version from code_extractions",
+        )
+        .map_err(|error| sqlite_error("Could not read existing code extractions", error))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                ExistingCodeExtraction {
+                    content_hash: row.get(1)?,
+                    parser_version: row.get(2)?,
+                    extractor_version: row.get(3)?,
+                },
+            ))
+        })
+        .map_err(|error| sqlite_error("Could not query existing code extractions", error))?;
+    let mut existing = HashMap::new();
+    for row in rows {
+        let (path, extraction) =
+            row.map_err(|error| sqlite_error("Could not decode existing code extraction", error))?;
+        existing.insert(path, extraction);
+    }
+    Ok(existing)
 }
 
 pub(super) fn search_symbols_json(
@@ -337,9 +405,9 @@ pub(super) fn search_symbols_json(
     let request: SearchSymbolsRequest = decode(&request)?;
     let limit = request.limit.unwrap_or(50).clamp(1, 500) as i64;
     let conn = handle
-        .conn
+        .graph_conn
         .lock()
-        .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+        .map_err(|_| napi_error("sqlite-error", "Code graph state lock is poisoned."))?;
 
     let trimmed_query = request
         .query
@@ -436,9 +504,9 @@ pub(super) fn search_references_json(
     let request: SearchReferencesRequest = decode(&request)?;
     let limit = request.limit.unwrap_or(100).clamp(1, 1000) as i64;
     let conn = handle
-        .conn
+        .graph_conn
         .lock()
-        .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+        .map_err(|_| napi_error("sqlite-error", "Code graph state lock is poisoned."))?;
 
     let mut sql = String::from(
         "select id, path, language, reference_name, reference_kind, source,
@@ -530,9 +598,9 @@ pub(super) fn search_graph_edges_json(
         ));
     }
     let conn = handle
-        .conn
+        .graph_conn
         .lock()
-        .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+        .map_err(|_| napi_error("sqlite-error", "Code graph state lock is poisoned."))?;
 
     let mut sql = String::from(
             "select e.id, e.kind, e.provenance, e.confidence, e.path, e.start_line, e.start_column, e.start_byte,

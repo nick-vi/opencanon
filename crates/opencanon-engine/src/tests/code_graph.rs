@@ -1,6 +1,5 @@
 use std::fs;
 
-use rusqlite::Connection;
 use serde_json::{json, Value};
 
 use super::support::*;
@@ -28,7 +27,7 @@ fn indexes_code_graph_for_typescript_files() {
         )
         .unwrap();
     let indexed = project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{
                     "path": "src/billing.ts",
@@ -184,7 +183,7 @@ fn indexes_code_graph_for_python_files() {
         )
         .unwrap();
     let indexed = project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{
                     "path": "pkg/__init__.py",
@@ -331,7 +330,7 @@ fn resolves_alias_and_workspace_import_graph_edges() {
         )
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{
                     "path": "src/app.ts",
@@ -390,7 +389,7 @@ fn replaces_code_nodes_when_files_change() {
         .scan_and_diff_json(json!({ "files": ["src/a.ts"] }).to_string())
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{ "path": "src/a.ts", "contentHash": "h1", "language": "typescript" }],
                 "parserVersion": "test",
@@ -405,7 +404,7 @@ fn replaces_code_nodes_when_files_change() {
         .scan_and_diff_json(json!({ "files": ["src/a.ts"] }).to_string())
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{ "path": "src/a.ts", "contentHash": "h2", "language": "typescript" }],
                 "parserVersion": "test",
@@ -429,7 +428,7 @@ fn replaces_code_nodes_when_files_change() {
 }
 
 #[test]
-fn deleting_files_cascades_graph_rows() {
+fn authoritative_inventory_removes_deleted_graph_rows() {
     let root = test_root("graph-delete");
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(root.join("src/keep.ts"), "export const KEEP = 1;\n").unwrap();
@@ -439,7 +438,7 @@ fn deleting_files_cascades_graph_rows() {
         .scan_and_diff_json(json!({ "files": ["src/keep.ts", "src/drop.ts"] }).to_string())
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [
                     { "path": "src/keep.ts", "contentHash": "h", "language": "typescript" },
@@ -456,30 +455,58 @@ fn deleting_files_cascades_graph_rows() {
     project
         .scan_and_diff_json(json!({ "files": ["src/keep.ts"] }).to_string())
         .unwrap();
+    let result = project
+        .index_code_graph_json_sync(
+            json!({
+                "files": [
+                    { "path": "src/keep.ts", "contentHash": "h", "language": "typescript" }
+                ],
+                "parserVersion": "test",
+                "extractorVersion": "test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let indexed: Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(indexed["deleted"], json!(["src/drop.ts"]));
 
     let symbols = project
         .search_symbols_json(json!({ "query": "dropMe" }).to_string())
         .unwrap();
     let parsed: Value = serde_json::from_str(&symbols).unwrap();
     assert!(parsed["symbols"].as_array().unwrap().is_empty());
+}
 
-    let conn = Connection::open(root.join(".opencanon/state/test/state.sqlite")).unwrap();
-    let unresolved_count: i64 = conn
-        .query_row(
-            "select count(*) from unresolved_references where path = 'src/drop.ts'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let extraction_count: i64 = conn
-        .query_row(
-            "select count(*) from code_extractions where path = 'src/drop.ts'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(unresolved_count, 0);
-    assert_eq!(extraction_count, 0);
+#[test]
+fn unchanged_inventory_skips_graph_extraction() {
+    let root = test_root("graph-unchanged");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/value.ts"), "export const value = 1;\n").unwrap();
+    let project = open_test_project(&root);
+    let request = json!({
+        "files": [
+            { "path": "src/value.ts", "contentHash": "same", "language": "typescript" }
+        ],
+        "parserVersion": "test",
+        "extractorVersion": "test"
+    })
+    .to_string();
+    let first: Value =
+        serde_json::from_str(&project.index_code_graph_json_sync(request.clone()).unwrap())
+            .unwrap();
+    let second: Value =
+        serde_json::from_str(&project.index_code_graph_json_sync(request).unwrap()).unwrap();
+
+    assert_eq!(first["indexed"].as_array().unwrap().len(), 1);
+    assert!(second["indexed"].as_array().unwrap().is_empty());
+    assert!(second["deleted"].as_array().unwrap().is_empty());
+    let symbols: Value = serde_json::from_str(
+        &project
+            .search_symbols_json(json!({ "query": "value" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(symbols["symbols"][0]["name"], "value");
 }
 
 #[test]
@@ -496,7 +523,7 @@ fn default_export_bound_names_are_searchable() {
         .scan_and_diff_json(json!({ "files": ["src/entry.ts"] }).to_string())
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{ "path": "src/entry.ts", "contentHash": "h", "language": "typescript" }],
                 "parserVersion": "test",
@@ -529,7 +556,7 @@ fn anonymous_default_function_exports_are_classified_as_functions() {
         .scan_and_diff_json(json!({ "files": ["src/entry.ts"] }).to_string())
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{ "path": "src/entry.ts", "contentHash": "h", "language": "typescript" }],
                 "parserVersion": "test",
@@ -551,7 +578,7 @@ fn graph_index_reports_read_failures_per_file() {
     let root = test_root("graph-read-failed");
     let project = open_test_project(&root);
     let output = project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{ "path": "src/missing.ts", "contentHash": "h", "language": "typescript" }],
                 "parserVersion": "test",
@@ -575,7 +602,7 @@ fn ignores_unsupported_languages_for_graph_extraction() {
         .scan_and_diff_json(json!({ "files": ["docs/notes.md"] }).to_string())
         .unwrap();
     let output = project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [{ "path": "docs/notes.md", "contentHash": "h", "language": "markdown" }],
                 "parserVersion": "test",
@@ -604,7 +631,7 @@ fn node_ids_are_stable_across_unrelated_file_changes() {
         .scan_and_diff_json(json!({ "files": ["src/a.ts", "src/b.ts"] }).to_string())
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [
                     { "path": "src/a.ts", "contentHash": "h", "language": "typescript" },
@@ -631,9 +658,10 @@ fn node_ids_are_stable_across_unrelated_file_changes() {
         .scan_and_diff_json(json!({ "files": ["src/a.ts", "src/b.ts"] }).to_string())
         .unwrap();
     project
-        .index_code_graph_json(
+        .index_code_graph_json_sync(
             json!({
                 "files": [
+                    { "path": "src/a.ts", "contentHash": "h", "language": "typescript" },
                     { "path": "src/b.ts", "contentHash": "h2", "language": "typescript" }
                 ],
                 "parserVersion": "test",

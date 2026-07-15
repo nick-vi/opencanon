@@ -113,6 +113,12 @@ export default [
         checks: ["doctor-tests", "cli-tests", "runtime-client-tests", "service-lifecycle-tests"],
       },
       {
+        id: "source-refresh-preserves-transports",
+        statement: "Project source refresh keeps pipe and HTTP responsive while native graph work runs asynchronously in dedicated derived state.",
+        acceptance: ["native graph writes do not run on the JavaScript event loop", "graph readers use independent SQLite WAL connections while graph writes are pending", "Activity and other Project State writes do not contend with graph transactions", "complete source identity derives changed and deleted graph files inside the graph store", "missing or incompatible graph state rebuilds from source", "cold graph extraction bounds memory by streaming files into one transaction", "a long refresh does not replace the serving runtime"],
+        checks: ["engine-tests", "runtime-client-tests", "service-lifecycle-tests"],
+      },
+      {
         id: "knowledge-builds-are-explicit-and-isolated",
         statement: "Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.",
         acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed bounds", "index and query worker failures preserve runtime availability and the last published index", "native embedding models are never loaded into the serving runtime"],
@@ -469,7 +475,7 @@ export default [
       {
         id: "ensure-means-ready",
         statement: "A successful project ensure or start result must reference a runtime whose process identity and health endpoint have been verified.",
-        acceptance: ["process spawn is not returned as command success", "starting remains observable while the request waits", "ready results carry the running lifecycle"],
+        acceptance: ["process spawn is not returned as command success", "starting remains observable while the request waits", "ready results carry the running lifecycle", "source-runtime identity changes when an imported source or native binary changes"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
       {

@@ -74,6 +74,7 @@ Rule `ensure-means-ready`: A successful project ensure or start result must refe
 - process spawn is not returned as command success
 - starting remains observable while the request waits
 - ready results carry the running lifecycle
+- source-runtime identity changes when an imported source or native binary changes
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
 Rule `startup-failure-is-typed`: A project runtime that exits during startup must return a structured problem or diagnostics payload to the supervising service before it exits.

@@ -413,7 +413,10 @@ export async function buildRuntimeSnapshot(input: {
   const project = await loadProjectContext(input.cwd);
   const sourceSnapshot = captureRuntimeSourceSnapshot({ rootDir: project.paths.rootDir, paths: project.paths, store: input.store });
   const { discovery, scan, fileSnapshots, factFiles, facts } = sourceSnapshot;
-  indexRuntimeCodeGraph({ store: input.store, factFiles, deletedFiles: scan.deletedFiles });
+  await indexRuntimeCodeGraph({
+    store: input.store,
+    factFiles,
+  });
 
   const engineGraph = input.store.project.buildRepoGraph({
     facts,
