@@ -692,7 +692,7 @@ export default [
     updates: {
       areas: ["project-knowledge-index", "local-service-and-runtimes"],
       specs: ["runtime-operations-spec"],
-      surfaces: ["project-knowledge-index", "local-service-control"],
+      surfaces: ["project-knowledge-index", "local-service-control", "project-canon-model", "release-update"],
     },
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-routes.ts" },
