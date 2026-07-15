@@ -18,10 +18,11 @@ use crate::constants::{
     WATCHER_MAX_BUFFER_CAPACITY, WATCHER_MAX_DEBOUNCE_MS, WATCHER_MIN_DEBOUNCE_MS,
 };
 use crate::contracts::{
-    BuildRepoGraphRequest, EmbedSemanticTextsRequest, ExtractFactsRequest, FactDiagnostic,
-    GenerateTextRequest, ListEventsRequest, ListObservabilityRecordsRequest, OpenProjectRequest,
-    ProjectRefreshStatus, ResolvedProjectSettings, ScanAndDiffRequest, StartWatcherRequest,
-    WatcherStartResult, WriteEventRequest, WriteObservabilityRecordsRequest,
+    ActivateCodeGraphRequest, BuildRepoGraphRequest, EmbedSemanticTextsRequest,
+    ExtractFactsRequest, FactDiagnostic, GenerateTextRequest, ListEventsRequest,
+    ListObservabilityRecordsRequest, OpenProjectRequest, ProjectRefreshStatus,
+    ResolvedProjectSettings, ScanAndDiffRequest, StartWatcherRequest, WatcherStartResult,
+    WriteEventRequest, WriteObservabilityRecordsRequest,
 };
 use crate::facts::{package_nodes, scan_file_facts};
 use crate::json::{decode, encode, napi_error, notify_error, sqlite_error};
@@ -45,7 +46,10 @@ mod semantic_status;
 mod semantic_store;
 mod semantic_vector_store;
 
-use code_graph_connection::open_code_graph_connection;
+use code_graph_connection::{
+    activate_code_graph_generation, cleanup_code_graph_generations, open_code_graph_connection,
+    open_staged_code_graph_connection,
+};
 use connection::open_project_connection;
 use json_fields::root_path;
 use observability_store::{list_observability_payloads, SqliteObservationSink};
@@ -76,7 +80,8 @@ impl Task for IndexCodeGraphTask {
     type JsValue = String;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        let mut conn = open_code_graph_connection(&self.state_path)?;
+        let request: crate::contracts::IndexCodeGraphRequest = decode(&self.request)?;
+        let mut conn = open_staged_code_graph_connection(&self.state_path, &request.generation)?;
         code_graph_store::index_code_graph_with_connection(
             &self.root_dir,
             &mut conn,
@@ -300,9 +305,25 @@ impl EngineProjectHandle {
         })
     }
 
+    #[napi(js_name = "activateCodeGraphJson")]
+    pub fn activate_code_graph_json(&self, request: String) -> napi::Result<()> {
+        let request: ActivateCodeGraphRequest = decode(&request)?;
+        let next = activate_code_graph_generation(&self.state_path, &request.generation)?;
+        {
+            let mut active = self
+                .graph_conn
+                .lock()
+                .map_err(|_| napi_error("sqlite-error", "Code graph state lock is poisoned."))?;
+            *active = next;
+        }
+        cleanup_code_graph_generations(&self.state_path, &request.generation)
+    }
+
     #[cfg(test)]
     pub(crate) fn index_code_graph_json_sync(&self, request: String) -> napi::Result<String> {
-        code_graph_store::index_code_graph_json(self, request)
+        let mut request: serde_json::Value = decode(&request)?;
+        request["generation"] = serde_json::Value::String("test".to_string());
+        code_graph_store::index_code_graph_json(self, request.to_string())
     }
 
     #[napi(js_name = "searchSymbolsJson")]

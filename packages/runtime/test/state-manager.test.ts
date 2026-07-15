@@ -23,7 +23,7 @@ test("RuntimeStateManager serializes rebuilds and publishes only the latest obse
       calls.push(summary);
       latestSummary = summary;
       active -= 1;
-      return snapshot(summary);
+      return candidate(snapshot(summary));
     },
     readProjectInventory: () => inventory(latestSummary),
     onRebuildError() {
@@ -54,7 +54,7 @@ test("RuntimeStateManager coalesces queued watch rebuilds to the latest revision
     isStopped: () => false,
     async rebuildNow(summary) {
       calls.push(summary);
-      return snapshot(summary);
+      return candidate(snapshot(summary));
     },
     readProjectInventory: () => inventory(calls.at(-1) ?? "initial"),
     onRebuildError() {
@@ -72,6 +72,92 @@ test("RuntimeStateManager coalesces queued watch rebuilds to the latest revision
   assert.deepEqual(manager.currentProjectInventory(), inventory("third"));
 });
 
+test("RuntimeStateManager cancels superseded active analysis and publishes the newest revision", async () => {
+  const calls: string[] = [];
+  const aborted: string[] = [];
+  let firstStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    firstStarted = resolve;
+  });
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("initial"),
+    initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    isStopped: () => false,
+    async rebuildNow(summary, _options, signal) {
+      calls.push(summary);
+      if (summary === "first") {
+        firstStarted();
+        await new Promise<void>((resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted.push(summary);
+            reject(new Error("superseded"));
+          }, { once: true });
+        });
+      }
+      return candidate(snapshot(summary));
+    },
+    readProjectInventory: () => inventory(calls.at(-1) ?? "initial"),
+    onRebuildError() {
+      throw new Error("superseded analysis must not publish a failure");
+    },
+  });
+
+  manager.scheduleRebuild("first");
+  await started;
+  const latestRevision = manager.scheduleRebuild("second");
+  const published = await manager.waitForRevision(latestRevision, { timeoutMs: 1_000 });
+
+  assert.deepEqual(calls, ["first", "second"]);
+  assert.deepEqual(aborted, ["first"]);
+  assert.equal(snapshotId(published), "second");
+  assert.equal(manager.lifecycle().phase, "ready");
+  assert.equal(manager.lifecycle().failure, undefined);
+});
+
+test("RuntimeStateManager commits only the accepted analysis candidate", async () => {
+  const commits: string[] = [];
+  const discards: string[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("initial"),
+    initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    isStopped: () => false,
+    async rebuildNow(summary) {
+      if (summary === "first") await firstBlocked;
+      const value = snapshot(summary);
+      return {
+        snapshot: value,
+        commit() {
+          commits.push(summary);
+          return value;
+        },
+        discard() {
+          discards.push(summary);
+        },
+      };
+    },
+    readProjectInventory: () => inventory("accepted"),
+    onRebuildError() {
+      throw new Error("unexpected rebuild error");
+    },
+  });
+
+  manager.scheduleRebuild("first");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const acceptedRevision = manager.scheduleRebuild("second");
+  releaseFirst();
+  await manager.waitForRevision(acceptedRevision, { timeoutMs: 1_000 });
+
+  assert.deepEqual(commits, ["second"]);
+  assert.deepEqual(discards, ["first"]);
+  assert.equal(snapshotId(manager.currentSnapshot()), "second");
+});
+
 test("RuntimeStateManager exposes revision progress and deterministic readiness", async () => {
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
@@ -84,7 +170,7 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
     isStopped: () => false,
     async rebuildNow(summary) {
       await blocked;
-      return snapshot(summary);
+      return candidate(snapshot(summary));
     },
     readProjectInventory: () => inventory("ready"),
     onRebuildError() {
@@ -112,7 +198,7 @@ test("RuntimeStateManager revision waits fail with lifecycle diagnostics", async
     initialValidationResultCache: createEphemeralValidationResultCache(),
     isStopped: () => false,
     async rebuildNow() {
-      return await new Promise<RuntimeSnapshot>(() => undefined);
+      return await new Promise<ReturnType<typeof candidate>>(() => undefined);
     },
     readProjectInventory: () => inventory("never"),
     onRebuildError() {
@@ -130,6 +216,10 @@ test("RuntimeStateManager revision waits fail with lifecycle diagnostics", async
 
 function snapshot(id: string): RuntimeSnapshot {
   return { id } as unknown as RuntimeSnapshot;
+}
+
+function candidate(value: RuntimeSnapshot) {
+  return { snapshot: value, commit: () => value };
 }
 
 function inventory(id: string): ProjectInventory {

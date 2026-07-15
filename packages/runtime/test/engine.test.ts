@@ -71,7 +71,8 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
         }),
       buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir: "/repo", graphHash: "graph", files: ["src/company.ts"] } }),
       indexCodeGraphJson: async () =>
-        JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
+        JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
+      activateCodeGraphJson: () => undefined,
       searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
       searchReferencesJson: () => JSON.stringify({ references: [] }),
       searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),

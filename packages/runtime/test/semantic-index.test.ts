@@ -323,8 +323,9 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         },
         extractFactsJson: () => JSON.stringify({ files: [], diagnostics: [] }),
         indexCodeGraphJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { files: Array<{ path: string }>; parserVersion: string };
+          const request = JSON.parse(requestJson) as { generation: string; files: Array<{ path: string }>; parserVersion: string };
           return JSON.stringify({
+            generation: request.generation,
             indexed: request.files.map((file) => ({ path: file.path, nodes: 0, unresolved: 0, supported: true })),
             deleted: [],
             diagnostics: [],
@@ -332,6 +333,7 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
             extractorVersion: "test",
           });
         },
+        activateCodeGraphJson: () => undefined,
         buildRepoGraphJson: () =>
           JSON.stringify({
             graph: { rootDir, graphHash: "graph", files: [] },
@@ -797,7 +799,8 @@ test("runtime snapshot reports missing semantic index with project embedding con
               importEdges: [],
             },
           }),
-        indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
@@ -1082,7 +1085,8 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
               importEdges: [],
             },
           }),
-        indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
@@ -1234,7 +1238,8 @@ test("runtime snapshot marks cached semantic index stale after provider config c
               importEdges: [],
             },
           }),
-        indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
@@ -1521,7 +1526,8 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
         scanAndDiffJson: () => JSON.stringify(scan),
         extractFactsJson: () => JSON.stringify({ files: facts, diagnostics: [] }),
         buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: scan.files.map((file) => file.path), packages: [], importEdges: [] } }),
-        indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
@@ -1675,7 +1681,8 @@ for (const scenario of [
           scanAndDiffJson: () => JSON.stringify(scan),
           extractFactsJson: () => JSON.stringify({ files: facts, diagnostics: [] }),
           buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: scan.files.map((file) => file.path), packages: [], importEdges: [] } }),
-          indexCodeGraphJson: () => JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+          indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
+          activateCodeGraphJson: () => undefined,
           searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
           searchReferencesJson: () => JSON.stringify({ references: [] }),
           searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),

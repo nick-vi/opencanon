@@ -541,6 +541,7 @@ pub(crate) struct FactDiagnostic {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct IndexCodeGraphRequest {
+    pub(crate) generation: String,
     pub(crate) files: Vec<IndexCodeGraphFile>,
     #[serde(default)]
     pub(crate) parser_version: String,
@@ -556,6 +557,12 @@ pub(crate) struct IndexCodeGraphFile {
     pub(crate) language: String,
     #[serde(default)]
     pub(crate) content: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActivateCodeGraphRequest {
+    pub(crate) generation: String,
 }
 
 #[derive(Debug, Deserialize)]

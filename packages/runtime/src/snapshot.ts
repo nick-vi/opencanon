@@ -34,6 +34,7 @@ import {
   type ValidatorOutcome,
   type ProducerPolicy,
   type ProducerSnapshot,
+  type ProductModelProjection,
 } from "@opencanon/core";
 import type { Engine } from "@opencanon/engine";
 import type { ProjectStore } from "./state.ts";
@@ -402,18 +403,41 @@ export async function buildStartupRuntimeSnapshot(input: {
   };
 }
 
-export async function buildRuntimeSnapshot(input: {
+export type RuntimeAnalysis = {
+  snapshot: RuntimeSnapshot;
+  publication: {
+    codeGraphGeneration: string;
+    productModel: ProductModelProjection;
+  };
+};
+
+type RuntimeSnapshotInput = {
   cwd: string;
   engine: Engine;
   store: ProjectStore;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
   producerPolicy?: ProducerPolicy;
   validationResultCache: ValidationResultCache;
-}): Promise<RuntimeSnapshot> {
+};
+
+export async function buildRuntimeSnapshot(input: RuntimeSnapshotInput): Promise<RuntimeSnapshot> {
+  const analysis = await buildRuntimeAnalysis(input);
+  input.store.project.activateCodeGraph(analysis.publication.codeGraphGeneration);
+  input.store.writeSnapshot({
+    health: analysis.snapshot.health,
+    files: analysis.snapshot.files,
+    graph: analysis.snapshot.graph,
+    findings: analysis.snapshot.findings,
+    productModel: analysis.publication.productModel,
+  });
+  return analysis.snapshot;
+}
+
+export async function buildRuntimeAnalysis(input: RuntimeSnapshotInput): Promise<RuntimeAnalysis> {
   const project = await loadProjectContext(input.cwd);
   const sourceSnapshot = captureRuntimeSourceSnapshot({ rootDir: project.paths.rootDir, paths: project.paths, store: input.store });
   const { discovery, scan, fileSnapshots, factFiles, facts } = sourceSnapshot;
-  await indexRuntimeCodeGraph({
+  const codeGraph = await indexRuntimeCodeGraph({
     store: input.store,
     factFiles,
   });
@@ -564,20 +588,22 @@ export async function buildRuntimeSnapshot(input: {
     store: input.store,
     semanticEmbedding: input.semanticEmbedding ?? project.paths.semanticEmbedding,
   });
-  input.store.writeSnapshot({ health, files: discovery.files, graph, findings, productModel });
-  const storeState = input.store.readState();
-
-  return {
+  const snapshot: RuntimeSnapshot = {
     health,
     state: {
       health,
-      files: storeState.files,
-      findings: storeState.findings,
-      staleFiles: storeState.staleFiles,
+      files: discovery.files.length,
+      findings: findings.length,
+      staleFiles: scan.staleFiles,
       cacheHits: 0,
       cacheMisses: scan.changedFiles.length + scan.deletedFiles.length,
       semanticIndex: semanticIndexSnapshot,
-      ...(storeState.productModel ? { productModel: storeState.productModel } : {}),
+      productModel: {
+        ...productModel.counts,
+        graphHash: productModel.graphHash,
+        definitionsHash: productModel.definitionsHash,
+        indexedAt: productModel.indexedAt,
+      },
     },
     files: discovery.files,
     areas,
@@ -599,6 +625,13 @@ export async function buildRuntimeSnapshot(input: {
     semanticIndex: semanticIndexSnapshot,
     impactSurfaces,
     validators,
+  };
+  return {
+    snapshot,
+    publication: {
+      codeGraphGeneration: codeGraph.generation,
+      productModel,
+    },
   };
 }
 

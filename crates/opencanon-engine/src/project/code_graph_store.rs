@@ -190,6 +190,7 @@ pub(super) fn index_code_graph_with_connection(
     request: String,
 ) -> napi::Result<String> {
     let request: IndexCodeGraphRequest = decode(&request)?;
+    let generation = request.generation.clone();
     let parser_version = if request.parser_version.trim().is_empty() {
         PARSER_VERSION.to_string()
     } else {
@@ -229,6 +230,7 @@ pub(super) fn index_code_graph_with_connection(
 
     if changed_files.is_empty() && deleted.is_empty() {
         return encode(&json!({
+          "generation": generation,
           "indexed": [],
           "deleted": [],
           "diagnostics": [],
@@ -355,6 +357,7 @@ pub(super) fn index_code_graph_with_connection(
         .map_err(|error| sqlite_error("Could not commit graph index transaction", error))?;
 
     encode(&json!({
+      "generation": generation,
       "indexed": indexed,
       "deleted": deleted,
       "diagnostics": diagnostics,

@@ -40,7 +40,8 @@ test("runtime store can use an isolated state path", () => {
         extractFactsJson: () => JSON.stringify({ files: [], diagnostics: [] }),
         buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: [] } }),
         indexCodeGraphJson: () =>
-          JSON.stringify({ indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
+          JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
+        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),

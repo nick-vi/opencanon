@@ -28,6 +28,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `packages/runtime/src/cli.ts`
 - Files: `packages/runtime/src/state.ts`
 - Files: `packages/runtime/src/snapshot.ts`
+- Files: `packages/runtime/src/project-analysis*.ts`
 - Files: `packages/cli/src/changes.ts`
 - Files: `packages/cli/src/runtime-client.ts`
 - Files: `packages/runtime/test/client-test-sources.ts`
@@ -55,6 +56,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - `engine-tests` command `npm run check:engine`
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
 - `semantic-index-tests` test `packages/runtime/test/semantic-index.test.ts`
+- `project-analysis-tests` test `packages/runtime/test/project-analysis.test.ts`
 - `change-run-tests` test `packages/runtime/test/change-runs.test.ts`
 - `runtime-supervision-tests` test `packages/runtime/test/runtime-supervision.test.ts`
 - `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
@@ -144,15 +146,20 @@ Rule `diagnostics-do-not-start-project-work`: Doctor and status surfaces inspect
 - typed validation starts its required producer and publishes the generation it consumed
 Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`, `service-lifecycle-tests`
 
-Rule `source-refresh-preserves-transports`: Project source refresh keeps pipe and HTTP responsive while native graph work runs asynchronously in dedicated derived state.
-- native graph writes do not run on the JavaScript event loop
+Rule `source-refresh-preserves-transports`: Project source refresh keeps pipe and HTTP responsive by running complete analysis outside the serving runtime and publishing only a complete accepted revision.
+- the serving process does not perform discovery, fact extraction, graph construction, or project validation
+- superseded analysis is cancelled and cannot publish
+- analysis failure preserves the previous snapshot and serving transports
+- graph indexing writes a private generation that stays invisible until the serving runtime accepts it
+- the product projection and graph generation commit only for the newest observed revision
+- native graph writes do not run on the serving JavaScript event loop
 - graph readers use independent SQLite WAL connections while graph writes are pending
 - Activity and other Project State writes do not contend with graph transactions
 - complete source identity derives changed and deleted graph files inside the graph store
 - missing or incompatible graph state rebuilds from source
 - cold graph extraction bounds memory by streaming files into one transaction
 - a long refresh does not replace the serving runtime
-Checks: `engine-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+Checks: `engine-tests`, `project-analysis-tests`, `runtime-client-tests`, `service-lifecycle-tests`
 
 Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.
 - missing or stale Knowledge fails read commands immediately

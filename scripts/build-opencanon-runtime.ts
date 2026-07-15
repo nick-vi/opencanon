@@ -51,6 +51,10 @@ await buildRuntimeEntry(
   path.join(rootDir, "packages/runtime/src/knowledge-index-worker-main.ts"),
   path.join(runtimeRoot, "knowledge-index-worker-main.js"),
 );
+await buildRuntimeEntry(
+  path.join(rootDir, "packages/runtime/src/project-analysis-worker-main.ts"),
+  path.join(runtimeRoot, "project-analysis-worker-main.js"),
+);
 
 emitRuntimeDeclarations();
 if (!skipEngine) copyEngineBinary();

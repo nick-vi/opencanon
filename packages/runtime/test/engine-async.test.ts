@@ -61,6 +61,7 @@ test("native graph indexing keeps the event loop and project readers responsive"
 
   try {
     const result = await project.indexCodeGraph({ files, parserVersion: "async-index-test" });
+    project.activateCodeGraph(result.generation);
     assert.equal(result.indexed.length, files.length);
     assert(timerTicks >= 2, `Expected the event loop to advance during graph indexing, received ${timerTicks} timer ticks.`);
     assert(successfulReads >= 2, `Expected concurrent project reads during graph indexing, received ${successfulReads}.`);

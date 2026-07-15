@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,6 +113,7 @@ export type EngineProject = {
   extractFacts(request: ProjectExtractFactsRequest): ExtractFactsResult;
   buildRepoGraph(request: ProjectBuildRepoGraphRequest): BuildRepoGraphResult;
   indexCodeGraph(request: IndexCodeGraphRequest): Promise<IndexCodeGraphResult>;
+  activateCodeGraph(generation: string): void;
   searchSymbols(request: SearchSymbolsRequest): SearchSymbolsResult;
   searchReferences(request: SearchReferencesRequest): SearchReferencesResult;
   searchGraphEdges(request: SearchGraphEdgesRequest): SearchGraphEdgesResult;
@@ -169,6 +171,7 @@ type EngineProjectJsonBinding = {
   extractFactsJson(request: string): string;
   buildRepoGraphJson(request: string): string;
   indexCodeGraphJson(request: string): string | Promise<string>;
+  activateCodeGraphJson(request: string): void;
   searchSymbolsJson(request: string): string;
   searchReferencesJson(request: string): string;
   searchGraphEdgesJson(request: string): string;
@@ -282,7 +285,8 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     buildRepoGraph: (request) =>
       BuildRepoGraphResultSchema.parse(parseJson(callEngine(() => project.buildRepoGraphJson(JSON.stringify(BuildRepoGraphRequestSchema.parse(request)))))),
     indexCodeGraph: async (request) =>
-      IndexCodeGraphResultSchema.parse(parseJson(await callEngineAsync(() => project.indexCodeGraphJson(JSON.stringify(IndexCodeGraphRequestSchema.parse(request)))))),
+      IndexCodeGraphResultSchema.parse(parseJson(await callEngineAsync(() => project.indexCodeGraphJson(JSON.stringify(IndexCodeGraphRequestSchema.parse({ ...request, generation: randomUUID() })))))),
+    activateCodeGraph: (generation) => callEngine(() => project.activateCodeGraphJson(JSON.stringify({ generation }))),
     searchSymbols: (request) =>
       SearchSymbolsResultSchema.parse(parseJson(callEngine(() => project.searchSymbolsJson(JSON.stringify(SearchSymbolsRequestSchema.parse(request)))))),
     searchReferences: (request) =>
@@ -398,6 +402,7 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "extractFactsJson",
     "buildRepoGraphJson",
     "indexCodeGraphJson",
+    "activateCodeGraphJson",
     "searchSymbolsJson",
     "searchReferencesJson",
     "searchGraphEdgesJson",

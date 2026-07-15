@@ -11,6 +11,7 @@ import {
   type FactDiagnostic,
   type FactKind,
   type FileFacts,
+  type IndexCodeGraphResult,
   type ProjectFileSnapshot,
   type ScanAndDiffResult,
 } from "@opencanon/core";
@@ -124,8 +125,8 @@ export function extractRuntimeFacts(input: {
 export async function indexRuntimeCodeGraph(input: {
   store: ProjectStore;
   factFiles: RuntimeFactFile[];
-}): Promise<void> {
-  await input.store.project.indexCodeGraph({
+}): Promise<IndexCodeGraphResult> {
+  return await input.store.project.indexCodeGraph({
     files: input.factFiles.filter((file) => isCodeGraphIndexableFile(file.path)),
     parserVersion: ENGINE_PARSER_VERSION,
   });

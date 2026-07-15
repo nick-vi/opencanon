@@ -39,6 +39,7 @@ export const BuildRepoGraphResultSchema = z.object({
 export type BuildRepoGraphResult = z.infer<typeof BuildRepoGraphResultSchema>;
 
 export const IndexCodeGraphRequestSchema = z.object({
+  generation: z.string().regex(/^[a-zA-Z0-9_-]+$/),
   files: z.array(
     z.object({
       path: z.string().min(1),
@@ -50,9 +51,10 @@ export const IndexCodeGraphRequestSchema = z.object({
   parserVersion: z.string().default(""),
   extractorVersion: z.string().default(""),
 });
-export type IndexCodeGraphRequest = z.input<typeof IndexCodeGraphRequestSchema>;
+export type IndexCodeGraphRequest = Omit<z.input<typeof IndexCodeGraphRequestSchema>, "generation">;
 
 export const IndexCodeGraphResultSchema = z.object({
+  generation: z.string().regex(/^[a-zA-Z0-9_-]+$/),
   indexed: z.array(
     z.object({
       path: z.string().min(1),

@@ -24,12 +24,18 @@ export type RuntimeStateManager = {
 
 export type RuntimeRebuildOptions = Record<string, never>;
 
+export type RuntimeRebuildCandidate = {
+  snapshot: RuntimeSnapshot;
+  commit(): Promise<RuntimeSnapshot> | RuntimeSnapshot;
+  discard?(): Promise<void> | void;
+};
+
 export type RuntimeStateManagerOptions = {
   initialSnapshot: RuntimeSnapshot;
   initialProjectInventory: ProjectInventory;
   initialValidationResultCache: ValidationResultCache;
   isStopped(): boolean;
-  rebuildNow(summary: string, options: RuntimeRebuildOptions): Promise<RuntimeSnapshot>;
+  rebuildNow(summary: string, options: RuntimeRebuildOptions, signal: AbortSignal): Promise<RuntimeRebuildCandidate>;
   readProjectInventory(): ProjectInventory;
   onRebuildError(error: unknown): void;
 };
@@ -52,6 +58,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   let queued: RebuildIntent | undefined;
   let failure: RuntimeLifecycleState["failure"];
   let loop: Promise<void> | undefined;
+  let activeAbortController: AbortController | undefined;
   let stopped = false;
   const waiters = new Set<RevisionWaiter>();
 
@@ -73,6 +80,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     queued = { revision: nextRevision, summary, options: inputOptions ?? {} };
     failure = undefined;
     phase = RuntimeLifecyclePhaseValue.Refreshing;
+    activeAbortController?.abort();
     startLoop();
     return nextRevision;
   }
@@ -91,24 +99,31 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       const intent = queued;
       queued = undefined;
       active = intent;
+      const abortController = new AbortController();
+      activeAbortController = abortController;
       phase = RuntimeLifecyclePhaseValue.Refreshing;
       try {
-        const next = await options.rebuildNow(intent.summary, intent.options);
+        const candidate = await options.rebuildNow(intent.summary, intent.options, abortController.signal);
         if (intent.revision === revision.observed) {
+          const next = await candidate.commit();
           snapshot = next;
           projectInventory = options.readProjectInventory();
           revision = { ...revision, published: intent.revision };
           phase = RuntimeLifecyclePhaseValue.Ready;
           failure = undefined;
           resolvePublishedWaiters();
+        } else {
+          await candidate.discard?.();
         }
       } catch (error) {
+        if (abortController.signal.aborted && queued) continue;
         const normalized = error instanceof Error ? error : new Error(String(error));
         failure = { revision: intent.revision, message: normalized.message };
         phase = RuntimeLifecyclePhaseValue.Failed;
         rejectWaitersThrough(intent.revision, normalized);
         options.onRebuildError(error);
       } finally {
+        if (activeAbortController === abortController) activeAbortController = undefined;
         if (active?.revision === intent.revision) active = undefined;
       }
     }
@@ -200,6 +215,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     stop() {
       if (stopped) return;
       stopped = true;
+      activeAbortController?.abort();
       phase = RuntimeLifecyclePhaseValue.Stopping;
       queued = undefined;
       const error = new Error("Project runtime stopped before the requested revision was published.");

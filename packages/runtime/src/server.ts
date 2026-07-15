@@ -67,7 +67,8 @@ import {
   type ValidationResultCache,
   type WatcherEventBatch,
 } from "@opencanon/core";
-import { buildRuntimeSnapshot, buildStartupRuntimeSnapshot, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
+import { buildStartupRuntimeSnapshot, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
+import { runProjectAnalysisOperation } from "./project-analysis-operation.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
 import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
@@ -85,7 +86,7 @@ import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
-import { createRuntimeStateManager, type RuntimeRebuildOptions } from "./state-manager.ts";
+import { createRuntimeStateManager, type RuntimeRebuildCandidate, type RuntimeRebuildOptions } from "./state-manager.ts";
 import { createChangeCheckRunner } from "./change-check-runner.ts";
 import { createKnowledgeQueryRuntime } from "./knowledge-query-runtime.ts";
 import { refreshActiveWorkProjection } from "./activity-projection.ts";
@@ -400,7 +401,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   async function buildIndexedSnapshot(summary: string, options: { force?: boolean; changedPaths?: string[] } = {}): Promise<RuntimeSnapshot> {
     if (currentWorkerJob) throw new Error(`Project operation already running: ${currentWorkerJob.label}.`);
     const jobId = beginWorkerJob({
-      kind: RuntimeWorkerJobKindValue.SemanticIndex,
+      kind: RuntimeWorkerJobKindValue.ProjectSnapshot,
       label: options.force ? "Rebuilding Project Knowledge" : "Indexing Project Knowledge",
       message: summary,
     });
@@ -659,7 +660,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     startStoreWatcher();
   }
 
-  async function rebuildAndPublishNow(summary: string, _options: RuntimeRebuildOptions): Promise<RuntimeSnapshot> {
+  async function rebuildAndPublishNow(summary: string, _options: RuntimeRebuildOptions, signal: AbortSignal): Promise<RuntimeRebuildCandidate> {
     const jobId = beginWorkerJob({
       kind: RuntimeWorkerJobKindValue.SemanticIndex,
       label: "Refreshing Project State",
@@ -676,45 +677,60 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           label: "Discovering project files",
           indeterminate: true,
         }));
-        const next = await rebuildSnapshot({ cwd: rootDir, store });
-        updateWorkerJob(jobId, {
-          label: "Linking definitions and context",
-          current: next.definitionGraph.nodes.length,
-          total: next.definitionGraph.nodes.length,
-          unit: "nodes",
-          message: "Building project map and reading Project Knowledge state.",
-        });
-        events.broadcast(indexingEvent("Building project map and reading Project Knowledge state.", {
-          phase: "product-graph",
-          label: "Linking definitions and context",
-          current: next.definitionGraph.nodes.length,
-          total: next.definitionGraph.nodes.length,
-          unit: "nodes",
-        }));
-        validatorGraphRuntime?.recordCurrentSourceSignature();
-        store.writeEvent(indexedEvent(next, summary));
-        finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
-          label: "Project state ready",
-          current: next.files.length,
-          total: next.files.length,
-          unit: "files",
-          message: summary,
-        });
-        const publishedSnapshot = withProcessIdentity(next);
-        events.broadcast(indexingEvent(summary, {
-          phase: "ready",
-          label: "Project state ready",
-          current: next.files.length,
-          total: next.files.length,
-          unit: "files",
-        }));
-        events.broadcast(snapshotEvent(publishedSnapshot, summary));
+        const analysis = await rebuildSnapshot({ store, signal });
+        const next = analysis.snapshot;
         span.setOutput({
           files: next.files.length,
           findings: next.findings.length,
           validators: next.validators.length,
         });
-        return publishedSnapshot;
+        return {
+          snapshot: next,
+          commit() {
+            store.project.activateCodeGraph(analysis.publication.codeGraphGeneration);
+            store.writeSnapshot({
+              health: next.health,
+              files: next.files,
+              graph: next.graph,
+              findings: next.findings,
+              productModel: analysis.publication.productModel,
+            });
+            stateManager.replaceValidationResultCache(createValidationResultCache(paths));
+            updateWorkerJob(jobId, {
+              label: "Linking definitions and context",
+              current: next.definitionGraph.nodes.length,
+              total: next.definitionGraph.nodes.length,
+              unit: "nodes",
+              message: "Building project map and reading Project Knowledge state.",
+            });
+            events.broadcast(indexingEvent("Building project map and reading Project Knowledge state.", {
+              phase: "product-graph",
+              label: "Linking definitions and context",
+              current: next.definitionGraph.nodes.length,
+              total: next.definitionGraph.nodes.length,
+              unit: "nodes",
+            }));
+            validatorGraphRuntime?.recordCurrentSourceSignature();
+            store.writeEvent(indexedEvent(next, summary));
+            finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
+              label: "Project state ready",
+              current: next.files.length,
+              total: next.files.length,
+              unit: "files",
+              message: summary,
+            });
+            const publishedSnapshot = withProcessIdentity(refreshSnapshotRefreshStatus(next, store));
+            events.broadcast(indexingEvent(summary, {
+              phase: "ready",
+              label: "Project state ready",
+              current: next.files.length,
+              total: next.files.length,
+              unit: "files",
+            }));
+            events.broadcast(snapshotEvent(publishedSnapshot, summary));
+            return publishedSnapshot;
+          },
+        };
       } catch (error) {
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
           label: "Project state refresh failed",
@@ -725,15 +741,9 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     });
   }
 
-  async function rebuildSnapshot(input: { cwd: string; store: ProjectStore }): Promise<RuntimeSnapshot> {
+  async function rebuildSnapshot(input: { store: ProjectStore; signal: AbortSignal }) {
     try {
-      return withProcessIdentity(await buildRuntimeSnapshot({
-        cwd: rootDir,
-        engine: prerequisites.engine,
-        store: input.store,
-        producerPolicy: InteractiveProducerPolicy,
-        validationResultCache: stateManager.validationResultCache(),
-      }));
+      return await runProjectAnalysisOperation({ rootDir, statePath: input.store.statePath, signal: input.signal });
     } catch (error) {
       throw new Error(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error)));
     }
