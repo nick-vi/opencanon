@@ -16,7 +16,7 @@ import {
   type CanonEvent,
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
-import { buildProjectSummary, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
+import { buildProjectSummary, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot, refreshChangeActivitySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
 import { TreeScope, buildTreeResponse, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { eventStream, operationEvent, snapshotEvent, type EventBroadcaster } from "./server-events.ts";
 import { isAuthorizedRuntimeRequest } from "./auth.ts";
@@ -459,7 +459,13 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const ownership = applyTaskOwnershipEvent(rootDir, parsed.event);
         if (!ownership.ok) return json(diagnosticsFailure(ownership.diagnostics), ownership.status);
         writeRuntimeEvent(rootDir, currentStore(), ownership.event);
-        const snapshot = await stateManager.rebuildAndPublish(ownership.event.summary);
+        const snapshot = refreshChangeActivitySnapshot({
+          snapshot: stateManager.currentSnapshot(),
+          project,
+          store: currentStore(),
+        });
+        stateManager.setSnapshot(snapshot);
+        events.broadcast(snapshotEvent(snapshot, ownership.event.summary));
         return json({ ok: true, data: { event: ownership.event, changes: snapshot.changes } });
       }
       if (url.pathname === ApiRoute.CanonRelated) {

@@ -103,6 +103,27 @@ export type RuntimeSnapshot = {
   }>;
 };
 
+export function refreshChangeActivitySnapshot(input: {
+  snapshot: RuntimeSnapshot;
+  project: Awaited<ReturnType<typeof loadProjectContext>>;
+  store: ProjectStore;
+}): RuntimeSnapshot {
+  const taskLeases = activeTaskLeaseSummaries(input.project.paths.rootDir);
+  const histories = listCompleteChangeHistories(
+    input.project.paths.rootDir,
+    input.store,
+    input.project.changes.map((change) => change.id),
+  );
+  const changes = input.project.changes.map((change) =>
+    snapshotChange(input.project.paths.rootDir, input.project.paths.changesPath, change, {
+      events: histories.byChangeId.get(change.id) ?? [],
+      findings: input.snapshot.findings,
+      taskLeases,
+    }),
+  );
+  return { ...input.snapshot, changes };
+}
+
 export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeSnapshot; store: ProjectStore; lifecycle: RuntimeProjectSummary["lifecycle"] }): RuntimeProjectSummary {
   const storeState = input.store.readState();
   const latestQuery = { mode: CanonEventQueryMode.Recent, limit: 1 } as const;

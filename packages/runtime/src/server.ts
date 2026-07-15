@@ -88,6 +88,7 @@ import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
 import { createRuntimeStateManager, type RuntimeRebuildOptions } from "./state-manager.ts";
 import { createChangeCheckRunner } from "./change-check-runner.ts";
 import { createKnowledgeQueryRuntime } from "./knowledge-query-runtime.ts";
+import { refreshActiveWorkProjection } from "./activity-projection.ts";
 import type { KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
 import { runKnowledgeIndexOperation, type KnowledgeIndexOperationInput, type KnowledgeIndexOperationResult } from "./knowledge-index-operation.ts";
 import { buildSnapshotFileCoverage } from "./snapshot-projection.ts";
@@ -627,7 +628,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       const nextSignature = currentCoordinationSignature();
       if (nextSignature === coordinationSignature) return;
       coordinationSignature = nextSignature;
-      stateManager.scheduleRebuild("Active work changed.");
+      void refreshActiveWorkProjection({ rootDir, summary: "Active work changed.", stateManager, store, events });
     }, CoordinationRefreshDebounceMs);
     if (typeof coordinationRefreshTimer === "object" && "unref" in coordinationRefreshTimer) {
       (coordinationRefreshTimer as { unref: () => void }).unref();

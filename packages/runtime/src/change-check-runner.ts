@@ -19,8 +19,9 @@ import {
 } from "@opencanon/core";
 import type { SimpleTracer } from "@opencanon/observability";
 import { SpanKind } from "@opencanon/observability";
-import { operationEvent, type EventBroadcaster } from "./server-events.ts";
+import { operationEvent, snapshotEvent, type EventBroadcaster } from "./server-events.ts";
 import { writeRuntimeEvent } from "./server-canon-events.ts";
+import { refreshChangeActivitySnapshot } from "./snapshot.ts";
 import {
   ChangeEventType,
   ChangeCheckOutputStream,
@@ -214,7 +215,7 @@ export async function createChangeCheckRunner(input: {
       summary: item.task ? `Task ${item.task.id} check ${item.check.id} started.` : `Check ${item.check.id} started.`,
     });
     writeRuntimeEvent(input.rootDir, input.store(), started);
-    scheduleProjectionRefresh(started.summary);
+    refreshActivityProjection(item.project, started.summary);
 
     const pendingOutput: Array<{ stream: ChangeCheckOutputStream; text: string }> = [];
     let pendingOutputBytes = 0;
@@ -386,11 +387,18 @@ export async function createChangeCheckRunner(input: {
       summary: "summary" in run ? run.summary : `Check ${item.check.id} ${run.status}.`,
     });
     writeRuntimeEvent(input.rootDir, input.store(), finished);
-    scheduleProjectionRefresh(finished.summary);
+    refreshActivityProjection(item.project, finished.summary);
   }
 
-  function scheduleProjectionRefresh(summary: string): void {
-    if (!stopping) input.stateManager.scheduleRebuild(summary);
+  function refreshActivityProjection(project: LoadedProject, summary: string): void {
+    if (stopping) return;
+    const snapshot = refreshChangeActivitySnapshot({
+      snapshot: input.stateManager.currentSnapshot(),
+      project,
+      store: input.store(),
+    });
+    input.stateManager.setSnapshot(snapshot);
+    input.events.broadcast(snapshotEvent(snapshot, summary));
   }
 
   function finishCancelled(run: ChangeCheckRun): ChangeCheckRun {
