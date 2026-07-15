@@ -755,4 +755,41 @@ export default [
     ],
     render: { kind: "none" },
   }),
+  defineChange({
+    id: "project-types-watcher-race",
+    title: "Remove the duplicate project types watcher",
+    kind: "fix",
+    summary: "Route project authoring type updates through the authoritative project watcher so atomic Knowledge publication cannot crash the runtime.",
+    updates: {
+      areas: ["definition-authoring-flow", "local-service-and-runtimes"],
+      specs: ["runtime-operations-spec"],
+      surfaces: ["project-knowledge-index", "local-service-control", "project-canon-model"],
+    },
+    scope: [
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/project-types-runtime.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/test/client.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "opencanon/changes/index.ts" },
+    ],
+    intent: {
+      problem: "Project type generation owns a second recursive Node watcher that can enter generated semantic-index staging directories and emit an unhandled error when atomic publication removes them.",
+      outcome: "The native project watcher remains the only recursive source watcher and schedules project type generation from its filtered event batches.",
+      why: "One watcher must own source invalidation so generated-state churn cannot race independent filesystem traversal or terminate a healthy project runtime.",
+    },
+    tasks: [
+      {
+        id: "single-watcher-owner",
+        title: "Route project type generation through the project watcher",
+        files: ["packages/runtime/src/project-types-runtime.ts", "packages/runtime/src/server.ts", "packages/runtime/test/client.test.ts"],
+        checks: ["runtime-client-tests", "typecheck", "process-steady-state", "full-ci"],
+      },
+    ],
+    checks: [
+      { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
+      { id: "typecheck", kind: "command", command: "npm run check:types" },
+      { id: "process-steady-state", kind: "command", command: "node scripts/check-test-processes.ts" },
+      { id: "full-ci", kind: "command", command: "npm run check:ci", timeoutMs: 10 * 60 * 1000 },
+    ],
+    render: { kind: "none" },
+  }),
 ];

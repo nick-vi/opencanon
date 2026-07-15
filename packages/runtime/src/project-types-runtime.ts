@@ -1,10 +1,8 @@
 import path from "node:path";
-import { watch, type FSWatcher } from "node:fs";
 import { generateProjectTypes, ProjectAuthoringGeneratedDirPath, relative, type ContextPaths } from "@opencanon/core";
 import { indexingEvent, type EventBroadcaster } from "./server-events.ts";
 
 const ProjectTypesDebounceMs = 500;
-const ProjectTypesInputWatcherReason = "Project authoring types updated after authoring inputs changed.";
 
 export type ProjectTypesRuntime = {
   generateNow(reason: string): void;
@@ -18,9 +16,7 @@ export function createProjectTypesRuntime(input: {
   events: EventBroadcaster;
 }): ProjectTypesRuntime {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let inputWatcher: FSWatcher | undefined;
   let stopped = false;
-  startInputWatcher();
 
   return {
     generateNow,
@@ -32,34 +28,8 @@ export function createProjectTypesRuntime(input: {
       stopped = true;
       if (timer) clearTimeout(timer);
       timer = undefined;
-      inputWatcher?.close();
-      inputWatcher = undefined;
     },
   };
-
-  function startInputWatcher(): void {
-    try {
-      inputWatcher = watch(input.rootDir, { recursive: true, encoding: "utf8" }, (_eventType, filename) => {
-        if (stopped) return;
-        if (!filename) {
-          schedule(ProjectTypesInputWatcherReason);
-          return;
-        }
-        scheduleForInputPath(filename);
-      });
-      if (typeof inputWatcher === "object" && "unref" in inputWatcher) {
-        inputWatcher.unref();
-      }
-    } catch (error) {
-      reportGenerationMessage(`Project authoring input watcher failed: ${errorMessage(error)}`);
-    }
-  }
-
-  function scheduleForInputPath(file: string | Buffer): void {
-    const filePath = typeof file === "string" ? file : file.toString("utf8");
-    if (!isProjectTypesGenerationInput(normalizeChangedPath(input.rootDir, filePath), fixturePrefix(input.rootDir, input.paths()))) return;
-    schedule(ProjectTypesInputWatcherReason);
-  }
 
   function schedule(reason: string): void {
     if (stopped) return;
