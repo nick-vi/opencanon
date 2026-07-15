@@ -753,6 +753,20 @@ export function changeEventsRouteCheckSource(): string {
       const retryText = await retryResponse.text();
       assert.equal(retryResponse.status, 200, retryText);
 
+      const conflictingRetryResponse = await fetch(server.url + "/api/changes/events", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          id: "route-change-started-idempotent",
+          changeId: "route-change",
+          type: "change-started",
+          summary: "Different request content.",
+          actor: "test",
+          files: ["src/company.ts"],
+        }),
+      });
+      assert.equal(conflictingRetryResponse.status, 409, await conflictingRetryResponse.text());
+
       const eventsResponse = await fetch(server.url + "/api/changes/events?changeId=route-change", { headers });
       const eventsText = await eventsResponse.text();
       assert.equal(eventsResponse.status, 200, eventsText);

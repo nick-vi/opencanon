@@ -36,7 +36,7 @@ import {
 } from "./worktree-coordination.ts";
 import { buildContextPacket } from "./server-context-packet.ts";
 import { canonHistoryFromRuntime } from "./server-history.ts";
-import { listChangeEvents, listCompleteChangeHistories, listRuntimeEvents, writeRuntimeEvent } from "./server-canon-events.ts";
+import { listChangeEvents, listCompleteChangeHistories, listRuntimeEvents, sameCanonEventRequest, writeRuntimeEvent } from "./server-canon-events.ts";
 import {
   ChangeEventType,
   applyTaskOwnershipEvent,
@@ -418,6 +418,22 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
         const change = project.changes.find((item) => item.id === parsed.event.changeIds[0]);
         if (!change) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change ${parsed.event.changeIds[0]}.`)]), 404);
+        const history = listCompleteChangeHistories(rootDir, currentStore(), [change.id]);
+        const existing = history.events.find((event) => event.id === parsed.event.id);
+        if (existing) {
+          if (!sameCanonEventRequest(existing, parsed.event)) {
+            return json(
+              diagnosticsFailure([
+                createOpenCanonDiagnostic({
+                  code: diagnosticCodes.lifecycleConflict,
+                  message: `Canon event id ${parsed.event.id} is already committed with different content.`,
+                }),
+              ], diagnosticCodes.lifecycleConflict),
+              409,
+            );
+          }
+          return json({ ok: true, data: { event: existing, changes: stateManager.currentSnapshot().changes } });
+        }
         const leases = activeTaskLeaseSummaries(rootDir);
         const activeLease = parsed.event.type === ChangeTaskEventType.Claimed
           ? leases.find((lease) => lease.changeId === change.id && lease.taskId === parsed.event.taskIds[0])
@@ -429,7 +445,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const transitionIssues = validateChangeLifecycleTransition({
           change,
           event: parsed.event,
-          events: listCompleteChangeHistories(rootDir, currentStore(), [change.id]).events,
+          events: history.events,
           leases,
         });
         if (transitionIssues.length > 0) {

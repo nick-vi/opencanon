@@ -22,6 +22,20 @@ export function listChangeEvents(rootDir: string, store: ProjectStore, input: { 
   });
 }
 
+export function sameCanonEventRequest(left: CanonEvent, right: CanonEvent): boolean {
+  return left.id === right.id
+    && left.type === right.type
+    && left.actor === right.actor
+    && left.summary === right.summary
+    && sameStrings(left.files, right.files)
+    && sameStrings(left.changeIds, right.changeIds)
+    && sameStrings(left.taskIds, right.taskIds)
+    && sameStrings(left.checkIds, right.checkIds)
+    && sameStrings(left.conventionIds, right.conventionIds)
+    && sameStrings(left.validatorIds, right.validatorIds)
+    && sameStrings(left.findingIds, right.findingIds);
+}
+
 export type CompleteChangeHistories = {
   events: CanonEvent[];
   byChangeId: ReadonlyMap<string, CanonEvent[]>;
@@ -37,4 +51,8 @@ export function listCompleteChangeHistories(rootDir: string, store: ProjectStore
     for (const changeId of event.changeIds) byChangeId.get(changeId)?.push(event);
   }
   return { events, byChangeId };
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
