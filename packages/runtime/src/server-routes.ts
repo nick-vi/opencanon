@@ -62,7 +62,7 @@ import {
   optionalStringParam,
   validateRelatedSelectors,
 } from "./server-query.ts";
-import { runKnowledgeQueryOperation } from "./knowledge-index-operation.ts";
+import type { KnowledgeQueryRuntime } from "./knowledge-query-runtime.ts";
 
 type RuntimePaths = ReturnType<typeof createPaths>;
 
@@ -79,6 +79,7 @@ export type RuntimeRouteHandlerInput = {
   projectTypesRuntime: ReturnType<typeof createProjectTypesRuntime>;
   typeProducerRuntime?: ReturnType<typeof createTypeProducerRuntime>;
   changeCheckRunner: ChangeCheckRunner;
+  knowledgeQueryRuntime: KnowledgeQueryRuntime;
   paths(): RuntimePaths;
   setPaths(paths: RuntimePaths): void;
   store(): ProjectStore;
@@ -90,22 +91,11 @@ export type RuntimeRouteHandlerInput = {
 };
 
 export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (request: Request) => Promise<Response> {
-  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, resetIdleTimer, refreshCurrentSnapshot, ensureProjectSnapshot, buildIndexedSnapshot, restartStore } = input;
+  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, knowledgeQueryRuntime, resetIdleTimer, refreshCurrentSnapshot, ensureProjectSnapshot, buildIndexedSnapshot, restartStore } = input;
   let paths = input.paths();
   const currentStore = () => input.store();
 
   const semanticContextSnapshot = async (): Promise<RuntimeSnapshot> => await refreshCurrentSnapshot();
-  let knowledgeQueryQueue: Promise<void> = Promise.resolve();
-  const embedKnowledgeQuery = async (query: string, signal: AbortSignal): Promise<number[]> => {
-    const operation = knowledgeQueryQueue.then(() => runKnowledgeQueryOperation({
-      rootDir,
-      statePath: currentStore().statePath,
-      query,
-      signal,
-    }));
-    knowledgeQueryQueue = operation.then(() => undefined, () => undefined);
-    return await operation;
-  };
 
   const semanticIndexNotReadyResponse = (snapshot: RuntimeSnapshot): Response | undefined => {
     const index = snapshot.state.semanticIndex ?? snapshot.semanticIndex;
@@ -233,7 +223,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
           if (!pathFilter.ok) return json(pathFilter.error, 400);
           try {
-            const vector = await embedKnowledgeQuery(query, request.signal);
+            const vector = await knowledgeQueryRuntime.query(query, request.signal);
             const result = searchProjectContext({
               store: currentStore(),
               snapshot,
@@ -263,7 +253,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
           if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Knowledge Ask requires a query."), 400);
           try {
-            const vector = await embedKnowledgeQuery(question, request.signal);
+            const vector = await knowledgeQueryRuntime.query(question, request.signal);
             const result = askProjectContext({ store: currentStore(), snapshot, question, vector });
             span.setOutput({ evidence: result.evidence.length, indexed: Boolean(result.index) });
             return json({ ok: true, data: result });
@@ -628,6 +618,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
         paths = createPaths(rootDir);
         stateManager.replaceValidationResultCache(createValidationResultCache(paths));
+        await knowledgeQueryRuntime.reset();
         await restartStore();
         projectTypesRuntime.generateNow("Project authoring types regenerated after settings changed.");
         await stateManager.rebuildAndPublish("Project settings saved.");

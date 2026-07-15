@@ -180,7 +180,7 @@ test("Code graph routes expose runtime-owned symbol and edge search", () => {
   }
 });
 
-test("Project Knowledge routes expose search, ask, chunks, coverage, and backlinks", () => {
+test("Project Knowledge routes expose search, ask, chunks, coverage, and backlinks", { timeout: HeavyRouteIntegrationTestTimeoutMs }, () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-context-routes-"));
   createAuthoringProject(rootDir);
   writeFileSync(
@@ -225,6 +225,7 @@ test("Project Knowledge routes expose search, ask, chunks, coverage, and backlin
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", projectContextRouteCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
+      timeout: HeavyRouteSubprocessTimeoutMs,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {

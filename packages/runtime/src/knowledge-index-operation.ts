@@ -27,13 +27,6 @@ export type KnowledgeIndexOperationResult = {
   files: string[];
 };
 
-export type KnowledgeQueryOperationInput = {
-  rootDir: string;
-  statePath: string;
-  query: string;
-  signal?: AbortSignal;
-};
-
 export async function runKnowledgeIndexOperation(input: KnowledgeIndexOperationInput): Promise<KnowledgeIndexOperationResult> {
   const changedPathArgs = (input.changedPaths ?? []).flatMap((file) => ["--changed-path", file]);
   let readyResult: KnowledgeIndexOperationResult | undefined;
@@ -50,26 +43,11 @@ export async function runKnowledgeIndexOperation(input: KnowledgeIndexOperationI
   return readyResult;
 }
 
-export async function runKnowledgeQueryOperation(input: KnowledgeQueryOperationInput): Promise<number[]> {
-  let vector: number[] | undefined;
-  await runKnowledgeWorker({
-    ...input,
-    args: ["--root", input.rootDir, "--query", input.query],
-    operation: "query",
-    onMessage(message) {
-      if (message.type !== KnowledgeIndexWorkerMessageType.QueryReady) throw new Error("Project Knowledge query worker returned an index message.");
-      vector = message.vector;
-    },
-  });
-  if (!vector) throw new Error("Project Knowledge query worker exited without a vector.");
-  return vector;
-}
-
 async function runKnowledgeWorker(input: {
   rootDir: string;
   statePath: string;
   args: string[];
-  operation: "index" | "query";
+  operation: "index";
   signal?: AbortSignal;
   onMessage(message: KnowledgeIndexWorkerMessage): void;
 }): Promise<void> {
@@ -144,12 +122,6 @@ function parseWorkerMessage(line: string): KnowledgeIndexWorkerMessage {
     message.index?.status === ReadySemanticIndexStatus &&
     Array.isArray(message.files) &&
     message.files.every((file) => typeof file === "string")
-  ) return message;
-  if (
-    message.type === KnowledgeIndexWorkerMessageType.QueryReady
-    && Array.isArray(message.vector)
-    && message.vector.length > 0
-    && message.vector.every((value) => typeof value === "number" && Number.isFinite(value))
   ) return message;
   if (message.type === KnowledgeIndexWorkerMessageType.Progress && message.progress && typeof message.progress.label === "string") return message;
   throw new Error("Project Knowledge worker returned an unknown progress message.");
