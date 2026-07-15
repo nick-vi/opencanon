@@ -459,10 +459,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         const requestedFiles = request.method === "POST" ? stringArrayBodyValue(body.files) : url.searchParams.getAll(UrlSearchParam.File);
         const safeFiles = validateOptionalRelativePaths(requestedFiles);
         if (!safeFiles.ok) return json(safeFiles.error, 400);
-        const snapshot = safeFiles.paths.length > 0
-          ? await ensureProjectSnapshot("File-scoped related canon requested current project state.")
-          : await refreshCurrentSnapshot();
-        const currentSnapshot = snapshot;
+        const currentSnapshot = await refreshCurrentSnapshot();
         const query = {
           files: safeFiles.paths,
           topics: request.method === "POST" ? stringArrayBodyValue(body.topics) : url.searchParams.getAll(UrlSearchParam.Topic).filter(Boolean),

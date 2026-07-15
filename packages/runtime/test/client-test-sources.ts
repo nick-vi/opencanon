@@ -891,15 +891,17 @@ export function ephemeralRuntimeClientCheckSource(): string {
 
     const rootDir = process.argv[1];
     if (await inspectProjectRuntime(rootDir)) throw new Error("expected no runtime before request");
-    const files = await withRuntimeClient(rootDir, async (client) => {
-      const snapshot = await client.get(RuntimeApiRoute.Snapshot);
+    const result = await withRuntimeClient(rootDir, async (client) => {
       const related = await client.get(RuntimeApiRoute.CanonRelated + "?file=" + encodeURIComponent("src/company.ts"));
-      return { snapshotFiles: snapshot.files, related };
+      const stateAfterRelated = await client.get(RuntimeApiRoute.State);
+      const snapshot = await client.get(RuntimeApiRoute.Snapshot);
+      return { snapshotFiles: snapshot.files, related, stateAfterRelated };
     });
     console.log(JSON.stringify({
-      files: files.snapshotFiles,
-      relatedConventionIds: files.related.conventions.map((convention) => convention.id),
-      relatedValidatorIds: files.related.validators.map((validator) => validator.id),
+      files: result.snapshotFiles,
+      relatedConventionIds: result.related.conventions.map((convention) => convention.id),
+      relatedValidatorIds: result.related.validators.map((validator) => validator.id),
+      lifecycleAfterRelated: result.stateAfterRelated.lifecycle,
       registered: Boolean(await inspectProjectRuntime(rootDir)),
       projectRuntimeFile: existsSync(projectRuntimePath(rootDir)),
       projectState: existsSync(projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(serviceRegistryPath()))),

@@ -41,6 +41,7 @@ export const RuntimeApiRoute = {
   Index: "/api/index",
   Producers: "/api/producers",
   Snapshot: "/api/snapshot",
+  State: "/api/state",
   Validate: "/api/validate",
   Worktrees: "/api/worktrees",
 } as const;

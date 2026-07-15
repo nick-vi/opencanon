@@ -823,6 +823,7 @@ test("runtime client lazily starts a supervised project runtime when none is run
       files: string[];
       relatedConventionIds: string[];
       relatedValidatorIds: string[];
+      lifecycleAfterRelated: { revision: { observed: number; accepted: number; published: number } };
       registered: boolean;
       projectState: boolean;
       projectRuntimeFile: boolean;
@@ -832,6 +833,7 @@ test("runtime client lazily starts a supervised project runtime when none is run
     assert.deepEqual(output.files, ["src/company.ts"]);
     assert.deepEqual(output.relatedConventionIds, ["test-rule"]);
     assert.deepEqual(output.relatedValidatorIds, ["test-rule"]);
+    assert.deepEqual(output.lifecycleAfterRelated.revision, { observed: 1, accepted: 1, published: 1 });
     assert.equal(output.registered, true);
     assert.equal(output.projectRuntimeFile, true);
     assert.equal(output.projectState, true);
