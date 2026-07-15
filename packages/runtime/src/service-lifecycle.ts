@@ -33,7 +33,13 @@ export function withLifecycle<T extends { lifecycle: ProcessLifecycleState }>(en
   };
 }
 
-export function runtimeFailureLifecycle(entry: RuntimeRegistryEntry, message: string, nowMs = Date.now(), problem?: OpenCanonProblem): ProcessLifecycleState {
+export function runtimeFailureLifecycle(
+  entry: RuntimeRegistryEntry,
+  message: string,
+  nowMs = Date.now(),
+  problem?: OpenCanonProblem,
+  options: { initialBackoffMs?: number } = {},
+): ProcessLifecycleState {
   const previous = entry.lifecycle.restart;
   const previousFirstFailureMs = previous.firstFailureAt ? Date.parse(previous.firstFailureAt) : Number.NaN;
   const withinWindow = Number.isFinite(previousFirstFailureMs) && nowMs - previousFirstFailureMs <= RestartFailureWindowMs;
@@ -41,7 +47,9 @@ export function runtimeFailureLifecycle(entry: RuntimeRegistryEntry, message: st
   const firstFailureAt = withinWindow && previous.firstFailureAt ? previous.firstFailureAt : new Date(nowMs).toISOString();
   const lastFailureAt = new Date(nowMs).toISOString();
   const terminal = problem?.retryable === false || attempts > RestartMaxAttempts;
-  const backoffMs = attempts === 1 ? 0 : Math.min(RestartBackoffMaxMs, RestartBackoffBaseMs * 2 ** Math.max(0, attempts - 2));
+  const backoffMs = attempts === 1
+    ? options.initialBackoffMs ?? 0
+    : Math.min(RestartBackoffMaxMs, RestartBackoffBaseMs * 2 ** Math.max(0, attempts - 2));
   const restart: ProcessRestartState = {
     attempts,
     firstFailureAt,

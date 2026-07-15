@@ -14,6 +14,7 @@ import {
   ProcessLifecycleStatus,
   RuntimeStatus,
   StartProjectRuntimeStatus,
+  defaultProjectRuntimeHealthConfirmationMs,
   defaultProjectRuntimeIdleTimeoutMs,
   type ReconcileProjectRuntimesResult,
   type RuntimeRegistryEntry,
@@ -71,7 +72,15 @@ export async function reconcileProjectRuntimes(input: { registryPath?: string; n
     }
 
     const eventKind = inspection.status === RuntimeStatus.Stale ? ProcessLifecycleEventKind.RuntimeStale : ProcessLifecycleEventKind.RuntimeUnhealthy;
-    const failedLifecycle = runtimeFailureLifecycle(inspection.entry, inspection.message, nowMs);
+    const failedLifecycle = runtimeFailureLifecycle(
+      inspection.entry,
+      inspection.message,
+      nowMs,
+      undefined,
+      inspection.status === RuntimeStatus.Unhealthy
+        ? { initialBackoffMs: defaultProjectRuntimeHealthConfirmationMs }
+        : {},
+    );
     const failureTransition = compareAndSetRuntimeLifecycle(inspection.entry, failedLifecycle, registryPath);
     if (!failureTransition.applied) {
       countConcurrentLifecycle(result, failureTransition.current);

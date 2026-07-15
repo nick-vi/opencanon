@@ -301,6 +301,7 @@ export const defaultRuntimePort = 4767;
 export const maxPortOffset = 1000;
 export const AutoPortStartupAttempts = 3;
 export const defaultProjectRuntimeIdleTimeoutMs = 10 * 60 * 1000;
+export const defaultProjectRuntimeHealthConfirmationMs = 30_000;
 export const maxServiceRequestBodyBytes = 1024 * 1024;
 export const discoveryRootChildLimit = 200;
 export const serviceCommandOutputLimit = 16_384;

@@ -287,6 +287,48 @@ test("reconciler preserves active restart backoff without incrementing attempts"
   }
 });
 
+test("reconciler confirms a live runtime health failure before replacing it", { timeout: 10000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-health-confirmation-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  const runtime = spawn(process.execPath, ["--input-type=module", "-e", "setInterval(() => {}, 1000);"], {
+    stdio: "ignore",
+  });
+  const nowMs = Date.parse("2026-05-01T00:00:00.000Z");
+
+  try {
+    if (!runtime.pid) throw new Error("test child did not start");
+    upsertRuntimeEntry({
+      rootDir,
+      host: "127.0.0.1",
+      port: 9,
+      url: "http://127.0.0.1:9",
+      pipeEndpoint: testRuntimePipeEndpoint(rootDir, registryPath),
+      pid: runtime.pid,
+      startedAt: "2026-04-30T23:00:00.000Z",
+      logPath: path.join(rootDir, ".opencanon", "runtime.log"),
+      authToken: "test-token",
+      ...testRuntimeLease("health-confirmation-runtime-lease"),
+      ...runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir)),
+    }, registryPath);
+
+    const result = await reconcileProjectRuntimes({ registryPath, nowMs });
+    const registered = readRuntimeRegistry(registryPath)[0];
+
+    assert.equal(result.unhealthy, 1);
+    assert.equal(result.backingOff, 1);
+    assert.equal(result.restarted, 0);
+    assert.equal(registered?.pid, runtime.pid);
+    assert.equal(registered?.lifecycle.status, ProcessLifecycleStatus.BackingOff);
+    assert.equal(registered?.lifecycle.restart.attempts, 1);
+    assert.equal(registered?.lifecycle.restart.nextRestartAt, "2026-05-01T00:00:30.000Z");
+    assert(processIsRunning(runtime.pid));
+  } finally {
+    if (runtime.pid && processIsRunning(runtime.pid)) process.kill(runtime.pid, "SIGKILL");
+    forgetRuntimeEntry(rootDir, registryPath);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("reconciler preserves terminal non-retryable project failures", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-service-reconcile-terminal-"));
   const registryPath = path.join(rootDir, "global", "service.json");
