@@ -26,7 +26,7 @@ export type RuntimeRebuildOptions = Record<string, never>;
 
 export type RuntimeRebuildCandidate = {
   snapshot: RuntimeSnapshot;
-  commit(): Promise<RuntimeSnapshot> | RuntimeSnapshot;
+  commit(): RuntimeSnapshot;
   discard?(): Promise<void> | void;
 };
 
@@ -105,7 +105,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       try {
         const candidate = await options.rebuildNow(intent.summary, intent.options, abortController.signal);
         if (intent.revision === revision.observed) {
-          const next = await candidate.commit();
+          const next = candidate.commit();
           snapshot = next;
           projectInventory = options.readProjectInventory();
           revision = { ...revision, published: intent.revision };
