@@ -67,8 +67,9 @@ import {
   type ValidationResultCache,
   type WatcherEventBatch,
 } from "@opencanon/core";
-import { buildStartupRuntimeState, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeChangeCatalog, type RuntimeSnapshot } from "./snapshot.ts";
+import { buildStartupRuntimeState, buildProjectSummary, buildRelatedCanon, prepareRuntimeAnalysisPublication, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeChangeCatalog, type RuntimeSnapshot } from "./snapshot.ts";
 import { runProjectAnalysisOperation } from "./project-analysis-operation.ts";
+import { projectAnalysisStatePath } from "./service-namespace.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
 import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
@@ -682,7 +683,12 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           indeterminate: true,
         }));
         const analysis = await rebuildSnapshot({ store, signal });
-        const next = analysis.snapshot;
+        const publication = prepareRuntimeAnalysisPublication({
+          analysis,
+          store,
+          semanticEmbedding: paths.semanticEmbedding,
+        });
+        const next = publication.snapshot;
         span.setOutput({
           files: next.files.length,
           findings: next.findings.length,
@@ -699,7 +705,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               graph: next.graph,
               findings: next.findings,
               staleFiles: next.state.staleFiles,
-              productModel: analysis.publication.productModel,
+              productModel: publication.productModel,
             });
             stateManager.replaceValidationResultCache(createValidationResultCache(paths));
             updateWorkerJob(jobId, {
@@ -749,7 +755,11 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
 
   async function rebuildSnapshot(input: { store: ProjectStore; signal: AbortSignal }) {
     try {
-      return await runProjectAnalysisOperation({ rootDir, statePath: input.store.statePath, signal: input.signal });
+      return await runProjectAnalysisOperation({
+        rootDir,
+        analysisStatePath: projectAnalysisStatePath(input.store.statePath),
+        signal: input.signal,
+      });
     } catch (error) {
       throw new Error(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error)));
     }

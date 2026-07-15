@@ -1,6 +1,6 @@
 import type { RuntimeAnalysis } from "./snapshot.ts";
 
-export const ProjectAnalysisProtocolVersion = 1;
+export const ProjectAnalysisProtocolVersion = 2;
 
 export type ProjectAnalysisResult = {
   version: typeof ProjectAnalysisProtocolVersion;
@@ -21,6 +21,9 @@ export function parseProjectAnalysisResult(value: unknown, requestId: string): P
   if (!analysis.publication || typeof analysis.publication !== "object") throw new Error("Project analysis worker returned no publication candidate.");
   if (!/^[a-zA-Z0-9_-]+$/.test(analysis.publication.codeGraphGeneration ?? "")) {
     throw new Error("Project analysis worker returned an invalid code graph generation.");
+  }
+  if (typeof analysis.publication.sourceInventoryHash !== "string" || analysis.publication.sourceInventoryHash.length === 0) {
+    throw new Error("Project analysis worker returned no source inventory identity.");
   }
   if (!analysis.publication.productModel || typeof analysis.publication.productModel !== "object") {
     throw new Error("Project analysis worker returned no product projection.");

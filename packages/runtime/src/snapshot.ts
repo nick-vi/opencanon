@@ -125,6 +125,51 @@ export function refreshChangeActivitySnapshot(input: {
   return { ...input.snapshot, changes };
 }
 
+export function prepareRuntimeAnalysisPublication(input: {
+  analysis: RuntimeAnalysis;
+  store: ProjectStore;
+  semanticEmbedding?: SemanticEmbeddingConfig | undefined;
+}): { snapshot: RuntimeSnapshot; productModel: ProductModelProjection } {
+  const semanticIndex = cachedSemanticIndexSnapshot({
+    scan: { inventoryHash: input.analysis.publication.sourceInventoryHash },
+    store: input.store,
+    semanticEmbedding: input.semanticEmbedding,
+  });
+  const snapshotWithServingState = refreshChangeActivitySnapshot({
+    snapshot: {
+      ...input.analysis.snapshot,
+      semanticIndex,
+      state: { ...input.analysis.snapshot.state, semanticIndex },
+    },
+    changeCatalog: input.analysis.publication.changeCatalog,
+    store: input.store,
+  });
+  const productModel = buildProductModelProjection({
+    areas: snapshotWithServingState.areas,
+    specs: snapshotWithServingState.specs,
+    changes: snapshotWithServingState.changes,
+    conventions: snapshotWithServingState.conventions,
+    impactSurfaces: snapshotWithServingState.impactSurfaces,
+    validators: snapshotWithServingState.validators,
+    definitionGraph: snapshotWithServingState.definitionGraph,
+  });
+  return {
+    productModel,
+    snapshot: {
+      ...snapshotWithServingState,
+      state: {
+        ...snapshotWithServingState.state,
+        productModel: {
+          ...productModel.counts,
+          graphHash: productModel.graphHash,
+          definitionsHash: productModel.definitionsHash,
+          indexedAt: productModel.indexedAt,
+        },
+      },
+    },
+  };
+}
+
 export function buildProjectSummary(input: { rootDir: string; snapshot: RuntimeSnapshot; store: ProjectStore; lifecycle: RuntimeProjectSummary["lifecycle"] }): RuntimeProjectSummary {
   const storeState = input.store.readState();
   const latestQuery = { mode: CanonEventQueryMode.Recent, limit: 1 } as const;
@@ -426,6 +471,7 @@ export type RuntimeAnalysis = {
   snapshot: RuntimeSnapshot;
   publication: {
     codeGraphGeneration: string;
+    sourceInventoryHash: string;
     productModel: ProductModelProjection;
     changeCatalog: RuntimeChangeCatalog;
   };
@@ -651,6 +697,7 @@ export async function buildRuntimeAnalysis(input: RuntimeSnapshotInput): Promise
     snapshot,
     publication: {
       codeGraphGeneration: codeGraph.generation,
+      sourceInventoryHash: scan.inventoryHash,
       productModel,
       changeCatalog: {
         rootDir: project.paths.rootDir,

@@ -18,7 +18,7 @@ export async function runProjectAnalysisWorkerCommand(args: string[], cwd = proc
   const input = parseWorkerArgs(args);
   const rootDir = resolveRootDir(input.rootDir ?? cwd);
   const statePath = process.env[ProjectRuntimeEnv.StatePath];
-  if (!statePath) throw new Error("Project analysis worker requires an explicit generated-state path.");
+  if (!statePath) throw new Error("Project analysis worker requires an explicit analysis-state path.");
   const paths = createPaths(rootDir);
   const prerequisites = assertRuntimePrerequisites();
   const store = createProjectStore({ rootDir, paths, engine: prerequisites.engine, statePath });

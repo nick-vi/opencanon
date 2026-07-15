@@ -13,7 +13,7 @@ import type { RuntimeAnalysis } from "./snapshot.ts";
 
 export type ProjectAnalysisOperationInput = {
   rootDir: string;
-  statePath: string;
+  analysisStatePath: string;
   signal?: AbortSignal;
 };
 
@@ -33,7 +33,7 @@ export async function runProjectAnalysisOperation(input: ProjectAnalysisOperatio
   ], {
     cwd: input.rootDir,
     stdio: ["ignore", "ignore", "pipe"],
-    env: { ...process.env, [ProjectRuntimeEnv.StatePath]: input.statePath },
+    env: { ...process.env, [ProjectRuntimeEnv.StatePath]: input.analysisStatePath },
   });
   let stderr = "";
   child.stderr.setEncoding("utf8");

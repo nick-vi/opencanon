@@ -1,25 +1,31 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { runProjectAnalysisOperation } from "../src/project-analysis-operation.ts";
 import { parseProjectAnalysisResult, ProjectAnalysisProtocolVersion } from "../src/project-analysis-protocol.ts";
+import { projectAnalysisStatePath } from "../src/service-namespace.ts";
 import { createAuthoringProject } from "./support.ts";
 
 test("project analysis worker returns a complete snapshot from isolated generated state", async () => {
   const rootDir = createProject();
   try {
+    const analysisStatePath = path.join(rootDir, ".opencanon/cache/analysis.sqlite");
+    const servingStatePath = path.join(rootDir, ".opencanon/cache/state.sqlite");
     const { snapshot, publication } = await runProjectAnalysisOperation({
       rootDir,
-      statePath: path.join(rootDir, ".opencanon/cache/state.sqlite"),
+      analysisStatePath,
     });
     assert(snapshot.files.includes("src/index.ts"));
     assert.equal(snapshot.state.files, 1);
     assert.equal(typeof snapshot.health.engine.engineVersion, "string");
     assert(snapshot.facts.some((file) => file.path === "src/index.ts"));
+    assert.equal(typeof publication.sourceInventoryHash, "string");
     assert.equal(publication.changeCatalog.rootDir, rootDir);
     assert.equal(publication.changeCatalog.changesPath, path.join(rootDir, "opencanon/changes/index.ts"));
+    assert.equal(existsSync(analysisStatePath), true);
+    assert.equal(existsSync(servingStatePath), false);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -31,7 +37,7 @@ test("project analysis cancellation waits for worker teardown", async () => {
   try {
     const operation = runProjectAnalysisOperation({
       rootDir,
-      statePath: path.join(rootDir, ".opencanon/cache/state.sqlite"),
+      analysisStatePath: path.join(rootDir, ".opencanon/cache/analysis.sqlite"),
       signal: controller.signal,
     });
     setTimeout(() => controller.abort(), 20);
@@ -59,9 +65,16 @@ test("project analysis protocol rejects stale and malformed results", () => {
     () => parseProjectAnalysisResult({
       version: ProjectAnalysisProtocolVersion,
       requestId: "request",
-      analysis: { snapshot: {}, publication: { codeGraphGeneration: "next", productModel: {} } },
+      analysis: { snapshot: {}, publication: { codeGraphGeneration: "next", sourceInventoryHash: "inventory", productModel: {} } },
     }, "request"),
     /no Change catalog/,
+  );
+});
+
+test("analysis state is a sibling writer domain of serving state", () => {
+  assert.equal(
+    projectAnalysisStatePath("/repo/.opencanon/state/test/state.sqlite"),
+    path.resolve("/repo/.opencanon/state/test/analysis.sqlite"),
   );
 });
 

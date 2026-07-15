@@ -44,6 +44,10 @@ export function projectRuntimeStatePath(rootDir: string, namespace: string): str
   return path.join(rootDir, ".opencanon", "state", validateRuntimeNamespace(namespace), "state.sqlite");
 }
 
+export function projectAnalysisStatePath(runtimeStatePath: string): string {
+  return path.join(path.dirname(path.resolve(runtimeStatePath)), "analysis.sqlite");
+}
+
 export function projectRuntimeStatePathInRoot(rootDir: string, stateRoot: string): string {
   return path.join(path.resolve(stateRoot), shortHash(rootDir), "state.sqlite");
 }
