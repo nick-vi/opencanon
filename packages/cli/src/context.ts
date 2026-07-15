@@ -104,7 +104,8 @@ export async function runContextCommand(args = process.argv.slice(2), cwd = proc
   const conventions = project.conventions;
 
   if (query.listExceptions && query.changed && query.files.length === 0) {
-    console.log("No changed files.");
+    if (query.format === Format.Json) writeJson({ exceptions: [] });
+    else console.log("No changed files.");
     return;
   }
 
@@ -138,7 +139,8 @@ export async function runContextCommand(args = process.argv.slice(2), cwd = proc
   }
 
   if (query.changed && query.files.length === 0 && query.topics.length === 0 && query.conventionIds.length === 0) {
-    console.log("No changed files.");
+    if (query.format === Format.Json) writeJson(emptyRelatedCanon());
+    else console.log("No changed files.");
     return;
   }
 
@@ -160,6 +162,22 @@ export async function runContextCommand(args = process.argv.slice(2), cwd = proc
     return;
   }
   console.log(renderMarkdown(result));
+}
+
+function emptyRelatedCanon(): RelatedCanon {
+  return {
+    root: rootDir,
+    query: { files: [], topics: [], conventions: [], validators: [], findings: [] },
+    matchedTopics: [],
+    docs: [],
+    areas: [],
+    specs: [],
+    changes: [],
+    conventions: [],
+    validators: [],
+    findings: [],
+    impactSurfaces: [],
+  };
 }
 
 export async function runAskCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {

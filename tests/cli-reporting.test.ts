@@ -15,6 +15,43 @@ import { createAuthoringProject } from "../packages/runtime/test/support.ts";
 const script = path.join(process.cwd(), "packages/cli/src/index.ts");
 const CliSpawnTimeoutMs = 60_000;
 
+test("changed commands preserve their JSON contracts when the worktree is clean", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-clean-json-"));
+  try {
+    createAuthoringProject(rootDir);
+    runGit(rootDir, ["init"]);
+    runGit(rootDir, ["config", "user.email", "test@opencanon.local"]);
+    runGit(rootDir, ["config", "user.name", "OpenCanon Test"]);
+    runGit(rootDir, ["add", "."]);
+    runGit(rootDir, ["commit", "-m", "fixture"]);
+
+    const context = spawnSync(process.execPath, [script, "context", "--changed", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(context.status, 0, context.stderr || context.stdout);
+    const contextPayload = JSON.parse(context.stdout) as { root: string; query: { files: string[] }; conventions: unknown[] };
+    assert.equal(contextPayload.root, realpathSync(rootDir));
+    assert.deepEqual(contextPayload.query.files, []);
+    assert.deepEqual(contextPayload.conventions, []);
+
+    const validation = spawnSync(process.execPath, [script, "validate", "--changed", "--format", "json"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: testEnv(rootDir),
+      timeout: CliSpawnTimeoutMs,
+    });
+    assert.equal(validation.status, 0, validation.stderr || validation.stdout);
+    const validationPayload = JSON.parse(validation.stdout) as { files: string[]; findings: unknown[] };
+    assert.deepEqual(validationPayload.files, []);
+    assert.deepEqual(validationPayload.findings, []);
+  } finally {
+    removeTestRoot(rootDir);
+  }
+});
+
 test("languages command exposes the explicit capability matrix", () => {
   const result = spawnSync(process.execPath, [script, "languages", "--format", "json"], {
     cwd: process.cwd(),
@@ -333,6 +370,11 @@ test("changes runs watch pages replay beyond one event frame", () => {
 function removeTestRoot(rootDir: string): void {
   stopTestRuntime(rootDir);
   rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
+function runGit(rootDir: string, args: string[]): void {
+  const result = spawnSync("git", args, { cwd: rootDir, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 }
 
 function stopTestRuntime(rootDir: string): void {

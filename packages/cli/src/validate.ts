@@ -117,7 +117,8 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
   }
 
   if (query.changed && query.files.length === 0) {
-    console.log("No changed files.");
+    if (query.format === Format.Json) writeJson(emptyValidationResult());
+    else console.log("No changed files.");
     return;
   }
 
