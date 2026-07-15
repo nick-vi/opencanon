@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.6 - 2026-07-15
+
+- Isolated native Project Knowledge indexing and semantic query inference from the serving project runtime so model work cannot close runtime connections or destabilize validation and context requests.
+- Made Knowledge reads explicit and fail-fast when the index is missing or stale, while preserving fast Merkle-backed incremental indexing and full vector reuse on unchanged projects.
+- Bounded source extraction and indexing batches for large repositories, and added reusable query workers for responsive Search and Ask operations.
+- Made Activity retries idempotent, contained asynchronous persistence failures, and prevented Activity updates from triggering full project rescans.
+
 ## v0.4.5 - 2026-07-08
 
 - Added scoped graph search and symbol-kind filtering for repository queries.
