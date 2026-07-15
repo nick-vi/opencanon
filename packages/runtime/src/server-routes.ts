@@ -62,6 +62,7 @@ import {
   optionalStringParam,
   validateRelatedSelectors,
 } from "./server-query.ts";
+import { runKnowledgeQueryOperation } from "./knowledge-index-operation.ts";
 
 type RuntimePaths = ReturnType<typeof createPaths>;
 
@@ -94,6 +95,17 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
   const currentStore = () => input.store();
 
   const semanticContextSnapshot = async (): Promise<RuntimeSnapshot> => await refreshCurrentSnapshot();
+  let knowledgeQueryQueue: Promise<void> = Promise.resolve();
+  const embedKnowledgeQuery = async (query: string, signal: AbortSignal): Promise<number[]> => {
+    const operation = knowledgeQueryQueue.then(() => runKnowledgeQueryOperation({
+      rootDir,
+      statePath: currentStore().statePath,
+      query,
+      signal,
+    }));
+    knowledgeQueryQueue = operation.then(() => undefined, () => undefined);
+    return await operation;
+  };
 
   const semanticIndexNotReadyResponse = (snapshot: RuntimeSnapshot): Response | undefined => {
     const index = snapshot.state.semanticIndex ?? snapshot.semanticIndex;
@@ -221,11 +233,12 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
           if (!pathFilter.ok) return json(pathFilter.error, 400);
           try {
+            const vector = await embedKnowledgeQuery(query, request.signal);
             const result = searchProjectContext({
               store: currentStore(),
               snapshot,
               query: { query, paths: pathFilter.paths, limit },
-              semanticEmbedding: paths.semanticEmbedding,
+              vector,
             });
             span.setOutput({ results: result.results.length, indexed: Boolean(result.index) });
             return json({ ok: true, data: result });
@@ -250,7 +263,8 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
           if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Knowledge Ask requires a query."), 400);
           try {
-            const result = askProjectContext({ store: currentStore(), snapshot, question, semanticEmbedding: paths.semanticEmbedding });
+            const vector = await embedKnowledgeQuery(question, request.signal);
+            const result = askProjectContext({ store: currentStore(), snapshot, question, vector });
             span.setOutput({ evidence: result.evidence.length, indexed: Boolean(result.index) });
             return json({ ok: true, data: result });
           } catch (error) {

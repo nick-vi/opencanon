@@ -27,16 +27,59 @@ export type KnowledgeIndexOperationResult = {
   files: string[];
 };
 
+export type KnowledgeQueryOperationInput = {
+  rootDir: string;
+  statePath: string;
+  query: string;
+  signal?: AbortSignal;
+};
+
 export async function runKnowledgeIndexOperation(input: KnowledgeIndexOperationInput): Promise<KnowledgeIndexOperationResult> {
   const changedPathArgs = (input.changedPaths ?? []).flatMap((file) => ["--changed-path", file]);
-  const child = spawn(nodeCommandForCliInvocation(), [knowledgeIndexWorkerPath(), "--root", input.rootDir, ...(input.force ? ["--force"] : []), ...changedPathArgs], {
+  let readyResult: KnowledgeIndexOperationResult | undefined;
+  await runKnowledgeWorker({
+    ...input,
+    args: ["--root", input.rootDir, ...(input.force ? ["--force"] : []), ...changedPathArgs],
+    operation: "index",
+    onMessage(message) {
+      if (message.type === KnowledgeIndexWorkerMessageType.Progress) input.onProgress(message.progress);
+      if (message.type === KnowledgeIndexWorkerMessageType.Ready) readyResult = { index: message.index, files: message.files };
+    },
+  });
+  if (!readyResult) throw new Error("Project Knowledge index worker exited without a ready result.");
+  return readyResult;
+}
+
+export async function runKnowledgeQueryOperation(input: KnowledgeQueryOperationInput): Promise<number[]> {
+  let vector: number[] | undefined;
+  await runKnowledgeWorker({
+    ...input,
+    args: ["--root", input.rootDir, "--query", input.query],
+    operation: "query",
+    onMessage(message) {
+      if (message.type !== KnowledgeIndexWorkerMessageType.QueryReady) throw new Error("Project Knowledge query worker returned an index message.");
+      vector = message.vector;
+    },
+  });
+  if (!vector) throw new Error("Project Knowledge query worker exited without a vector.");
+  return vector;
+}
+
+async function runKnowledgeWorker(input: {
+  rootDir: string;
+  statePath: string;
+  args: string[];
+  operation: "index" | "query";
+  signal?: AbortSignal;
+  onMessage(message: KnowledgeIndexWorkerMessage): void;
+}): Promise<void> {
+  const child = spawn(nodeCommandForCliInvocation(), [knowledgeIndexWorkerPath(), ...input.args], {
     cwd: input.rootDir,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, [ProjectRuntimeEnv.StatePath]: input.statePath },
   });
   let stdout = "";
   let stderr = "";
-  let readyResult: KnowledgeIndexOperationResult | undefined;
   let protocolError: Error | undefined;
   const onAbort = () => {
     if (child.pid) void terminateSpawnedProcess(child.pid);
@@ -53,8 +96,7 @@ export async function runKnowledgeIndexOperation(input: KnowledgeIndexOperationI
       if (line) {
         try {
           const message = parseWorkerMessage(line);
-          if (message.type === KnowledgeIndexWorkerMessageType.Progress) input.onProgress(message.progress);
-          if (message.type === KnowledgeIndexWorkerMessageType.Ready) readyResult = { index: message.index, files: message.files };
+          input.onMessage(message);
         } catch (error) {
           protocolError = error instanceof Error ? error : new Error(String(error));
           if (child.pid) void terminateSpawnedProcess(child.pid);
@@ -72,13 +114,12 @@ export async function runKnowledgeIndexOperation(input: KnowledgeIndexOperationI
       child.once("error", reject);
       child.once("exit", (code, signal) => resolve({ code, signal }));
     });
-    if (input.signal?.aborted) throw new Error("Project Knowledge indexing was cancelled because the project runtime stopped.");
+    if (input.signal?.aborted) throw new Error(`Project Knowledge ${input.operation} was cancelled.`);
     if (protocolError) throw protocolError;
-    if (code !== 0 || !readyResult) {
+    if (code !== 0) {
       const detail = stderr.trim() || (signal ? `worker terminated by ${signal}` : `worker exited with code ${String(code)}`);
-      throw new Error(`Project Knowledge index worker failed: ${detail}.`);
+      throw new Error(`Project Knowledge ${input.operation} worker failed: ${detail}.`);
     }
-    return readyResult;
   } finally {
     input.signal?.removeEventListener("abort", onAbort);
   }
@@ -103,6 +144,12 @@ function parseWorkerMessage(line: string): KnowledgeIndexWorkerMessage {
     message.index?.status === ReadySemanticIndexStatus &&
     Array.isArray(message.files) &&
     message.files.every((file) => typeof file === "string")
+  ) return message;
+  if (
+    message.type === KnowledgeIndexWorkerMessageType.QueryReady
+    && Array.isArray(message.vector)
+    && message.vector.length > 0
+    && message.vector.every((value) => typeof value === "number" && Number.isFinite(value))
   ) return message;
   if (message.type === KnowledgeIndexWorkerMessageType.Progress && message.progress && typeof message.progress.label === "string") return message;
   throw new Error("Project Knowledge worker returned an unknown progress message.");

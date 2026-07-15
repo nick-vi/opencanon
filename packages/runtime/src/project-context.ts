@@ -13,7 +13,6 @@ import {
 } from "@opencanon/core";
 import type { ProjectStore } from "./state.ts";
 import type { RuntimeSnapshot } from "./snapshot.ts";
-import { semanticSearchVectorForProvider } from "./semantic-index.ts";
 
 const ContextIndexId = "project";
 const SemanticIndexStatus = {
@@ -38,22 +37,16 @@ export function searchProjectContext(input: {
   store: ProjectStore;
   snapshot: RuntimeSnapshot;
   query: ProjectContextQueryOptions;
-  semanticEmbedding?: Parameters<typeof semanticSearchVectorForProvider>[0]["semanticEmbedding"];
+  vector: number[];
 }): ProjectContextSearchResult {
   const text = input.query.query.trim();
   const currentIndex = input.store.readSemanticIndexStatus({ indexId: ContextIndexId }).index;
   if (!text) return { index: currentIndex, query: text, results: [] };
-  const vector = semanticSearchVectorForProvider({
-    query: text,
-    provider: currentIndex?.provider,
-    project: input.store.project,
-    semanticEmbedding: input.semanticEmbedding,
-  });
   const limit = input.query.limit ?? 20;
   const result = input.store.searchSemanticIndex({
     indexId: ContextIndexId,
     query: text,
-    vector,
+    vector: input.vector,
     paths: input.query.paths ?? [],
     limit: Math.min(100, Math.max(limit * 4, 100)),
   });
@@ -99,14 +92,14 @@ export function askProjectContext(input: {
   store: ProjectStore;
   snapshot: RuntimeSnapshot;
   question: string;
-  semanticEmbedding?: Parameters<typeof semanticSearchVectorForProvider>[0]["semanticEmbedding"];
+  vector: number[];
 }): ProjectContextAskResult {
   const question = input.question.trim();
   const search = searchProjectContext({
     store: input.store,
     snapshot: input.snapshot,
     query: { query: question, limit: 6 },
-    semanticEmbedding: input.semanticEmbedding,
+    vector: input.vector,
   });
   const warnings = freshnessWarnings(search.index);
   if (search.results.length === 0) {
