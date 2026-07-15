@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -121,6 +121,9 @@ test("GET /api/doctor returns the project doctor report for authorized API clien
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-doctor-route-"));
   createAuthoringProject(rootDir);
   mkdirSync(path.join(rootDir, "src"), { recursive: true });
+  mkdirSync(path.join(rootDir, "node_modules"), { recursive: true });
+  symlinkSync(path.join(process.cwd(), "node_modules/typescript"), path.join(rootDir, "node_modules/typescript"), "dir");
+  writeFileSync(path.join(rootDir, "tsconfig.json"), JSON.stringify({ include: ["src/**/*.ts"] }));
   writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
 
   try {

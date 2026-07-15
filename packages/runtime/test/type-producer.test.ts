@@ -237,13 +237,15 @@ test("TypeProducerRuntime lazy-spawns, answers a query, and shuts down on idle",
     // Wait past the idle window (last reset at query time); child self-terminates.
     await new Promise((resolve) => setTimeout(resolve, 4500));
     assert.equal(runtime.isRunning(), false, "idle timeout should kill the child");
+    const restarted = await runtime.query([FIXTURE_SITE]);
+    assert.ok((restarted.generation ?? 0) > (generation ?? 0), "a respawned producer advances the runtime-global generation");
   } finally {
     await runtime.stop();
     cleanup();
   }
 });
 
-test("TypeProducerRuntime warm lazy-spawns and waits for a ready generation", { timeout: producerTestTimeoutMs }, async (ctx) => {
+test("TypeProducerRuntime status remains observation-only while the producer is idle", { timeout: producerTestTimeoutMs }, async (ctx) => {
   if (!typescriptAvailable()) return ctx.skip();
   const { rootDir, cleanup } = makeFixture();
   const runtime: TypeProducerRuntime = createTypeProducerRuntime({
@@ -251,24 +253,19 @@ test("TypeProducerRuntime warm lazy-spawns and waits for a ready generation", { 
     tsconfigPath: path.join(rootDir, "tsconfig.json"),
     idleTimeoutMs: 3000,
     requestTimeoutMs: producerRequestTimeoutMs,
-    warmTimeoutMs: producerRequestTimeoutMs,
   });
   try {
     assert.equal(runtime.isRunning(), false, "should not spawn on construct");
-    const status = await runtime.warm();
-    assert.equal(runtime.isRunning(), true, "warm should lazy-spawn");
-    assert.equal(status.kind, "ready", JSON.stringify(status));
-    assert.ok((status.generation ?? 0) >= 1, "warm should wait for the first generation");
-    await new Promise((resolve) => setTimeout(resolve, 4500));
-    assert.equal(runtime.isRunning(), false, "idle timeout should still kill the warmed child");
-    assert.equal(runtime.status().kind, "ready", "idle reap preserves the warmed ready status");
+    assert.equal(runtime.status().kind, "idle");
+    assert.equal(runtime.status().kind, "idle");
+    assert.equal(runtime.isRunning(), false, "status inspection must not start the producer");
   } finally {
     await runtime.stop();
     cleanup();
   }
 });
 
-test("TypeProducerRuntime warm records readiness from the resolveTypes response", { timeout: producerTestTimeoutMs }, async (ctx) => {
+test("TypeProducerRuntime query records readiness from the resolveTypes response", { timeout: producerTestTimeoutMs }, async (ctx) => {
   if (!typescriptAvailable()) return ctx.skip();
   const { rootDir, cleanup } = makeFixture();
   const producerPath = writeFakeProducer(
@@ -290,11 +287,12 @@ test("TypeProducerRuntime warm records readiness from the resolveTypes response"
     tsconfigPath: path.join(rootDir, "tsconfig.json"),
     idleTimeoutMs: 10_000,
     requestTimeoutMs: producerRequestTimeoutMs,
-    warmTimeoutMs: producerRequestTimeoutMs,
     producerMainPath: producerPath,
   });
   try {
-    const status = await runtime.warm();
+    const result = await runtime.query([FIXTURE_SITE]);
+    const status = runtime.status();
+    assert.equal(result.generation, 7);
     assert.equal(status.kind, "ready", JSON.stringify(status));
     assert.equal(status.generation, 7);
     assert.deepEqual(runtime.status(), { language: "typescript", kind: "ready", generation: 7 });
@@ -320,7 +318,7 @@ test("TypeProducerRuntime idle reap is a controlled shutdown, not a query failur
       await new Promise((resolve) => setTimeout(resolve, 900));
     });
     assert.equal(runtime.isRunning(), false, "idle timeout should reap the child");
-    assert.equal(runtime.status().kind, "ready", "idle reap preserves the last good producer status");
+    assert.equal(runtime.status().kind, "idle", "idle reap exposes that the producer will restart on demand");
     assert(!stderr.includes("query failed"), "controlled idle reap should not log a query failure");
   } finally {
     await runtime.stop();
@@ -524,13 +522,9 @@ test("LiveTypeProducerProvider returns empty (not throw) when producer unavailab
     async query() {
       return { resolutions: [] };
     },
-    async warm() {
-      return this.status();
-    },
     status() {
       return { language: "typescript", kind: "ready" };
     },
-    onReady() {},
     async stop() {},
     isRunning() {
       return false;
@@ -545,13 +539,9 @@ test("LiveTypeProducerProvider returns empty (not throw) when producer unavailab
     async query(): Promise<never> {
       throw new Error("boom");
     },
-    async warm() {
-      return this.status();
-    },
     status() {
       return { language: "typescript", kind: "crashed", detail: "boom" };
     },
-    onReady() {},
     async stop() {},
     isRunning() {
       return false;

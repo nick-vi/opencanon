@@ -366,11 +366,13 @@ export function buildDoctorReport(params: { paths: ContextPaths; conventions: Co
     const warnings = (status.warnings ?? []).map((warning) => `  warning [${warning.code}]: ${warning.message}`);
     return [`${status.language}: ${status.kind}${detail}`, ...warnings].join("\n");
   });
-  const producerProblem = producers.some((status) => status.kind !== ProducerStatusKind.Ready && status.kind !== ProducerStatusKind.NotImplemented);
+  const producerProblem = producers.some(
+    (status) => status.kind !== ProducerStatusKind.Ready && status.kind !== ProducerStatusKind.Idle && status.kind !== ProducerStatusKind.NotImplemented,
+  );
   pushCheck(DoctorCheckGroup.App, {
     id: "type-producers",
     status: producerProblem ? DoctorStatus.Warn : DoctorStatus.Pass,
-    message: producerProblem ? "One or more type producers are not ready." : "Required type producers are ready.",
+    message: producerProblem ? "One or more type producers are unavailable." : "Required type producers are available.",
     details: producerDetails,
   });
 

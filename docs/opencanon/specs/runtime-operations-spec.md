@@ -137,6 +137,13 @@ Rule `doctor-reports-live-knowledge`: Doctor reports current Project Knowledge r
 - no running runtime is described as uninspected
 Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`
 
+Rule `diagnostics-do-not-start-project-work`: Doctor and status surfaces inspect bounded current state without starting producers, validation, indexing, or project snapshot revisions.
+- an idle producer remains idle after Doctor
+- Doctor does not publish a project revision
+- pipe and HTTP health remain responsive throughout Doctor
+- typed validation starts its required producer and publishes the generation it consumed
+Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+
 Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.
 - missing or stale Knowledge fails read commands immediately
 - only project index starts a build

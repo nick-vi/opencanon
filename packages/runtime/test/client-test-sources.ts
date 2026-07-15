@@ -17,7 +17,12 @@ export function doctorRouteCheckSource(): string {
       const unauthorized = await fetch(server.url + "/api/doctor");
       assert.equal(unauthorized.status, 401);
 
-      const response = await fetch(server.url + "/api/doctor", { headers: runtimeAuthHeaders(server.authToken) });
+      const headers = runtimeAuthHeaders(server.authToken);
+      const beforeState = await fetch(server.url + "/api/state", { headers }).then((response) => response.json());
+      const beforeProducers = await fetch(server.url + "/api/producers", { headers }).then((response) => response.json());
+      assert.equal(beforeProducers.data.producers.find((producer) => producer.language === "typescript")?.kind, "idle");
+
+      const response = await fetch(server.url + "/api/doctor", { headers });
       const text = await response.text();
       assert(response.status >= 200 && response.status < 300, text);
       const body = JSON.parse(text);
@@ -25,6 +30,11 @@ export function doctorRouteCheckSource(): string {
       assert(["pass", "warn", "fail"].includes(body.data.status));
       assert(body.data.checks.some((check) => check.id === "config"));
       assert(body.data.checks.some((check) => check.id === "context-files"));
+
+      const afterState = await fetch(server.url + "/api/state", { headers }).then((next) => next.json());
+      const afterProducers = await fetch(server.url + "/api/producers", { headers }).then((next) => next.json());
+      assert.deepEqual(afterState.data.lifecycle.revision, beforeState.data.lifecycle.revision, "Doctor must not advance project revisions");
+      assert.deepEqual(afterProducers.data.producers, beforeProducers.data.producers, "Doctor must not change producer state");
     } finally {
       await server.stop();
     }

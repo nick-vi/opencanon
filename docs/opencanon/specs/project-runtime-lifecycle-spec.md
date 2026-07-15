@@ -102,8 +102,10 @@ Rule `process-control-is-namespaced`: Each runtime distribution owns a determini
 - ephemeral Proof state is removed with its owned workspace
 Checks: `service-lifecycle-tests`, `runtime-client-tests`
 
-Rule `doctor-inspects-live-runtime`: Doctor waits only for process startup, then inspects runtime health, producers, and Project Knowledge without blocking on an unrelated project-state revision.
+Rule `doctor-inspects-live-runtime`: Doctor waits only for process startup, then observes runtime health, producers, and Project Knowledge without starting or blocking on project-state work.
 - Doctor immediately after validation does not report active refresh work as unhealthy
+- an idle producer is healthy and remains idle
+- Doctor does not advance a project revision
 - a responsive matching runtime remains process-ready while revisions refresh
 - failed revision state remains explicitly observable through runtime state
 Checks: `service-lifecycle-tests`, `runtime-client-tests`

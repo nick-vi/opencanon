@@ -47,7 +47,6 @@ export const RuntimeApiRoute = {
 } as const;
 
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
-const RunningRuntimeProducerWarmTimeoutMs = 35_000;
 const RunningRuntimeKnowledgeProbeTimeoutMs = 2_000;
 
 /**
@@ -58,7 +57,7 @@ const RunningRuntimeKnowledgeProbeTimeoutMs = 2_000;
  */
 export async function fetchRunningRuntimeProducers<T = unknown>(
   cwd: string,
-  options: { warm?: boolean; timeoutMs?: number } = {},
+  options: { timeoutMs?: number } = {},
 ): Promise<T | undefined> {
   const rootDir = resolveRootDir(cwd);
   const inspection = await inspectProjectRuntime(rootDir);
@@ -74,8 +73,8 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
       localProtocolEndpointFromEntry(inspection.entry),
       {
         method: "GET",
-        path: options.warm ? `${RuntimeApiRoute.Producers}?warm=1` : RuntimeApiRoute.Producers,
-        timeoutMs: options.timeoutMs ?? (options.warm ? RunningRuntimeProducerWarmTimeoutMs : RunningRuntimeProducerProbeTimeoutMs),
+        path: RuntimeApiRoute.Producers,
+        timeoutMs: options.timeoutMs ?? RunningRuntimeProducerProbeTimeoutMs,
       },
     );
     return payload.producers;

@@ -84,6 +84,7 @@ export function finiteLiteralIncludes(r: TypeResolution | undefined, value: stri
 /**
  * State of a per-language type producer. First-class surface: shown in
  * `doctor`/`project status`, gated in CI by `--require-producer`.
+ * - "idle": the producer is configured and starts on the next typed query.
  * - "ready": the producer can serve type-checker-accurate facts now.
  * - "warming": a live producer exists but its program is not yet built (cold
  *   ts.Program / first incremental rebuild). Distinct from `stale`/`crashed`:
@@ -102,6 +103,7 @@ export function finiteLiteralIncludes(r: TypeResolution | undefined, value: stri
  * inlining the raw strings, so the soft-enum stays refactor-safe and self-documents.
  */
 export const ProducerStatusKind = {
+  Idle: "idle",
   Ready: "ready",
   Warming: "warming",
   MissingTsconfig: "missing-tsconfig",
@@ -144,12 +146,13 @@ export type ProducerStatus = {
  * Authoritative precedence among candidate producer statuses for ONE language.
  * Lower index = stronger. The single resolver (`pickAuthoritativeStatus`) uses
  * this so every surface (skip logic, /api/producers, --require-producer, doctor,
- * UI) reads ONE value and a sidecar can never override a live producer. A ready
- * OR warming live producer beats any sidecar state.
+ * UI) reads ONE value and a sidecar can never override a live producer. A ready,
+ * warming, or idle live producer beats any sidecar state.
  */
 const ProducerStatusPrecedence: ProducerStatusKind[] = [
   ProducerStatusKind.Ready, // live-ready (strongest)
   ProducerStatusKind.Warming, // live-warming — still beats any sidecar
+  ProducerStatusKind.Idle, // live-idle — configured and starts on demand
   ProducerStatusKind.Crashed, // live-crashed
   ProducerStatusKind.Stale, // sidecar-stale (only reached when no live producer)
   ProducerStatusKind.UnsupportedPackage,
@@ -170,7 +173,7 @@ function precedenceRank(kind: ProducerStatusKind): number {
  * return the one that wins by precedence. The caller is responsible for ONLY
  * passing the sidecar candidate when there is no live producer for the
  * language — but even if both are passed, precedence guarantees a live
- * ready/warming/crashed status beats sidecar-stale/-ready. Stable: ties keep the
+ * ready/warming/idle/crashed status beats sidecar-stale/-ready. Stable: ties keep the
  * first candidate.
  */
 export function pickAuthoritativeStatus(candidates: ProducerStatus[]): ProducerStatus {

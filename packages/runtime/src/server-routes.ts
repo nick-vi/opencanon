@@ -555,7 +555,6 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         // Live producer status (the runtime owns it). resolveProducerStatuses
         // consults the installed live factory; the response is the binary,
         // first-class producer-state surface for `project status` + CI gates.
-        if (url.searchParams.get("warm") === "1") await typeProducerRuntime?.warm();
         const producers = resolveProducerStatuses(rootDir);
         try {
           const project = await loadProjectContext(rootDir);
@@ -566,7 +565,6 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.Doctor) {
         return tracer.span("doctor.report", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          if (url.searchParams.get("warm") === "1") await typeProducerRuntime?.warm();
           const project = await loadProjectContext(rootDir);
           const report = buildDoctorReport({
             paths: project.paths,

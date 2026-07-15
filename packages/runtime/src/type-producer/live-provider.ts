@@ -6,8 +6,8 @@
  * Returns an empty map only alongside a non-ready producer status when the
  * producer is unavailable or crashes.
  *
- * `status()` reflects the runtime's live state: `ready` once the watch-program has
- * built at least one generation; `warming` while spawnable but still building;
+ * `status()` reflects the runtime's live state: `idle` before on-demand startup,
+ * `ready` while a completed watch-program is live, `warming` while it is building;
  * `missing-package` / `missing-tsconfig` when it cannot spawn; `crashed` after a
  * failed query. It carries the current build `generation`.
  */

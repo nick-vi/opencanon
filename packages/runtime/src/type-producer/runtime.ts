@@ -55,10 +55,6 @@ const DefaultIdleTimeoutMs = 5 * 60 * 1000;
 // cold-start; beyond it we assume the producer is wedged, return no facts, and
 // expose `crashed` status rather than stalling validation forever.
 const DefaultRequestTimeoutMs = 60 * 1000;
-// Explicit health/status warm-up is user-facing. It may pay the cold tsc watch
-// build, but it should not leave the UI waiting as long as a validator RPC.
-const DefaultWarmTimeoutMs = 30 * 1000;
-
 // Source (dev) runs producer-main.ts; the bundled OpenCanon runtime ships
 // producer-main.js next to runtime.js. Prefer whichever sibling exists.
 const defaultProducerMainPath = (() => {
@@ -78,8 +74,6 @@ export type ProducerQueryResult = { resolutions: ProducerResolution[]; generatio
 export type TypeProducerRuntime = {
   /** Resolve the surrounding types for `sites`. Empty resolutions are paired with non-ready status when the producer is unavailable. */
   query(sites: TypeSite[]): Promise<ProducerQueryResult>;
-  /** Spawn the producer if needed and wait until the first program generation is ready, returning the current status either way. */
-  warm(): Promise<ProducerStatus>;
   /**
    * Producer status: `ready` when spawnable AND its program has finished
    * building (carries the build `generation`); `warming` when spawnable but the
@@ -87,8 +81,6 @@ export type TypeProducerRuntime = {
    * a failed query.
    */
   status(): ProducerStatus;
-  /** Register a callback fired when the producer reaches `ready` (generation advance). */
-  onReady(callback: (generation: number) => void): void;
   /** Kill the child (if running) and stop the idle timer. Called on runtime stop. */
   stop(): Promise<void>;
   /** Whether a child process is currently spawned (for tests/diagnostics). */
@@ -100,12 +92,10 @@ export function createTypeProducerRuntime(input: {
   tsconfigPath: string;
   idleTimeoutMs?: number;
   requestTimeoutMs?: number;
-  warmTimeoutMs?: number;
   producerMainPath?: string;
 }): TypeProducerRuntime {
   const idleTimeoutMs = input.idleTimeoutMs ?? DefaultIdleTimeoutMs;
   const requestTimeoutMs = input.requestTimeoutMs ?? DefaultRequestTimeoutMs;
-  const warmTimeoutMs = input.warmTimeoutMs ?? DefaultWarmTimeoutMs;
   const producerMainPath = input.producerMainPath ?? defaultProducerMainPath;
   let child: ChildProcess | undefined;
   let rl: readline.Interface | undefined;
@@ -120,11 +110,10 @@ export function createTypeProducerRuntime(input: {
   // Build state tracked from the child's status replies. `building` is true from
   // spawn until the first afterProgramCreate (warming); `generation` is the
   // child's monotonic build counter. The runtime reflects these synchronously in
-  // status() and fires onReady when the generation advances into a ready state.
+  // status(). Validation binds facts to the generation returned by its query.
   let building = true;
+  let childGeneration = 0;
   let generation = 0;
-  const readyCallbacks: Array<(generation: number) => void> = [];
-  const warmWaiters: Array<{ resolve: (status: ProducerStatus) => void; timer: ReturnType<typeof setTimeout> }> = [];
   // Serialize writes to the child's stdin: one in-flight at a time, honoring
   // backpressure (`write` returning false → await 'drain'). Without this, N
   // concurrent queries interleave/flood the pipe and ignored backpressure can
@@ -207,14 +196,6 @@ export function createTypeProducerRuntime(input: {
     pending.clear();
   }
 
-  function clearWarmWaiters(status: ProducerStatus): void {
-    const waiters = warmWaiters.splice(0);
-    for (const waiter of waiters) {
-      clearTimeout(waiter.timer);
-      waiter.resolve(status);
-    }
-  }
-
   function detachChild(proc: ChildProcess): void {
     if (child !== proc) return;
     rl?.close();
@@ -250,13 +231,11 @@ export function createTypeProducerRuntime(input: {
     detachChild(proc);
     if (expected) {
       clearPending(new ControlledProducerStopError(expected));
-      clearWarmWaiters(currentStatus());
       return;
     }
     const message = producerExitMessage(code, signal);
     recordProducerCrash(message);
     clearPending(new Error(message));
-    clearWarmWaiters(currentStatus());
   }
 
   function handleChildError(proc: ChildProcess, error: Error): void {
@@ -265,29 +244,29 @@ export function createTypeProducerRuntime(input: {
     recordProducerCrash(message);
     detachChild(proc);
     clearPending(new Error(message));
-    clearWarmWaiters(currentStatus());
   }
 
   // Apply a build-state update from the child. Generation is monotonic; a
   // transition into a ready state (not building, generation advanced) fires the
-  // onReady callbacks so the runtime can refresh the snapshot (warming->ready).
+  // update the status sampled after the query completes.
   function handleStatusEvent(nextBuilding: boolean, nextGeneration: number): void {
-    const advanced = nextGeneration > generation;
-    if (nextGeneration >= generation) generation = nextGeneration;
+    const advanced = nextGeneration > childGeneration;
+    if (advanced) {
+      generation += nextGeneration - childGeneration;
+      childGeneration = nextGeneration;
+    }
     const wasBuilding = building;
     building = nextBuilding;
-    const reachedReady = !nextBuilding && Boolean(child) && (advanced || wasBuilding);
-    if (reachedReady) {
+    if (!nextBuilding && Boolean(child) && (advanced || wasBuilding)) {
       lastCrash = undefined;
       resetIdleTimer();
-      for (const callback of readyCallbacks) callback(generation);
-      clearWarmWaiters(currentStatus());
     }
   }
 
   function spawnChild(): void {
     // Each spawn starts cold: warming until the first afterProgramCreate.
     building = true;
+    childGeneration = 0;
     const proc = spawn(
       process.execPath,
       [producerMainPath, "--tsconfig", input.tsconfigPath, "--root", input.rootDir],
@@ -380,12 +359,7 @@ export function createTypeProducerRuntime(input: {
     if (child && building) {
       return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Warming, detail: "type program is building.", generation };
     }
-    if (generation === 0) {
-      // Spawnable but never warmed (no query yet, or building before first
-      // afterProgramCreate). Report warming so a boot snapshot skips loudly
-      // instead of baking a stale/empty result.
-      return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Warming, detail: "type producer not yet warmed.", generation };
-    }
+    if (!child) return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Idle, detail: "starts on the next typed validation.", generation };
     return { language: ProjectFileLanguage.TypeScript, kind: ProducerStatusKind.Ready, generation };
   }
 
@@ -416,9 +390,9 @@ export function createTypeProducerRuntime(input: {
 
   async function resolveTypesRequest(
     sites: TypeSite[],
-    options: { allowEmpty?: boolean; timeoutMs?: number } = {},
+    options: { timeoutMs?: number } = {},
   ): Promise<ProducerQueryResult> {
-    if (stopped || (!options.allowEmpty && sites.length === 0) || !canSpawn()) return { resolutions: [] };
+    if (stopped || sites.length === 0 || !canSpawn()) return { resolutions: [] };
     if (!child) {
       try {
         spawnChild();
@@ -466,7 +440,7 @@ export function createTypeProducerRuntime(input: {
       .then((result) => {
         lastCrash = undefined;
         if (typeof result.generation === "number") handleStatusEvent(false, result.generation);
-        return result;
+        return { ...result, generation };
       })
       .catch((error) => {
         if (error instanceof ControlledProducerStopError) return { resolutions: [] };
@@ -487,29 +461,6 @@ export function createTypeProducerRuntime(input: {
     async query(sites) {
       return resolveTypesRequest(sites);
     },
-    async warm() {
-      if (stopped || !canSpawn()) return currentStatus();
-      const status = currentStatus();
-      if (status.kind !== ProducerStatusKind.Warming) return status;
-      await resolveTypesRequest([], { allowEmpty: true, timeoutMs: warmTimeoutMs });
-      const afterSpawnStatus = currentStatus();
-      if (afterSpawnStatus.kind !== ProducerStatusKind.Warming) return afterSpawnStatus;
-      return await new Promise<ProducerStatus>((resolve) => {
-        const waiter = {
-          resolve,
-          timer: setTimeout(() => {
-            const index = warmWaiters.indexOf(waiter);
-            if (index >= 0) warmWaiters.splice(index, 1);
-            resolve(currentStatus());
-          }, warmTimeoutMs),
-        };
-        if (typeof waiter.timer === "object" && "unref" in waiter.timer) (waiter.timer as { unref: () => void }).unref();
-        warmWaiters.push(waiter);
-      });
-    },
-    onReady(callback) {
-      readyCallbacks.push(callback);
-    },
     status() {
       return currentStatus();
     },
@@ -524,7 +475,6 @@ export function createTypeProducerRuntime(input: {
         killChild(proc);
       }
       clearPending(new ControlledProducerStopError(ProducerStopReason.RuntimeStop));
-      clearWarmWaiters(currentStatus());
     },
     isRunning() {
       return Boolean(child);

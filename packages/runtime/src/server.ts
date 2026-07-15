@@ -322,13 +322,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   const idleTimeoutMs = options.idleTimeoutMs && options.idleTimeoutMs > 0 ? options.idleTimeoutMs : undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const transportActivity = createRuntimeActivityTracker(resetIdleTimer);
-  // Producer warming->ready refresh state. `latestReadyGeneration` is the newest
-  // generation observed; a debounced refresh fires after quiescence and the
-  // generation-guard drops it if a newer generation arrived meanwhile.
-  const ProducerReadyDebounceMs = 300;
-  let producerReadyDebounce: ReturnType<typeof setTimeout> | undefined;
-  let latestReadyGeneration = 0;
-
   let server: { port: number; stop(force?: boolean): Promise<void> } | undefined;
   let pipeServer: LocalProtocolPipeServer | undefined;
   try {
@@ -340,13 +333,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     if (typeProducerRuntime) {
       const liveProvider = new LiveTypeProducerProvider(typeProducerRuntime);
       setLiveTypeFactsProviderFactory((queryRoot, language) => (queryRoot === rootDir && language === ProjectFileLanguage.TypeScript ? liveProvider : null));
-      // Defect #3: when the lazy producer warms (warming->ready, generation
-      // advance), refresh the snapshot so baked skipped(warming) outcomes flip to
-      // ran. Debounce rapid transitions; a generation-guard drops a completion
-      // when a newer generation has since arrived (no flapping noise). Reuses the
-      // existing rebuildAndPublish path so only validators whose producer
-      // availability changed get re-run on the next snapshot build.
-      typeProducerRuntime.onReady((generation) => scheduleProducerReadyRefresh(generation));
     }
     const routeRequest = createRuntimeRouteHandler({
       rootDir,
@@ -397,27 +383,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     await storeResource.dispose();
     workerLease.release();
     throw error;
-  }
-
-  function scheduleProducerReadyRefresh(generation: number): void {
-    if (stopped) return;
-    if (generation > latestReadyGeneration) latestReadyGeneration = generation;
-    if (producerReadyDebounce) clearTimeout(producerReadyDebounce);
-    producerReadyDebounce = setTimeout(() => {
-      producerReadyDebounce = undefined;
-      const scheduledGeneration = latestReadyGeneration;
-      // Generation-guard: rebuild, then drop the publish if a newer generation
-      // arrived during the debounce window (a rebuild for it is/was scheduled).
-      void scheduleWatchRebuildForProducer(scheduledGeneration);
-    }, ProducerReadyDebounceMs);
-    if (typeof producerReadyDebounce === "object" && "unref" in producerReadyDebounce) {
-      (producerReadyDebounce as { unref: () => void }).unref();
-    }
-  }
-
-  async function scheduleWatchRebuildForProducer(generation: number): Promise<void> {
-    if (stopped || generation < latestReadyGeneration) return;
-    stateManager.scheduleRebuild(`Type producer ready (generation ${generation}); re-running producer-dependent validators.`);
   }
 
   async function refreshCurrentSnapshot(): Promise<RuntimeSnapshot> {
@@ -869,8 +834,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     knowledgeIndexAbortController.abort();
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = undefined;
-    if (producerReadyDebounce) clearTimeout(producerReadyDebounce);
-    producerReadyDebounce = undefined;
     if (knowledgeWatchTimer) clearTimeout(knowledgeWatchTimer);
     knowledgeWatchTimer = undefined;
     pendingKnowledgeWatchSummary = undefined;

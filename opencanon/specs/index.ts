@@ -107,6 +107,12 @@ export default [
         checks: ["doctor-tests", "cli-tests", "runtime-client-tests"],
       },
       {
+        id: "diagnostics-do-not-start-project-work",
+        statement: "Doctor and status surfaces inspect bounded current state without starting producers, validation, indexing, or project snapshot revisions.",
+        acceptance: ["an idle producer remains idle after Doctor", "Doctor does not publish a project revision", "pipe and HTTP health remain responsive throughout Doctor", "typed validation starts its required producer and publishes the generation it consumed"],
+        checks: ["doctor-tests", "cli-tests", "runtime-client-tests", "service-lifecycle-tests"],
+      },
+      {
         id: "knowledge-builds-are-explicit-and-isolated",
         statement: "Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.",
         acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed bounds", "index and query worker failures preserve runtime availability and the last published index", "native embedding models are never loaded into the serving runtime"],
@@ -492,8 +498,8 @@ export default [
       },
       {
         id: "doctor-inspects-live-runtime",
-        statement: "Doctor waits only for process startup, then inspects runtime health, producers, and Project Knowledge without blocking on an unrelated project-state revision.",
-        acceptance: ["Doctor immediately after validation does not report active refresh work as unhealthy", "a responsive matching runtime remains process-ready while revisions refresh", "failed revision state remains explicitly observable through runtime state"],
+        statement: "Doctor waits only for process startup, then observes runtime health, producers, and Project Knowledge without starting or blocking on project-state work.",
+        acceptance: ["Doctor immediately after validation does not report active refresh work as unhealthy", "an idle producer is healthy and remains idle", "Doctor does not advance a project revision", "a responsive matching runtime remains process-ready while revisions refresh", "failed revision state remains explicitly observable through runtime state"],
         checks: ["service-lifecycle-tests", "runtime-client-tests"],
       },
       {

@@ -447,6 +447,27 @@ test("doctor uses the authoritative producer statuses when provided (live produc
   }
 });
 
+test("doctor treats an idle on-demand producer as healthy", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-idle-producer-"));
+  try {
+    writeFileSync(path.join(rootDir, "package.json"), "{\"type\":\"module\",\"scripts\":{\"opencanon\":\"opencanon\"}}\n");
+    writeFileSync(path.join(rootDir, "tsconfig.json"), "{\"include\":[\"src/**/*.ts\"]}\n");
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    writeFileSync(path.join(rootDir, "src/index.ts"), "export const value = true;\n");
+    const report = buildDoctorReport({
+      paths: createPaths(rootDir),
+      conventions: [],
+      validators: [],
+      producerStatuses: [{ language: "typescript", kind: "idle", detail: "starts on the next typed validation.", generation: 0 }],
+    });
+    const check = report.checks.find((item) => item.id === "type-producers");
+    assert.equal(check?.status, "pass");
+    assert(check?.details?.some((line) => line.includes("typescript: idle")));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("doctor reports Project Knowledge inspection outcomes explicitly", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-knowledge-"));
   try {

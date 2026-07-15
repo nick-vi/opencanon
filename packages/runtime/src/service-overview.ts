@@ -79,7 +79,7 @@ export async function invokeServiceAction(input: { id: string; rootDir?: string;
       });
     case ServiceActionId.ProjectDoctor:
       if (!rootDir) return serviceActionWarning("Project required", "Open a project before running Doctor.");
-      return invokeProjectRuntimeAction(rootDir, registryPath, `${ApiRoute.Doctor}?warm=1`, "GET", "Doctor completed", "Refreshed project health.");
+      return invokeProjectRuntimeAction(rootDir, registryPath, ApiRoute.Doctor, "GET", "Doctor completed", "Refreshed project health.");
     default:
       return {
         status: ServiceActionStatusValue.Error,

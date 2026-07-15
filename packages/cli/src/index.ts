@@ -239,7 +239,7 @@ async function runDoctorCommand(args: string[], cwd: string): Promise<void> {
   // is correct (no live producer exists).
   const runtimeHealth = await buildDoctorRuntimeHealth(rootDir);
   const [producerStatuses, knowledgeInspection] = await Promise.all([
-    fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir, { warm: true }),
+    fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir),
     inspectRunningRuntimeKnowledge(rootDir),
   ]);
   let report = buildDoctorReport({ paths, areas, specs, changes, conventions, validators, runExternalTools: query.runExternalTools, producerStatuses, knowledgeInspection, runtimeHealth });
