@@ -66,10 +66,6 @@ import {
 
 type RuntimePaths = ReturnType<typeof createPaths>;
 
-const UrlSearchParamValue = {
-  Enabled: "1",
-} as const;
-
 const SemanticIndexReadinessStatus = {
   Ready: "ready",
 } as const;
@@ -98,12 +94,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
   let paths = input.paths();
   const currentStore = () => input.store();
 
-  const semanticContextSnapshot = async (url: URL, summary: string): Promise<RuntimeSnapshot> => {
-    if (url.searchParams.get(UrlSearchParam.Index) === UrlSearchParamValue.Enabled) {
-      return await buildIndexedSnapshot(summary);
-    }
-    return await ensureProjectSnapshot(summary);
-  };
+  const semanticContextSnapshot = async (): Promise<RuntimeSnapshot> => await refreshCurrentSnapshot();
 
   const semanticIndexNotReadyResponse = (snapshot: RuntimeSnapshot): Response | undefined => {
     const index = snapshot.state.semanticIndex ?? snapshot.semanticIndex;
@@ -115,7 +106,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           code: diagnosticCodes.semanticIndexNotReady,
           message: "Project Knowledge is not ready. Run opencanon project index before using Search, Ask, Chunks, or Coverage.",
           details,
-          action: "Run opencanon project index, or call this API with index=1 when you intentionally want the request to build Project Knowledge first.",
+          action: "Run opencanon project index to build Project Knowledge explicitly.",
         }),
       ], diagnosticCodes.semanticIndexNotReady),
       409,
@@ -206,7 +197,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { sourceFiles: snapshot.files.filter(isCodeGraphIndexableFile).length, edges: result.edges } });
       }
       if (url.pathname === ApiRoute.ContextChunks) {
-        const snapshot = await semanticContextSnapshot(url, "Project Knowledge chunks requested current index.");
+        const snapshot = await semanticContextSnapshot();
         const notReady = semanticIndexNotReadyResponse(snapshot);
         if (notReady) return notReady;
         const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
@@ -225,7 +216,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextSearch) {
         return await tracer.span("project-context.search", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await semanticContextSnapshot(url, "Project Knowledge search requested current index.");
+          const snapshot = await semanticContextSnapshot();
           const notReady = semanticIndexNotReadyResponse(snapshot);
           if (notReady) return notReady;
           const query = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
@@ -256,7 +247,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.ContextAsk) {
         return await tracer.span("project-context.ask", { kind: SpanKind.TASK, attributes: { source: "runtime" } }, async (span) => {
-          const snapshot = await semanticContextSnapshot(url, "Project Knowledge Ask requested current index.");
+          const snapshot = await semanticContextSnapshot();
           const notReady = semanticIndexNotReadyResponse(snapshot);
           if (notReady) return notReady;
           const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
@@ -279,7 +270,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextCoverage) {
-        const snapshot = await semanticContextSnapshot(url, "Project Knowledge coverage requested current index.");
+        const snapshot = await semanticContextSnapshot();
         const notReady = semanticIndexNotReadyResponse(snapshot);
         if (notReady) return notReady;
         return json({ ok: true, data: projectContextCoverage({ store: currentStore(), snapshot }) });

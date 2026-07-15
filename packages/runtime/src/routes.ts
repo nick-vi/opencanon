@@ -78,7 +78,6 @@ export const UrlSearchParam = {
   FindingId: "findingId",
   Id: "id",
   Kind: "kind",
-  Index: "index",
   Limit: "limit",
   Mode: "mode",
   Offset: "offset",

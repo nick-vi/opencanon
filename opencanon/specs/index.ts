@@ -106,6 +106,12 @@ export default [
         acceptance: ["stale or missing live Knowledge warns", "invalid state or a failed live probe fails", "no running runtime is described as uninspected"],
         checks: ["doctor-tests", "cli-tests", "runtime-client-tests"],
       },
+      {
+        id: "knowledge-builds-are-explicit-and-isolated",
+        statement: "Project Knowledge reads never start indexing, while explicit index operations execute with bounded memory and cannot terminate the serving runtime.",
+        acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed bounds", "index worker failure preserves runtime availability and the last published index"],
+        checks: ["semantic-index-tests", "runtime-client-tests", "service-lifecycle-tests"],
+      },
     ],
     scenarios: [
       {
@@ -136,11 +142,19 @@ export default [
         then: ["the closed Change is absent from ready and blocked work", "the briefing queue agrees with the Change snapshot"],
         checks: ["engine-tests", "runtime-client-tests", "worktree-tests", "cli-tests"],
       },
+      {
+        id: "search-observes-missing-knowledge",
+        given: ["Project Knowledge has not been built"],
+        when: "a client searches or reads semantic context",
+        then: ["the request returns semantic-index-not-ready without scanning the repository", "the project runtime stays healthy", "the response points to opencanon project index"],
+        checks: ["semantic-index-tests", "runtime-client-tests", "cli-tests"],
+      },
     ],
     checks: [
       { id: "contracts-tests", kind: "test", target: "tests/contracts.test.ts" },
       { id: "engine-tests", kind: "command", command: "npm run check:engine" },
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
+      { id: "semantic-index-tests", kind: "test", target: "packages/runtime/test/semantic-index.test.ts" },
       { id: "change-run-tests", kind: "test", target: "packages/runtime/test/change-runs.test.ts" },
       { id: "runtime-supervision-tests", kind: "test", target: "packages/runtime/test/runtime-supervision.test.ts" },
       { id: "service-lifecycle-tests", kind: "test", target: "packages/runtime/test/service.test.ts" },

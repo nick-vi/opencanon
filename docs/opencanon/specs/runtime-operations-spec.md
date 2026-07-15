@@ -54,6 +54,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - `contracts-tests` test `tests/contracts.test.ts`
 - `engine-tests` command `npm run check:engine`
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
+- `semantic-index-tests` test `packages/runtime/test/semantic-index.test.ts`
 - `change-run-tests` test `packages/runtime/test/change-runs.test.ts`
 - `runtime-supervision-tests` test `packages/runtime/test/runtime-supervision.test.ts`
 - `service-lifecycle-tests` test `packages/runtime/test/service.test.ts`
@@ -136,6 +137,13 @@ Rule `doctor-reports-live-knowledge`: Doctor reports current Project Knowledge r
 - no running runtime is described as uninspected
 Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`
 
+Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while explicit index operations execute with bounded memory and cannot terminate the serving runtime.
+- missing or stale Knowledge fails read commands immediately
+- only project index starts a build
+- source and embedding batches have fixed bounds
+- index worker failure preserves runtime availability and the last published index
+Checks: `semantic-index-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+
 ## Scenarios
 
 Scenario `agent-watches-long-check`
@@ -169,6 +177,14 @@ Scenario `agent-brief-survives-unrelated-activity`
 - Then the closed Change is absent from ready and blocked work
 - Then the briefing queue agrees with the Change snapshot
 Checks: `engine-tests`, `runtime-client-tests`, `worktree-tests`, `cli-tests`
+
+Scenario `search-observes-missing-knowledge`
+- Given Project Knowledge has not been built
+- When a client searches or reads semantic context
+- Then the request returns semantic-index-not-ready without scanning the repository
+- Then the project runtime stays healthy
+- Then the response points to opencanon project index
+Checks: `semantic-index-tests`, `runtime-client-tests`, `cli-tests`
 
 ## Governance
 
