@@ -829,6 +829,101 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
 }
 
 #[test]
+fn knowledge_index_delta_retains_unchanged_vectors_on_changed_paths() {
+    let root = test_root("semantic-index-delta-reuse");
+    let project = open_test_project(&root);
+    project
+        .write_semantic_index_json(complete_semantic_request().to_string())
+        .unwrap();
+
+    project
+        .write_semantic_index_delta_json(
+            json!({
+                "index": {
+                    "id": "project",
+                    "version": "semantic-index-v2",
+                    "status": "ready",
+                    "provider": {
+                        "id": "opencanon-native-test",
+                        "kind": "native",
+                        "modelId": "test-native-embedding-2",
+                        "dimensions": 2,
+                        "distance": "cosine",
+                        "configHash": "config"
+                    },
+                    "chunkerVersion": "chunker",
+                    "producerVersion": "producer",
+                    "sourceInventoryHash": "inventory-two",
+                    "chunkTreeHash": "tree-two",
+                    "identityHash": "identity",
+                    "chunkCount": 2,
+                    "vectorCount": 2,
+                    "staleChunkCount": 0,
+                    "embeddingStats": {
+                        "totalChunks": 2,
+                        "embeddedChunks": 0,
+                        "reusedChunks": 2,
+                        "filesScanned": 2,
+                        "filesChanged": 1,
+                        "filesDeleted": 0,
+                        "chunksAdded": 0,
+                        "chunksChanged": 1,
+                        "chunksRemoved": 1,
+                        "vectorsWritten": 0,
+                        "vectorsReused": 2
+                    },
+                    "indexedAt": "2026-06-06T00:00:01.000Z",
+                    "diagnostics": []
+                },
+                "removedPaths": ["src/one.ts"],
+                "removedNodeKeys": [],
+                "nodes": [],
+                "chunks": [{
+                    "metadata": {
+                        "id": "chunk:one",
+                        "path": "src/one.ts",
+                        "contentHash": "content-one-updated",
+                        "chunkHash": "chunk-one-updated",
+                        "embeddingHash": "embedding-one",
+                        "kind": "file",
+                        "language": "typescript",
+                        "ordinal": 0,
+                        "range": {
+                            "start": { "line": 1, "column": 1, "byte": 0 },
+                            "end": { "line": 1, "column": 12, "byte": 12 }
+                        },
+                        "tokenEstimate": 3,
+                        "preview": "first chunk updated"
+                    },
+                    "text": "first chunk updated",
+                    "vector": []
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    let status: Value = serde_json::from_str(
+        &project
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status["index"]["status"], "ready");
+    assert_eq!(status["index"]["vectorCount"], 2);
+
+    let search: Value = serde_json::from_str(
+        &project
+            .search_semantic_index_json(
+                json!({ "indexId": "project", "vector": [1.0, 0.0], "limit": 2 }).to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(search["results"][0]["chunk"]["id"], "chunk:one");
+}
+
+#[test]
 fn knowledge_index_recovers_when_vector_store_has_stale_duplicate_id() {
     let root = test_root("semantic-index-stale-vector-id");
     let project = open_test_project(&root);

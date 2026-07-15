@@ -274,7 +274,17 @@ pub(super) fn write_semantic_vector_delta(
     removed_ids: &[String],
     chunks: &[SemanticChunkEmbeddingRequest],
 ) -> Result<(), EmbedDbError> {
+    let reusable_ids: HashSet<&str> = chunks
+        .iter()
+        .filter(|chunk| {
+            existing_chunks.get(&chunk.metadata.id) == Some(&chunk.metadata.embedding_hash)
+        })
+        .map(|chunk| chunk.metadata.id.as_str())
+        .collect();
     for removed_id in removed_ids {
+        if reusable_ids.contains(removed_id.as_str()) {
+            continue;
+        }
         vector_db.delete(removed_id)?;
     }
 

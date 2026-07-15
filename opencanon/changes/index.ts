@@ -792,4 +792,41 @@ export default [
     ],
     render: { kind: "none" },
   }),
+  defineChange({
+    id: "semantic-delta-reuse-integrity",
+    title: "Preserve reusable vectors in Knowledge deltas",
+    kind: "fix",
+    summary: "Keep unchanged chunk vectors when a changed source path is replaced incrementally.",
+    updates: {
+      areas: ["project-knowledge-index"],
+      specs: ["runtime-operations-spec"],
+      surfaces: ["project-knowledge-index", "project-canon-model", "release-update"],
+    },
+    scope: [
+      { kind: DefinitionTargetKind.File, path: "crates/opencanon-engine/src/project/semantic_store.rs" },
+      { kind: DefinitionTargetKind.File, path: "crates/opencanon-engine/src/tests/semantic_index.rs" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/semantic-index.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/knowledge-index-manager.ts" },
+      { kind: DefinitionTargetKind.File, path: "opencanon/changes/index.ts" },
+    ],
+    intent: {
+      problem: "A Knowledge delta removes every vector for a changed path before deciding that unchanged chunk embeddings can be reused, leaving the published vector count below its metadata count.",
+      outcome: "Changed paths retain vectors whose stable chunk identity and embedding hash still match, while obsolete and changed vectors are replaced atomically.",
+      why: "Incremental indexing must preserve the same complete chunk/vector invariant as a full rebuild without re-embedding unchanged content.",
+    },
+    tasks: [
+      {
+        id: "retain-reusable-vectors",
+        title: "Retain unchanged vectors during delta publication",
+        files: ["crates/opencanon-engine/src/project/semantic_store.rs", "crates/opencanon-engine/src/tests/semantic_index.rs"],
+        checks: ["engine-tests", "semantic-index-tests", "project-doctor"],
+      },
+    ],
+    checks: [
+      { id: "engine-tests", kind: "command", command: "npm run check:engine" },
+      { id: "semantic-index-tests", kind: "test", target: "packages/runtime/test/semantic-index.test.ts" },
+      { id: "project-doctor", kind: "doctor" },
+    ],
+    render: { kind: "none" },
+  }),
 ];
