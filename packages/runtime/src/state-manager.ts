@@ -1,4 +1,4 @@
-import type { RuntimeSnapshot } from "./snapshot.ts";
+import type { RuntimeChangeCatalog, RuntimeSnapshot } from "./snapshot.ts";
 import type { ProjectInventory } from "./server-fs.ts";
 import { RuntimeLifecyclePhaseValue, type RuntimeLifecycleState, type RuntimeRevision, type ValidationResultCache } from "@opencanon/core";
 
@@ -10,6 +10,7 @@ export type RuntimeWaitOptions = {
 export type RuntimeStateManager = {
   currentSnapshot(): RuntimeSnapshot;
   setSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot;
+  currentChangeCatalog(): RuntimeChangeCatalog;
   currentProjectInventory(): ProjectInventory;
   validationResultCache(): ValidationResultCache;
   replaceValidationResultCache(cache: ValidationResultCache): void;
@@ -26,12 +27,14 @@ export type RuntimeRebuildOptions = Record<string, never>;
 
 export type RuntimeRebuildCandidate = {
   snapshot: RuntimeSnapshot;
+  changeCatalog: RuntimeChangeCatalog;
   commit(): RuntimeSnapshot;
   discard?(): Promise<void> | void;
 };
 
 export type RuntimeStateManagerOptions = {
   initialSnapshot: RuntimeSnapshot;
+  initialChangeCatalog: RuntimeChangeCatalog;
   initialProjectInventory: ProjectInventory;
   initialValidationResultCache: ValidationResultCache;
   isStopped(): boolean;
@@ -50,6 +53,7 @@ type RevisionWaiter = {
 
 export function createRuntimeStateManager(options: RuntimeStateManagerOptions): RuntimeStateManager {
   let snapshot = options.initialSnapshot;
+  let changeCatalog = options.initialChangeCatalog;
   let projectInventory = options.initialProjectInventory;
   let validationResultCache = options.initialValidationResultCache;
   let revision: RuntimeRevision = { observed: 1, accepted: 1, published: 1 };
@@ -107,6 +111,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
         if (intent.revision === revision.observed) {
           const next = candidate.commit();
           snapshot = next;
+          changeCatalog = candidate.changeCatalog;
           projectInventory = options.readProjectInventory();
           revision = { ...revision, published: intent.revision };
           phase = RuntimeLifecyclePhaseValue.Ready;
@@ -192,6 +197,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       snapshot = next;
       return snapshot;
     },
+    currentChangeCatalog: () => changeCatalog,
     currentProjectInventory: () => projectInventory,
     validationResultCache: () => validationResultCache,
     replaceValidationResultCache(next) {

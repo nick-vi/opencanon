@@ -10,7 +10,7 @@ import { createAuthoringProject } from "./support.ts";
 test("project analysis worker returns a complete snapshot from isolated generated state", async () => {
   const rootDir = createProject();
   try {
-    const { snapshot } = await runProjectAnalysisOperation({
+    const { snapshot, publication } = await runProjectAnalysisOperation({
       rootDir,
       statePath: path.join(rootDir, ".opencanon/cache/state.sqlite"),
     });
@@ -18,6 +18,8 @@ test("project analysis worker returns a complete snapshot from isolated generate
     assert.equal(snapshot.state.files, 1);
     assert.equal(typeof snapshot.health.engine.engineVersion, "string");
     assert(snapshot.facts.some((file) => file.path === "src/index.ts"));
+    assert.equal(publication.changeCatalog.rootDir, rootDir);
+    assert.equal(publication.changeCatalog.changesPath, path.join(rootDir, "opencanon/changes/index.ts"));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -52,6 +54,14 @@ test("project analysis protocol rejects stale and malformed results", () => {
   assert.throws(
     () => parseProjectAnalysisResult({ version: ProjectAnalysisProtocolVersion, requestId: "request", analysis: { snapshot: {}, publication: {} } }, "request"),
     /invalid code graph generation/,
+  );
+  assert.throws(
+    () => parseProjectAnalysisResult({
+      version: ProjectAnalysisProtocolVersion,
+      requestId: "request",
+      analysis: { snapshot: {}, publication: { codeGraphGeneration: "next", productModel: {} } },
+    }, "request"),
+    /no Change catalog/,
   );
 });
 

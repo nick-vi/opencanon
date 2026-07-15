@@ -25,5 +25,12 @@ export function parseProjectAnalysisResult(value: unknown, requestId: string): P
   if (!analysis.publication.productModel || typeof analysis.publication.productModel !== "object") {
     throw new Error("Project analysis worker returned no product projection.");
   }
+  const changeCatalog = analysis.publication.changeCatalog;
+  if (!changeCatalog || typeof changeCatalog !== "object" || !Array.isArray(changeCatalog.changes)) {
+    throw new Error("Project analysis worker returned no Change catalog.");
+  }
+  if (typeof changeCatalog.rootDir !== "string" || typeof changeCatalog.changesPath !== "string") {
+    throw new Error("Project analysis worker returned an invalid Change catalog.");
+  }
   return result as ProjectAnalysisResult;
 }

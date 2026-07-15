@@ -67,7 +67,7 @@ import {
   type ValidationResultCache,
   type WatcherEventBatch,
 } from "@opencanon/core";
-import { buildStartupRuntimeSnapshot, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
+import { buildStartupRuntimeState, buildProjectSummary, buildRelatedCanon, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeChangeCatalog, type RuntimeSnapshot } from "./snapshot.ts";
 import { runProjectAnalysisOperation } from "./project-analysis-operation.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
@@ -252,20 +252,23 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   // warms the producer.
   const validationResultCache = createValidationResultCache(paths);
   let snapshot: RuntimeSnapshot;
+  let startupChangeCatalog: RuntimeChangeCatalog;
   try {
-    snapshot = await tracer.span("runtime.snapshot.boot", { kind: SpanKind.TASK, attributes: { phase: "boot" } }, async (span) => {
-      const next = await buildStartupRuntimeSnapshot({
+    const startup = await tracer.span("runtime.snapshot.boot", { kind: SpanKind.TASK, attributes: { phase: "boot" } }, async (span) => {
+      const next = await buildStartupRuntimeState({
         cwd: rootDir,
         engine: prerequisites.engine,
         store,
       });
       span.setOutput({
-        files: next.files.length,
-        findings: next.findings.length,
-        validators: next.validators.length,
+        files: next.snapshot.files.length,
+        findings: next.snapshot.findings.length,
+        validators: next.snapshot.validators.length,
       });
-      return withProcessIdentity(next);
+      return { ...next, snapshot: withProcessIdentity(next.snapshot) };
     });
+    snapshot = startup.snapshot;
+    startupChangeCatalog = startup.changeCatalog;
   } catch (error) {
     setProjectAstFactsProviderFactory(undefined);
     fixtureAst.dispose();
@@ -281,6 +284,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let validatorGraphRuntime: ReturnType<typeof createValidatorGraphRuntime> | undefined;
   const stateManager = createRuntimeStateManager({
     initialSnapshot: snapshot,
+    initialChangeCatalog: startupChangeCatalog,
     initialProjectInventory: listProjectInventory(rootDir),
     initialValidationResultCache: validationResultCache,
     isStopped: () => stopped,
@@ -594,7 +598,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       const nextSignature = currentCoordinationSignature();
       if (nextSignature === coordinationSignature) return;
       coordinationSignature = nextSignature;
-      void refreshActiveWorkProjection({ rootDir, summary: "Active work changed.", stateManager, store, events });
+      refreshActiveWorkProjection({ summary: "Active work changed.", stateManager, store, events });
     }, CoordinationRefreshDebounceMs);
     if (typeof coordinationRefreshTimer === "object" && "unref" in coordinationRefreshTimer) {
       (coordinationRefreshTimer as { unref: () => void }).unref();
@@ -686,6 +690,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         });
         return {
           snapshot: next,
+          changeCatalog: analysis.publication.changeCatalog,
           commit() {
             store.project.activateCodeGraph(analysis.publication.codeGraphGeneration);
             store.writeSnapshot({

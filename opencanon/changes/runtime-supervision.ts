@@ -91,6 +91,9 @@ export const runtimeSupervisionChanges = [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/project-analysis-protocol.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/project-analysis-worker.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/project-analysis-worker-main.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/activity-projection.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/change-check-runner.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-routes.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-identity.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-namespace.ts" },
@@ -99,6 +102,7 @@ export const runtimeSupervisionChanges = [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/state.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/engine-async.test.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/engine.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/test/client-test-sources.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/project-analysis.test.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/project-source-snapshot.test.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/semantic-index.test.ts" },
@@ -112,7 +116,7 @@ export const runtimeSupervisionChanges = [
     ],
     intent: {
       problem: "A watcher refresh synchronously rebuilt the complete native code graph in the serving runtime, blocking pipe and HTTP long enough for supervision to replace a live project runtime.",
-      outcome: "A subordinate analysis process owns discovery, fact extraction, graph updates, and project validation; the serving runtime publishes only the latest complete result while native graph transactions derive deltas in dedicated SQLite WAL state.",
+      outcome: "A subordinate analysis process owns discovery, fact extraction, graph updates, and project validation; the serving runtime atomically publishes only the latest complete snapshot, graph generation, product model, and Change catalog while native graph transactions derive deltas in dedicated SQLite WAL state.",
       why: "The serving runtime must remain available through analysis CPU, memory pressure, native failure, and cancellation; unrelated Activity writes must not contend with graph transactions, and disposable graph state must rebuild correctly when absent.",
     },
     tasks: [
@@ -139,7 +143,7 @@ export const runtimeSupervisionChanges = [
       {
         id: "isolate-project-analysis",
         title: "Run complete refresh in a cancellable analysis process",
-        files: ["packages/runtime/src/project-analysis-operation.ts", "packages/runtime/src/project-analysis-protocol.ts", "packages/runtime/src/project-analysis-worker.ts", "packages/runtime/src/project-analysis-worker-main.ts", "packages/runtime/src/server.ts", "packages/runtime/src/state-manager.ts", "packages/runtime/src/state.ts", "packages/runtime/test/project-analysis.test.ts", "packages/runtime/test/state-manager.test.ts", "scripts/build-opencanon-runtime.ts"],
+        files: ["packages/runtime/src/project-analysis-operation.ts", "packages/runtime/src/project-analysis-protocol.ts", "packages/runtime/src/project-analysis-worker.ts", "packages/runtime/src/project-analysis-worker-main.ts", "packages/runtime/src/activity-projection.ts", "packages/runtime/src/change-check-runner.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/server.ts", "packages/runtime/src/snapshot.ts", "packages/runtime/src/state-manager.ts", "packages/runtime/src/state.ts", "packages/runtime/test/client-test-sources.ts", "packages/runtime/test/project-analysis.test.ts", "packages/runtime/test/state-manager.test.ts", "scripts/build-opencanon-runtime.ts"],
         checks: ["project-analysis-tests", "runtime-types", "process-steady-state"],
         dependsOn: ["apply-source-deltas"],
       },

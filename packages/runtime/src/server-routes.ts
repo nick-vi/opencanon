@@ -319,9 +319,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: snapshot.changes });
       }
       if (url.pathname === ApiRoute.ChangeReady) {
-        const project = await loadProjectContext(rootDir);
-        const histories = listCompleteChangeHistories(rootDir, currentStore(), project.changes.map((change) => change.id));
-        return json({ ok: true, data: deriveChangeWorkQueue(project.changes, histories.events, { leases: activeTaskLeaseSummaries(rootDir) }) });
+        const changeCatalog = stateManager.currentChangeCatalog();
+        const histories = listCompleteChangeHistories(rootDir, currentStore(), changeCatalog.changes.map((change) => change.id));
+        return json({ ok: true, data: deriveChangeWorkQueue(changeCatalog.changes, histories.events, { leases: activeTaskLeaseSummaries(rootDir) }) });
       }
       if (url.pathname === ApiRoute.Worktrees) {
         return json({ ok: true, data: listWorktreeOverview(rootDir) });
@@ -417,10 +417,10 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           const checkId = url.searchParams.get(UrlSearchParam.CheckId) ?? undefined;
           return json({ ok: true, data: listChangeEvents(rootDir, currentStore(), { changeId, taskId, checkId, limit: numberParam(url, UrlSearchParam.Limit, 50) }) });
         }
-        const project = await loadProjectContext(rootDir);
-        const parsed = parseChangeEventRequest(await readJsonBody(request), project.changes);
+        const changeCatalog = stateManager.currentChangeCatalog();
+        const parsed = parseChangeEventRequest(await readJsonBody(request), changeCatalog.changes);
         if (!parsed.ok) return json(diagnosticsFailure(parsed.diagnostics), 400);
-        const change = project.changes.find((item) => item.id === parsed.event.changeIds[0]);
+        const change = changeCatalog.changes.find((item) => item.id === parsed.event.changeIds[0]);
         if (!change) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change ${parsed.event.changeIds[0]}.`)]), 404);
         const history = listCompleteChangeHistories(rootDir, currentStore(), [change.id]);
         const existing = history.events.find((event) => event.id === parsed.event.id);
@@ -461,7 +461,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         writeRuntimeEvent(rootDir, currentStore(), ownership.event);
         const snapshot = refreshChangeActivitySnapshot({
           snapshot: stateManager.currentSnapshot(),
-          project,
+          changeCatalog,
           store: currentStore(),
         });
         stateManager.setSnapshot(snapshot);

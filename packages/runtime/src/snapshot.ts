@@ -106,17 +106,17 @@ export type RuntimeSnapshot = {
 
 export function refreshChangeActivitySnapshot(input: {
   snapshot: RuntimeSnapshot;
-  project: Awaited<ReturnType<typeof loadProjectContext>>;
+  changeCatalog: RuntimeChangeCatalog;
   store: ProjectStore;
 }): RuntimeSnapshot {
-  const taskLeases = activeTaskLeaseSummaries(input.project.paths.rootDir);
+  const taskLeases = activeTaskLeaseSummaries(input.changeCatalog.rootDir);
   const histories = listCompleteChangeHistories(
-    input.project.paths.rootDir,
+    input.changeCatalog.rootDir,
     input.store,
-    input.project.changes.map((change) => change.id),
+    input.changeCatalog.changes.map((change) => change.id),
   );
-  const changes = input.project.changes.map((change) =>
-    snapshotChange(input.project.paths.rootDir, input.project.paths.changesPath, change, {
+  const changes = input.changeCatalog.changes.map((change) =>
+    snapshotChange(input.changeCatalog.rootDir, input.changeCatalog.changesPath, change, {
       events: histories.byChangeId.get(change.id) ?? [],
       findings: input.snapshot.findings,
       taskLeases,
@@ -286,11 +286,22 @@ export type RelatedCanon = {
   impactSurfaces: ImpactSurface[];
 };
 
-export async function buildStartupRuntimeSnapshot(input: {
+export type RuntimeChangeCatalog = {
+  rootDir: string;
+  changesPath: string;
+  changes: Change[];
+};
+
+export type RuntimeStartupState = {
+  snapshot: RuntimeSnapshot;
+  changeCatalog: RuntimeChangeCatalog;
+};
+
+export async function buildStartupRuntimeState(input: {
   cwd: string;
   engine: Engine;
   store: ProjectStore;
-}): Promise<RuntimeSnapshot> {
+}): Promise<RuntimeStartupState> {
   const project = await loadProjectContext(input.cwd);
   const taskLeases = activeTaskLeaseSummaries(project.paths.rootDir);
   const changeHistories = listCompleteChangeHistories(project.paths.rootDir, input.store, project.changes.map((change) => change.id));
@@ -368,7 +379,7 @@ export async function buildStartupRuntimeSnapshot(input: {
     },
   };
   const storeState = input.store.readState();
-  return {
+  const snapshot: RuntimeSnapshot = {
     health,
     state: {
       health,
@@ -401,6 +412,14 @@ export async function buildStartupRuntimeSnapshot(input: {
     impactSurfaces,
     validators,
   };
+  return {
+    snapshot,
+    changeCatalog: {
+      rootDir: project.paths.rootDir,
+      changesPath: project.paths.changesPath,
+      changes: project.changes,
+    },
+  };
 }
 
 export type RuntimeAnalysis = {
@@ -408,6 +427,7 @@ export type RuntimeAnalysis = {
   publication: {
     codeGraphGeneration: string;
     productModel: ProductModelProjection;
+    changeCatalog: RuntimeChangeCatalog;
   };
 };
 
@@ -632,6 +652,11 @@ export async function buildRuntimeAnalysis(input: RuntimeSnapshotInput): Promise
     publication: {
       codeGraphGeneration: codeGraph.generation,
       productModel,
+      changeCatalog: {
+        rootDir: project.paths.rootDir,
+        changesPath: project.paths.changesPath,
+        changes: project.changes,
+      },
     },
   };
 }

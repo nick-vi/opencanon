@@ -215,7 +215,7 @@ export async function createChangeCheckRunner(input: {
       summary: item.task ? `Task ${item.task.id} check ${item.check.id} started.` : `Check ${item.check.id} started.`,
     });
     writeRuntimeEvent(input.rootDir, input.store(), started);
-    refreshActivityProjection(item.project, started.summary);
+    refreshActivityProjection(started.summary);
 
     const pendingOutput: Array<{ stream: ChangeCheckOutputStream; text: string }> = [];
     let pendingOutputBytes = 0;
@@ -387,14 +387,14 @@ export async function createChangeCheckRunner(input: {
       summary: "summary" in run ? run.summary : `Check ${item.check.id} ${run.status}.`,
     });
     writeRuntimeEvent(input.rootDir, input.store(), finished);
-    refreshActivityProjection(item.project, finished.summary);
+    refreshActivityProjection(finished.summary);
   }
 
-  function refreshActivityProjection(project: LoadedProject, summary: string): void {
+  function refreshActivityProjection(summary: string): void {
     if (stopping) return;
     const snapshot = refreshChangeActivitySnapshot({
       snapshot: input.stateManager.currentSnapshot(),
-      project,
+      changeCatalog: input.stateManager.currentChangeCatalog(),
       store: input.store(),
     });
     input.stateManager.setSnapshot(snapshot);

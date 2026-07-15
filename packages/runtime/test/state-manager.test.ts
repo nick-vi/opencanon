@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createEphemeralValidationResultCache } from "@opencanon/core";
-import type { RuntimeSnapshot } from "../src/snapshot.ts";
+import type { RuntimeChangeCatalog, RuntimeSnapshot } from "../src/snapshot.ts";
 import { createRuntimeStateManager } from "../src/state-manager.ts";
 import type { ProjectInventory } from "../src/server-fs.ts";
 
@@ -13,6 +13,7 @@ test("RuntimeStateManager serializes rebuilds and publishes only the latest obse
 
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
     isStopped: () => false,
@@ -49,6 +50,7 @@ test("RuntimeStateManager coalesces queued watch rebuilds to the latest revision
 
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
     isStopped: () => false,
@@ -81,6 +83,7 @@ test("RuntimeStateManager cancels superseded active analysis and publishes the n
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
     isStopped: () => false,
@@ -124,6 +127,7 @@ test("RuntimeStateManager commits only the accepted analysis candidate", async (
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
     isStopped: () => false,
@@ -132,6 +136,7 @@ test("RuntimeStateManager commits only the accepted analysis candidate", async (
       const value = snapshot(summary);
       return {
         snapshot: value,
+        changeCatalog: catalog(summary),
         commit() {
           commits.push(summary);
           return value;
@@ -156,6 +161,7 @@ test("RuntimeStateManager commits only the accepted analysis candidate", async (
   assert.deepEqual(commits, ["second"]);
   assert.deepEqual(discards, ["first"]);
   assert.equal(snapshotId(manager.currentSnapshot()), "second");
+  assert.equal(manager.currentChangeCatalog().changesPath, "second");
 });
 
 test("RuntimeStateManager exposes revision progress and deterministic readiness", async () => {
@@ -165,6 +171,7 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
     isStopped: () => false,
@@ -194,6 +201,7 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
 test("RuntimeStateManager revision waits fail with lifecycle diagnostics", async () => {
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
     isStopped: () => false,
@@ -219,7 +227,12 @@ function snapshot(id: string): RuntimeSnapshot {
 }
 
 function candidate(value: RuntimeSnapshot) {
-  return { snapshot: value, commit: () => value };
+  const id = snapshotId(value);
+  return { snapshot: value, changeCatalog: catalog(id), commit: () => value };
+}
+
+function catalog(id: string): RuntimeChangeCatalog {
+  return { rootDir: "/project", changesPath: id, changes: [] };
 }
 
 function inventory(id: string): ProjectInventory {

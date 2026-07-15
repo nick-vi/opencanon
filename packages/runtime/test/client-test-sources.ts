@@ -716,18 +716,26 @@ export function changeEventsRouteCheckSource(): string {
   const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
   return `
     import assert from "node:assert/strict";
+    import { readFileSync, writeFileSync } from "node:fs";
+    import path from "node:path";
     import { runtimeAuthHeaders, startOpenCanonRuntime } from ${JSON.stringify(runtimeUrl)};
 
     const rootDir = process.argv[1];
+    const changesPath = path.join(rootDir, "opencanon/changes/index.ts");
+    const originalChanges = readFileSync(changesPath, "utf8");
     const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+    const headers = { ...runtimeAuthHeaders(server.authToken), "content-type": "application/json" };
     try {
-      const headers = { ...runtimeAuthHeaders(server.authToken), "content-type": "application/json" };
       const changesResponse = await fetch(server.url + "/api/changes", { headers });
       const changesText = await changesResponse.text();
       assert.equal(changesResponse.status, 200, changesText);
       const changesBody = JSON.parse(changesText);
       assert.equal(changesBody.data[0].id, "route-change");
       assert.equal(changesBody.data[0].boardColumn, "planned");
+
+      // Activity is evaluated against the last accepted catalog. An invalid
+      // in-progress source revision must not force a route-local Canon reload.
+      writeFileSync(changesPath, "export default [\\n", "utf8");
 
       const recordResponse = await fetch(server.url + "/api/changes/events", {
         method: "POST",
@@ -747,6 +755,12 @@ export function changeEventsRouteCheckSource(): string {
       assert.equal(recordBody.data.event.changeIds[0], "route-change");
       assert.equal(recordBody.data.event.type, "change-started");
       assert.equal(recordBody.data.event.id, "route-change-started-idempotent");
+      writeFileSync(changesPath, originalChanges, "utf8");
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const state = await fetch(server.url + "/api/state", { headers }).then((response) => response.json());
+        if (state.data?.lifecycle?.settled) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
 
       const retryResponse = await fetch(server.url + "/api/changes/events", {
         method: "POST",
@@ -792,6 +806,7 @@ export function changeEventsRouteCheckSource(): string {
       assert.equal(change.boardColumn, "running");
       assert.equal(change.lastEvent.type, "change-started");
     } finally {
+      writeFileSync(changesPath, originalChanges, "utf8");
       await server.stop();
     }
   `;
