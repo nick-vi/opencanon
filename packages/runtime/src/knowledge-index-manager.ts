@@ -1,12 +1,18 @@
 import {
   DefaultSemanticIndexId,
+  DiagnosticSeverity,
+  discoverProjectFiles,
+  isEngineExtractableFile,
   loadProjectContext,
+  type FactKind,
   type ScanAndDiffResult,
+  type SemanticIndexDiagnostic,
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
 import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, semanticSearchVectorForProvider } from "./semantic-index.ts";
 import { listPreviousSemanticChunks } from "./semantic-index-snapshot.ts";
-import { captureRuntimeSourceSnapshot } from "./project-source-snapshot.ts";
+import { applyChangeHint, extractRuntimeFacts, factFilesFromSnapshots, snapshotFiles } from "./project-source-snapshot.ts";
+import { collectRuntimeKnowledgeChunks, type RuntimeKnowledgeChunk } from "./knowledge-producers.ts";
 import type { ProjectStore } from "./state.ts";
 
 export const KnowledgeIndexPhase = {
@@ -47,6 +53,8 @@ export type KnowledgeIndexManager = {
 const SemanticIndexStatus = {
   Ready: "ready",
 } as const;
+export const KnowledgeSourceBatchSize = 64;
+const KnowledgeFactKinds: FactKind[] = ["imports", "exports", "symbols", "declarations", "calls", "literals"];
 
 export function createKnowledgeIndexManager(input: {
   rootDir: string;
@@ -57,8 +65,9 @@ export function createKnowledgeIndexManager(input: {
       const emit = options.onProgress ?? (() => undefined);
       emit({ phase: KnowledgeIndexPhase.Scan, label: "Scanning project files" });
       const project = await loadProjectContext(input.rootDir);
-      const sourceSnapshot = captureRuntimeSourceSnapshot({ rootDir: project.paths.rootDir, paths: project.paths, store: input.store, changedPaths: options.changedPaths });
-      const { scan, facts } = sourceSnapshot;
+      const discovery = discoverProjectFiles(project.paths);
+      if (discovery.failed) throw new Error(discovery.diagnostics.join("\n"));
+      const scan = applyChangeHint(input.store.scanAndDiff(discovery.files), options.changedPaths);
       emit({
         phase: KnowledgeIndexPhase.Diff,
         label: "Diffing Project Knowledge inventory",
@@ -66,16 +75,17 @@ export function createKnowledgeIndexManager(input: {
         total: scan.files.length,
         unit: "files",
       });
-      emit({
-        phase: KnowledgeIndexPhase.Chunk,
-        label: "Chunking changed Knowledge sources",
-        current: options.force ? scan.files.length : scan.changedFiles.length,
-        total: scan.files.length,
-        unit: "files",
-      });
       const previousIndex = input.store.readSemanticIndexStatus({ indexId: DefaultSemanticIndexId }).index;
       const canApplyDelta = !options.force && previousIndex?.status === SemanticIndexStatus.Ready;
       const previousChunks = canApplyDelta ? listPreviousSemanticChunks(input.store) : [];
+      const sourcePaths = canApplyDelta ? scan.changedFiles : scan.files.map((file) => file.path);
+      const collected = collectKnowledgeChunksInBatches({
+        rootDir: project.paths.rootDir,
+        store: input.store,
+        scan,
+        sourcePaths,
+        emit,
+      });
       let mode: KnowledgeIndexRunResult["mode"];
       if (options.force || !previousIndex || previousIndex.status !== SemanticIndexStatus.Ready) {
         mode = "full";
@@ -83,7 +93,9 @@ export function createKnowledgeIndexManager(input: {
         const request = buildProjectSemanticIndex({
           rootDir: project.paths.rootDir,
           scan,
-          facts,
+          facts: [],
+          runtimeChunks: collected.chunks,
+          diagnostics: collected.diagnostics,
           project: input.store.project,
           semanticEmbedding: project.paths.semanticEmbedding,
           previousChunks,
@@ -96,7 +108,9 @@ export function createKnowledgeIndexManager(input: {
         const request = buildProjectSemanticIndexDelta({
           rootDir: project.paths.rootDir,
           scan,
-          facts,
+          facts: [],
+          runtimeChunks: collected.chunks,
+          diagnostics: collected.diagnostics,
           project: input.store.project,
           semanticEmbedding: project.paths.semanticEmbedding,
           previousIndex,
@@ -127,4 +141,52 @@ export function createKnowledgeIndexManager(input: {
       return { index, scan, mode };
     },
   };
+}
+
+export function collectKnowledgeChunksInBatches(input: {
+  rootDir: string;
+  store: ProjectStore;
+  scan: ScanAndDiffResult;
+  sourcePaths: string[];
+  emit(progress: KnowledgeIndexProgress): void;
+}): { chunks: RuntimeKnowledgeChunk[]; diagnostics: SemanticIndexDiagnostic[] } {
+  const eligiblePaths = input.sourcePaths.filter(isKnowledgeSourcePath).sort();
+  const chunks: RuntimeKnowledgeChunk[] = [];
+  const diagnostics: SemanticIndexDiagnostic[] = [];
+  if (eligiblePaths.length === 0) {
+    input.emit({ phase: KnowledgeIndexPhase.Chunk, label: "Chunking Project Knowledge sources", current: 0, total: 0, unit: "files" });
+    return { chunks, diagnostics };
+  }
+
+  const filesByPath = new Map(input.scan.files.map((file) => [file.path, file]));
+  for (let offset = 0; offset < eligiblePaths.length; offset += KnowledgeSourceBatchSize) {
+    const batchPaths = eligiblePaths.slice(offset, offset + KnowledgeSourceBatchSize);
+    const factSnapshots = snapshotFiles(input.rootDir, batchPaths.filter(isEngineExtractableFile));
+    const extracted = extractRuntimeFacts({
+      store: input.store,
+      factFiles: factFilesFromSnapshots(factSnapshots),
+      facts: KnowledgeFactKinds,
+    });
+    const batchFiles = batchPaths.map((file) => filesByPath.get(file)).filter((file): file is NonNullable<typeof file> => file !== undefined);
+    chunks.push(...collectRuntimeKnowledgeChunks({
+      rootDir: input.rootDir,
+      scan: { ...input.scan, files: batchFiles },
+      facts: extracted.files,
+    }, diagnostics));
+    input.emit({
+      phase: KnowledgeIndexPhase.Chunk,
+      label: "Chunking Project Knowledge sources",
+      current: Math.min(offset + batchPaths.length, eligiblePaths.length),
+      total: eligiblePaths.length,
+      unit: "files",
+    });
+  }
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.severity === DiagnosticSeverity.Error) throw new Error(diagnostic.message);
+  }
+  return { chunks, diagnostics };
+}
+
+function isKnowledgeSourcePath(file: string): boolean {
+  return isEngineExtractableFile(file) || /\.(md|markdown)$/iu.test(file);
 }

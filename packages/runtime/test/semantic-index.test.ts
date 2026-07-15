@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "vitest";
 import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticIndexProducerVersion, semanticSearchVectorForProvider } from "@opencanon/runtime";
 import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity } from "../src/knowledge-producers.ts";
+import { collectKnowledgeChunksInBatches, KnowledgeSourceBatchSize } from "../src/knowledge-index-manager.ts";
 import { captureRuntimeSourceSnapshot, snapshotFiles } from "../src/project-source-snapshot.ts";
 import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapshot.ts";
 import { createEngine } from "@opencanon/engine";
@@ -71,6 +72,76 @@ test("runtime source snapshot capture handles large file inventories determinist
     assert.deepEqual(snapshots.map((file) => file.path), files);
     assert(snapshots.every((file) => file.contentHash.startsWith("sha256:")));
     assert.equal(snapshots.reduce((total, file) => total + file.size, 0), files.reduce((total, file, index) => total + Buffer.byteLength(`export const value${index} = ${index};\n`), 0));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("Project Knowledge extracts only required facts in bounded source batches", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-batches-"));
+  try {
+    mkdirSync(path.join(rootDir, "src"), { recursive: true });
+    const files = Array.from({ length: KnowledgeSourceBatchSize * 2 + 2 }, (_value, index) => {
+      const file = `src/file-${String(index).padStart(3, "0")}.ts`;
+      writeFileSync(path.join(rootDir, file), `export const value${index} = ${index};\n`);
+      return { path: file, contentHash: `content-${index}`, size: 32, stale: false };
+    });
+    const extractionBatchSizes: number[] = [];
+    const requestedFacts: string[][] = [];
+    const store = {
+      project: {
+        extractFacts(request: { files: Array<{ path: string; contentHash: string }>; facts: string[] }) {
+          extractionBatchSizes.push(request.files.length);
+          requestedFacts.push(request.facts);
+          return {
+            files: request.files.map((file): FileFacts => ({
+              path: file.path,
+              contentHash: file.contentHash,
+              language: "typescript",
+              parser: "oxc",
+              parserVersion: "test",
+              imports: [],
+              exports: [{ line: 1, column: 1, name: path.basename(file.path, ".ts"), kind: "const" }],
+              symbols: [],
+              declarations: [],
+              calls: [],
+              literals: [],
+              comments: [],
+              references: [],
+              annotations: [],
+              diagnosticFacts: [],
+              duplicates: [],
+              diagnostics: [],
+            })),
+            diagnostics: [],
+          };
+        },
+      },
+    };
+    const progress: Array<{ current?: number; total?: number }> = [];
+    const collected = collectKnowledgeChunksInBatches({
+      rootDir,
+      store: store as never,
+      scan: {
+        statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
+        schemaVersion: 6,
+        inventoryHash: "inventory",
+        files,
+        changedFiles: files.map((file) => file.path),
+        unchangedFiles: [],
+        deletedFiles: [],
+        staleFiles: 0,
+      },
+      sourcePaths: files.map((file) => file.path),
+      emit(event) {
+        progress.push(event);
+      },
+    });
+
+    assert.deepEqual(extractionBatchSizes, [KnowledgeSourceBatchSize, KnowledgeSourceBatchSize, 2]);
+    assert(requestedFacts.every((facts) => facts.join(",") === "imports,exports,symbols,declarations,calls,literals"));
+    assert.equal(collected.chunks.length, files.length);
+    assert.deepEqual(progress.at(-1), { phase: "chunk", label: "Chunking Project Knowledge sources", current: files.length, total: files.length, unit: "files" });
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

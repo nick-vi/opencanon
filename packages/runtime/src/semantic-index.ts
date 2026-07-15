@@ -39,6 +39,8 @@ export type ProjectSemanticIndexBuildInput = {
   project?: EngineProject | undefined;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
   previousChunks?: SemanticChunkMetadata[] | undefined;
+  runtimeChunks?: RuntimeKnowledgeChunk[] | undefined;
+  diagnostics?: SemanticIndexDiagnostic[] | undefined;
 };
 
 export type ProjectSemanticIndexDeltaInput = ProjectSemanticIndexBuildInput & {
@@ -50,7 +52,7 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   const backend = createSemanticEmbeddingBackend(input.project, input.semanticEmbedding);
   const provider = backend.provider;
   const producerVersion = semanticIndexProducerVersion();
-  const diagnostics: SemanticIndexDiagnostic[] = [];
+  const diagnostics: SemanticIndexDiagnostic[] = [...(input.diagnostics ?? [])];
   diagnostics.push(...backend.diagnostics);
   const runtimeChunks = collectRuntimeSemanticChunks(input, diagnostics);
 
@@ -140,7 +142,7 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
   const backend = createSemanticEmbeddingBackend(input.project, input.semanticEmbedding);
   const provider = backend.provider;
   const producerVersion = semanticIndexProducerVersion();
-  const diagnostics: SemanticIndexDiagnostic[] = [];
+  const diagnostics: SemanticIndexDiagnostic[] = [...(input.diagnostics ?? [])];
   diagnostics.push(...backend.diagnostics);
   const identityHash = semanticEmbeddingIdentityHash({
     providerId: provider.id,
@@ -299,10 +301,15 @@ function uniquifySemanticChunkIds(chunks: RuntimeSemanticChunk[]): RuntimeSemant
 }
 
 function collectRuntimeSemanticChunks(
-  input: Pick<ProjectSemanticIndexBuildInput, "rootDir" | "scan" | "facts">,
+  input: Pick<ProjectSemanticIndexBuildInput, "rootDir" | "scan" | "facts" | "runtimeChunks">,
   diagnostics: SemanticIndexDiagnostic[],
   onlyPaths?: Set<string> | undefined,
 ): RuntimeSemanticChunk[] {
+  if (input.runtimeChunks) {
+    return onlyPaths
+      ? input.runtimeChunks.filter((chunk) => onlyPaths.has(chunk.metadata.path))
+      : input.runtimeChunks;
+  }
   return collectRuntimeKnowledgeChunks({ ...input, onlyPaths }, diagnostics);
 }
 
