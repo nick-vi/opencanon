@@ -1,5 +1,6 @@
 import {
   createSemanticChunkId,
+  DefaultSemanticEmbeddingContextLength,
   DefaultSemanticIndexId,
   DiagnosticSeverity,
   semanticChunkTreeHash,
@@ -29,8 +30,8 @@ import type { EngineProject } from "@opencanon/engine";
 import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity, type RuntimeKnowledgeChunk } from "./knowledge-producers.ts";
 import { semanticIndexAncestorNodeKeys, semanticIndexNodesForChunks } from "./semantic-index-nodes.ts";
 
-const MaxEmbeddingBatchTexts = 128;
-const MaxEmbeddingBatchChars = 256_000;
+const MaxEmbeddingBatchTexts = 32;
+const MaxEmbeddingBatchChars = 64_000;
 
 export type ProjectSemanticIndexBuildInput = {
   rootDir: string;
@@ -41,6 +42,7 @@ export type ProjectSemanticIndexBuildInput = {
   previousChunks?: SemanticChunkMetadata[] | undefined;
   runtimeChunks?: RuntimeKnowledgeChunk[] | undefined;
   diagnostics?: SemanticIndexDiagnostic[] | undefined;
+  onEmbeddingProgress?: ((completed: number, total: number) => void) | undefined;
 };
 
 export type ProjectSemanticIndexDeltaInput = ProjectSemanticIndexBuildInput & {
@@ -64,7 +66,7 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   let vectors: number[][] = [];
   if (chunksNeedingEmbedding.length > 0 && !hasSemanticIndexError(diagnostics)) {
     try {
-      vectors = embedDocumentsInBatches(backend, chunksNeedingEmbedding.map((chunk) => chunk.text));
+      vectors = embedDocumentsInBatches(backend, chunksNeedingEmbedding.map((chunk) => chunk.text), input.onEmbeddingProgress);
     } catch (error) {
       diagnostics.push({
         code: "semantic-embedding-failed",
@@ -173,7 +175,7 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
   let vectors: number[][] = [];
   if (changedChunksWithEmbeddingHash.length > 0 && !hasSemanticIndexError(diagnostics)) {
     try {
-      vectors = embedDocumentsInBatches(backend, changedChunksWithEmbeddingHash.map((chunk) => chunk.text));
+      vectors = embedDocumentsInBatches(backend, changedChunksWithEmbeddingHash.map((chunk) => chunk.text), input.onEmbeddingProgress);
     } catch (error) {
       diagnostics.push({
         code: "semantic-embedding-failed",
@@ -240,7 +242,11 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
   };
 }
 
-function embedDocumentsInBatches(backend: SemanticEmbeddingBackend, texts: string[]): number[][] {
+function embedDocumentsInBatches(
+  backend: SemanticEmbeddingBackend,
+  texts: string[],
+  onProgress?: ((completed: number, total: number) => void) | undefined,
+): number[][] {
   const vectors: number[][] = [];
   let batch: string[] = [];
   let batchChars = 0;
@@ -250,13 +256,17 @@ function embedDocumentsInBatches(backend: SemanticEmbeddingBackend, texts: strin
     const nextWouldExceedChars = batch.length > 0 && batchChars + textChars > MaxEmbeddingBatchChars;
     if (nextWouldExceedCount || nextWouldExceedChars) {
       vectors.push(...backend.embedDocuments(batch));
+      onProgress?.(vectors.length, texts.length);
       batch = [];
       batchChars = 0;
     }
     batch.push(text);
     batchChars += textChars;
   }
-  if (batch.length > 0) vectors.push(...backend.embedDocuments(batch));
+  if (batch.length > 0) {
+    vectors.push(...backend.embedDocuments(batch));
+    onProgress?.(vectors.length, texts.length);
+  }
   return vectors;
 }
 
@@ -510,7 +520,7 @@ function nativeEmbeddingOptions(config: SemanticEmbeddingConfig): {
   return {
     nGpuLayers: config.nGpuLayers,
     nThreads: config.nThreads,
-    nCtx: config.nCtx,
+    nCtx: config.nCtx ?? DefaultSemanticEmbeddingContextLength,
     showDownloadProgress: config.showDownloadProgress,
   };
 }

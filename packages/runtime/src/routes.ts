@@ -103,6 +103,7 @@ export const diagnosticCodes = {
   operationCapacityExceeded: "operation-capacity-exceeded",
   inferenceError: "inference-error",
   projectInventoryFailed: "project-inventory-failed",
+  semanticIndexBuildFailed: "semantic-index-build-failed",
   semanticIndexNotReady: "semantic-index-not-ready",
 } as const;
 

@@ -21,6 +21,7 @@ export const openCanonErrorCodeValues = [
   "project-inventory-failed",
   "invalid-engine-payload",
   "inference-error",
+  "semantic-index-build-failed",
   "semantic-index-not-ready",
   "runtime-manifest-invalid",
   "runtime-update-failed",

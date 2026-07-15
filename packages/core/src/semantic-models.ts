@@ -73,10 +73,12 @@ export const SemanticEmbeddingModels = {
 
 export const DefaultSemanticEmbeddingModelId = SemanticEmbeddingModelId.JinaCodeV2;
 export const DefaultNativeSemanticEmbeddingModelId = SemanticEmbeddingModelId.JinaCodeV2;
+export const DefaultSemanticEmbeddingContextLength = 2048;
 
 export const DefaultSemanticEmbeddingConfig = {
   mode: SemanticEmbeddingProviderKind.Native,
   modelId: DefaultSemanticEmbeddingModelId,
+  nCtx: DefaultSemanticEmbeddingContextLength,
   showDownloadProgress: true,
 } as const satisfies SemanticEmbeddingConfig;
 

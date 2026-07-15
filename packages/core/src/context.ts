@@ -478,6 +478,9 @@ function validateSemanticEmbeddingConfig(config: unknown): string[] {
       diagnostics.push(`semanticEmbedding.${field} must be a ${field === "nGpuLayers" ? "non-negative" : "positive"} integer.`);
     }
   }
+  if (typeof config.nCtx === "number" && Number.isInteger(config.nCtx) && config.nCtx > model.contextLength) {
+    diagnostics.push(`semanticEmbedding.nCtx must not exceed ${model.contextLength} for ${model.id}.`);
+  }
   if (typeof config.showDownloadProgress !== "boolean") diagnostics.push("semanticEmbedding.showDownloadProgress must be a boolean.");
   return diagnostics;
 }

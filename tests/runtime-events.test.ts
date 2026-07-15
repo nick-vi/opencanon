@@ -135,7 +135,14 @@ test("local pipe stream client consumes SSE chunks and aborts explicitly", async
   });
   try {
     let output = "";
-    await streamLocalText({ transport: "pipe", pipeEndpoint: endpoint }, { method: "GET", path: "/api/events/stream", onChunk: (chunk) => { output += chunk; } });
+    let opens = 0;
+    await streamLocalText({ transport: "pipe", pipeEndpoint: endpoint }, {
+      method: "GET",
+      path: "/api/events/stream",
+      onOpen: () => { opens += 1; },
+      onChunk: (chunk) => { output += chunk; },
+    });
+    assert.equal(opens, 1);
     assert.match(output, /event: operation/);
     assert.match(output, /"ok":true/);
   } finally {

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { createEngine } from "@opencanon/engine";
-import { inspectProjectRuntime, projectRuntimeStatePath, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
+import { createPaths } from "@opencanon/core";
+import { createKnowledgeIndexManager, createProjectStore, inspectProjectRuntime, projectRuntimeStatePath, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
 import {
@@ -231,6 +232,37 @@ test("Project Knowledge routes expose search, ask, chunks, coverage, and backlin
   }
 });
 
+test("Project Knowledge worker failure leaves the serving runtime healthy", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-worker-failure-"));
+  createAuthoringProject(rootDir);
+  const server = await startOpenCanonRuntime({
+    cwd: rootDir,
+    port: 0,
+    async runKnowledgeIndexOperation() {
+      throw new Error("isolated index failure");
+    },
+  });
+  try {
+    const headers = runtimeAuthHeaders(server.authToken);
+    const indexResponse = await fetch(server.url + "/api/index", { method: "POST", headers });
+    const indexText = await indexResponse.text();
+    assert.equal(indexResponse.status, 500, indexText);
+    assert.match(indexText, /isolated index failure/u);
+
+    const healthResponse = await fetch(server.url + "/api/health", { headers });
+    const healthText = await healthResponse.text();
+    assert.equal(healthResponse.status, 200, healthText);
+    const health = JSON.parse(healthText) as { data?: { jobs?: Array<{ status?: string; message?: string }> } };
+    assert(health.data?.jobs?.some((job) => job.status === "failed" && job.message === "isolated index failure"));
+
+    const statusResponse = await fetch(server.url + "/api/context/status", { headers });
+    assert.equal(statusResponse.status, 200, await statusResponse.text());
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("Project Knowledge watcher refreshes an existing index after file changes", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-watch-"));
   const registryPath = path.join(rootDir, ".opencanon/test-service-registry.json");
@@ -261,6 +293,7 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
     );
 
     let semanticIndex: unknown = null;
+    const scanStatePath = path.join(rootDir, ".opencanon/state/test/state.sqlite");
     let semanticChunks: Array<{ metadata: Record<string, unknown>; text: string; vector?: number[] }> = [];
     let watcherCallback: ((error: unknown, batchJson?: string) => void) | undefined;
     const previousHashes = new Map<string, string>();
@@ -374,6 +407,15 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
       cwd: rootDir,
       port: 0,
       runtime: { nodeVersion: process.versions.node, engine },
+      async runKnowledgeIndexOperation(input) {
+        const workerStore = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scanStatePath });
+        try {
+          const result = await createKnowledgeIndexManager({ rootDir, store: workerStore }).index({ force: input.force, changedPaths: input.changedPaths, onProgress: input.onProgress });
+          return { index: result.index, files: result.scan.files.map((file) => file.path) };
+        } finally {
+          workerStore.close();
+        }
+      },
     });
     try {
       const headers = runtimeAuthHeaders(server.authToken);

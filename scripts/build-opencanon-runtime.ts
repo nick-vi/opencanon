@@ -47,6 +47,10 @@ await buildRuntimeEntry(
 await buildRuntimeEntry(path.join(rootDir, "packages/runtime/src/type-producer/producer-main.ts"), path.join(runtimeRoot, "producer-main.js"), {
   external: ["typescript"],
 });
+await buildRuntimeEntry(
+  path.join(rootDir, "packages/runtime/src/knowledge-index-worker-main.ts"),
+  path.join(runtimeRoot, "knowledge-index-worker-main.js"),
+);
 
 emitRuntimeDeclarations();
 if (!skipEngine) copyEngineBinary();

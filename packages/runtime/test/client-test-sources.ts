@@ -94,6 +94,7 @@ export function codeGraphRouteCheckSource(): string {
       return body.data;
     }
     try {
+      await get("/api/snapshot");
       const symbols = await get("/api/code/symbols?query=loadCompany&limit=10");
       assert.equal(typeof symbols.sourceFiles, "number");
       assert(symbols.symbols.some((symbol) => symbol.name === "loadCompany" && symbol.path === "src/company.ts"));
@@ -160,6 +161,8 @@ export function projectContextRouteCheckSource(): string {
 
       const status = await get("/api/context/status");
       assert.equal(status.index.status, "ready");
+      const summary = await get("/api/project/summary");
+      assert.equal(summary.files, 2);
 
       const search = await get("/api/context/search?query=invoice%20search%20term&limit=5");
       assert.equal(search.results[0].file, "src/company.ts");

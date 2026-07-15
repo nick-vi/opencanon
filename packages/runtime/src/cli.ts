@@ -23,9 +23,10 @@ import {
   serviceInspectionJson,
 } from "./cli-status.ts";
 import { startOpenCanonRuntime, checkRuntimePrerequisites } from "./server.ts";
+import { StreamEventType } from "./server-events.ts";
 import { runtimeStartupProblem, writeRuntimeStartupFailure } from "./service-startup-result.ts";
 import { stopAllProjectRuntimes } from "./service-control.ts";
-import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
+import { localProtocolEndpointFromEntry, requestLocalJson, streamLocalText } from "./local-protocol.ts";
 import { HiddenServiceRegistryArg } from "./service-peer-discovery.ts";
 import { ProjectRuntimeEnv } from "./service-types.ts";
 import { defaultRuntimeNamespace, projectRuntimeStatePath } from "./service-namespace.ts";
@@ -732,16 +733,57 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
   }
   const format = formatOption(options.format);
   const ensured = await ensureProjectRuntimeViaService({ cwd });
+  const endpoint = localProtocolEndpointFromEntry(ensured.project.entry);
   if (format !== Format.Json) {
     console.log("# OpenCanon Project Knowledge");
     console.log("");
     console.log(options.force === true ? "Rebuilding Project Knowledge..." : "Indexing Project Knowledge...");
     console.log("");
   }
-  const snapshot = await requestLocalJson<{ state?: { semanticIndex?: SemanticIndexSnapshot }; semanticIndex?: SemanticIndexSnapshot | null }>(
-    localProtocolEndpointFromEntry(ensured.project.entry),
-    { method: "POST", path: ApiRoute.Index, body: { response: ProjectIndexResponseMode.SemanticIndex, force: options.force === true } },
-  );
+  const controller = new AbortController();
+  let streamOpened!: () => void;
+  let streamOpenFailed!: (error: Error) => void;
+  let streamIsOpen = false;
+  const streamOpen = new Promise<void>((resolve, reject) => {
+    streamOpened = resolve;
+    streamOpenFailed = reject;
+  });
+  const parser = createKnowledgeProgressParser((line) => process.stderr.write(`${line}\n`));
+  const stream = streamLocalText(endpoint, {
+    method: "GET",
+    path: ApiRoute.EventsStream,
+    signal: controller.signal,
+    onOpen() {
+      streamIsOpen = true;
+      streamOpened();
+    },
+    onChunk: parser.push,
+  }).then(() => {
+    if (!streamIsOpen && !controller.signal.aborted) throw new Error("OpenCanon Knowledge progress stream closed before opening.");
+  }).catch((error) => {
+    if (!streamIsOpen) {
+      streamOpenFailed(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    if (!controller.signal.aborted) throw error;
+  });
+  try {
+    await streamOpen;
+  } catch (error) {
+    controller.abort();
+    await stream.catch(() => undefined);
+    throw error;
+  }
+  let snapshot: { state?: { semanticIndex?: SemanticIndexSnapshot }; semanticIndex?: SemanticIndexSnapshot | null };
+  try {
+    snapshot = await requestLocalJson(
+      endpoint,
+      { method: "POST", path: ApiRoute.Index, body: { response: ProjectIndexResponseMode.SemanticIndex, force: options.force === true } },
+    );
+  } finally {
+    controller.abort();
+    await stream;
+  }
   const index = snapshot.state?.semanticIndex ?? snapshot.semanticIndex;
   if (format === Format.Json) {
     writeJson({ index: index ?? null });
@@ -752,6 +794,42 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
     return;
   }
   for (const line of renderSemanticIndexLines(index)) console.log(line);
+}
+
+function createKnowledgeProgressParser(onProgress: (line: string) => void): { push(chunk: string): void } {
+  let buffer = "";
+  let lastLine = "";
+  return {
+    push(chunk) {
+      buffer += chunk.replace(/\r\n/gu, "\n");
+      while (true) {
+        const boundary = buffer.indexOf("\n\n");
+        if (boundary < 0) return;
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const data = frame
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n");
+        if (!data) continue;
+        try {
+          const event = JSON.parse(data) as { type?: string; progress?: { label?: string; current?: number; total?: number; unit?: string } };
+          if (event.type !== StreamEventType.Indexing || !event.progress?.label) continue;
+          const count = event.progress.current !== undefined && event.progress.total !== undefined
+            ? ` (${event.progress.current}/${event.progress.total}${event.progress.unit ? ` ${event.progress.unit}` : ""})`
+            : "";
+          const line = `${event.progress.label}${count}`;
+          if (line !== lastLine) {
+            lastLine = line;
+            onProgress(line);
+          }
+        } catch (error) {
+          throw new Error(`OpenCanon returned malformed Knowledge progress: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    },
+  };
 }
 
 async function runProjectLogsCommand(args: string[], cwd: string): Promise<void> {

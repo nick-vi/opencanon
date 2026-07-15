@@ -8,7 +8,6 @@ import {
   createValidationResultCache,
   buildDoctorReport,
   deriveChangeWorkQueue,
-  isCodeGraphIndexableFile,
   loadPendingCommitGates,
   loadProjectContext,
   normalizeProducerStatusesForProject,
@@ -157,10 +156,9 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { index: snapshot.state.semanticIndex ?? snapshot.semanticIndex } });
       }
       if (url.pathname === ApiRoute.CodeSymbols) {
-        const snapshot = await ensureProjectSnapshot("Code symbol search requested current project state.");
         const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
         if (!safePath.ok) return json(safePath.error, 400);
-        const sourceFiles = snapshot.files.filter(isCodeGraphIndexableFile).length;
+        const sourceFiles = stateManager.currentSnapshot().state.files;
         const limit = Math.min(1000, numberParam(url, UrlSearchParam.Limit, 50));
         if (url.searchParams.get(UrlSearchParam.References) === "1") {
           const result = currentStore().project.searchReferences({
@@ -181,7 +179,6 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         return json({ ok: true, data: { sourceFiles, symbols: result.symbols } });
       }
       if (url.pathname === ApiRoute.CodeGraph) {
-        const snapshot = await ensureProjectSnapshot("Code graph search requested current project state.");
         const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
         if (!safePath.ok) return json(safePath.error, 400);
         const direction = codeGraphDirectionParam(url);
@@ -194,7 +191,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           direction: direction.direction,
           limit: Math.min(1000, numberParam(url, UrlSearchParam.Limit, 50)),
         });
-        return json({ ok: true, data: { sourceFiles: snapshot.files.filter(isCodeGraphIndexableFile).length, edges: result.edges } });
+        return json({ ok: true, data: { sourceFiles: stateManager.currentSnapshot().state.files, edges: result.edges } });
       }
       if (url.pathname === ApiRoute.ContextChunks) {
         const snapshot = await semanticContextSnapshot();
@@ -308,7 +305,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.ContextBacklinks) {
-        const snapshot = await ensureProjectSnapshot("Project Knowledge backlinks requested current project state.");
+        const snapshot = await refreshCurrentSnapshot();
         const query = (url.searchParams.get(UrlSearchParam.Query) ?? url.searchParams.get(UrlSearchParam.Id) ?? url.searchParams.get(UrlSearchParam.Path) ?? "").trim();
         if (!query) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Knowledge backlinks requires query, id, or path."), 400);
         return json({ ok: true, data: projectContextBacklinks({ snapshot, query }) });
@@ -579,11 +576,21 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       }
       if (url.pathname === ApiRoute.Index && request.method === "POST") {
         const body = await readJsonBody(request);
-        const snapshot = await buildIndexedSnapshot("Manual reindex completed.", { force: body.force === true });
-        if (body.response === ProjectIndexResponseMode.SemanticIndex) {
-          return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
+        try {
+          const snapshot = await buildIndexedSnapshot("Manual reindex completed.", { force: body.force === true });
+          if (body.response === ProjectIndexResponseMode.SemanticIndex) {
+            return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
+          }
+          return json({ ok: true, data: snapshot });
+        } catch (error) {
+          return json(
+            diagnostic(
+              diagnosticCodes.semanticIndexBuildFailed,
+              `Project Knowledge indexing failed: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+            500,
+          );
         }
-        return json({ ok: true, data: snapshot });
       }
       if (url.pathname === ApiRoute.Settings) {
         if (request.method === "GET") return json({ ok: true, data: readProjectSettings(rootDir) });

@@ -87,7 +87,9 @@ import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
 import { createRuntimeStateManager, type RuntimeRebuildOptions } from "./state-manager.ts";
 import { createChangeCheckRunner } from "./change-check-runner.ts";
-import { createKnowledgeIndexManager, type KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
+import type { KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
+import { runKnowledgeIndexOperation, type KnowledgeIndexOperationInput, type KnowledgeIndexOperationResult } from "./knowledge-index-operation.ts";
+import { buildSnapshotFileCoverage } from "./snapshot-projection.ts";
 import { createRuntimeActivityTracker } from "./activity-tracker.ts";
 import { ProjectFileLanguage, setLiveTypeFactsProviderFactory, setProjectAstFactsProviderFactory, resolveProducerStatuses, normalizeProducerStatusesForProject } from "@opencanon/core";
 import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-facts-provider.ts";
@@ -139,6 +141,7 @@ export type RuntimeServerOptions = {
   onIdle?: () => void | Promise<void>;
   onStopped?: () => void | Promise<void>;
   runtime?: RuntimePrerequisites;
+  runKnowledgeIndexOperation?: (input: KnowledgeIndexOperationInput) => Promise<KnowledgeIndexOperationResult>;
 };
 
 export type RuntimeServer = {
@@ -210,6 +213,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   const events = createEventBroadcaster();
   let currentWorkerJob: RuntimeWorkerJob | undefined;
   let lastWorkerJob: RuntimeWorkerJob | undefined;
+  const knowledgeIndexAbortController = new AbortController();
+  const executeKnowledgeIndex = options.runKnowledgeIndexOperation ?? runKnowledgeIndexOperation;
   const projectTypesRuntime = createProjectTypesRuntime({
     rootDir,
     paths: () => paths,
@@ -420,33 +425,58 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
 
   async function buildIndexedSnapshot(summary: string, options: { force?: boolean; changedPaths?: string[] } = {}): Promise<RuntimeSnapshot> {
+    if (currentWorkerJob) throw new Error(`Project operation already running: ${currentWorkerJob.label}.`);
     const jobId = beginWorkerJob({
       kind: RuntimeWorkerJobKindValue.SemanticIndex,
       label: options.force ? "Rebuilding Project Knowledge" : "Indexing Project Knowledge",
       message: summary,
     });
-    const manager = createKnowledgeIndexManager({ rootDir, store });
-    await manager.index({
+    const result = await executeKnowledgeIndex({
+      rootDir,
+      statePath: store.statePath,
       force: options.force,
       changedPaths: options.changedPaths,
+      signal: knowledgeIndexAbortController.signal,
       onProgress(progress) {
         publishKnowledgeIndexProgress(jobId, progress);
       },
     }).then(
-      () =>
+      (publishedResult) => {
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
           label: "Project Knowledge ready",
           message: summary,
-        }),
+        });
+        return publishedResult;
+      },
       (error) => {
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
           label: "Project Knowledge indexing failed",
           message: errorMessage(error),
         });
+        stateManager.setSnapshot(withProcessIdentity(stateManager.currentSnapshot()));
         throw error;
       },
     );
-    return await stateManager.rebuildAndPublish(summary);
+    await restartStore();
+    const current = await refreshCurrentSnapshot();
+    const definitionGraph = {
+      ...current.definitionGraph,
+      fileCoverage: buildSnapshotFileCoverage({
+        files: result.files,
+        areas: current.areas,
+        specs: current.specs,
+        changes: current.changes,
+        conventions: current.conventions,
+        impactSurfaces: current.impactSurfaces,
+      }),
+    };
+    return stateManager.setSnapshot(withProcessIdentity({
+      ...current,
+      files: result.files,
+      definitionGraph,
+      semanticIndex: result.index,
+      state: { ...current.state, files: result.files.length, semanticIndex: result.index },
+    }));
   }
 
   function scheduleKnowledgeRefreshForWatch(batch: WatcherEventBatch, summary: string | undefined): void {
@@ -828,6 +858,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   async function stopInternal(): Promise<void> {
     if (stopped) return;
     stopped = true;
+    knowledgeIndexAbortController.abort();
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = undefined;
     if (producerReadyDebounce) clearTimeout(producerReadyDebounce);

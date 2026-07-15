@@ -642,8 +642,8 @@ test("runtime semantic index batches native document embeddings", () => {
     assert.equal(build.index.status, "ready");
     assert.equal(build.chunks.length, 300);
     assert.equal(build.index.embeddingStats?.embeddedChunks, 300);
-    assert.equal(calls.length, 3);
-    assert.deepEqual(calls.map((call) => call.texts.length), [128, 128, 44]);
+    assert.equal(calls.length, 10);
+    assert.deepEqual(calls.map((call) => call.texts.length), [32, 32, 32, 32, 32, 32, 32, 32, 32, 12]);
     assert(build.chunks.every((chunk) => chunk.vector.length === 896));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

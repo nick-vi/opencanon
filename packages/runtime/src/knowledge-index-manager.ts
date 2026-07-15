@@ -89,13 +89,15 @@ export function createKnowledgeIndexManager(input: {
       let mode: KnowledgeIndexRunResult["mode"];
       if (options.force || !previousIndex || previousIndex.status !== SemanticIndexStatus.Ready) {
         mode = "full";
-        emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding Project Knowledge", current: 0, total: scan.files.length, unit: "files" });
         const request = buildProjectSemanticIndex({
           rootDir: project.paths.rootDir,
           scan,
           facts: [],
           runtimeChunks: collected.chunks,
           diagnostics: collected.diagnostics,
+          onEmbeddingProgress(current, total) {
+            emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding Project Knowledge", current, total, unit: "chunks" });
+          },
           project: input.store.project,
           semanticEmbedding: project.paths.semanticEmbedding,
           previousChunks,
@@ -104,13 +106,15 @@ export function createKnowledgeIndexManager(input: {
         input.store.writeSemanticIndex(request);
       } else {
         mode = "delta";
-        emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding changed Project Knowledge", current: 0, total: scan.changedFiles.length, unit: "files" });
         const request = buildProjectSemanticIndexDelta({
           rootDir: project.paths.rootDir,
           scan,
           facts: [],
           runtimeChunks: collected.chunks,
           diagnostics: collected.diagnostics,
+          onEmbeddingProgress(current, total) {
+            emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding changed Project Knowledge", current, total, unit: "chunks" });
+          },
           project: input.store.project,
           semanticEmbedding: project.paths.semanticEmbedding,
           previousIndex,

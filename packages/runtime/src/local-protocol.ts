@@ -60,6 +60,7 @@ export type LocalProtocolTransport = {
 
 export type LocalProtocolStreamRequest = Omit<LocalProtocolRequest, "timeoutMs"> & {
   signal?: AbortSignal;
+  onOpen?(): void;
   onChunk(chunk: string): void;
 };
 
@@ -239,6 +240,7 @@ export async function streamLocalText(endpoint: LocalProtocolEndpoint, request: 
   if (!response.ok || !response.body) {
     throw new Error(`OpenCanon event stream failed: ${response.status} ${response.statusText}.`);
   }
+  request.onOpen?.();
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   try {
@@ -421,6 +423,7 @@ async function streamPipeText(endpoint: LocalProtocolPipeEndpoint, request: Loca
     const socket = net.createConnection(endpoint.pipeEndpoint);
     let buffer = "";
     let settled = false;
+    let opened = false;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -458,6 +461,10 @@ async function streamPipeText(endpoint: LocalProtocolPipeEndpoint, request: Loca
         if (parsed.status < 200 || parsed.status >= 300) {
           finish(new Error(`OpenCanon event stream failed: ${parsed.status} ${parsed.statusText}.`));
           return;
+        }
+        if (!opened) {
+          opened = true;
+          request.onOpen?.();
         }
         if (parsed.chunk) {
           try {

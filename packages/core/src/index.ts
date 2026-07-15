@@ -542,6 +542,7 @@ export type { SemanticHashInput } from "./semantic-index.ts";
 export {
   DefaultNativeSemanticEmbeddingModelId,
   DefaultSemanticEmbeddingConfig,
+  DefaultSemanticEmbeddingContextLength,
   DefaultSemanticEmbeddingModelId,
   semanticEmbeddingModel,
   SemanticEmbeddingModelId,
