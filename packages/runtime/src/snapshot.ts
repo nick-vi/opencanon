@@ -428,6 +428,7 @@ export async function buildRuntimeSnapshot(input: RuntimeSnapshotInput): Promise
     files: analysis.snapshot.files,
     graph: analysis.snapshot.graph,
     findings: analysis.snapshot.findings,
+    staleFiles: analysis.snapshot.state.staleFiles,
     productModel: analysis.publication.productModel,
   });
   return analysis.snapshot;

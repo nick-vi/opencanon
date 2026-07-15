@@ -68,6 +68,7 @@ export type StoreSnapshotInput = {
   files: string[];
   graph: RepoGraph;
   findings: CanonFinding[];
+  staleFiles: number;
   productModel: ProductModelProjection;
 };
 
@@ -142,7 +143,7 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
       state = {
         files: input.files.length,
         findings: input.findings.length,
-        staleFiles: state.staleFiles,
+        staleFiles: input.staleFiles,
         graphHash: input.graph.graphHash,
         lastIndexedAt: new Date().toISOString(),
         productModel: productModelState(input.productModel),

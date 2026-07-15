@@ -693,6 +693,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               files: next.files,
               graph: next.graph,
               findings: next.findings,
+              staleFiles: next.state.staleFiles,
               productModel: analysis.publication.productModel,
             });
             stateManager.replaceValidationResultCache(createValidationResultCache(paths));
