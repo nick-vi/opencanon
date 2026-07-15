@@ -10,7 +10,7 @@ use napi::{Env, Task};
 use napi_derive::napi;
 use notify::{Config, Event, EventKindMask, RecursiveMode, Watcher};
 use opencanon_inference::{Embedder, EmbedderConfig, Generator, GeneratorConfig};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde_json::json;
 
 use crate::constants::{
@@ -137,19 +137,9 @@ impl EngineProjectHandle {
     #[napi(js_name = "scanAndDiffJson")]
     pub fn scan_and_diff_json(&self, request: String) -> napi::Result<String> {
         let request: ScanAndDiffRequest = decode(&request)?;
-        let mut conn = self
-            .conn
-            .lock()
-            .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-        let tx = conn
-            .transaction()
-            .map_err(|error| sqlite_error("Could not start scan transaction", error))?;
-        let mut existing = read_existing_file_hashes(&tx)?;
-        let mut files = Vec::new();
-        let mut changed_files = Vec::new();
-        let mut unchanged_files = Vec::new();
-        let mut inventory_parts = Vec::new();
-        let indexed_at = timestamp();
+        let mut scanned_files = Vec::with_capacity(request.files.len());
+        let mut files = Vec::with_capacity(request.files.len());
+        let mut inventory_parts = Vec::with_capacity(request.files.len());
 
         for file in request.files.iter() {
             let absolute = root_path(&self.root_dir, file);
@@ -161,20 +151,6 @@ impl EngineProjectHandle {
             })?;
             let content_hash = blake3::hash(&bytes).to_hex().to_string();
             let size = bytes.len() as i64;
-            match existing.remove(file) {
-                Some(previous_hash) if previous_hash == content_hash => {
-                    unchanged_files.push(file.clone());
-                }
-                _ => {
-                    changed_files.push(file.clone());
-                }
-            }
-            tx.execute(
-                "insert into files(path, content_hash, size, indexed_at, stale) values (?1, ?2, ?3, ?4, 0)
-                 on conflict(path) do update set content_hash = excluded.content_hash, size = excluded.size, indexed_at = excluded.indexed_at, stale = 0",
-                params![file, content_hash, size, indexed_at],
-            )
-            .map_err(|error| sqlite_error("Could not upsert file state", error))?;
             inventory_parts.push(format!("{file}\0{content_hash}"));
             files.push(json!({
               "path": file,
@@ -182,6 +158,40 @@ impl EngineProjectHandle {
               "size": size,
               "stale": false,
             }));
+            scanned_files.push((file.clone(), content_hash, size));
+        }
+
+        inventory_parts.sort();
+        let inventory_hash = blake3::hash(inventory_parts.join("\n").as_bytes())
+            .to_hex()
+            .to_string();
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| sqlite_error("Could not start scan transaction", error))?;
+        let mut existing = read_existing_file_hashes(&tx)?;
+        let mut changed_files = Vec::new();
+        let mut unchanged_files = Vec::new();
+        let indexed_at = timestamp();
+
+        for (file, content_hash, size) in scanned_files.iter() {
+            match existing.remove(file) {
+                Some(previous_hash) if previous_hash == content_hash.as_str() => {
+                    unchanged_files.push(file.clone());
+                }
+                _ => {
+                    changed_files.push(file.clone());
+                    tx.execute(
+                        "insert into files(path, content_hash, size, indexed_at, stale) values (?1, ?2, ?3, ?4, 0)
+                         on conflict(path) do update set content_hash = excluded.content_hash, size = excluded.size, indexed_at = excluded.indexed_at, stale = 0",
+                        params![file, content_hash, size, indexed_at],
+                    )
+                    .map_err(|error| sqlite_error("Could not upsert file state", error))?;
+                }
+            }
         }
 
         let mut deleted_files = existing.keys().cloned().collect::<Vec<_>>();
@@ -193,10 +203,6 @@ impl EngineProjectHandle {
                 .map_err(|error| sqlite_error("Could not delete fact state", error))?;
         }
 
-        inventory_parts.sort();
-        let inventory_hash = blake3::hash(inventory_parts.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
         tx.execute(
             "insert into watch_state(root_dir, inventory_hash, stale, reason, updated_at) values (?1, ?2, 0, null, ?3)
              on conflict(root_dir) do update set inventory_hash = excluded.inventory_hash, stale = 0, reason = null, updated_at = excluded.updated_at",

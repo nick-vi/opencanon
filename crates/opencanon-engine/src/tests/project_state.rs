@@ -134,6 +134,30 @@ fn opens_project_state_after_transient_sqlite_write_lock() {
 }
 
 #[test]
+fn scan_waits_for_a_concurrent_writer_without_lock_upgrade_failure() {
+    let root = test_root("scan-concurrent-writer");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/company.ts"), "export const value = 1;\n").unwrap();
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
+    let project = open_test_project(&root);
+    let lock_conn = Connection::open(&state_path).unwrap();
+    lock_conn
+        .execute_batch("pragma journal_mode = wal; begin immediate;")
+        .unwrap();
+
+    let handle = thread::spawn(move || {
+        project.scan_and_diff_json(json!({ "files": ["src/company.ts"] }).to_string())
+    });
+
+    thread::sleep(Duration::from_millis(100));
+    lock_conn.execute_batch("commit;").unwrap();
+
+    let output = handle.join().unwrap().unwrap();
+    let parsed: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(parsed["changedFiles"][0], "src/company.ts");
+}
+
+#[test]
 fn rejects_state_tables_without_migration_record() {
     let root = test_root("strict-migrations");
     let state_path = root.join(".opencanon/state/test/state.sqlite");
