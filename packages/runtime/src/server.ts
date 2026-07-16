@@ -75,17 +75,16 @@ import { knowledgeWatchSummary, watcherBatchSummary } from "./project-watch-summ
 import { projectAnalysisStatePath } from "./service-namespace.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { createEventBroadcaster, failureEvent, indexedEvent, progressEvent, projectPublishedEvent } from "./server-events.ts";
-import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
+import { serveRuntime } from "./server-http.ts";
 import { createRuntimeRouteHandler } from "./server-routes.ts";
-import { createRuntimeRequestAdmission } from "./request-admission.ts";
 import { assertRuntimePrerequisites, formatHttpBaseUrl, renderPrerequisiteFailure, requiredNodeRequirement, type RuntimePrerequisites } from "./runtime.ts";
 import { createProjectStore, type ProjectStore } from "./state.ts";
 import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
 import { assertSafeRuntimeHost, createRuntimeAuthToken, isAuthorizedRuntimeRequest, usableRuntimeAuthToken } from "./auth.ts";
 import { listProjects } from "./project-summary.ts";
-import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, validateRuntimeAuth, validateMethod, type RuntimeError } from "./routes.ts";
-import { localPipeEndpoint, serveLocalProtocolPipe, type LocalProtocolPipeServer } from "./local-protocol.ts";
+import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, type RuntimeError } from "./routes.ts";
+import { ProjectProtocolPipeFrameMaxBytes, localPipeEndpoint, serveLocalProtocolPipe, type LocalProtocolPipeServer } from "./local-protocol.ts";
 import { acquireProjectWorkerLease, stopService } from "./service.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
@@ -344,7 +343,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       const liveProvider = new LiveTypeProducerProvider(typeProducerRuntime);
       setLiveTypeFactsProviderFactory((queryRoot, language) => (queryRoot === rootDir && language === ProjectFileLanguage.TypeScript ? liveProvider : null));
     }
-    const routeRequest = createRuntimeRouteHandler({
+    const protocolHandler = createRuntimeRouteHandler({
       rootDir,
       authToken,
       tracer,
@@ -365,19 +364,26 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       buildIndexedSnapshot,
       restartStore,
     });
-    const requestAdmission = createRuntimeRequestAdmission({ authToken });
-    server = await serveRuntime({ host, port, routeRequest, beginActivity: beginTransportActivity, requestAdmission });
+    server = await serveRuntime({
+      host,
+      port,
+      preflightRequest: protocolHandler.preflightRequest,
+      routeRequest: protocolHandler.routeRequest,
+      requestBodyLimit: protocolHandler.requestBodyLimit,
+      beginActivity: beginTransportActivity,
+    });
     const pipeEndpoint =
       options.pipeEndpoint ??
       configuredPipeEndpoint ??
       localPipeEndpoint({ scope: "runtime", key: `${rootDir}:${options.statePath ?? ""}:${process.pid}:${port}` });
     pipeServer = await serveLocalProtocolPipe({
       endpoint: pipeEndpoint,
-      routeRequest,
+      routeRequest: protocolHandler.routeRequest,
       host: "opencanon.runtime",
-      maxFrameBytes: MaxRequestBodyBytes,
+      maxFrameBytes: ProjectProtocolPipeFrameMaxBytes,
       beginActivity: beginTransportActivity,
-      requestAdmission,
+      preflightRequest: protocolHandler.preflightRequest,
+      requestBodyLimit: protocolHandler.requestBodyLimit,
     });
     resetIdleTimer();
   } catch (error) {

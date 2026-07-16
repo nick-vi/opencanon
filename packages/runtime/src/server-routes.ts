@@ -5,7 +5,6 @@ import {
   ChangeCheckRunStatus,
   ChangeCheckRunStatusSchema,
   ChangeTaskEventType,
-  ProtocolOperationKind,
   createPaths,
   createValidationResultCache,
   buildDoctorReport,
@@ -15,7 +14,6 @@ import {
   normalizeProducerStatusesForProject,
   findProtocolOperation,
   ProtocolEventReplaySchema,
-  protocolProjection,
   resolveProducerStatuses,
   validateChangeLifecycleTransition,
   type CanonEvent,
@@ -29,7 +27,8 @@ import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
 import { listProjects } from "./project-summary.ts";
 import { askProjectContext, listProjectContextChunks, projectContextBacklinks, projectContextCoverage, searchProjectContext } from "./project-context.ts";
-import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, validateRuntimeAuth, validateMethod } from "./routes.ts";
+import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json } from "./routes.ts";
+import { createRuntimeProtocolPolicy } from "./protocol-policy.ts";
 import type { RuntimeStateManager } from "./state-manager.ts";
 import type { ProjectStore } from "./state.ts";
 import type { createProjectTypesRuntime } from "./project-types-runtime.ts";
@@ -95,10 +94,18 @@ export type RuntimeRouteHandlerInput = {
   restartStore(): Promise<void>;
 };
 
-export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (request: Request) => Promise<Response> {
+export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
+  preflightRequest(request: Request): Response | undefined;
+  routeRequest(request: Request): Promise<Response>;
+  requestBodyLimit(method: string, pathname: string): number;
+} {
   const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, knowledgeQueryRuntime, resetIdleTimer, refreshCurrentSnapshot, ensureProjectSnapshot, buildIndexedSnapshot, restartStore } = input;
   let paths = input.paths();
   const currentStore = () => input.store();
+  const protocolPolicy = createRuntimeProtocolPolicy({
+    authToken,
+    currentRevision: () => stateManager.lifecycle().revision.published,
+  });
 
   const semanticContextSnapshot = async (): Promise<RuntimeSnapshot> => await refreshCurrentSnapshot();
 
@@ -126,21 +133,14 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       "runtime.request",
       { kind: SpanKind.SERVER, attributes: { method: request.method, path: url.pathname } },
       async (span) => {
-        const response = await routeRequestInner(request, url);
         const operation = findProtocolOperation(request.method, url.pathname);
-        const projected = operation?.kind === ProtocolOperationKind.Query
-          ? await projectSuccessfulResponse(response, stateManager.lifecycle().revision.published)
-          : response;
-        span.setOutput({ status: projected.status, operationId: operation?.id });
-        return projected;
+        const response = await protocolPolicy.execute(request, routeRequestInner);
+        span.setOutput({ status: response.status, operationId: operation?.id });
+        return response;
       },
     );
   };
   const routeRequestInner = async (request: Request, url: URL): Promise<Response> => {
-    const methodValidation = validateMethod(url.pathname, request.method);
-    if (!methodValidation.ok) return json(methodValidation.error, 405);
-    const authValidation = validateRuntimeAuth(request, url, authToken);
-    if (!authValidation.ok) return json(authValidation.error, 401);
     if (url.pathname === ApiRoute.Health) {
         // Public liveness, but the detailed health (engine/schema versions, graph hash,
         // refresh state, counts) is only disclosed to authorized callers.
@@ -751,14 +751,11 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       return new Response("OpenCanon project runtime exposes /api/* only.", { status: 404 });
   };
 
-  return routeRequest;
-}
-
-async function projectSuccessfulResponse(response: Response, revision: number): Promise<Response> {
-  if (response.status < 200 || response.status >= 300 || !response.headers.get("content-type")?.includes("application/json")) return response;
-  const body = await response.clone().json().catch(() => undefined) as { ok?: unknown; data?: unknown } | undefined;
-  if (!body || body.ok !== true || !("data" in body)) return response;
-  return json({ ok: true, data: protocolProjection(revision, body.data) }, response.status);
+  return {
+    preflightRequest: protocolPolicy.preflight,
+    routeRequest,
+    requestBodyLimit: protocolPolicy.requestBodyLimit,
+  };
 }
 
 function isTerminalChangeCheckEvent(type: string): boolean {

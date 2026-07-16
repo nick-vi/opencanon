@@ -1,16 +1,12 @@
 import {
   OpenCanonDiagnosticSchema,
   ProtocolApiPathPrefix,
-  ProtocolAuthorization,
   ProtocolRoute,
   createOpenCanonDiagnostic,
   createOpenCanonDiagnosticsError,
-  findProtocolOperation,
-  protocolMethodsForPath,
   type OpenCanonDiagnostic,
   type OpenCanonErrorPayload,
 } from "@opencanon/core";
-import { isAuthorizedRuntimeRequest } from "./auth.ts";
 
 const HttpHeaderValue = {
   Json: "application/json; charset=utf-8",
@@ -61,10 +57,13 @@ export const UrlSearchParam = {
 
 export const diagnosticCodes = {
   invalidRuntimeResponse: "invalid-runtime-response",
+  invalidProtocolRequest: "invalid-protocol-request",
   lifecycleConflict: "lifecycle-conflict",
   operationCapacityExceeded: "operation-capacity-exceeded",
-  requestCapacityExceeded: "request-capacity-exceeded",
+  requestTooLarge: "request-too-large",
+  responseTooLarge: "response-too-large",
   resyncRequired: "resync-required",
+  unsupportedProtocolVersion: "unsupported-protocol-version",
   inferenceError: "inference-error",
   projectInventoryFailed: "project-inventory-failed",
   semanticIndexBuildFailed: "semantic-index-build-failed",
@@ -80,9 +79,13 @@ type DiagnosticCode = (typeof diagnosticCodes)[keyof typeof diagnosticCodes];
 export type RuntimeError = { ok: false; error: OpenCanonErrorPayload };
 
 export function json<T>(data: ApiSuccess<T> | RuntimeError, status = 200): Response {
-  return new Response(JSON.stringify(data, null, 2), {
+  const body = JSON.stringify(data, null, 2);
+  return new Response(body, {
     status,
-    headers: { "content-type": HttpHeaderValue.Json },
+    headers: {
+      "content-length": String(new TextEncoder().encode(body).byteLength),
+      "content-type": HttpHeaderValue.Json,
+    },
   });
 }
 
@@ -94,17 +97,6 @@ export function diagnosticsFailure(diagnostics: unknown[], fallbackCode: Diagnos
   return {
     ok: false,
     error: createOpenCanonDiagnosticsError(normalizeDiagnostics(diagnostics, fallbackCode)),
-  };
-}
-
-export function validateMethod(pathname: string, method: string): { ok: true } | { ok: false; error: RuntimeError } {
-  if (!pathname.startsWith(ApiPathPrefix)) return { ok: true };
-  if (findProtocolOperation(method, pathname)) return { ok: true };
-  const expected = protocolMethodsForPath(pathname);
-  if (expected.length === 0) return { ok: true };
-  return {
-    ok: false,
-    error: diagnostic(diagnosticCodes.invalidRuntimeResponse, `${pathname} requires ${expected.join(" or ")}.`),
   };
 }
 
@@ -129,15 +121,4 @@ function normalizeDiagnostic(input: unknown, fallbackCode: DiagnosticCode): Open
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function validateRuntimeAuth(request: Request, url: URL, authToken: string): { ok: true } | { ok: false; error: RuntimeError } {
-  if (!url.pathname.startsWith(ApiPathPrefix)) return { ok: true };
-  const operation = findProtocolOperation(request.method, url.pathname);
-  if (operation?.authorization === ProtocolAuthorization.Public) return { ok: true };
-  if (isAuthorizedRuntimeRequest(request, url, authToken)) return { ok: true };
-  return {
-    ok: false,
-    error: diagnostic(diagnosticCodes.invalidRuntimeResponse, "Runtime authorization is required."),
-  };
 }

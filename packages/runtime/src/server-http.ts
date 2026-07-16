@@ -1,14 +1,15 @@
 import { createServer, type IncomingMessage, type Server as NodeHttpServer, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { diagnosticsFailure } from "./routes.ts";
-import type { RuntimeRequestAdmission } from "./request-admission.ts";
+import { ProtocolHttpMethod } from "@opencanon/core";
+import { diagnostic, diagnosticCodes, diagnosticsFailure } from "./routes.ts";
 
 export async function serveRuntime(input: {
   host: string;
   port: number;
+  preflightRequest(request: Request): Response | undefined;
   routeRequest(request: Request): Promise<Response>;
+  requestBodyLimit(method: string, pathname: string): number;
   beginActivity?(): () => void;
-  requestAdmission?: RuntimeRequestAdmission;
 }): Promise<{ port: number; stop(force?: boolean): Promise<void> }> {
   const sockets = new Set<Socket>();
   const nodeServer = createServer(async (nodeRequest, nodeResponse) => {
@@ -60,7 +61,13 @@ async function closeNodeServer(server: NodeHttpServer, sockets: Set<Socket>, for
 }
 
 async function handleNodeRequest(
-  input: { host: string; routeRequest(request: Request): Promise<Response>; beginActivity?(): () => void; requestAdmission?: RuntimeRequestAdmission },
+  input: {
+    host: string;
+    preflightRequest(request: Request): Response | undefined;
+    routeRequest(request: Request): Promise<Response>;
+    requestBodyLimit(method: string, pathname: string): number;
+    beginActivity?(): () => void;
+  },
   nodeRequest: IncomingMessage,
   nodeResponse: ServerResponse,
 ): Promise<void> {
@@ -76,33 +83,31 @@ async function handleNodeRequest(
   });
 
   try {
-    const method = nodeRequest.method ?? "GET";
+    const method = nodeRequest.method ?? ProtocolHttpMethod.Get;
+    const pathname = new URL(nodeRequest.url ?? "/", `http://${input.host}`).pathname;
+    const requestBodyLimit = input.requestBodyLimit(method, pathname);
+    const preflightFailure = input.preflightRequest(incomingMessageToRequest(nodeRequest, input.host, abortController.signal));
+    if (preflightFailure) {
+      await writeNodeResponse(preflightFailure, nodeResponse, abortController.signal);
+      return;
+    }
     let body: Buffer | undefined;
-    if (method !== "GET" && method !== "HEAD") {
+    if (method !== ProtocolHttpMethod.Get) {
       const declared = Number(nodeRequest.headers["content-length"]);
-      if (Number.isFinite(declared) && declared > MaxRequestBodyBytes) {
-        respondJson(nodeResponse, 413, diagnosticsFailure(["Request body exceeds the maximum allowed size."]));
+      if (Number.isFinite(declared) && declared > requestBodyLimit) {
+        respondJson(nodeResponse, 413, diagnostic(diagnosticCodes.requestTooLarge, `Request body exceeds the ${requestBodyLimit}-byte operation limit.`));
         return;
       }
-      const read = await readBodyWithLimit(nodeRequest, MaxRequestBodyBytes);
+      const read = await readBodyWithLimit(nodeRequest, requestBodyLimit);
       if (read === null) {
-        respondJson(nodeResponse, 413, diagnosticsFailure(["Request body exceeds the maximum allowed size."]));
+        respondJson(nodeResponse, 413, diagnostic(diagnosticCodes.requestTooLarge, `Request body exceeds the ${requestBodyLimit}-byte operation limit.`));
         return;
       }
       body = read;
     }
     const request = incomingMessageToRequest(nodeRequest, input.host, abortController.signal, body);
-    const admission = input.requestAdmission?.admit(request);
-    if (admission && !admission.ok) {
-      await writeNodeResponse(admission.response, nodeResponse, abortController.signal);
-      return;
-    }
-    try {
-      const response = await input.routeRequest(request);
-      await writeNodeResponse(response, nodeResponse, abortController.signal);
-    } finally {
-      admission?.release();
-    }
+    const response = await input.routeRequest(request);
+    await writeNodeResponse(response, nodeResponse, abortController.signal);
   } catch (error) {
     if (abortController.signal.aborted) return;
     if (!nodeResponse.headersSent) {
@@ -120,8 +125,6 @@ async function handleNodeRequest(
 
 /** Maximum accepted request body. Bounds memory against an authenticated client posting
  * an unbounded body to validate/settings/authoring routes. */
-export const MaxRequestBodyBytes = 64 * 1024 * 1024;
-
 function respondJson(nodeResponse: ServerResponse, status: number, payload: unknown): void {
   nodeResponse.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   nodeResponse.end(JSON.stringify(payload));
@@ -159,9 +162,9 @@ function incomingMessageToRequest(nodeRequest: IncomingMessage, fallbackHost: st
   // Build the URL from the configured bind host, not the client-supplied Host header, so
   // routing/any future absolute-URL logic can't be steered by a forged Host.
   const url = new URL(nodeRequest.url ?? "/", `http://${fallbackHost}`);
-  const method = nodeRequest.method ?? "GET";
+  const method = nodeRequest.method ?? ProtocolHttpMethod.Get;
   const init: RequestInit & { duplex?: "half" } = { headers, method, signal };
-  if (body && method !== "GET" && method !== "HEAD") {
+  if (body && method !== ProtocolHttpMethod.Get) {
     init.body = new Uint8Array(body);
   }
   return new Request(url, init);

@@ -249,12 +249,17 @@ export function activityRoutesCheckSource(): string {
 
     const rootDir = process.argv[1];
     const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
-    const headers = { ...runtimeAuthHeaders(server.authToken), "content-type": "application/json" };
+    const headers = {
+      ...runtimeAuthHeaders(server.authToken),
+      "content-type": "application/json",
+      "idempotency-key": "activity-change-started",
+    };
     try {
       const started = await fetch(server.url + "/api/changes/events", {
         method: "POST",
         headers,
         body: JSON.stringify({
+          id: "activity-change-started",
           changeId: "activity-change",
           type: "change-started",
           summary: "Started <activity & change>.",
@@ -331,7 +336,11 @@ export function changeTaskRoutesCheckSource(): string {
       return body.data.data;
     }
     async function post(path, body) {
-      const response = await fetch(server.url + path, { method: "POST", headers, body: JSON.stringify(body) });
+      const response = await fetch(server.url + path, {
+        method: "POST",
+        headers: { ...headers, ...(path === "/api/changes/events" ? { "idempotency-key": body.id ?? crypto.randomUUID() } : {}) },
+        body: JSON.stringify(body),
+      });
       const text = await response.text();
       assert(response.status >= 200 && response.status < 300, text);
       const parsed = JSON.parse(text);
@@ -412,7 +421,7 @@ export function changeTaskRoutesCheckSource(): string {
 
       const duplicateClaim = await fetch(server.url + "/api/changes/events", {
         method: "POST",
-        headers,
+        headers: { ...headers, "idempotency-key": "duplicate-claim" },
         body: JSON.stringify({
           changeId: "task-change",
           taskId: "model",
@@ -436,7 +445,7 @@ export function changeTaskRoutesCheckSource(): string {
 
       const earlyClose = await fetch(server.url + "/api/changes/events", {
         method: "POST",
-        headers,
+        headers: { ...headers, "idempotency-key": "early-close" },
         body: JSON.stringify({
           changeId: "task-change",
           type: "change-closed",
@@ -747,7 +756,7 @@ export function changeEventsRouteCheckSource(): string {
 
       const recordResponse = await fetch(server.url + "/api/changes/events", {
         method: "POST",
-        headers,
+        headers: { ...headers, "idempotency-key": "route-change-started-idempotent" },
         body: JSON.stringify({
           id: "route-change-started-idempotent",
           changeId: "route-change",
@@ -772,7 +781,7 @@ export function changeEventsRouteCheckSource(): string {
 
       const retryResponse = await fetch(server.url + "/api/changes/events", {
         method: "POST",
-        headers,
+        headers: { ...headers, "idempotency-key": "route-change-started-idempotent" },
         body: JSON.stringify({
           id: "route-change-started-idempotent",
           changeId: "route-change",
@@ -787,7 +796,7 @@ export function changeEventsRouteCheckSource(): string {
 
       const conflictingRetryResponse = await fetch(server.url + "/api/changes/events", {
         method: "POST",
-        headers,
+        headers: { ...headers, "idempotency-key": "route-change-started-idempotent" },
         body: JSON.stringify({
           id: "route-change-started-idempotent",
           changeId: "route-change",

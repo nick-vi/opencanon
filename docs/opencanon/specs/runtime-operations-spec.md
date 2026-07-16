@@ -14,7 +14,7 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `crates/opencanon-engine/src/state.rs`
 - Files: `crates/opencanon-engine/src/migrations/*.sql`
 - Files: `packages/runtime/src/server-events.ts`
-- Files: `packages/runtime/src/request-admission.ts`
+- Files: `packages/runtime/src/protocol-policy.ts`
 - Files: `packages/runtime/src/server-http.ts`
 - Files: `packages/runtime/src/routes.ts`
 - Files: `packages/runtime/src/local-protocol.ts`

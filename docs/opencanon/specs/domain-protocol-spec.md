@@ -13,7 +13,7 @@ CLI, MCP, browser, and desktop clients consume bounded revisioned projections an
 - Files: `packages/runtime/src/server-events.ts`
 - Files: `packages/runtime/src/local-protocol.ts`
 - Files: `packages/runtime/src/server-http.ts`
-- Files: `packages/runtime/src/request-admission.ts`
+- Files: `packages/runtime/src/protocol-policy.ts`
 - Files: `packages/cli/src/runtime-client.ts`
 - Files: `packages/cli/src/{validate,review,mcp}.ts`
 - Files: `packages/runtime/test/*.test.ts`

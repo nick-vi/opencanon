@@ -16,7 +16,6 @@ import {
   protocolMethodsForPath,
   protocolOperationById,
 } from "@opencanon/core";
-import { validateMethod, validateRuntimeAuth } from "../src/routes.ts";
 
 test("the protocol registry owns every route and method pair exactly once", () => {
   const ids = new Set<string>();
@@ -43,17 +42,6 @@ test("the protocol registry owns every route and method pair exactly once", () =
   assert.deepEqual(protocolMethodsForPath(ProtocolRoute.Health), [ProtocolHttpMethod.Get]);
   assert.equal(findProtocolOperation(ProtocolHttpMethod.Post, ProtocolRoute.Health), undefined);
   assert.equal(protocolOperationById("health.read")?.authorization, ProtocolAuthorization.Public);
-});
-
-test("runtime method and authorization checks are derived from protocol policy", () => {
-  assert.equal(validateMethod(ProtocolRoute.CanonRelated, ProtocolHttpMethod.Get).ok, true);
-  assert.equal(validateMethod(ProtocolRoute.CanonRelated, ProtocolHttpMethod.Post).ok, true);
-  assert.equal(validateMethod(ProtocolRoute.Health, ProtocolHttpMethod.Post).ok, false);
-
-  const healthUrl = new URL(`http://opencanon.runtime${ProtocolRoute.Health}`);
-  assert.equal(validateRuntimeAuth(new Request(healthUrl), healthUrl, "secret").ok, true);
-  const stateUrl = new URL(`http://opencanon.runtime${ProtocolRoute.State}`);
-  assert.equal(validateRuntimeAuth(new Request(stateUrl), stateUrl, "secret").ok, false);
 });
 
 test("projection and event contracts expose revisions without embedding snapshots", () => {

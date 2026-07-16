@@ -216,6 +216,10 @@ export function protocolMethodsForPath(path: string): ProtocolHttpMethod[] {
   return ProtocolOperations.filter((item) => item.path === path).map((item) => item.method);
 }
 
+export function maximumProtocolRequestBytes(): number {
+  return Math.max(...ProtocolOperations.map((item) => item.limits.requestBytes));
+}
+
 function operationRequestKey(method: string, path: string): string {
   return `${method.toUpperCase()} ${path}`;
 }

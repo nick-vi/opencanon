@@ -4,6 +4,11 @@ export const DomainProtocolVersion = 1 as const;
 const PositiveSafeIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const NonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
+export const ProtocolHeader = {
+  IdempotencyKey: "idempotency-key",
+  Version: "x-opencanon-protocol-version",
+} as const;
+
 export const ProtocolOperationKind = {
   Query: "query",
   Command: "command",

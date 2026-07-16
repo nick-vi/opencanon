@@ -791,6 +791,7 @@ export type { ValidationResultCache } from "./validation-result-cache.ts";
 export { createEphemeralValidationResultCache, createValidationResultCache, validationContextFiles, validationRuntimeFingerprint, validatorRunCacheKey } from "./validation-result-cache.ts";
 export {
   DomainProtocolVersion,
+  ProtocolHeader,
   ProjectionResponseSchema,
   PersistedProjectProtocolEventDraftSchema,
   ProjectProtocolEventSchema,
@@ -839,6 +840,7 @@ export {
   ProtocolOperations,
   ProtocolRoute,
   findProtocolOperation,
+  maximumProtocolRequestBytes,
   protocolMethodsForPath,
   protocolOperationById,
 } from "./protocol-operations.ts";

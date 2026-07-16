@@ -4,6 +4,8 @@ import net, { type Socket } from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
+  ProtocolHttpMethod,
+  maximumProtocolRequestBytes,
   createOpenCanonDiagnostic,
   createOpenCanonDiagnosticsError,
   formatOpenCanonErrorPayload,
@@ -14,7 +16,6 @@ import {
   type ProjectionResponse,
 } from "@opencanon/core";
 import { runtimeAuthHeaders } from "./auth.ts";
-import type { RuntimeRequestAdmission } from "./request-admission.ts";
 
 export const LocalTransportKind = {
   Http: "http",
@@ -126,6 +127,8 @@ type PipeErrorFrame = {
 const PipeProtocolName = "opencanon.local.v2";
 const PipeFrameDelimiter = "\n";
 const PipeFrameMaxBytes = 64 * 1024 * 1024;
+const ProtocolPipeEnvelopeBytes = 64 * 1024;
+export const ProjectProtocolPipeFrameMaxBytes = maximumProtocolRequestBytes() + ProtocolPipeEnvelopeBytes;
 const PipeHost = "opencanon.local";
 const PlatformName = {
   Win32: "win32",
@@ -364,7 +367,8 @@ export async function serveLocalProtocolPipe(input: {
   host?: string;
   maxFrameBytes?: number;
   beginActivity?(): () => void;
-  requestAdmission?: RuntimeRequestAdmission;
+  preflightRequest?(request: Request): Response | undefined;
+  requestBodyLimit?(method: string, pathname: string): number;
 }): Promise<LocalProtocolPipeServer> {
   const sockets = new Set<Socket>();
   const nodeServer = net.createServer((socket) => {
@@ -507,7 +511,14 @@ async function streamPipeText(endpoint: LocalProtocolPipeEndpoint, request: Loca
 }
 
 async function handlePipeSocket(
-  input: { routeRequest(request: Request): Promise<Response>; host?: string; maxFrameBytes?: number; beginActivity?(): () => void; requestAdmission?: RuntimeRequestAdmission },
+  input: {
+    routeRequest(request: Request): Promise<Response>;
+    host?: string;
+    maxFrameBytes?: number;
+    beginActivity?(): () => void;
+    preflightRequest?(request: Request): Response | undefined;
+    requestBodyLimit?(method: string, pathname: string): number;
+  },
   socket: Socket,
 ): Promise<void> {
   const endActivity = input.beginActivity?.();
@@ -519,26 +530,45 @@ async function handlePipeSocket(
       await endPipeFrame(socket, errorFrame(requestId, 400, "Bad Request", "Malformed OpenCanon pipe request."));
       return;
     }
-    const request = pipeFrameToRequest(rawFrame, input.host ?? PipeHost);
-    const admission = input.requestAdmission?.admit(request);
-    try {
-      const response = admission && !admission.ok ? admission.response : await input.routeRequest(request);
-      if (isEventStreamResponse(response)) {
-        await streamPipeResponse(socket, rawFrame.id, response);
-        return;
-      }
-      const responseFrame: PipeResponseFrame = {
+    const preflightFailure = input.preflightRequest?.(
+      pipeFrameToRequest({ ...rawFrame, body: undefined }, input.host ?? PipeHost),
+    );
+    if (preflightFailure) {
+      await writePipeFrame(socket, {
         protocol: PipeProtocolName,
         id: rawFrame.id,
-        status: response.status,
-        statusText: response.statusText,
-        body: await responseBodyValue(response),
-      };
-      await writePipeFrame(socket, responseFrame);
+        status: preflightFailure.status,
+        statusText: preflightFailure.statusText,
+        body: await responseBodyValue(preflightFailure),
+      });
       socket.end();
-    } finally {
-      if (admission?.ok) admission.release();
+      return;
     }
+    const pathname = new URL(rawFrame.path, `http://${input.host ?? PipeHost}`).pathname;
+    const requestBodyBytes = rawFrame.body === undefined ? 0 : Buffer.byteLength(JSON.stringify(rawFrame.body));
+    const requestBodyLimit = input.requestBodyLimit?.(rawFrame.method, pathname);
+    if (requestBodyLimit !== undefined && requestBodyBytes > requestBodyLimit) {
+      await endPipeFrame(
+        socket,
+        errorFrame(requestId, 413, "Payload Too Large", `Request body exceeds the ${requestBodyLimit}-byte operation limit.`),
+      );
+      return;
+    }
+    const request = pipeFrameToRequest(rawFrame, input.host ?? PipeHost);
+    const response = await input.routeRequest(request);
+    if (isEventStreamResponse(response)) {
+      await streamPipeResponse(socket, rawFrame.id, response);
+      return;
+    }
+    const responseFrame: PipeResponseFrame = {
+      protocol: PipeProtocolName,
+      id: rawFrame.id,
+      status: response.status,
+      statusText: response.statusText,
+      body: await responseBodyValue(response),
+    };
+    await writePipeFrame(socket, responseFrame);
+    socket.end();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await endPipeFrame(socket, errorFrame(requestId, 500, "Internal Server Error", message));
@@ -553,9 +583,11 @@ function pipeFrameToRequest(frame: PipeRequestFrame, host: string): Request {
   }
   const headers = new Headers(frame.headers ?? {});
   const init: RequestInit & { duplex?: "half" } = { method: frame.method, headers };
-  if (frame.body !== undefined && frame.method !== "GET") {
+  if (frame.body !== undefined && frame.method !== ProtocolHttpMethod.Get) {
     if (!headers.has("content-type")) headers.set("content-type", "application/json; charset=utf-8");
-    init.body = JSON.stringify(frame.body);
+    const body = JSON.stringify(frame.body);
+    headers.set("content-length", String(Buffer.byteLength(body)));
+    init.body = body;
   }
   return new Request(new URL(frame.path, `http://${host}`), init);
 }

@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { DomainProtocolVersion, ProtocolHeader } from "@opencanon/core";
 
 const BearerPrefix = "Bearer ";
 const RuntimeAuthCookie = "opencanon_runtime_token";
@@ -8,7 +9,10 @@ export function createRuntimeAuthToken(): string {
 }
 
 export function runtimeAuthHeaders(authToken: string): Record<string, string> {
-  return { authorization: `${BearerPrefix}${authToken}` };
+  return {
+    authorization: `${BearerPrefix}${authToken}`,
+    [ProtocolHeader.Version]: String(DomainProtocolVersion),
+  };
 }
 
 export function runtimeAuthCookieHeader(authToken: string, secure: boolean): string {
