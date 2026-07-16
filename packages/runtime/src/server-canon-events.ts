@@ -7,7 +7,7 @@ export function writeRuntimeEvent(rootDir: string, store: ProjectStore, event: C
   writeGlobalCanonEvent(rootDir, event);
 }
 
-export function listRuntimeEvents(rootDir: string, store: ProjectStore, query: CanonEventQuery): CanonEvent[] {
+export function listRuntimeEvents(rootDir: string, store: Pick<ProjectStore, "listEvents">, query: CanonEventQuery): CanonEvent[] {
   const events = mergeCanonEvents([...store.listEvents(query), ...listGlobalCanonEvents(rootDir, query)], Number.MAX_SAFE_INTEGER);
   return query.mode === CanonEventQueryMode.Recent ? events.slice(0, query.limit) : events;
 }
@@ -41,7 +41,11 @@ export type CompleteChangeHistories = {
   byChangeId: ReadonlyMap<string, CanonEvent[]>;
 };
 
-export function listCompleteChangeHistories(rootDir: string, store: ProjectStore, changeIds: readonly string[]): CompleteChangeHistories {
+export function listCompleteChangeHistories(
+  rootDir: string,
+  store: Pick<ProjectStore, "listEvents">,
+  changeIds: readonly string[],
+): CompleteChangeHistories {
   const normalizedIds = [...new Set(changeIds.map((value) => value.trim()).filter(Boolean))].sort();
   const byChangeId = new Map(normalizedIds.map((changeId) => [changeId, [] as CanonEvent[]]));
   if (normalizedIds.length === 0) return { events: [], byChangeId };

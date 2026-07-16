@@ -1,4 +1,4 @@
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, OptionalExtension, Transaction};
 use serde_json::json;
 
 use super::EngineProjectHandle;
@@ -10,15 +10,40 @@ pub(super) fn append_protocol_event_json(
     request: String,
 ) -> napi::Result<String> {
     let request: AppendProtocolEventRequest = decode(&request)?;
-    if request.max_count == 0 {
+    let mut conn = project
+        .conn
+        .lock()
+        .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+    let transaction = conn
+        .transaction()
+        .map_err(|error| sqlite_error("Could not start protocol event transaction", error))?;
+    let event = append_protocol_event(
+        &transaction,
+        request.event,
+        request.max_count,
+        &request.retain_after,
+    )?;
+    transaction
+        .commit()
+        .map_err(|error| sqlite_error("Could not commit protocol event", error))?;
+
+    encode(&event)
+}
+
+pub(super) fn append_protocol_event(
+    transaction: &Transaction<'_>,
+    mut event: serde_json::Value,
+    max_count: u32,
+    retain_after: &str,
+) -> napi::Result<serde_json::Value> {
+    if max_count == 0 {
         return Err(napi_error(
             "invalid-engine-payload",
             "Protocol event retention count must be positive.",
         ));
     }
-    let timestamp = required_string(&request.event, "timestamp")?;
-    let revision = request
-        .event
+    let timestamp = required_string(&event, "timestamp")?;
+    let revision = event
         .get("revision")
         .and_then(serde_json::Value::as_u64)
         .filter(|value| *value > 0)
@@ -34,22 +59,12 @@ pub(super) fn append_protocol_event_json(
             "Protocol event revision exceeds SQLite integer range.",
         )
     })?;
-    let domain = required_string(&request.event, "domain")?;
-    let event_type = required_string(&request.event, "type")?;
-    let operation_id = request
-        .event
-        .get("operationId")
-        .and_then(serde_json::Value::as_str);
-    let payload = serde_json::to_string(&request.event)
+    let domain = required_string(&event, "domain")?;
+    let event_type = required_string(&event, "type")?;
+    let operation_id = event.get("operationId").and_then(serde_json::Value::as_str);
+    let payload = serde_json::to_string(&event)
         .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
 
-    let mut conn = project
-        .conn
-        .lock()
-        .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let transaction = conn
-        .transaction()
-        .map_err(|error| sqlite_error("Could not start protocol event transaction", error))?;
     transaction
         .execute(
             "insert into protocol_events(timestamp, revision, domain, type, operation_id, payload)
@@ -68,13 +83,13 @@ pub(super) fn append_protocol_event_json(
     transaction
         .execute(
             "delete from protocol_events where timestamp < ?1",
-            params![request.retain_after],
+            params![retain_after],
         )
         .map_err(|error| sqlite_error("Could not expire protocol events by age", error))?;
     let keep_from = transaction
         .query_row(
             "select sequence from protocol_events order by sequence desc limit 1 offset ?1",
-            params![i64::from(request.max_count - 1)],
+            params![i64::from(max_count - 1)],
             |row| row.get::<_, i64>(0),
         )
         .optional()
@@ -87,11 +102,7 @@ pub(super) fn append_protocol_event_json(
             )
             .map_err(|error| sqlite_error("Could not bound protocol event retention", error))?;
     }
-    transaction
-        .commit()
-        .map_err(|error| sqlite_error("Could not commit protocol event", error))?;
 
-    let mut event = request.event;
     let record = event.as_object_mut().ok_or_else(|| {
         napi_error(
             "invalid-engine-payload",
@@ -99,7 +110,7 @@ pub(super) fn append_protocol_event_json(
         )
     })?;
     record.insert("sequence".to_string(), json!(sequence));
-    encode(&event)
+    Ok(event)
 }
 
 pub(super) fn list_protocol_events_json(

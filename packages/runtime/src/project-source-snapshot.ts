@@ -16,7 +16,7 @@ import {
   type ScanAndDiffResult,
 } from "@opencanon/core";
 import { ENGINE_PARSER_VERSION } from "./ast-facts-provider.ts";
-import type { ProjectStore } from "./state.ts";
+import type { ProjectAnalysisStore } from "./state.ts";
 
 const allFactKinds: FactKind[] = ["imports", "exports", "symbols", "calls", "literals", "comments"];
 
@@ -42,7 +42,7 @@ export type RuntimeFactFile = {
 export function captureRuntimeSourceSnapshot(input: {
   rootDir: string;
   paths: Parameters<typeof discoverProjectFiles>[0];
-  store: ProjectStore;
+  store: ProjectAnalysisStore;
   changedPaths?: string[];
   inventory?: RuntimeSourceInventory;
 }): RuntimeSourceSnapshot {
@@ -70,7 +70,7 @@ export function captureRuntimeSourceSnapshot(input: {
 
 export function scanRuntimeSourceInventory(input: {
   paths: Parameters<typeof discoverProjectFiles>[0];
-  store: ProjectStore;
+  store: ProjectAnalysisStore;
   changedPaths?: string[];
 }): RuntimeSourceInventory {
   const discovery = discoverProjectFiles(input.paths);
@@ -116,7 +116,7 @@ export function factFilesFromSnapshots(fileSnapshots: ProjectFileSnapshot[]): Ru
 }
 
 export function extractRuntimeFacts(input: {
-  store: ProjectStore;
+  store: ProjectAnalysisStore;
   factFiles: RuntimeFactFile[];
   facts?: FactKind[];
 }): { files: FileFacts[]; diagnostics: FactDiagnostic[] } {
@@ -136,7 +136,7 @@ export function extractRuntimeFacts(input: {
 }
 
 export async function indexRuntimeCodeGraph(input: {
-  store: ProjectStore;
+  store: ProjectAnalysisStore;
   factFiles: RuntimeFactFile[];
 }): Promise<IndexCodeGraphResult> {
   return await input.store.project.indexCodeGraph({

@@ -16,6 +16,8 @@ import {
   type ContextPaths,
   type RuntimeHealth,
   type ProductModelProjection,
+  type ProjectPublicationState,
+  type PublishProjectStateResult,
   type PersistedProjectProtocolEventDraft,
   type ProjectProtocolEvent,
   type ProtocolEventWindow,
@@ -45,7 +47,8 @@ export type ProjectStore = {
   statePath: string;
   project: EngineProject;
   scanAndDiff(files: string[]): ScanAndDiffResult;
-  writeSnapshot(input: StoreSnapshotInput): void;
+  publication(): ProjectPublicationState;
+  publishProjectState(input: StorePublicationInput): PublishProjectStateResult;
   readState(): StoreState;
   writeEvent(event: CanonEvent): void;
   listEvents(query: CanonEventQuery): CanonEvent[];
@@ -68,6 +71,11 @@ export type ProjectStore = {
   close(): void;
 };
 
+export type ProjectAnalysisStore = Pick<
+  ProjectStore,
+  "statePath" | "project" | "scanAndDiff" | "listEvents" | "readSemanticIndexStatus" | "close"
+>;
+
 export type StoreSnapshotInput = {
   health: RuntimeHealth;
   files: string[];
@@ -75,6 +83,14 @@ export type StoreSnapshotInput = {
   findings: CanonFinding[];
   staleFiles: number;
   productModel: ProductModelProjection;
+};
+
+export type StorePublicationInput = {
+  revision: number;
+  protocolEvent: PersistedProjectProtocolEventDraft;
+  codeGraphGeneration?: string;
+  snapshot?: StoreSnapshotInput;
+  canonEvent?: CanonEvent;
 };
 
 export type StoreState = {
@@ -100,34 +116,13 @@ export function openProjectStore(input: { rootDir: string; paths: ContextPaths; 
 
 export function createProjectStore(input: { rootDir: string; paths: ContextPaths; engine: Engine; statePath?: string }): ProjectStore {
   const statePath = input.statePath ?? projectRuntimeStatePath(input.rootDir, StableRuntimeNamespace);
-  const project = input.engine.openProject({
-    rootDir: input.rootDir,
+  const project = openStoreProject({
+    ...input,
     statePath,
-    settings: {
-      docsDir: relative(input.rootDir, input.paths.docsDir),
-      conventionsPath: relative(input.rootDir, input.paths.conventionsPath),
-      areasPath: relative(input.rootDir, input.paths.areasPath),
-      specsPath: relative(input.rootDir, input.paths.specsPath),
-      changesPath: relative(input.rootDir, input.paths.changesPath),
-      fixturesDir: relative(input.rootDir, input.paths.fixturesDir),
-      impactSurfacesPath: relative(input.rootDir, input.paths.impactSurfacesPath),
-      proposedImpactNotesPath: relative(input.rootDir, input.paths.proposedImpactNotesPath),
-      baselinePath: relative(input.rootDir, input.paths.baselinePath),
-      commitApprovalsPath: relative(input.rootDir, input.paths.commitApprovalsPath),
-      commitApprovalsPersistent: input.paths.commitApprovalsPersistent,
-      projectFilePatterns: input.paths.projectFilePatterns,
-      ignore: input.paths.ignore,
-      entrypoints: input.paths.entrypoints,
-      publicSurfaces: input.paths.publicSurfaces,
-      generated: input.paths.generated,
-      externalTools: input.paths.externalTools,
-      maxFiles: input.paths.maxFiles,
-      maxFileSizeKb: input.paths.maxFileSizeKb,
-      fileDiscovery: input.paths.fileDiscovery,
-      configHash: hashSettings(input.paths),
-    },
+    codeGraphStatePath: statePath,
   });
   const persistedProductModel = project.readProductModelProjection();
+  let publication = project.readProjectPublication();
   const persistedSemanticIndex = project.readSemanticIndexStatus({ indexId: "project" }).index;
   let state: StoreState = {
     files: 0,
@@ -145,18 +140,36 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
       state = { ...state, files: result.files.length, staleFiles: result.staleFiles };
       return result;
     },
-    writeSnapshot(input) {
-      project.writeProductModelProjection(input.productModel);
-      const semanticIndex = project.readSemanticIndexStatus({ indexId: "project" }).index ?? state.semanticIndex;
+    publication: () => publication,
+    publishProjectState(input) {
+      if (Boolean(input.codeGraphGeneration) !== Boolean(input.snapshot)) {
+        throw new Error("A Project State publication must include both a code graph generation and snapshot, or neither.");
+      }
+      const semanticIndex = input.snapshot
+        ? project.readSemanticIndexStatus({ indexId: "project" }).index ?? state.semanticIndex
+        : undefined;
+      const result = project.publishProjectState({
+        revision: input.revision,
+        ...(input.codeGraphGeneration ? { codeGraphGeneration: input.codeGraphGeneration } : {}),
+        ...(input.snapshot ? { productModel: input.snapshot.productModel } : {}),
+        ...(input.canonEvent ? { canonEvent: input.canonEvent } : {}),
+        protocolEvent: input.protocolEvent,
+        maxProtocolEventCount: ProtocolEventRetentionCount,
+        retainProtocolEventsAfter: new Date(Date.now() - ProtocolEventRetentionMs).toISOString(),
+      });
+      publication = result.publication;
+      if (!input.snapshot) return result;
+      const snapshot = input.snapshot;
       state = {
-        files: input.files.length,
-        findings: input.findings.length,
-        staleFiles: input.staleFiles,
-        graphHash: input.graph.graphHash,
+        files: snapshot.files.length,
+        findings: snapshot.findings.length,
+        staleFiles: snapshot.staleFiles,
+        graphHash: snapshot.graph.graphHash,
         lastIndexedAt: new Date().toISOString(),
-        productModel: productModelState(input.productModel),
+        productModel: productModelState(snapshot.productModel),
         ...(semanticIndex ? { semanticIndex } : {}),
       };
+      return result;
     },
     readState() {
       return state;
@@ -225,6 +238,69 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
       project.close();
     },
   };
+}
+
+export function createProjectAnalysisStore(input: {
+  rootDir: string;
+  paths: ContextPaths;
+  engine: Engine;
+  statePath: string;
+  codeGraphStatePath: string;
+}): ProjectAnalysisStore {
+  const project = openStoreProject(input);
+  return {
+    statePath: input.statePath,
+    project,
+    scanAndDiff(files) {
+      return project.scanAndDiff({ files });
+    },
+    listEvents(query) {
+      return project.listEvents(query);
+    },
+    readSemanticIndexStatus(request = {}) {
+      return project.readSemanticIndexStatus(request);
+    },
+    close() {
+      project.close();
+    },
+  };
+}
+
+function openStoreProject(input: {
+  rootDir: string;
+  paths: ContextPaths;
+  engine: Engine;
+  statePath: string;
+  codeGraphStatePath: string;
+}): EngineProject {
+  return input.engine.openProject({
+    rootDir: input.rootDir,
+    statePath: input.statePath,
+    codeGraphStatePath: input.codeGraphStatePath,
+    settings: {
+      docsDir: relative(input.rootDir, input.paths.docsDir),
+      conventionsPath: relative(input.rootDir, input.paths.conventionsPath),
+      areasPath: relative(input.rootDir, input.paths.areasPath),
+      specsPath: relative(input.rootDir, input.paths.specsPath),
+      changesPath: relative(input.rootDir, input.paths.changesPath),
+      fixturesDir: relative(input.rootDir, input.paths.fixturesDir),
+      impactSurfacesPath: relative(input.rootDir, input.paths.impactSurfacesPath),
+      proposedImpactNotesPath: relative(input.rootDir, input.paths.proposedImpactNotesPath),
+      baselinePath: relative(input.rootDir, input.paths.baselinePath),
+      commitApprovalsPath: relative(input.rootDir, input.paths.commitApprovalsPath),
+      commitApprovalsPersistent: input.paths.commitApprovalsPersistent,
+      projectFilePatterns: input.paths.projectFilePatterns,
+      ignore: input.paths.ignore,
+      entrypoints: input.paths.entrypoints,
+      publicSurfaces: input.paths.publicSurfaces,
+      generated: input.paths.generated,
+      externalTools: input.paths.externalTools,
+      maxFiles: input.paths.maxFiles,
+      maxFileSizeKb: input.paths.maxFileSizeKb,
+      fileDiscovery: input.paths.fileDiscovery,
+      configHash: hashSettings(input.paths),
+    },
+  });
 }
 
 function productModelState(productModel: ProductModelProjection): NonNullable<StoreState["productModel"]> {

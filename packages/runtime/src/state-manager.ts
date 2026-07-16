@@ -1,6 +1,12 @@
 import type { RuntimeChangeCatalog, RuntimeSnapshot } from "./snapshot.ts";
 import type { ProjectInventory } from "./server-fs.ts";
-import { RuntimeLifecyclePhaseValue, type RuntimeLifecycleState, type RuntimeRevision, type ValidationResultCache } from "@opencanon/core";
+import {
+  RuntimeLifecyclePhaseValue,
+  type ProjectProtocolEvent,
+  type RuntimeLifecycleState,
+  type RuntimeRevision,
+  type ValidationResultCache,
+} from "@opencanon/core";
 
 export type RuntimeWaitOptions = {
   signal?: AbortSignal;
@@ -29,19 +35,27 @@ export type RuntimeRebuildOptions = Record<string, never>;
 export type RuntimeRebuildCandidate = {
   snapshot: RuntimeSnapshot;
   changeCatalog: RuntimeChangeCatalog;
-  commit(): RuntimeSnapshot;
+  commit(revision: number): RuntimeRebuildPublication;
+  afterPublished?(): void;
   discard?(): Promise<void> | void;
+};
+
+export type RuntimeRebuildPublication = {
+  snapshot: RuntimeSnapshot;
+  event: ProjectProtocolEvent;
 };
 
 export type RuntimeStateManagerOptions = {
   initialSnapshot: RuntimeSnapshot;
+  initialRevision: number;
   initialChangeCatalog: RuntimeChangeCatalog;
   initialProjectInventory: ProjectInventory;
   initialValidationResultCache: ValidationResultCache;
   isStopped(): boolean;
   rebuildNow(summary: string, options: RuntimeRebuildOptions, signal: AbortSignal): Promise<RuntimeRebuildCandidate>;
   readProjectInventory(): ProjectInventory;
-  onPublished?(input: { revision: number; snapshot: RuntimeSnapshot; summary: string }): void;
+  onPublished?(input: { revision: number; snapshot: RuntimeSnapshot; summary: string; event: ProjectProtocolEvent }): void;
+  onPublicationNotificationError?(error: unknown): void;
   onRebuildError(error: unknown): void;
 };
 
@@ -63,7 +77,14 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   let changeCatalog = options.initialChangeCatalog;
   let projectInventory = options.initialProjectInventory;
   let validationResultCache = options.initialValidationResultCache;
-  let revision: RuntimeRevision = { observed: 1, accepted: 1, published: 1 };
+  if (!Number.isSafeInteger(options.initialRevision) || options.initialRevision < 1) {
+    throw new Error("Project runtime initial revision must be a positive safe integer.");
+  }
+  let revision: RuntimeRevision = {
+    observed: options.initialRevision,
+    accepted: options.initialRevision,
+    published: options.initialRevision,
+  };
   let phase: RuntimeLifecycleState["phase"] = RuntimeLifecyclePhaseValue.TransportReady;
   let active: RebuildIntent | undefined;
   let queued: RebuildIntent | undefined;
@@ -118,14 +139,28 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       try {
         const candidate = await options.rebuildNow(intent.summary, intent.options, abortController.signal);
         if (intent.revision === revision.observed) {
-          const next = candidate.commit();
-          snapshot = next;
+          const publication = candidate.commit(intent.revision);
+          snapshot = publication.snapshot;
           changeCatalog = candidate.changeCatalog;
           projectInventory = options.readProjectInventory();
           revision = { ...revision, published: intent.revision };
           phase = RuntimeLifecyclePhaseValue.Ready;
           failure = undefined;
-          options.onPublished?.({ revision: intent.revision, snapshot, summary: intent.summary });
+          try {
+            options.onPublished?.({
+              revision: intent.revision,
+              snapshot,
+              summary: intent.summary,
+              event: publication.event,
+            });
+          } catch (error) {
+            reportPublicationNotificationError(error);
+          }
+          try {
+            candidate.afterPublished?.();
+          } catch (error) {
+            reportPublicationNotificationError(error);
+          }
           resolvePublishedWaiters();
         } else {
           await candidate.discard?.();
@@ -151,6 +186,14 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       waiters.delete(waiter);
       waiter.cleanup();
       waiter.resolve(snapshot);
+    }
+  }
+
+  function reportPublicationNotificationError(error: unknown): void {
+    try {
+      options.onPublicationNotificationError?.(error);
+    } catch {
+      // Publication is already durable; observer failures cannot roll it back or stop the coordinator.
     }
   }
 

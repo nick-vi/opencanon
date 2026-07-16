@@ -70,6 +70,7 @@ fn opens_project_state_and_scans_file_diff() {
         json!({
             "rootDir": root,
             "statePath": state_path,
+            "codeGraphStatePath": state_path,
             "settings": {
                 "docsDir": "docs/opencanon",
                 "conventionsPath": "opencanon/conventions/index.ts",
@@ -119,6 +120,7 @@ fn opens_project_state_after_transient_sqlite_write_lock() {
             json!({
                 "rootDir": open_root,
                 "statePath": open_state_path,
+                "codeGraphStatePath": open_state_path,
                 "settings": test_settings()
             })
             .to_string(),
@@ -171,6 +173,7 @@ fn rejects_state_tables_without_migration_record() {
         json!({
             "rootDir": root,
             "statePath": state_path,
+            "codeGraphStatePath": state_path,
             "settings": test_settings()
         })
         .to_string(),

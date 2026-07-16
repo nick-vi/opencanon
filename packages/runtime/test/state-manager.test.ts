@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { createEphemeralValidationResultCache } from "@opencanon/core";
+import { DomainProtocolVersion, ProtocolDomain, createEphemeralValidationResultCache, type ProjectProtocolEvent } from "@opencanon/core";
 import type { RuntimeChangeCatalog, RuntimeSnapshot } from "../src/snapshot.ts";
 import { createRuntimeStateManager } from "../src/state-manager.ts";
 import type { ProjectInventory } from "../src/server-fs.ts";
@@ -13,6 +13,7 @@ test("RuntimeStateManager serializes rebuilds and publishes only the latest obse
 
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -50,6 +51,7 @@ test("RuntimeStateManager coalesces queued watch rebuilds to the latest revision
 
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -83,6 +85,7 @@ test("RuntimeStateManager cancels superseded active analysis and publishes the n
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -127,6 +130,7 @@ test("RuntimeStateManager commits only the accepted analysis candidate", async (
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -137,9 +141,9 @@ test("RuntimeStateManager commits only the accepted analysis candidate", async (
       return {
         snapshot: value,
         changeCatalog: catalog(summary),
-        commit() {
+        commit(revision) {
           commits.push(summary);
-          return value;
+          return { snapshot: value, event: publicationEvent(revision) };
         },
         discard() {
           discards.push(summary);
@@ -171,6 +175,7 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -198,6 +203,52 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
   assert.equal(manager.lifecycle().settled, true);
 });
 
+test("RuntimeStateManager continues persisted revisions and isolates post-publication observers", async () => {
+  const notifications: string[] = [];
+  let committedRevision = 0;
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("persisted"),
+    initialRevision: 7,
+    initialChangeCatalog: catalog("persisted"),
+    initialProjectInventory: inventory("persisted"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    isStopped: () => false,
+    async rebuildNow(summary) {
+      const value = snapshot(summary);
+      return {
+        snapshot: value,
+        changeCatalog: catalog(summary),
+        commit(revision) {
+          committedRevision = revision;
+          return { snapshot: value, event: publicationEvent(revision) };
+        },
+        afterPublished() {
+          notifications.push("candidate");
+        },
+      };
+    },
+    readProjectInventory: () => inventory("next"),
+    onPublished() {
+      notifications.push("observer");
+      throw new Error("observer failed after commit");
+    },
+    onPublicationNotificationError() {
+      notifications.push("reported");
+      throw new Error("reporter failed");
+    },
+    onRebuildError() {
+      throw new Error("a committed publication must not become a rebuild failure");
+    },
+  });
+
+  const published = await manager.rebuildAndPublish("next");
+
+  assert.equal(snapshotId(published), "next");
+  assert.equal(committedRevision, 8);
+  assert.deepEqual(manager.lifecycle().revision, { observed: 8, accepted: 8, published: 8 });
+  assert.deepEqual(notifications, ["observer", "reported", "candidate"]);
+});
+
 test("RuntimeStateManager starts exclusive operations only after project analysis settles", async () => {
   const order: string[] = [];
   let releaseAnalysis!: () => void;
@@ -210,6 +261,7 @@ test("RuntimeStateManager starts exclusive operations only after project analysi
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -253,6 +305,7 @@ test("RuntimeStateManager queues project refresh behind an exclusive operation",
   });
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -293,6 +346,7 @@ test("RuntimeStateManager queues project refresh behind an exclusive operation",
 test("RuntimeStateManager revision waits fail with lifecycle diagnostics", async () => {
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
@@ -320,7 +374,24 @@ function snapshot(id: string): RuntimeSnapshot {
 
 function candidate(value: RuntimeSnapshot) {
   const id = snapshotId(value);
-  return { snapshot: value, changeCatalog: catalog(id), commit: () => value };
+  return {
+    snapshot: value,
+    changeCatalog: catalog(id),
+    commit: (revision: number) => ({ snapshot: value, event: publicationEvent(revision) }),
+  };
+}
+
+function publicationEvent(revision: number): ProjectProtocolEvent {
+  return {
+    protocolVersion: DomainProtocolVersion,
+    sequence: revision,
+    timestamp: "2026-07-16T14:00:00.000Z",
+    revision,
+    domain: ProtocolDomain.Project,
+    type: "published",
+    summary: "Published Project State.",
+    ids: [],
+  };
 }
 
 function catalog(id: string): RuntimeChangeCatalog {

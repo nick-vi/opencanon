@@ -31,6 +31,9 @@ import {
   OpenProjectRequestSchema,
   OpenCanonError,
   ReadProductModelProjectionResultSchema,
+  ProjectPublicationStateSchema,
+  PublishProjectStateRequestSchema,
+  PublishProjectStateResultSchema,
   ReadSemanticIndexStatusRequestSchema,
   ReadSemanticIndexStatusResultSchema,
   ScanAndDiffRequestSchema,
@@ -46,7 +49,6 @@ import {
   WatcherEventBatchSchema,
   WatcherStartRequestSchema,
   WatcherStartResultSchema,
-  WriteProductModelProjectionRequestSchema,
   WriteSemanticIndexDeltaRequestSchema,
   WriteSemanticIndexRequestSchema,
   createOpenCanonDiagnostic,
@@ -79,6 +81,9 @@ import {
   type ProjectProtocolEvent,
   type ProtocolEventWindow,
   type ProductModelProjection,
+  type ProjectPublicationState,
+  type PublishProjectStateRequest,
+  type PublishProjectStateResult,
   type ReadSemanticIndexStatusRequest,
   type ReadSemanticIndexStatusResult,
   type ScanAndDiffRequest,
@@ -119,12 +124,12 @@ export type EngineProject = {
   extractFacts(request: ProjectExtractFactsRequest): ExtractFactsResult;
   buildRepoGraph(request: ProjectBuildRepoGraphRequest): BuildRepoGraphResult;
   indexCodeGraph(request: IndexCodeGraphRequest): Promise<IndexCodeGraphResult>;
-  activateCodeGraph(generation: string): void;
   searchSymbols(request: SearchSymbolsRequest): SearchSymbolsResult;
   searchReferences(request: SearchReferencesRequest): SearchReferencesResult;
   searchGraphEdges(request: SearchGraphEdgesRequest): SearchGraphEdgesResult;
-  writeProductModelProjection(projection: ProductModelProjection): void;
   readProductModelProjection(): ProductModelProjection | null;
+  readProjectPublication(): ProjectPublicationState;
+  publishProjectState(request: PublishProjectStateRequest): PublishProjectStateResult;
   writeSemanticIndex(request: WriteSemanticIndexRequest): void;
   writeSemanticIndexDelta(request: WriteSemanticIndexDeltaRequest): void;
   readSemanticIndexStatus(request?: ReadSemanticIndexStatusRequest): ReadSemanticIndexStatusResult;
@@ -179,12 +184,12 @@ type EngineProjectJsonBinding = {
   extractFactsJson(request: string): string;
   buildRepoGraphJson(request: string): string;
   indexCodeGraphJson(request: string): string | Promise<string>;
-  activateCodeGraphJson(request: string): void;
   searchSymbolsJson(request: string): string;
   searchReferencesJson(request: string): string;
   searchGraphEdgesJson(request: string): string;
-  writeProductModelProjectionJson(request: string): void;
   readProductModelProjectionJson(): string;
+  readProjectPublicationJson(): string;
+  publishProjectStateJson(request: string): string;
   writeSemanticIndexJson(request: string): void;
   writeSemanticIndexDeltaJson(request: string): void;
   readSemanticIndexStatusJson(request: string): string;
@@ -296,19 +301,30 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
       BuildRepoGraphResultSchema.parse(parseJson(callEngine(() => project.buildRepoGraphJson(JSON.stringify(BuildRepoGraphRequestSchema.parse(request)))))),
     indexCodeGraph: async (request) =>
       IndexCodeGraphResultSchema.parse(parseJson(await callEngineAsync(() => project.indexCodeGraphJson(JSON.stringify(IndexCodeGraphRequestSchema.parse({ ...request, generation: randomUUID() })))))),
-    activateCodeGraph: (generation) => callEngine(() => project.activateCodeGraphJson(JSON.stringify({ generation }))),
     searchSymbols: (request) =>
       SearchSymbolsResultSchema.parse(parseJson(callEngine(() => project.searchSymbolsJson(JSON.stringify(SearchSymbolsRequestSchema.parse(request)))))),
     searchReferences: (request) =>
       SearchReferencesResultSchema.parse(parseJson(callEngine(() => project.searchReferencesJson(JSON.stringify(SearchReferencesRequestSchema.parse(request)))))),
     searchGraphEdges: (request) =>
       SearchGraphEdgesResultSchema.parse(parseJson(callEngine(() => project.searchGraphEdgesJson(JSON.stringify(SearchGraphEdgesRequestSchema.parse(request)))))),
-    writeProductModelProjection: (projection) =>
-      callEngine(() => project.writeProductModelProjectionJson(JSON.stringify(WriteProductModelProjectionRequestSchema.parse({ projection })))),
     readProductModelProjection: () => {
       const parsed = ReadProductModelProjectionResultSchema.safeParse(parseJson(callEngine(() => project.readProductModelProjectionJson())));
       return parsed.success ? parsed.data.projection : null;
     },
+    readProjectPublication: () =>
+      ProjectPublicationStateSchema.parse(
+        parseJson(callEngine(() => project.readProjectPublicationJson())),
+      ),
+    publishProjectState: (request) =>
+      PublishProjectStateResultSchema.parse(
+        parseJson(
+          callEngine(() =>
+            project.publishProjectStateJson(
+              JSON.stringify(PublishProjectStateRequestSchema.parse(request)),
+            ),
+          ),
+        ),
+      ),
     writeSemanticIndex: (request) =>
       callEngine(() => project.writeSemanticIndexJson(JSON.stringify(WriteSemanticIndexRequestSchema.parse(request)))),
     writeSemanticIndexDelta: (request) =>
@@ -430,12 +446,12 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "extractFactsJson",
     "buildRepoGraphJson",
     "indexCodeGraphJson",
-    "activateCodeGraphJson",
     "searchSymbolsJson",
     "searchReferencesJson",
     "searchGraphEdgesJson",
-    "writeProductModelProjectionJson",
     "readProductModelProjectionJson",
+    "readProjectPublicationJson",
+    "publishProjectStateJson",
     "writeSemanticIndexJson",
     "writeSemanticIndexDeltaJson",
     "readSemanticIndexStatusJson",

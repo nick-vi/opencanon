@@ -17,6 +17,7 @@ test("project analysis worker returns a complete snapshot from isolated generate
     const outcome = await runProjectAnalysisOperation({
       rootDir,
       analysisStatePath,
+      codeGraphStatePath: analysisStatePath,
     });
     assert.equal(outcome.kind, RuntimeAnalysisOutcomeKind.Candidate);
     if (outcome.kind !== RuntimeAnalysisOutcomeKind.Candidate) throw new Error("Expected a project analysis candidate.");
@@ -40,7 +41,7 @@ test("project analysis returns unchanged before graph and validation work when s
   const rootDir = createProject();
   try {
     const analysisStatePath = path.join(rootDir, ".opencanon/cache/analysis.sqlite");
-    const first = await runProjectAnalysisOperation({ rootDir, analysisStatePath });
+    const first = await runProjectAnalysisOperation({ rootDir, analysisStatePath, codeGraphStatePath: analysisStatePath });
     assert.equal(first.kind, RuntimeAnalysisOutcomeKind.Candidate);
     if (first.kind !== RuntimeAnalysisOutcomeKind.Candidate) throw new Error("Expected an initial project analysis candidate.");
     const graphDir = path.join(path.dirname(analysisStatePath), "code-graph");
@@ -49,6 +50,7 @@ test("project analysis returns unchanged before graph and validation work when s
     const second = await runProjectAnalysisOperation({
       rootDir,
       analysisStatePath,
+      codeGraphStatePath: analysisStatePath,
       previousAnalysisInputHash: first.analysis.publication.analysisInputHash,
     });
 
@@ -67,6 +69,7 @@ test("project analysis returns unchanged before graph and validation work when s
     const third = await runProjectAnalysisOperation({
       rootDir,
       analysisStatePath,
+      codeGraphStatePath: analysisStatePath,
       previousAnalysisInputHash: first.analysis.publication.analysisInputHash,
     });
     assert.equal(third.kind, RuntimeAnalysisOutcomeKind.Candidate);
@@ -84,7 +87,7 @@ test("project analysis treats imported canon changes as analysis input changes",
   writeFileSync(path.join(rootDir, "conventions/index.ts"), conventionSource());
   writeFileSync(helperPath, 'export const conventionIds = ["first-rule"];\n');
   try {
-    const first = await runProjectAnalysisOperation({ rootDir, analysisStatePath });
+    const first = await runProjectAnalysisOperation({ rootDir, analysisStatePath, codeGraphStatePath: analysisStatePath });
     assert.equal(first.kind, RuntimeAnalysisOutcomeKind.Candidate);
     if (first.kind !== RuntimeAnalysisOutcomeKind.Candidate) throw new Error("Expected an initial project analysis candidate.");
 
@@ -92,6 +95,7 @@ test("project analysis treats imported canon changes as analysis input changes",
     const second = await runProjectAnalysisOperation({
       rootDir,
       analysisStatePath,
+      codeGraphStatePath: analysisStatePath,
       previousAnalysisInputHash: first.analysis.publication.analysisInputHash,
     });
 
@@ -108,10 +112,12 @@ test("project analysis treats imported canon changes as analysis input changes",
 test("project analysis cancellation waits for worker teardown", async () => {
   const rootDir = createProject(600);
   const controller = new AbortController();
+  const analysisStatePath = path.join(rootDir, ".opencanon/cache/analysis.sqlite");
   try {
     const operation = runProjectAnalysisOperation({
       rootDir,
-      analysisStatePath: path.join(rootDir, ".opencanon/cache/analysis.sqlite"),
+      analysisStatePath,
+      codeGraphStatePath: analysisStatePath,
       signal: controller.signal,
     });
     setTimeout(() => controller.abort(), 20);

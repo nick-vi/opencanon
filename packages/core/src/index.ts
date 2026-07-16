@@ -353,7 +353,6 @@ export type {
   WatcherStartRequest,
   WatcherStartResult,
   ProjectRefresh,
-  WriteProductModelProjectionRequest,
   WorkspaceNode,
   IndexCodeGraphRequest,
   IndexCodeGraphResult,
@@ -478,7 +477,6 @@ export {
   ProjectRefreshSchema,
   ProjectRefreshModeValue,
   ProjectRefreshStatusValue,
-  WriteProductModelProjectionRequestSchema,
   WorkspaceNodeSchema,
   IndexCodeGraphRequestSchema,
   IndexCodeGraphResultSchema,
@@ -785,6 +783,16 @@ export {
 export type { HookFeedback } from "./hooks.ts";
 export { appendOpenCodeFeedback, createHookFeedback, extractFilesFromPatchText, normalizeHookPayload, renderHookResponse } from "./hooks.ts";
 export type { ProjectFileSnapshot } from "./project-files.ts";
+export {
+  ProjectPublicationStateSchema,
+  PublishProjectStateRequestSchema,
+  PublishProjectStateResultSchema,
+} from "./project-publication.ts";
+export type {
+  ProjectPublicationState,
+  PublishProjectStateRequest,
+  PublishProjectStateResult,
+} from "./project-publication.ts";
 export type { ValidationInput, ValidationResult, ValidatorOutcome } from "./validation.ts";
 export { runValidation, selectValidators, sortFindings, validatorGraphHash, ValidatorOutcomeStatus } from "./validation.ts";
 export type { ValidationResultCache } from "./validation-result-cache.ts";

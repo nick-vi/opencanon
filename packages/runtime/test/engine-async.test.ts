@@ -20,6 +20,7 @@ test("native graph indexing keeps the event loop and project readers responsive"
   const project = loadEngine().openProject({
     rootDir,
     statePath: path.join(rootDir, "state.sqlite"),
+    codeGraphStatePath: path.join(rootDir, "state.sqlite"),
     settings: {
       docsDir: "docs",
       conventionsPath: "opencanon/conventions.ts",
@@ -61,7 +62,40 @@ test("native graph indexing keeps the event loop and project readers responsive"
 
   try {
     const result = await project.indexCodeGraph({ files, parserVersion: "async-index-test" });
-    project.activateCodeGraph(result.generation);
+    project.publishProjectState({
+      revision: 2,
+      codeGraphGeneration: result.generation,
+      productModel: {
+        indexedAt: "2026-07-16T14:00:00.000Z",
+        graphHash: "async-index-test",
+        definitionsHash: "async-index-test",
+        counts: { areas: 0, specs: 0, changes: 0, conventions: 0, impactSurfaces: 0, validators: 0, nodes: 0, edges: 0, diagnostics: 0 },
+        areas: [],
+        specs: [],
+        changes: [],
+        conventions: [],
+        impactSurfaces: [],
+        validators: [],
+        definitionGraph: {
+          nodes: [],
+          edges: [],
+          diagnostics: [],
+          fileCoverage: {},
+          backlinks: { areaToSurfaces: {}, specToSurfaces: {}, changeToSurfaces: {}, surfaceToAreas: {}, surfaceToSpecs: {}, surfaceToChanges: {}, surfaceToConventions: {} },
+        },
+      },
+      protocolEvent: {
+        protocolVersion: 1,
+        timestamp: "2026-07-16T14:00:00.000Z",
+        revision: 2,
+        domain: "project",
+        type: "published",
+        summary: "Published asynchronous graph index.",
+        ids: [],
+      },
+      maxProtocolEventCount: 100,
+      retainProtocolEventsAfter: "2026-07-01T00:00:00.000Z",
+    });
     assert.equal(result.indexed.length, files.length);
     assert(timerTicks >= 2, `Expected the event loop to advance during graph indexing, received ${timerTicks} timer ticks.`);
     assert(successfulReads >= 2, `Expected concurrent project reads during graph indexing, received ${successfulReads}.`);

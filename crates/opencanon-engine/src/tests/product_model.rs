@@ -4,6 +4,12 @@ use serde_json::{json, Value};
 use super::support::*;
 use crate::open_project_json;
 
+fn replace_product_model_projection(project: &crate::EngineProjectHandle, request: Value) {
+    project
+        .replace_product_model_projection_for_test(request["projection"].clone())
+        .unwrap();
+}
+
 #[test]
 fn stale_product_model_projection_schema_is_recreated() {
     let root = test_root("stale-product-model-projection");
@@ -73,15 +79,16 @@ fn stale_product_model_projection_schema_is_recreated() {
         json!({
             "rootDir": root,
             "statePath": state_path,
+            "codeGraphStatePath": state_path,
             "settings": test_settings()
         })
         .to_string(),
     )
     .unwrap();
 
-    project
-        .write_product_model_projection_json(
-            json!({
+    replace_product_model_projection(
+        &project,
+        json!({
                 "projection": {
                     "indexedAt": "2026-06-06T00:00:00.000Z",
                     "graphHash": "graph-hash",
@@ -112,10 +119,8 @@ fn stale_product_model_projection_schema_is_recreated() {
                         }
                     }
                 }
-            })
-            .to_string(),
-        )
-        .unwrap();
+        }),
+    );
 }
 
 #[test]
@@ -123,9 +128,9 @@ fn product_model_projection_round_trips_and_indexes_rows() {
     let root = test_root("product-model-projection");
     let project = open_test_project(&root);
 
-    project
-        .write_product_model_projection_json(
-            json!({
+    replace_product_model_projection(
+        &project,
+        json!({
                 "projection": {
                     "indexedAt": "2026-06-06T00:00:00.000Z",
                     "graphHash": "graph-hash",
@@ -180,10 +185,8 @@ fn product_model_projection_round_trips_and_indexes_rows() {
                         }
                     }
                 }
-            })
-            .to_string(),
-        )
-        .unwrap();
+        }),
+    );
 
     let output = project.read_product_model_projection_json().unwrap();
     let parsed: Value = serde_json::from_str(&output).unwrap();

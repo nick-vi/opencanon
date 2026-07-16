@@ -37,7 +37,7 @@ import {
   type ProductModelProjection,
 } from "@opencanon/core";
 import type { Engine } from "@opencanon/engine";
-import type { ProjectStore } from "./state.ts";
+import type { ProjectAnalysisStore, ProjectStore } from "./state.ts";
 import { cachedSemanticIndexSnapshot, cachedStartupSemanticIndexSnapshot } from "./semantic-index-snapshot.ts";
 import { activeTaskLeaseSummaries, listGlobalCanonEvents, mergeCanonEvents } from "./worktree-coordination.ts";
 import { listCompleteChangeHistories } from "./server-canon-events.ts";
@@ -56,6 +56,7 @@ import {
 import { findingSnapshotId } from "./snapshot-related.ts";
 import { captureRuntimeSourceSnapshot, indexRuntimeCodeGraph, scanRuntimeSourceInventory } from "./project-source-snapshot.ts";
 import { projectAnalysisIdentity } from "./project-analysis-identity.ts";
+import { indexedEvent, projectPublishedEvent } from "./server-events.ts";
 
 const FindingSeverity = {
   Error: "error",
@@ -497,21 +498,36 @@ type RuntimeSnapshotInput = {
   validationResultCache: ValidationResultCache;
 };
 
+type RuntimeAnalysisInput = Omit<RuntimeSnapshotInput, "store"> & {
+  store: ProjectAnalysisStore;
+};
+
 export async function buildRuntimeSnapshot(input: RuntimeSnapshotInput): Promise<RuntimeSnapshot> {
   const analysis = await buildRuntimeAnalysis(input);
-  input.store.project.activateCodeGraph(analysis.publication.codeGraphGeneration);
-  input.store.writeSnapshot({
-    health: analysis.snapshot.health,
-    files: analysis.snapshot.files,
-    graph: analysis.snapshot.graph,
-    findings: analysis.snapshot.findings,
-    staleFiles: analysis.snapshot.state.staleFiles,
-    productModel: analysis.publication.productModel,
+  const revision = input.store.publication().revision + 1;
+  const summary = "Built Project State snapshot.";
+  input.store.publishProjectState({
+    revision,
+    codeGraphGeneration: analysis.publication.codeGraphGeneration,
+    snapshot: {
+      health: analysis.snapshot.health,
+      files: analysis.snapshot.files,
+      graph: analysis.snapshot.graph,
+      findings: analysis.snapshot.findings,
+      staleFiles: analysis.snapshot.state.staleFiles,
+      productModel: analysis.publication.productModel,
+    },
+    canonEvent: indexedEvent(analysis.snapshot, summary),
+    protocolEvent: {
+      ...projectPublishedEvent(summary),
+      timestamp: new Date().toISOString(),
+      revision,
+    },
   });
   return analysis.snapshot;
 }
 
-export async function buildRuntimeAnalysis(input: RuntimeSnapshotInput): Promise<RuntimeAnalysis> {
+export async function buildRuntimeAnalysis(input: RuntimeAnalysisInput): Promise<RuntimeAnalysis> {
   const outcome = await buildRuntimeAnalysisOutcome(input);
   if (outcome.kind !== RuntimeAnalysisOutcomeKind.Candidate) {
     throw new Error("Project analysis unexpectedly returned unchanged without a previous source identity.");
@@ -520,7 +536,7 @@ export async function buildRuntimeAnalysis(input: RuntimeSnapshotInput): Promise
 }
 
 export async function buildRuntimeAnalysisOutcome(
-  input: RuntimeSnapshotInput & { previousAnalysisInputHash?: string },
+  input: RuntimeAnalysisInput & { previousAnalysisInputHash?: string },
 ): Promise<RuntimeAnalysisOutcome> {
   const project = await loadProjectContext(input.cwd);
   const inventory = scanRuntimeSourceInventory({ paths: project.paths, store: input.store });

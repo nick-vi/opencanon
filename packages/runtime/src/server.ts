@@ -217,7 +217,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       },
     }),
   });
-  let publishedRevision = 1;
+  let publishedRevision = store.publication().revision;
   const events = createEventBroadcaster({
     currentRevision: () => publishedRevision,
     append: (event) => store.appendProtocolEvent(event),
@@ -292,6 +292,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   let acceptedAnalysisInputHash: string | undefined;
   const stateManager = createRuntimeStateManager({
     initialSnapshot: snapshot,
+    initialRevision: publishedRevision,
     initialChangeCatalog: startupChangeCatalog,
     initialProjectInventory: listProjectInventory(rootDir),
     initialValidationResultCache: validationResultCache,
@@ -300,7 +301,10 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     readProjectInventory: () => listProjectInventory(rootDir),
     onPublished(publication) {
       publishedRevision = publication.revision;
-      events.broadcast(projectPublishedEvent(publication.summary));
+      events.broadcastPersisted(publication.event);
+    },
+    onPublicationNotificationError(error) {
+      events.broadcast(failureEvent(ProtocolDomain.Health, `Project publication notification failed: ${errorMessage(error)}`));
     },
     onRebuildError(error) {
       events.broadcast(failureEvent(ProtocolDomain.Project, formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error))));
@@ -682,6 +686,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
             changeCatalog: stateManager.currentChangeCatalog(),
             jobId,
             events,
+            store,
+            summary,
             finishWorkerJob,
           });
         }
@@ -692,6 +698,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           semanticEmbedding: paths.semanticEmbedding,
         });
         const next = publication.snapshot;
+        const publishedSnapshot = withProcessIdentity(refreshSnapshotRefreshStatus(next, store));
+        const nextValidationResultCache = createValidationResultCache(paths);
         span.setOutput({
           files: next.files.length,
           findings: next.findings.length,
@@ -700,17 +708,29 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         return {
           snapshot: next,
           changeCatalog: analysis.publication.changeCatalog,
-          commit() {
-            store.project.activateCodeGraph(analysis.publication.codeGraphGeneration);
-            store.writeSnapshot({
-              health: next.health,
-              files: next.files,
-              graph: next.graph,
-              findings: next.findings,
-              staleFiles: next.state.staleFiles,
-              productModel: publication.productModel,
+          commit(revision) {
+            const result = store.publishProjectState({
+              revision,
+              codeGraphGeneration: analysis.publication.codeGraphGeneration,
+              snapshot: {
+                health: next.health,
+                files: next.files,
+                graph: next.graph,
+                findings: next.findings,
+                staleFiles: next.state.staleFiles,
+                productModel: publication.productModel,
+              },
+              canonEvent: indexedEvent(next, summary),
+              protocolEvent: events.prepare(projectPublishedEvent(summary), revision),
             });
-            stateManager.replaceValidationResultCache(createValidationResultCache(paths));
+            return {
+              snapshot: publishedSnapshot,
+              event: result.event,
+            };
+          },
+          afterPublished() {
+            stateManager.replaceValidationResultCache(nextValidationResultCache);
+            acceptedAnalysisInputHash = analysis.publication.analysisInputHash;
             updateWorkerJob(jobId, {
               label: "Linking definitions and context",
               current: next.definitionGraph.nodes.length,
@@ -728,7 +748,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               unit: "nodes",
               operationId: jobId,
             }));
-            store.writeEvent(indexedEvent(next, summary));
             finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
               label: "Project state ready",
               current: next.files.length,
@@ -736,7 +755,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               unit: "files",
               message: summary,
             });
-            const publishedSnapshot = withProcessIdentity(refreshSnapshotRefreshStatus(next, store));
             events.broadcast(progressEvent({
               domain: ProtocolDomain.Project,
               operation: "project-refresh",
@@ -747,8 +765,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               unit: "files",
               operationId: jobId,
             }));
-            acceptedAnalysisInputHash = analysis.publication.analysisInputHash;
-            return publishedSnapshot;
           },
         };
       } catch (error) {
@@ -766,6 +782,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       return await runProjectAnalysisOperation({
         rootDir,
         analysisStatePath: projectAnalysisStatePath(input.store.statePath),
+        codeGraphStatePath: input.store.statePath,
         previousAnalysisInputHash: acceptedAnalysisInputHash,
         signal: input.signal,
       });

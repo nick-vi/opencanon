@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct OpenProjectRequest {
     pub(crate) root_dir: String,
     pub(crate) state_path: String,
+    pub(crate) code_graph_state_path: String,
     pub(crate) settings: ResolvedProjectSettings,
 }
 
@@ -56,6 +57,18 @@ pub(crate) struct ListProtocolEventsRequest {
     pub(crate) after_sequence: u64,
     pub(crate) limit: u32,
     pub(crate) operation_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PublishProjectStateRequest {
+    pub(crate) revision: u64,
+    pub(crate) code_graph_generation: Option<String>,
+    pub(crate) product_model: Option<serde_json::Value>,
+    pub(crate) canon_event: Option<serde_json::Value>,
+    pub(crate) protocol_event: serde_json::Value,
+    pub(crate) max_protocol_event_count: u32,
+    pub(crate) retain_protocol_events_after: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -321,11 +334,6 @@ fn default_semantic_provider_kind() -> String {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct WriteProductModelProjectionRequest {
-    pub(crate) projection: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StartWatcherRequest {
     pub(crate) debounce_ms: Option<u64>,
@@ -573,12 +581,6 @@ pub(crate) struct IndexCodeGraphFile {
     pub(crate) language: String,
     #[serde(default)]
     pub(crate) content: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ActivateCodeGraphRequest {
-    pub(crate) generation: String,
 }
 
 #[derive(Debug, Deserialize)]

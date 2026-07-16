@@ -11,7 +11,7 @@ import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapsh
 import { createEngine } from "@opencanon/engine";
 import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
-import { admittedJobs, assignedJobEvent, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication } from "./engine-binding-test-support.ts";
 
 test("runtime source snapshots feed captured bytes into fact extraction", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-"));
@@ -333,7 +333,6 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
             extractorVersion: "test",
           });
         },
-        activateCodeGraphJson: () => undefined,
         buildRepoGraphJson: () =>
           JSON.stringify({
             graph: { rootDir, graphHash: "graph", files: [] },
@@ -341,8 +340,9 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-        writeProductModelProjectionJson: () => undefined,
         readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        readProjectPublicationJson: initialProjectPublication,
+        publishProjectStateJson: assignedProjectPublication,
         writeSemanticIndexJson: () => undefined,
         writeSemanticIndexDeltaJson: () => undefined,
         readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),
@@ -802,12 +802,12 @@ test("runtime snapshot reports missing semantic index with project embedding con
             },
           }),
         indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
-        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-        writeProductModelProjectionJson: () => undefined,
         readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        readProjectPublicationJson: initialProjectPublication,
+        publishProjectStateJson: assignedProjectPublication,
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
@@ -1090,12 +1090,12 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
             },
           }),
         indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
-        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-        writeProductModelProjectionJson: () => undefined,
         readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        readProjectPublicationJson: initialProjectPublication,
+        publishProjectStateJson: assignedProjectPublication,
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
@@ -1245,12 +1245,12 @@ test("runtime snapshot marks cached semantic index stale after provider config c
             },
           }),
         indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
-        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-        writeProductModelProjectionJson: () => undefined,
         readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        readProjectPublicationJson: initialProjectPublication,
+        publishProjectStateJson: assignedProjectPublication,
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
@@ -1535,12 +1535,12 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
         extractFactsJson: () => JSON.stringify({ files: facts, diagnostics: [] }),
         buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: scan.files.map((file) => file.path), packages: [], importEdges: [] } }),
         indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
-        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-        writeProductModelProjectionJson: () => undefined,
         readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        readProjectPublicationJson: initialProjectPublication,
+        publishProjectStateJson: assignedProjectPublication,
         writeSemanticIndexJson: (requestJson: string) => {
           writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
         },
@@ -1692,12 +1692,12 @@ for (const scenario of [
           extractFactsJson: () => JSON.stringify({ files: facts, diagnostics: [] }),
           buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: scan.files.map((file) => file.path), packages: [], importEdges: [] } }),
           indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
-          activateCodeGraphJson: () => undefined,
           searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
           searchReferencesJson: () => JSON.stringify({ references: [] }),
           searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-          writeProductModelProjectionJson: () => undefined,
           readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+          readProjectPublicationJson: initialProjectPublication,
+          publishProjectStateJson: assignedProjectPublication,
           writeSemanticIndexJson: (requestJson: string) => {
             writes.push(JSON.parse(requestJson) as WriteSemanticIndexRequest);
             throw new Error(scenario.message);

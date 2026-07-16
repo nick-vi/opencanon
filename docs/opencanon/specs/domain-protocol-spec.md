@@ -76,6 +76,9 @@ Checks: `runtime-event-tests`, `runtime-client-tests`
 Rule `publication-is-atomic-and-monotonic`: Project State commits each monotonic published revision, accepted product projection, active graph generation, Canon history, and replay event as one durable publication boundary.
 - failed publication keeps the previous graph and revision
 - runtime restart resumes above the last published revision
+- coalesced refreshes may skip revisions but can never publish a revision at or below the current one
+- the serving Project State is the sole graph publication owner while isolated analysis can only stage generations into that owner
+- generation cleanup cannot remove a staged graph during publication
 - live delivery relays the committed replay event without appending it again
 - unchanged refreshes advance revision without rewriting the product projection
 Checks: `engine-publication-tests`, `coordinator-tests`, `runtime-event-tests`, `runtime-client-tests`

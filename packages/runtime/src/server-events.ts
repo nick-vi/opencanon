@@ -1,5 +1,6 @@
 import {
   DomainProtocolVersion,
+  PersistedProjectProtocolEventDraftSchema,
   ProjectProtocolEventDraftSchema,
   ProjectProtocolEventSchema,
   ProtocolDomain,
@@ -103,7 +104,38 @@ export function createEventBroadcaster(input: EventBroadcasterInput) {
     }
   }
 
+  function prepare(
+    draftValue: ProjectProtocolEventDraft,
+    revision = input.currentRevision(),
+    timestamp = new Date().toISOString(),
+  ): PersistedProjectProtocolEventDraft {
+    const draft = ProjectProtocolEventDraftSchema.parse(draftValue);
+    const persistedDraft = PersistedProjectProtocolEventDraftSchema.parse({
+      ...draft,
+      timestamp,
+      revision,
+    });
+    encode(ProjectProtocolEventSchema.parse({ ...persistedDraft, sequence: Number.MAX_SAFE_INTEGER }));
+    return persistedDraft;
+  }
+
+  function broadcastPersisted(eventValue: ProjectProtocolEvent): ProjectProtocolEvent {
+    const event = ProjectProtocolEventSchema.parse(eventValue);
+    const payload = encode(event);
+    for (const controller of [...clients.keys()]) {
+      const client = clients.get(controller);
+      if (client?.filter && !client.filter(event)) continue;
+      if (!enqueue(controller, payload)) continue;
+      if (client?.closeWhen?.(event)) {
+        removeClient(controller);
+        controller.close();
+      }
+    }
+    return event;
+  }
+
   return {
+    prepare,
     connect(initial: ProjectProtocolEvent[] | (() => ProjectProtocolEvent[]), options: EventStreamOptions = {}): ReadableStream<Uint8Array> {
       let activeController: ReadableStreamDefaultController<Uint8Array> | undefined;
       return new ReadableStream<Uint8Array>(
@@ -141,27 +173,11 @@ export function createEventBroadcaster(input: EventBroadcasterInput) {
       );
     },
     broadcast(draftValue: ProjectProtocolEventDraft): ProjectProtocolEvent {
-      const draft = ProjectProtocolEventDraftSchema.parse(draftValue);
-      const persistedDraft = {
-        ...draft,
-        timestamp: new Date().toISOString(),
-        revision: input.currentRevision(),
-      } satisfies PersistedProjectProtocolEventDraft;
-      encode(ProjectProtocolEventSchema.parse({ ...persistedDraft, sequence: Number.MAX_SAFE_INTEGER }));
+      const persistedDraft = prepare(draftValue);
       const persisted = input.append(persistedDraft);
-      const event = ProjectProtocolEventSchema.parse(persisted);
-      const payload = encode(event);
-      for (const controller of [...clients.keys()]) {
-        const client = clients.get(controller);
-        if (client?.filter && !client.filter(event)) continue;
-        if (!enqueue(controller, payload)) continue;
-        if (client?.closeWhen?.(event)) {
-          removeClient(controller);
-          controller.close();
-        }
-      }
-      return event;
+      return broadcastPersisted(persisted);
     },
+    broadcastPersisted,
     close(): void {
       for (const controller of [...clients.keys()]) {
         removeClient(controller);

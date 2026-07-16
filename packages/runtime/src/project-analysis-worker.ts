@@ -12,7 +12,7 @@ import { ProjectAnalysisProtocolVersion, type ProjectAnalysisResult } from "./pr
 import { assertRuntimePrerequisites } from "./runtime.ts";
 import { ProjectRuntimeEnv } from "./service-types.ts";
 import { buildRuntimeAnalysisOutcome } from "./snapshot.ts";
-import { createProjectStore } from "./state.ts";
+import { createProjectAnalysisStore } from "./state.ts";
 
 export async function runProjectAnalysisWorkerCommand(args: string[], cwd = process.cwd()): Promise<void> {
   const input = parseWorkerArgs(args);
@@ -21,7 +21,13 @@ export async function runProjectAnalysisWorkerCommand(args: string[], cwd = proc
   if (!statePath) throw new Error("Project analysis worker requires an explicit analysis-state path.");
   const paths = createPaths(rootDir);
   const prerequisites = assertRuntimePrerequisites();
-  const store = createProjectStore({ rootDir, paths, engine: prerequisites.engine, statePath });
+  const store = createProjectAnalysisStore({
+    rootDir,
+    paths,
+    engine: prerequisites.engine,
+    statePath,
+    codeGraphStatePath: input.codeGraphStatePath,
+  });
   const engineAstProvider = engineProjectAstFactsProvider(store.project);
   const fixtureAst = createCliAstFactsProvider();
   setProjectAstFactsProviderFactory((queryRoot) => (queryRoot === rootDir ? engineAstProvider : fixtureAst.factory(queryRoot)));
@@ -50,10 +56,17 @@ export async function runProjectAnalysisWorkerCommand(args: string[], cwd = proc
   }
 }
 
-function parseWorkerArgs(args: string[]): { rootDir?: string; resultPath: string; requestId: string; previousAnalysisInputHash?: string } {
+function parseWorkerArgs(args: string[]): {
+  rootDir?: string;
+  resultPath: string;
+  requestId: string;
+  codeGraphStatePath: string;
+  previousAnalysisInputHash?: string;
+} {
   let rootDir: string | undefined;
   let resultPath: string | undefined;
   let requestId: string | undefined;
+  let codeGraphStatePath: string | undefined;
   let previousAnalysisInputHash: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -61,11 +74,13 @@ function parseWorkerArgs(args: string[]): { rootDir?: string; resultPath: string
     if (arg === "--root" && value) rootDir = value;
     else if (arg === "--result" && value) resultPath = path.resolve(value);
     else if (arg === "--request-id" && value) requestId = value;
+    else if (arg === "--code-graph-state" && value) codeGraphStatePath = path.resolve(value);
     else if (arg === "--previous-analysis-input-hash" && value) previousAnalysisInputHash = value;
     else throw new Error(`Unknown or incomplete project analysis worker option: ${String(arg)}.`);
     index += 1;
   }
   if (!resultPath) throw new Error("Project analysis worker requires --result <path>.");
   if (!requestId) throw new Error("Project analysis worker requires --request-id <id>.");
-  return { rootDir, resultPath, requestId, previousAnalysisInputHash };
+  if (!codeGraphStatePath) throw new Error("Project analysis worker requires --code-graph-state <path>.");
+  return { rootDir, resultPath, requestId, codeGraphStatePath, previousAnalysisInputHash };
 }

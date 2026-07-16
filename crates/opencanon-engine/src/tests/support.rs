@@ -62,10 +62,12 @@ pub(super) fn test_root(name: &str) -> std::path::PathBuf {
 }
 
 pub(super) fn open_test_project(root: &std::path::Path) -> EngineProjectHandle {
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
     open_project_json(
         json!({
             "rootDir": root,
-            "statePath": root.join(".opencanon/state/test/state.sqlite"),
+            "statePath": state_path,
+            "codeGraphStatePath": state_path,
             "settings": test_settings()
         })
         .to_string(),

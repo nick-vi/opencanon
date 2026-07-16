@@ -18,11 +18,10 @@ use crate::constants::{
     WATCHER_MAX_BUFFER_CAPACITY, WATCHER_MAX_DEBOUNCE_MS, WATCHER_MIN_DEBOUNCE_MS,
 };
 use crate::contracts::{
-    ActivateCodeGraphRequest, BuildRepoGraphRequest, EmbedSemanticTextsRequest,
-    ExtractFactsRequest, FactDiagnostic, GenerateTextRequest, ListEventsRequest,
-    ListObservabilityRecordsRequest, OpenProjectRequest, ProjectRefreshStatus,
-    ResolvedProjectSettings, ScanAndDiffRequest, StartWatcherRequest, WatcherStartResult,
-    WriteEventRequest, WriteObservabilityRecordsRequest,
+    BuildRepoGraphRequest, EmbedSemanticTextsRequest, ExtractFactsRequest, FactDiagnostic,
+    GenerateTextRequest, ListEventsRequest, ListObservabilityRecordsRequest, OpenProjectRequest,
+    ProjectRefreshStatus, ResolvedProjectSettings, ScanAndDiffRequest, StartWatcherRequest,
+    WatcherStartResult, WriteEventRequest, WriteObservabilityRecordsRequest,
 };
 use crate::facts::{package_nodes, scan_file_facts};
 use crate::json::{decode, encode, napi_error, notify_error, sqlite_error};
@@ -33,6 +32,7 @@ use crate::watcher::{
     WatcherThreadInput,
 };
 
+mod canon_event_store;
 mod code_graph_connection;
 mod code_graph_resolver;
 mod code_graph_store;
@@ -42,13 +42,14 @@ mod json_fields;
 mod observability_store;
 mod product_model_store;
 mod protocol_event_store;
+mod publication_store;
 mod semantic_delta_store;
 mod semantic_status;
 mod semantic_store;
 mod semantic_vector_store;
 
 use code_graph_connection::{
-    activate_code_graph_generation, cleanup_code_graph_generations, open_code_graph_connection,
+    open_code_graph_connection, open_existing_code_graph_connection,
     open_staged_code_graph_connection,
 };
 use connection::open_project_connection;
@@ -60,6 +61,7 @@ use semantic_store::inference_error;
 pub struct EngineProjectHandle {
     root_dir: String,
     state_path: String,
+    code_graph_state_path: String,
     settings: ResolvedProjectSettings,
     migrations_applied: Vec<u32>,
     conn: Mutex<Connection>,
@@ -72,7 +74,7 @@ pub struct EngineProjectHandle {
 
 pub struct IndexCodeGraphTask {
     root_dir: String,
-    state_path: String,
+    code_graph_state_path: String,
     request: String,
 }
 
@@ -82,7 +84,8 @@ impl Task for IndexCodeGraphTask {
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
         let request: crate::contracts::IndexCodeGraphRequest = decode(&self.request)?;
-        let mut conn = open_staged_code_graph_connection(&self.state_path, &request.generation)?;
+        let mut conn =
+            open_staged_code_graph_connection(&self.code_graph_state_path, &request.generation)?;
         code_graph_store::index_code_graph_with_connection(
             &self.root_dir,
             &mut conn,
@@ -93,32 +96,6 @@ impl Task for IndexCodeGraphTask {
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
         Ok(output)
     }
-}
-
-fn canon_event_links(event: &serde_json::Value) -> napi::Result<Vec<(&'static str, String)>> {
-    let mut links = Vec::new();
-    for (field, kind) in [
-        ("changeIds", "change"),
-        ("taskIds", "task"),
-        ("checkIds", "check"),
-    ] {
-        let Some(values) = event.get(field).and_then(serde_json::Value::as_array) else {
-            continue;
-        };
-        for value in values {
-            let value = value
-                .as_str()
-                .filter(|item| !item.trim().is_empty())
-                .ok_or_else(|| {
-                    napi_error(
-                        "invalid-engine-payload",
-                        &format!("Canon event {field} must contain non-empty strings."),
-                    )
-                })?;
-            links.push((kind, value.to_string()));
-        }
-    }
-    Ok(links)
 }
 
 #[napi]
@@ -307,23 +284,9 @@ impl EngineProjectHandle {
     pub fn index_code_graph_json(&self, request: String) -> AsyncTask<IndexCodeGraphTask> {
         AsyncTask::new(IndexCodeGraphTask {
             root_dir: self.root_dir.clone(),
-            state_path: self.state_path.clone(),
+            code_graph_state_path: self.code_graph_state_path.clone(),
             request,
         })
-    }
-
-    #[napi(js_name = "activateCodeGraphJson")]
-    pub fn activate_code_graph_json(&self, request: String) -> napi::Result<()> {
-        let request: ActivateCodeGraphRequest = decode(&request)?;
-        let next = activate_code_graph_generation(&self.state_path, &request.generation)?;
-        {
-            let mut active = self
-                .graph_conn
-                .lock()
-                .map_err(|_| napi_error("sqlite-error", "Code graph state lock is poisoned."))?;
-            *active = next;
-        }
-        cleanup_code_graph_generations(&self.state_path, &request.generation)
     }
 
     #[cfg(test)]
@@ -331,6 +294,45 @@ impl EngineProjectHandle {
         let mut request: serde_json::Value = decode(&request)?;
         request["generation"] = serde_json::Value::String("test".to_string());
         code_graph_store::index_code_graph_json(self, request.to_string())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stage_code_graph_json_sync(&self, request: String) -> napi::Result<String> {
+        let request_value: serde_json::Value = decode(&request)?;
+        let generation = request_value
+            .get("generation")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                napi_error(
+                    "invalid-engine-payload",
+                    "Staged code graph test request is missing generation.",
+                )
+            })?;
+        let mut connection =
+            open_staged_code_graph_connection(&self.code_graph_state_path, generation)?;
+        code_graph_store::index_code_graph_with_connection(&self.root_dir, &mut connection, request)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replace_product_model_projection_for_test(
+        &self,
+        projection: serde_json::Value,
+    ) -> napi::Result<()> {
+        let mut connection = self
+            .conn
+            .lock()
+            .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
+        let transaction = connection.transaction().map_err(|error| {
+            sqlite_error("Could not start product model test transaction", error)
+        })?;
+        product_model_store::write_product_model_projection(
+            &transaction,
+            &self.root_dir,
+            &projection,
+        )?;
+        transaction
+            .commit()
+            .map_err(|error| sqlite_error("Could not commit product model test transaction", error))
     }
 
     #[napi(js_name = "searchSymbolsJson")]
@@ -439,29 +441,6 @@ impl EngineProjectHandle {
     #[napi(js_name = "writeEventJson")]
     pub fn write_event_json(&self, request: String) -> napi::Result<()> {
         let request: WriteEventRequest = decode(&request)?;
-        let id = request
-            .event
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| napi_error("invalid-engine-payload", "Canon event is missing id."))?;
-        let event_type = request
-            .event
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| napi_error("invalid-engine-payload", "Canon event is missing type."))?;
-        let timestamp = request
-            .event
-            .get("timestamp")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                napi_error(
-                    "invalid-engine-payload",
-                    "Canon event is missing timestamp.",
-                )
-            })?;
-        let payload = serde_json::to_string(&request.event)
-            .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
-        let links = canon_event_links(&request.event)?;
         let mut conn = self
             .conn
             .lock()
@@ -469,26 +448,7 @@ impl EngineProjectHandle {
         let transaction = conn
             .transaction()
             .map_err(|error| sqlite_error("Could not start Canon event transaction", error))?;
-        transaction.execute(
-            "insert into canon_events(id, type, timestamp, payload) values (?1, ?2, ?3, ?4)
-             on conflict(id) do update set type = excluded.type, timestamp = excluded.timestamp, payload = excluded.payload",
-            params![id, event_type, timestamp, payload],
-        )
-        .map_err(|error| sqlite_error("Could not write canon event", error))?;
-        transaction
-            .execute(
-                "delete from canon_event_links where event_id = ?1",
-                params![id],
-            )
-            .map_err(|error| sqlite_error("Could not replace Canon event links", error))?;
-        for (kind, value) in links {
-            transaction
-                .execute(
-                    "insert into canon_event_links(event_id, kind, value) values (?1, ?2, ?3)",
-                    params![id, kind, value],
-                )
-                .map_err(|error| sqlite_error("Could not write Canon event link", error))?;
-        }
+        canon_event_store::write_canon_event(&transaction, &request.event)?;
         transaction
             .commit()
             .map_err(|error| sqlite_error("Could not commit Canon event", error))?;
@@ -587,6 +547,16 @@ impl EngineProjectHandle {
     #[napi(js_name = "listProtocolEventsJson")]
     pub fn list_protocol_events_json(&self, request: String) -> napi::Result<String> {
         protocol_event_store::list_protocol_events_json(self, request)
+    }
+
+    #[napi(js_name = "readProjectPublicationJson")]
+    pub fn read_project_publication_json(&self) -> napi::Result<String> {
+        publication_store::read_project_publication_json(self)
+    }
+
+    #[napi(js_name = "publishProjectStateJson")]
+    pub fn publish_project_state_json(&self, request: String) -> napi::Result<String> {
+        publication_store::publish_project_state_json(self, request)
     }
 
     #[napi(js_name = "writeJobJson")]
@@ -724,11 +694,6 @@ impl EngineProjectHandle {
         semantic_store::generate_text_json(self, request)
     }
 
-    #[napi(js_name = "writeProductModelProjectionJson")]
-    pub fn write_product_model_projection_json(&self, request: String) -> napi::Result<()> {
-        product_model_store::write_product_model_projection_json(self, request)
-    }
-
     #[napi(js_name = "readProductModelProjectionJson")]
     pub fn read_product_model_projection_json(&self) -> napi::Result<String> {
         product_model_store::read_product_model_projection_json(self)
@@ -748,14 +713,20 @@ impl EngineProjectHandle {
         let OpenProjectRequest {
             root_dir,
             state_path,
+            code_graph_state_path,
             settings,
         } = request;
         let (conn, migrations_applied) = open_project_connection(&state_path, &settings)?;
-        let graph_conn = open_code_graph_connection(&state_path)?;
+        let graph_conn = if code_graph_state_path == state_path {
+            open_code_graph_connection(&state_path, &conn)?
+        } else {
+            open_existing_code_graph_connection(&code_graph_state_path)?
+        };
 
         Ok(Self {
             root_dir,
             state_path,
+            code_graph_state_path,
             settings,
             migrations_applied,
             conn: Mutex::new(conn),

@@ -1,18 +1,17 @@
 use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
 
+use super::publication_store::{
+    initialize_project_publication, read_project_publication, read_project_publication_at_path,
+};
 use crate::json::{napi_error, sqlite_error};
 
 const CODE_GRAPH_SCHEMA_VERSION: i64 = 1;
 const SQLITE_BUSY_TIMEOUT_SECS: u64 = 10;
-const ACTIVE_GENERATION_FILE: &str = "active";
 const GENERATION_LOCK_FILE: &str = ".generation.lock";
-static POINTER_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn code_graph_state_dir(state_path: &str) -> PathBuf {
     Path::new(state_path)
@@ -21,15 +20,51 @@ pub(crate) fn code_graph_state_dir(state_path: &str) -> PathBuf {
         .join("code-graph")
 }
 
-pub(super) fn open_code_graph_connection(state_path: &str) -> napi::Result<Connection> {
+pub(super) fn open_code_graph_connection(
+    state_path: &str,
+    state_connection: &Connection,
+) -> napi::Result<Connection> {
     let graph_dir = prepare_graph_dir(state_path)?;
     with_generation_lock(&graph_dir, || {
-        let generation = read_active_generation(&graph_dir)?.unwrap_or_else(new_initial_generation);
+        let generation = match read_project_publication(state_connection)? {
+            Some(publication) => publication.active_code_graph_generation,
+            None => {
+                let generation = new_initial_generation();
+                let graph_path = generation_path(&graph_dir, &generation)?;
+                let connection = open_or_initialize(&graph_path)?;
+                initialize_project_publication(state_connection, &generation)?;
+                cleanup_inactive_generations(&graph_dir, &generation)?;
+                return Ok(connection);
+            }
+        };
         let graph_path = generation_path(&graph_dir, &generation)?;
-        let conn = open_or_initialize(&graph_path)?;
-        write_active_generation(&graph_dir, &generation)?;
+        if !graph_path.is_file() {
+            return Err(napi_error(
+                "state-missing",
+                &format!("Published code graph generation {generation} does not exist."),
+            ));
+        }
+        let conn = configured_connection(&graph_path)?;
+        if schema_version(&conn)? != CODE_GRAPH_SCHEMA_VERSION {
+            return Err(napi_error(
+                "state-invalid",
+                &format!(
+                    "Published code graph generation {generation} has an incompatible schema."
+                ),
+            ));
+        }
         cleanup_inactive_generations(&graph_dir, &generation)?;
         Ok(conn)
+    })
+}
+
+pub(super) fn open_existing_code_graph_connection(
+    code_graph_state_path: &str,
+) -> napi::Result<Connection> {
+    let graph_dir = prepare_graph_dir(code_graph_state_path)?;
+    with_generation_lock(&graph_dir, || {
+        let publication = read_project_publication_at_path(code_graph_state_path)?;
+        open_active_generation(&graph_dir, &publication.active_code_graph_generation)
     })
 }
 
@@ -41,10 +76,15 @@ pub(super) fn open_staged_code_graph_connection(
     let graph_dir = prepare_graph_dir(state_path)?;
     with_generation_lock(&graph_dir, || {
         let active_generation =
-            read_active_generation(&graph_dir)?.unwrap_or_else(new_initial_generation);
+            read_project_publication_at_path(state_path)?.active_code_graph_generation;
         let active_path = generation_path(&graph_dir, &active_generation)?;
-        let active = open_or_initialize(&active_path)?;
-        write_active_generation(&graph_dir, &active_generation)?;
+        if !active_path.is_file() {
+            return Err(napi_error(
+                "state-missing",
+                &format!("Published code graph generation {active_generation} does not exist."),
+            ));
+        }
+        let active = configured_connection(&active_path)?;
         cleanup_inactive_generations(&graph_dir, &active_generation)?;
 
         let staged_path = generation_path(&graph_dir, generation)?;
@@ -56,10 +96,11 @@ pub(super) fn open_staged_code_graph_connection(
     })
 }
 
-pub(super) fn activate_code_graph_generation(
+pub(super) fn with_staged_code_graph_generation<T>(
     state_path: &str,
     generation: &str,
-) -> napi::Result<Connection> {
+    operation: impl FnOnce(Connection) -> napi::Result<T>,
+) -> napi::Result<T> {
     validate_generation(generation)?;
     let graph_dir = prepare_graph_dir(state_path)?;
     with_generation_lock(&graph_dir, || {
@@ -77,18 +118,7 @@ pub(super) fn activate_code_graph_generation(
                 &format!("Code graph generation {generation} has an incompatible schema."),
             ));
         }
-        write_active_generation(&graph_dir, generation)?;
-        Ok(conn)
-    })
-}
-
-pub(super) fn cleanup_code_graph_generations(
-    state_path: &str,
-    active_generation: &str,
-) -> napi::Result<()> {
-    let graph_dir = code_graph_state_dir(state_path);
-    with_generation_lock(&graph_dir, || {
-        cleanup_inactive_generations(&graph_dir, active_generation)
+        operation(conn)
     })
 }
 
@@ -116,6 +146,25 @@ fn with_generation_lock<T>(
         )
     })?;
     operation()
+}
+
+fn open_active_generation(graph_dir: &Path, generation: &str) -> napi::Result<Connection> {
+    let graph_path = generation_path(graph_dir, generation)?;
+    if !graph_path.is_file() {
+        return Err(napi_error(
+            "state-missing",
+            &format!("Published code graph generation {generation} does not exist."),
+        ));
+    }
+    let connection = configured_connection(&graph_path)?;
+    if schema_version(&connection)? != CODE_GRAPH_SCHEMA_VERSION {
+        return Err(napi_error(
+            "state-invalid",
+            &format!("Published code graph generation {generation} has an incompatible schema."),
+        ));
+    }
+    cleanup_inactive_generations(graph_dir, generation)?;
+    Ok(connection)
 }
 
 fn prepare_graph_dir(state_path: &str) -> napi::Result<PathBuf> {
@@ -154,50 +203,6 @@ fn new_initial_generation() -> String {
         .unwrap_or_default()
         .as_nanos();
     format!("initial-{nanos}")
-}
-
-fn read_active_generation(graph_dir: &Path) -> napi::Result<Option<String>> {
-    let pointer = graph_dir.join(ACTIVE_GENERATION_FILE);
-    let value = match fs::read_to_string(&pointer) {
-        Ok(value) => value.trim().to_string(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(napi_error(
-                "state-unreadable",
-                &format!("Could not read active code graph generation: {error}"),
-            ));
-        }
-    };
-    validate_generation(&value)?;
-    Ok(Some(value))
-}
-
-fn write_active_generation(graph_dir: &Path, generation: &str) -> napi::Result<()> {
-    let pointer = graph_dir.join(ACTIVE_GENERATION_FILE);
-    let partial = graph_dir.join(format!(
-        ".{ACTIVE_GENERATION_FILE}.{}.{}.partial",
-        std::process::id(),
-        POINTER_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    let result = (|| {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&partial)?;
-        file.write_all(format!("{generation}\n").as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&partial, &pointer)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&partial);
-    }
-    result.map_err(|error| {
-        napi_error(
-            "state-path-unwritable",
-            &format!("Could not write active code graph generation: {error}"),
-        )
-    })
 }
 
 fn open_or_initialize(graph_path: &Path) -> napi::Result<Connection> {
@@ -311,13 +316,16 @@ fn remove_database_files(graph_path: &Path) -> napi::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Barrier};
+
+    static GENERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     fn test_root(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "opencanon-code-graph-{name}-{}-{}",
             std::process::id(),
-            POINTER_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            GENERATION_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ))
     }
 
@@ -327,7 +335,11 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let state_path = root.join("state.sqlite");
         let state = state_path.to_str().unwrap();
-        let active = open_code_graph_connection(state).unwrap();
+        let state_connection = Connection::open(state).unwrap();
+        state_connection
+            .execute_batch(include_str!("../migrations/014_project_publication.sql"))
+            .unwrap();
+        let active = open_code_graph_connection(state, &state_connection).unwrap();
         active
             .execute("insert into files(path) values ('active.ts')", [])
             .unwrap();
@@ -344,7 +356,7 @@ mod tests {
         );
         drop(active);
 
-        let activated = activate_code_graph_generation(state, "next").unwrap();
+        let activated = with_staged_code_graph_generation(state, "next", Ok).unwrap();
         assert_eq!(
             activated
                 .query_row("select count(*) from files", [], |row| row.get::<_, i64>(0))
@@ -367,8 +379,13 @@ mod tests {
                 let state = state.clone();
                 std::thread::spawn(move || {
                     barrier.wait();
-                    let connection =
-                        open_code_graph_connection(&state).map_err(|error| error.to_string())?;
+                    let state_connection =
+                        Connection::open(&state).map_err(|error| error.to_string())?;
+                    state_connection
+                        .execute_batch(include_str!("../migrations/014_project_publication.sql"))
+                        .ok();
+                    let connection = open_code_graph_connection(&state, &state_connection)
+                        .map_err(|error| error.to_string())?;
                     connection
                         .query_row("select count(*) from files", [], |row| row.get::<_, i64>(0))
                         .map_err(|error| error.to_string())
@@ -379,9 +396,50 @@ mod tests {
         for handle in handles {
             assert_eq!(handle.join().unwrap().unwrap(), 0);
         }
+        let state_connection = Connection::open(&state).unwrap();
+        let generation = read_project_publication(&state_connection)
+            .unwrap()
+            .unwrap()
+            .active_code_graph_generation;
         let graph_dir = code_graph_state_dir(&state);
-        let generation = read_active_generation(&graph_dir).unwrap().unwrap();
         assert!(generation_path(&graph_dir, &generation).unwrap().is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn publication_lock_keeps_staged_generation_until_the_publication_boundary_finishes() {
+        let root = test_root("publication-lock");
+        fs::create_dir_all(&root).unwrap();
+        let state = root.join("state.sqlite").to_string_lossy().into_owned();
+        let state_connection = Connection::open(&state).unwrap();
+        state_connection
+            .execute_batch(include_str!("../migrations/014_project_publication.sql"))
+            .unwrap();
+        drop(open_code_graph_connection(&state, &state_connection).unwrap());
+        drop(open_staged_code_graph_connection(&state, "next").unwrap());
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (opened_tx, opened_rx) = std::sync::mpsc::channel();
+        let mut opener = None;
+        let selected = with_staged_code_graph_generation(&state, "next", |connection| {
+            let opener_state = state.clone();
+            opener = Some(std::thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                let state_connection = Connection::open(&opener_state).unwrap();
+                drop(open_code_graph_connection(&opener_state, &state_connection).unwrap());
+                opened_tx.send(()).unwrap();
+            }));
+            started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert!(opened_rx.recv_timeout(Duration::from_millis(50)).is_err());
+            assert!(generation_path(&code_graph_state_dir(&state), "next")
+                .unwrap()
+                .is_file());
+            Ok(connection)
+        })
+        .unwrap();
+        drop(selected);
+        opener.unwrap().join().unwrap();
+        opened_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

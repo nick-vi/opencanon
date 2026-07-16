@@ -6,13 +6,12 @@ import { test } from "vitest";
 import { createPaths } from "@opencanon/core";
 import { createProjectStore, projectRuntimeStatePath, StableRuntimeNamespace } from "@opencanon/runtime";
 import { createEngine } from "@opencanon/engine";
-import { admittedJobs, assignedJobEvent, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication } from "./engine-binding-test-support.ts";
 
 test("runtime store can use an isolated state path", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-store-"));
   const statePath = path.join(rootDir, "isolated", "state.sqlite");
   let openedStatePath = "";
-  let productModelProjection: unknown = null;
   const engine = createEngine({
     versionJson: () => JSON.stringify({ packageVersion: "0.1.0", engineVersion: "0.1.0", napiVersion: "3.9.0", schemaVersion: 1 }),
     openProjectJson: (requestJson: string) => {
@@ -41,14 +40,12 @@ test("runtime store can use an isolated state path", () => {
         buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: [] } }),
         indexCodeGraphJson: () =>
           JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
-        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-        writeProductModelProjectionJson: (requestJson: string) => {
-          productModelProjection = (JSON.parse(requestJson) as { projection: unknown }).projection;
-        },
-        readProductModelProjectionJson: () => JSON.stringify({ projection: productModelProjection }),
+        readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        readProjectPublicationJson: initialProjectPublication,
+        publishProjectStateJson: assignedProjectPublication,
         writeSemanticIndexJson: () => undefined,
         writeSemanticIndexDeltaJson: () => undefined,
         readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),

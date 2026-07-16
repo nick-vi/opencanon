@@ -1,8 +1,7 @@
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, OptionalExtension, Transaction};
 use serde_json::{json, Value};
 
-use crate::contracts::WriteProductModelProjectionRequest;
-use crate::json::{decode, encode, napi_error, sqlite_error};
+use crate::json::{encode, napi_error, sqlite_error};
 
 use super::json_fields::{
     json_array_field, json_int_field, json_object_field, json_optional_string_field,
@@ -10,12 +9,11 @@ use super::json_fields::{
 };
 use super::EngineProjectHandle;
 
-pub(super) fn write_product_model_projection_json(
-    handle: &EngineProjectHandle,
-    request: String,
+pub(super) fn write_product_model_projection(
+    tx: &Transaction<'_>,
+    root_dir: &str,
+    projection: &Value,
 ) -> napi::Result<()> {
-    let request: WriteProductModelProjectionRequest = decode(&request)?;
-    let projection = request.projection;
     let indexed_at = json_string_field(&projection, "indexedAt")?.to_string();
     let graph_hash = json_string_field(&projection, "graphHash")?.to_string();
     let definitions_hash = json_string_field(&projection, "definitionsHash")?.to_string();
@@ -27,16 +25,9 @@ pub(super) fn write_product_model_projection_json(
     let payload = serde_json::to_string(&projection)
         .map_err(|error| napi_error("invalid-engine-payload", &error.to_string()))?;
 
-    let mut conn = handle
-        .conn
-        .lock()
-        .map_err(|_| napi_error("sqlite-error", "Project state lock is poisoned."))?;
-    let tx = conn
-        .transaction()
-        .map_err(|error| sqlite_error("Could not start product model transaction", error))?;
     tx.execute(
         "delete from product_model_snapshots where root_dir = ?1",
-        params![handle.root_dir],
+        params![root_dir],
     )
     .map_err(|error| sqlite_error("Could not clear product model projection", error))?;
     tx.execute(
@@ -45,7 +36,7 @@ pub(super) fn write_product_model_projection_json(
                node_count, edge_count, diagnostic_count, payload, indexed_at)
              values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
-                handle.root_dir,
+                root_dir,
                 graph_hash,
                 definitions_hash,
                 json_int_field(counts, "areas")?,
@@ -71,7 +62,7 @@ pub(super) fn write_product_model_projection_json(
             "insert into product_model_nodes(root_dir, id, kind, label, payload, indexed_at)
                  values (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
-                handle.root_dir,
+                root_dir,
                 node_id,
                 json_string_field(node, "kind")?,
                 json_string_field(node, "label")?,
@@ -93,7 +84,7 @@ pub(super) fn write_product_model_projection_json(
         tx.execute(
                 "insert into product_model_edges(root_dir, id, from_node_id, to_node_id, kind, label, payload, indexed_at)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![handle.root_dir, edge_id, from, to, kind, label, edge_payload, indexed_at],
+                params![root_dir, edge_id, from, to, kind, label, edge_payload, indexed_at],
             )
             .map_err(|error| sqlite_error("Could not write product model edge", error))?;
     }
@@ -117,7 +108,7 @@ pub(super) fn write_product_model_projection_json(
                 "insert into product_model_diagnostics(root_dir, id, severity, code, from_node_id, to_node_id, message, payload, indexed_at)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
-                    handle.root_dir,
+                    root_dir,
                     diagnostic_id,
                     severity,
                     code,
@@ -131,8 +122,6 @@ pub(super) fn write_product_model_projection_json(
             .map_err(|error| sqlite_error("Could not write product model diagnostic", error))?;
     }
 
-    tx.commit()
-        .map_err(|error| sqlite_error("Could not commit product model transaction", error))?;
     Ok(())
 }
 

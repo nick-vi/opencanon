@@ -1004,6 +1004,45 @@ export function ephemeralRuntimeClientCheckSource(): string {
   `;
 }
 
+export function runtimeRevisionRestartCheckSource(): string {
+  const runtimeClientUrl = pathToFileURL(path.join(process.cwd(), "packages/cli/src/runtime-client.ts")).href;
+  const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
+  return `
+    import { withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
+    import { stopProjectRuntime } from ${JSON.stringify(runtimeUrl)};
+
+    const rootDir = process.argv[1];
+
+    async function settledState() {
+      return await withRuntimeClient(rootDir, async (client) => {
+        const deadline = Date.now() + 30_000;
+        let last;
+        while (Date.now() < deadline) {
+          last = await client.query("project.state");
+          if (last.lifecycle.settled) return last;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("Project State did not settle: " + JSON.stringify(last?.lifecycle));
+      });
+    }
+
+    const first = await settledState();
+    await stopProjectRuntime(rootDir);
+    const second = await settledState();
+    const replay = await withRuntimeClient(rootDir, async (client) =>
+      await client.query("events.list", { query: { afterSequence: "0", limit: "100" } }),
+    );
+    console.log(JSON.stringify({
+      firstRevision: first.lifecycle.revision.published,
+      secondRevision: second.lifecycle.revision.published,
+      replayRevision: replay.revision,
+      publicationRevisions: replay.events
+        .filter((event) => event.type === "published")
+        .map((event) => event.revision),
+    }));
+  `;
+}
+
 export function runtimeClientRepairCheckSource(): string {
   const runtimeClientUrl = pathToFileURL(path.join(process.cwd(), "packages/cli/src/runtime-client.ts")).href;
   const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;

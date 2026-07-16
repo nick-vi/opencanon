@@ -7,9 +7,9 @@ import path from "node:path";
 import { test } from "vitest";
 import { createEngine } from "@opencanon/engine";
 import { createPaths } from "@opencanon/core";
-import { createKnowledgeIndexManager, createProjectStore, inspectProjectRuntime, projectRuntimeStatePath, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
+import { createKnowledgeIndexManager, createProjectStore, inspectProjectRuntime, openProjectStore, projectRuntimeStatePath, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
-import { admittedJobs, assignedJobEvent, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication } from "./engine-binding-test-support.ts";
 import {
   activityRoutesCheckSource,
   canonHistoryRouteCheckSource,
@@ -25,6 +25,7 @@ import {
   runtimeClientRepairCheckSource,
   runtimeClientStreamRepairCheckSource,
   runtimeProjectTypesCheckSource,
+  runtimeRevisionRestartCheckSource,
   runtimeSummaryRouteCheckSource,
   runtimeValidatorReloadCheckSource,
   validateTraversalCheckSource,
@@ -308,6 +309,7 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
 
     let semanticIndex: unknown = null;
     const scanStatePath = path.join(rootDir, ".opencanon/state/test/state.sqlite");
+    openProjectStore({ rootDir, paths: createPaths(rootDir), statePath: scanStatePath }).close();
     let semanticChunks: Array<{ metadata: Record<string, unknown>; text: string; vector?: number[] }> = [];
     let watcherCallback: ((error: unknown, batchJson?: string) => void) | undefined;
     const previousHashes = new Map<string, string>();
@@ -361,12 +363,12 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
         extractFactsJson: () => JSON.stringify({ files: [], diagnostics: [] }),
         buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir, graphHash: "graph", files: ["docs/guide.md"], packages: [], importEdges: [] } }),
         indexCodeGraphJson: () => JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-test", extractorVersion: "graph-test" }),
-        activateCodeGraphJson: () => undefined,
         searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
         searchReferencesJson: () => JSON.stringify({ references: [] }),
         searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-        writeProductModelProjectionJson: () => undefined,
         readProductModelProjectionJson: () => JSON.stringify({ projection: null }),
+        readProjectPublicationJson: initialProjectPublication,
+        publishProjectStateJson: assignedProjectPublication,
         writeSemanticIndexJson: (requestJson: string) => {
           const request = JSON.parse(requestJson) as { index: unknown; chunks: Array<{ metadata: Record<string, unknown>; text: string; vector: number[] }> };
           semanticIndex = request.index;
@@ -423,6 +425,7 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
     const server = await startOpenCanonRuntime({
       cwd: rootDir,
       port: 0,
+      statePath: scanStatePath,
       runtime: { nodeVersion: process.versions.node, engine },
       async runKnowledgeIndexOperation(input) {
         const workerStore = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scanStatePath });
@@ -901,6 +904,37 @@ test("runtime client lazily starts a supervised project runtime when none is run
     assert.deepEqual(output.registryRoots, [rootDir]);
     assert.equal(output.service, true);
     assert.equal(existsSync(projectRuntimeStatePath(rootDir, runtimeNamespaceForRegistry(registryPath))), true);
+  } finally {
+    await stopService(registryPath);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("project publication revisions and replay events continue across runtime restart", { timeout: 60000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-revision-restart-"));
+  const registryPath = path.join(rootDir, "global", "service.json");
+  createAuthoringProject(rootDir);
+  mkdirSync(path.join(rootDir, "src"), { recursive: true });
+  writeFileSync(path.join(rootDir, "src/company.ts"), "export const company = true;\n");
+
+  try {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", runtimeRevisionRestartCheckSource(), rootDir], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: sourceRuntimeEnv(registryPath),
+      timeout: 50_000,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout.trim()) as {
+      firstRevision: number;
+      secondRevision: number;
+      replayRevision: number;
+      publicationRevisions: number[];
+    };
+    assert(output.secondRevision > output.firstRevision);
+    assert.equal(output.replayRevision, output.secondRevision);
+    assert(output.publicationRevisions.includes(output.firstRevision));
+    assert(output.publicationRevisions.includes(output.secondRevision));
   } finally {
     await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });

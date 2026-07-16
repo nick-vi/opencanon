@@ -255,8 +255,9 @@ export type ResolvedProjectSettingsInput = z.input<typeof ResolvedProjectSetting
 export const OpenProjectRequestSchema = z.object({
   rootDir: z.string().min(1),
   statePath: z.string().min(1),
+  codeGraphStatePath: z.string().min(1),
   settings: ResolvedProjectSettingsSchema,
-});
+}).strict();
 export type OpenProjectRequest = z.input<typeof OpenProjectRequestSchema>;
 
 export const ProjectRefreshStatusValue = {
@@ -408,11 +409,6 @@ export const ProductModelProjectionSchema = z.object({
   definitionGraph: ProductModelDefinitionGraphSchema,
 });
 export type ProductModelProjection = z.infer<typeof ProductModelProjectionSchema>;
-
-export const WriteProductModelProjectionRequestSchema = z.object({
-  projection: ProductModelProjectionSchema,
-});
-export type WriteProductModelProjectionRequest = z.infer<typeof WriteProductModelProjectionRequestSchema>;
 
 export const ReadProductModelProjectionResultSchema = z.object({
   projection: ProductModelProjectionSchema.nullable(),

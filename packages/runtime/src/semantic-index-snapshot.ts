@@ -11,7 +11,7 @@ import {
   type SemanticIndexDiagnostic,
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
-import type { ProjectStore } from "./state.ts";
+import type { ProjectAnalysisStore, ProjectStore } from "./state.ts";
 import { configuredSemanticEmbeddingProvider, semanticIndexProducerVersion } from "./semantic-index.ts";
 
 const SemanticChunkMetadataPageSize = 500;
@@ -37,7 +37,7 @@ export function listPreviousSemanticChunks(store: ProjectStore): SemanticChunkMe
 
 export function cachedSemanticIndexSnapshot(input: {
   scan: { inventoryHash: string };
-  store: ProjectStore;
+  store: Pick<ProjectAnalysisStore, "readSemanticIndexStatus">;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
 }): SemanticIndexSnapshot {
   const providerCheck = configuredSemanticEmbeddingProvider(input.semanticEmbedding);

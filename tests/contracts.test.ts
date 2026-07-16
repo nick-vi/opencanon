@@ -50,12 +50,39 @@ import {
   ok,
   matchesProjectFileScope,
   DefaultSemanticEmbeddingConfig,
+  DomainProtocolVersion,
+  ProtocolDomain,
+  PublishProjectStateRequestSchema,
   semanticEmbeddingModel,
   SemanticEmbeddingModelId,
   SemanticEmbeddingProviderKind,
   semanticEmbeddingModelIds,
   type ContextPaths,
 } from "@opencanon/core";
+
+test("Project State publication contract binds projection and event identity", () => {
+  const request = {
+    revision: 2,
+    protocolEvent: {
+      protocolVersion: DomainProtocolVersion,
+      timestamp: "2026-07-16T14:00:00.000Z",
+      revision: 2,
+      domain: ProtocolDomain.Project,
+      type: "published",
+      summary: "Published Project State.",
+      ids: [],
+    },
+    maxProtocolEventCount: 100,
+    retainProtocolEventsAfter: "2026-07-01T00:00:00.000Z",
+  };
+
+  assert.equal(PublishProjectStateRequestSchema.safeParse(request).success, true);
+  assert.equal(PublishProjectStateRequestSchema.safeParse({ ...request, codeGraphGeneration: "generation-two" }).success, false);
+  assert.equal(PublishProjectStateRequestSchema.safeParse({
+    ...request,
+    protocolEvent: { ...request.protocolEvent, revision: 3 },
+  }).success, false);
+});
 
 test("file facts schema defaults optional fact arrays", () => {
   const facts = FileFactsSchema.parse({
@@ -377,6 +404,7 @@ test("engine project state contracts parse project handles and scan results", ()
   const request = OpenProjectRequestSchema.parse({
     rootDir: "/repo",
     statePath: "/repo/.opencanon/state/test/state.sqlite",
+    codeGraphStatePath: "/repo/.opencanon/state/test/state.sqlite",
     settings: {
       docsDir: "docs/opencanon",
       conventionsPath: "opencanon/conventions/index.ts",

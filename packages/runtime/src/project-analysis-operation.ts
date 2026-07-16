@@ -14,6 +14,7 @@ import type { RuntimeAnalysisOutcome } from "./snapshot.ts";
 export type ProjectAnalysisOperationInput = {
   rootDir: string;
   analysisStatePath: string;
+  codeGraphStatePath: string;
   previousAnalysisInputHash?: string;
   signal?: AbortSignal;
 };
@@ -31,6 +32,8 @@ export async function runProjectAnalysisOperation(input: ProjectAnalysisOperatio
     resultPath,
     "--request-id",
     requestId,
+    "--code-graph-state",
+    input.codeGraphStatePath,
     ...(input.previousAnalysisInputHash ? ["--previous-analysis-input-hash", input.previousAnalysisInputHash] : []),
   ];
   const child = spawn(nodeCommandForCliInvocation(), childArgs, {

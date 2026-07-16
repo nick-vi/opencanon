@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createEngine, loadEngine, engineBindingName, validateEngineVersion } from "@opencanon/engine";
-import { assignedProtocolEvent, emptyProtocolEventWindow } from "./engine-binding-test-support.ts";
+import { assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, initialProjectPublication } from "./engine-binding-test-support.ts";
 
 test("engine loader names pinned platform binaries and validates version payload", () => {
   assert.equal(engineBindingName("opencanon", "darwin", "arm64"), "opencanon.darwin-arm64.node");
@@ -73,14 +73,16 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
       buildRepoGraphJson: () => JSON.stringify({ graph: { rootDir: "/repo", graphHash: "graph", files: ["src/company.ts"] } }),
       indexCodeGraphJson: async () =>
         JSON.stringify({ generation: "test", indexed: [], deleted: [], diagnostics: [], parserVersion: "oxc-0.128.0", extractorVersion: "oxc-graph-1" }),
-      activateCodeGraphJson: () => undefined,
       searchSymbolsJson: () => JSON.stringify({ symbols: [] }),
       searchReferencesJson: () => JSON.stringify({ references: [] }),
       searchGraphEdgesJson: () => JSON.stringify({ edges: [] }),
-      writeProductModelProjectionJson: (requestJson: string) => {
-        productModelProjection = (JSON.parse(requestJson) as { projection: unknown }).projection;
-      },
       readProductModelProjectionJson: () => JSON.stringify({ projection: productModelProjection }),
+      readProjectPublicationJson: initialProjectPublication,
+      publishProjectStateJson: (requestJson: string) => {
+        const request = JSON.parse(requestJson) as { productModel?: unknown };
+        if (request.productModel) productModelProjection = request.productModel;
+        return assignedProjectPublication(requestJson);
+      },
       writeSemanticIndexJson: (requestJson: string) => {
         const request = JSON.parse(requestJson) as { index: unknown; chunks: Array<{ metadata: unknown }> };
         semanticIndex = request.index;
@@ -148,6 +150,7 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
   const project = engine.openProject({
     rootDir: "/repo",
     statePath: "/repo/.opencanon/state/test/state.sqlite",
+    codeGraphStatePath: "/repo/.opencanon/state/test/state.sqlite",
     settings: {
       docsDir: "docs/opencanon",
       conventionsPath: "opencanon/conventions/index.ts",
@@ -214,11 +217,14 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
   assert.equal(project.buildRepoGraph({ facts: [], packageManifests: [] }).graph.graphHash, "graph");
   assert.deepEqual((await project.indexCodeGraph({ files: [], parserVersion: "oxc-0.128.0" })).indexed, []);
   assert.deepEqual(project.searchReferences({ query: "findCompany" }).references, []);
-  project.writeProductModelProjection({
-    indexedAt: "2026-06-06T00:00:00.000Z",
-    graphHash: "definition-graph",
-    definitionsHash: "definitions",
-    counts: {
+  const publication = project.publishProjectState({
+    revision: 2,
+    codeGraphGeneration: "test",
+    productModel: {
+      indexedAt: "2026-06-06T00:00:00.000Z",
+      graphHash: "definition-graph",
+      definitionsHash: "definitions",
+      counts: {
       areas: 0,
       specs: 0,
       changes: 0,
@@ -228,29 +234,42 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
       nodes: 0,
       edges: 0,
       diagnostics: 0,
-    },
-    areas: [],
-    specs: [],
-    changes: [],
-    conventions: [],
-    impactSurfaces: [],
-    validators: [],
-    definitionGraph: {
-      nodes: [],
-      edges: [],
-      diagnostics: [],
-      fileCoverage: {},
-      backlinks: {
-        areaToSurfaces: {},
-        specToSurfaces: {},
-        changeToSurfaces: {},
-        surfaceToAreas: {},
-        surfaceToSpecs: {},
-        surfaceToChanges: {},
-        surfaceToConventions: {},
+      },
+      areas: [],
+      specs: [],
+      changes: [],
+      conventions: [],
+      impactSurfaces: [],
+      validators: [],
+      definitionGraph: {
+        nodes: [],
+        edges: [],
+        diagnostics: [],
+        fileCoverage: {},
+        backlinks: {
+          areaToSurfaces: {},
+          specToSurfaces: {},
+          changeToSurfaces: {},
+          surfaceToAreas: {},
+          surfaceToSpecs: {},
+          surfaceToChanges: {},
+          surfaceToConventions: {},
+        },
       },
     },
+    protocolEvent: {
+      protocolVersion: 1,
+      timestamp: "2026-06-06T00:00:00.000Z",
+      revision: 2,
+      domain: "project",
+      type: "published",
+      summary: "Published Project State.",
+      ids: [],
+    },
+    maxProtocolEventCount: 100,
+    retainProtocolEventsAfter: "2026-06-01T00:00:00.000Z",
   });
+  assert.equal(publication.publication.revision, 2);
   assert.equal(project.readProductModelProjection()?.graphHash, "definition-graph");
   project.writeSemanticIndex({
     index: {
