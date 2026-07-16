@@ -1,7 +1,9 @@
 import { DefinitionTargetKind, defineChange } from "@opencanon/core";
+import { domainProtocolChanges } from "./domain-protocol.ts";
 import { runtimeSupervisionChanges } from "./runtime-supervision.ts";
 
 export default [
+  ...domainProtocolChanges,
   defineChange({
     id: "agent-readiness-integrity",
     title: "Keep agent readiness projections truthful",
