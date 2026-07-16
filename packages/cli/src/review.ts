@@ -81,7 +81,7 @@ export async function runReviewCommand(args = process.argv.slice(2), cwd = proce
   const files = resolveReviewFiles(query, rootDir, project.paths);
   const knowledge = await fetchRuntimeKnowledge(rootDir);
   const validation = files.length > 0 ? await validateFilesForReview(rootDir, project.paths, files, query.strictProducers) : null;
-  const producerStatuses = await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir);
+  const producerStatuses = await fetchRunningRuntimeProducers(rootDir);
   const doctor = buildDoctorReport({
     paths: project.paths,
     areas: project.areas,

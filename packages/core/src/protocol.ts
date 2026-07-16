@@ -142,10 +142,8 @@ type ProtocolOperationDefinitionInput<
 };
 
 export function defineProtocolOperation<
-  const TId extends string,
-  const TInput extends z.ZodType,
-  const TOutput extends z.ZodType,
->(definition: ProtocolOperationDefinitionInput<TId, TInput, TOutput>): ProtocolOperationDefinition<TId, TInput, TOutput> {
+  const TDefinition extends ProtocolOperationDefinitionInput<string, z.ZodType, z.ZodType>,
+>(definition: TDefinition): Readonly<TDefinition> {
   ProtocolOperationMetadataSchema.parse(operationMetadata(definition));
   return Object.freeze(definition);
 }

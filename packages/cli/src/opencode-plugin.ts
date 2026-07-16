@@ -36,7 +36,7 @@ export const OpenCanonPlugin = async ({ directory, worktree }: { directory: stri
       const turnId = callId || undefined;
 
       const result = await withRuntimeClient(cwd, (client) =>
-        client.query<FeedbackResult>("feedback.query", {
+        client.query("feedback.query", {
           body: {
             files,
             host: FeedbackPluginHost.OpenCode,

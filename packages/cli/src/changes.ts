@@ -224,7 +224,7 @@ async function runChangesListCommand(args: string[], cwd: string, commandName: s
   }
   if (parsed.args.length > 0) fail(`Unexpected ${commandName} arguments: ${parsed.args.join(", ")}`);
 
-  const changes = await withChangesRuntimeClient(cwd, (client) => client.query<ChangeSummary[]>("changes.list"));
+  const changes = await withChangesRuntimeClient(cwd, (client) => client.query("changes.list"));
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ changes }, null, 2));
   else console.log(renderChangesListMarkdown(changes));
 }
@@ -243,7 +243,7 @@ async function runChangesReadyCommand(args: string[], cwd: string): Promise<void
   }
   if (parsed.args.length > 0) fail(`Unexpected opencanon changes ready arguments: ${parsed.args.join(", ")}`);
 
-  const queue = await withChangesRuntimeClient(cwd, (client) => client.query<ChangeWorkQueue>("changes.ready"));
+  const queue = await withChangesRuntimeClient(cwd, (client) => client.query("changes.ready"));
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(queue, null, 2));
   else console.log(renderChangesReadyMarkdown(queue));
 }
@@ -264,8 +264,8 @@ async function runChangesShowCommand(args: string[], cwd: string): Promise<void>
   const changeId = requiredSingleArgument(parsed.args, "changes show");
   const limit = positiveIntegerOption(options.events, "--events", 25);
   const { changes, events } = await withChangesRuntimeClient(cwd, async (client) => ({
-    changes: await client.query<ChangeSummary[]>("changes.list"),
-    events: await client.query<ChangeEvent[]>("activity.list", { query: { changeId, limit: String(limit) } }),
+    changes: await client.query("changes.list"),
+    events: await client.query("activity.list", { query: { changeId, limit: String(limit) } }),
   }));
   const change = changes.find((item) => item.id === changeId);
   if (!change) fail(`Unknown change id: ${changeId}`);
@@ -298,7 +298,7 @@ async function runChangesEventsCommand(args: string[], cwd: string): Promise<voi
   if (taskId) query.set("taskId", taskId);
   if (checkId) query.set("checkId", checkId);
   const events = await withChangesRuntimeClient(cwd, (client) =>
-    client.query<ChangeEvent[]>("activity.list", protocolInputFromSearchParams(query)),
+    client.query("activity.list", protocolInputFromSearchParams("activity.list", query)),
   );
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ events }, null, 2));
   else console.log(renderChangeEventsMarkdown(String(changeId), events));
@@ -330,7 +330,7 @@ async function runChangesRecordCommand(args: string[], cwd: string): Promise<voi
   const eventId = createChangeRequestEventId(String(changeId), type);
 
   const result = await withChangesRuntimeClient(cwd, (client) =>
-    client.command<RecordChangeEventResponse>(
+    client.command(
       "activity.record",
       { body: { id: eventId, changeId: String(changeId), type, summary, files, ...(actor ? { actor } : {}) } },
       { idempotencyKey: eventId },
@@ -364,7 +364,7 @@ async function runChangesLifecycleCommand(command: string, args: string[], cwd: 
   const eventId = createChangeRequestEventId(changeId, type);
   const actor = optionalStringOption(options.agent, "--agent") ?? optionalStringOption(options.actor, "--actor");
   const result = await withChangesRuntimeClient(cwd, (client) =>
-    client.command<RecordChangeEventResponse>(
+    client.command(
       "activity.record",
       {
         body: {
@@ -408,7 +408,7 @@ async function runChangesCheckCommand(args: string[], cwd: string): Promise<void
   const actor = optionalStringOption(options.actor, "--actor");
   const result = await withChangesRuntimeClient(cwd, async (client) => {
     const started = StartChangeCheckRunsResponseSchema.parse(
-      await client.command<StartChangeCheckRunsResponse>("proof.runs.start", {
+      await client.command("proof.runs.start", {
         body: {
           changeId: values[0],
           all,
@@ -468,8 +468,9 @@ async function runChangesRunsListCommand(args: string[], cwd: string): Promise<v
   const query = new URLSearchParams({ limit: String(limit) });
   if (status?.success) query.set("status", status.data);
   const result = await withChangesRuntimeClient(cwd, (client) =>
-    client.query<{ runs: ChangeCheckRun[] }>("proof.runs.read", protocolInputFromSearchParams(query)),
+    client.query("proof.runs.read", protocolInputFromSearchParams("proof.runs.read", query)),
   );
+  if (!("runs" in result)) fail("OpenCanon returned one Change check run where a run list was required.");
   const runs = result.runs.map((run) => ChangeCheckRunSchema.parse(run));
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ runs }, null, 2));
   else console.log(renderChangeCheckRunsMarkdown(runs));
@@ -531,7 +532,7 @@ async function runChangesRunsCancelCommand(args: string[], cwd: string): Promise
   }
   const runId = requiredSingleArgument(parsed.args, "changes runs cancel");
   const result = await withChangesRuntimeClient(cwd, async (client) => {
-    const raw = await client.command<ChangeCheckRunSnapshot>("proof.runs.cancel", { body: { runId } });
+    const raw = await client.command("proof.runs.cancel", { body: { runId } });
     return parseChangeCheckRunSnapshot(raw);
   });
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(result, null, 2));
@@ -607,7 +608,7 @@ async function followChangeCheckRun(
       const query = new URLSearchParams({ operationId: initial.id });
       if (protocolCursor !== undefined) query.set("afterSequence", String(protocolCursor));
       try {
-        await client.stream("events.stream", protocolInputFromSearchParams(query), {
+        await client.stream("events.stream", protocolInputFromSearchParams("events.stream", query), {
           signal: controller.signal,
           onChunk: parser.push,
         });
@@ -630,7 +631,8 @@ async function followChangeCheckRun(
 async function readChangeCheckRunSnapshot(client: RuntimeClient, runId: string, after?: number): Promise<ChangeCheckRunSnapshot> {
   const query = new URLSearchParams({ runId });
   if (after !== undefined) query.set("after", String(after));
-  const raw = await client.query<ChangeCheckRunSnapshot>("proof.runs.read", protocolInputFromSearchParams(query));
+  const raw = await client.query("proof.runs.read", protocolInputFromSearchParams("proof.runs.read", query));
+  if (!("run" in raw)) fail("OpenCanon returned a Change check run list where one run was required.");
   return parseChangeCheckRunSnapshot(raw);
 }
 

@@ -33,7 +33,7 @@ export async function runGraphCommand(args = process.argv.slice(2), cwd = proces
     limit: String(query.limit),
   });
   const result = await withRuntimeClient<CodeGraphResponse>(rootDir, (client) =>
-    client.query("code.graph", protocolInputFromSearchParams(params)),
+    client.query("code.graph", protocolInputFromSearchParams("code.graph", params)),
   );
   if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, command: query.command, query: query.query, edges: result.edges }, null, 2));
   else printEdges(query.command, result.edges, result.sourceFiles, query.query);

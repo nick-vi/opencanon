@@ -6,7 +6,7 @@ const OutputPath = path.join("packages", "core", "generated", "domain-protocol.o
 const CheckFlag = "--check";
 const rootDir = process.cwd();
 const outputPath = path.join(rootDir, OutputPath);
-const expected = `${JSON.stringify(createOpenCanonOpenApiDocument(), null, 2)}\n`;
+const expected = `${JSON.stringify(createOpenCanonOpenApiDocument())}\n`;
 
 if (process.argv.includes(CheckFlag)) {
   const actual = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : undefined;

@@ -83,7 +83,7 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
 
   if (query.list) {
     const catalog = await withRuntimeClient(cwd, (client) =>
-      client.query<RuntimeValidatorCatalog>("validators.list", { query: { limit: "500" } }),
+      client.query("validators.list", { query: { limit: "500" } }),
     );
     const rows = catalog.validators.map((validator) => ({
       id: validator.id,
@@ -145,7 +145,7 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
   let result = await withRuntimeClient(
     cwd,
     (client) =>
-      client.query<ValidationResult>("validation.run", {
+      client.query("validation.run", {
         body: {
           files: query.files,
           topics: query.topics,

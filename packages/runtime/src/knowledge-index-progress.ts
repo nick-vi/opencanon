@@ -59,7 +59,7 @@ export async function requestKnowledgeIndex(input: {
     throw error;
   }
   try {
-    return await client.command<{ semanticIndex: SemanticIndexSnapshot | null }>("knowledge.index", {
+    return await client.command("knowledge.index", {
       body: { force: input.force },
     });
   } finally {

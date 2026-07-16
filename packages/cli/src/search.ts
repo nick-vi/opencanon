@@ -89,9 +89,11 @@ async function searchSymbols(rootDir: string, query: SearchQuery): Promise<Searc
     limit: String(engineLimit),
   });
   if (query.symbolKind) params.set("kind", query.symbolKind);
-  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) =>
-    client.query("code.symbols", protocolInputFromSearchParams(params)),
-  );
+  const result = await withRuntimeClient(rootDir, async (client) => {
+    const response = await client.query("code.symbols", protocolInputFromSearchParams("code.symbols", params));
+    if (!("symbols" in response)) fail("OpenCanon returned references where symbols were required.");
+    return response;
+  });
   return result.symbols.map((symbol) => symbolResult(symbol, query.query));
 }
 
@@ -100,9 +102,9 @@ async function searchProjectContext(rootDir: string, query: SearchQuery): Promis
     const params = new URLSearchParams();
     params.set("query", query.query);
     params.set("limit", String(query.limit));
-    const response = await withRuntimeClient<ContextSearchResponse>(
+    const response = await withRuntimeClient(
       rootDir,
-      (client) => client.query("knowledge.search", protocolInputFromSearchParams(params)),
+      (client) => client.query("knowledge.search", protocolInputFromSearchParams("knowledge.search", params)),
       { requestTimeoutMs: ContextSearchRequestTimeoutMs },
     );
     return response.results.map((result) => ({
@@ -111,7 +113,7 @@ async function searchProjectContext(rootDir: string, query: SearchQuery): Promis
       path: result.chunk.path,
       line: result.chunk.range.start.line,
       detail: result.chunk.preview,
-      score: Math.round(result.score * 100),
+      score: Math.round((result.score ?? 0) * 100),
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

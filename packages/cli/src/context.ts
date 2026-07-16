@@ -28,7 +28,7 @@ import type {
   ProjectContextBacklinksResult,
   ProjectContextCoverageResult,
   ReadSemanticIndexStatusResult,
-  ProtocolInput,
+  ProtocolOperationInput,
 } from "@opencanon/core";
 
 type Query = {
@@ -48,10 +48,9 @@ type Query = {
 };
 
 type ContextValidator = Pick<Validator, "id" | "topics" | "appliesScopes" | "severity" | "scope" | "facts" | "conventionIds" | "docs" | "summary">;
-type RelatedCanonRequest = {
-  kind: "get" | "post";
-  input: ProtocolInput;
-};
+type RelatedCanonRequest =
+  | { kind: "get"; input: ProtocolOperationInput<"canon.related.read"> }
+  | { kind: "post"; input: ProtocolOperationInput<"canon.related.query"> };
 type ProjectContextQueryArgs = { help: true } | { help?: false; params: URLSearchParams; format: Format };
 
 let rootDir = "";
@@ -149,8 +148,8 @@ export async function runContextCommand(args = process.argv.slice(2), cwd = proc
   const relatedRequest = contextRequest(query);
   const related = await withRuntimeClient(cwd, (client) =>
     relatedRequest.kind === "post"
-      ? client.query<RelatedCanon>("canon.related.query", relatedRequest.input)
-      : client.query<RelatedCanon>("canon.related.read", relatedRequest.input),
+      ? client.query("canon.related.query", relatedRequest.input)
+      : client.query("canon.related.read", relatedRequest.input),
   );
   const result = {
     ...related,
@@ -243,7 +242,7 @@ async function runProjectContextChunks(args: string[], cwd: string): Promise<voi
   params.set("offset", String(nonNegativeIntegerOption(options.offset, "--offset", 0)));
   const format = formatOption(options.format);
   const result = await withRuntimeClient<ListSemanticChunksResult>(cwd, (client) =>
-    client.query("knowledge.chunks", protocolInputFromSearchParams(params)),
+    client.query("knowledge.chunks", protocolInputFromSearchParams("knowledge.chunks", params)),
   );
   if (format === Format.Json) {
     writeJson(result);
@@ -267,7 +266,7 @@ async function runProjectContextAsk(args: string[], cwd: string, command: string
     return;
   }
   const result = await withRuntimeClient<ProjectContextAskResult>(cwd, (client) =>
-    client.query("knowledge.ask", protocolInputFromSearchParams(parsed.params)),
+    client.query("knowledge.ask", protocolInputFromSearchParams("knowledge.ask", parsed.params)),
   );
   if (parsed.format === Format.Json) {
     writeJson(result);
@@ -320,7 +319,7 @@ async function runProjectContextBacklinks(args: string[], cwd: string): Promise<
     return;
   }
   const result = await withRuntimeClient<ProjectContextBacklinksResult>(cwd, (client) =>
-    client.query("knowledge.backlinks", protocolInputFromSearchParams(parsed.params)),
+    client.query("knowledge.backlinks", protocolInputFromSearchParams("knowledge.backlinks", parsed.params)),
   );
   if (parsed.format === Format.Json) {
     writeJson(result);
@@ -457,7 +456,7 @@ function contextRequest(query: Query): RelatedCanonRequest {
   for (const file of query.files) params.append("file", file);
   for (const topic of query.topics) params.append("topic", topic);
   for (const conventionId of query.conventionIds) params.append("conventionId", conventionId);
-  const input = protocolInputFromSearchParams(params);
+  const input = protocolInputFromSearchParams("canon.related.read", params);
   if (params.toString().length <= maxRelatedContextGetPathLength) return { kind: "get", input };
   return {
     kind: "post",

@@ -118,9 +118,11 @@ async function graphRenameInputs(rootDir: string, name: string): Promise<Pick<Pa
     const symbolsParams = new URLSearchParams({ query: name, limit: "500" });
     const referencesParams = new URLSearchParams({ query: name, limit: "1000", references: "1" });
     const [symbols, references] = await Promise.all([
-      client.query<CodeSymbolsResponse>("code.symbols", protocolInputFromSearchParams(symbolsParams)),
-      client.query<CodeReferencesResponse>("code.symbols", protocolInputFromSearchParams(referencesParams)),
+      client.query("code.symbols", protocolInputFromSearchParams("code.symbols", symbolsParams)),
+      client.query("code.symbols", protocolInputFromSearchParams("code.symbols", referencesParams)),
     ]);
+    if (!("symbols" in symbols)) fail("OpenCanon returned references where symbols were required.");
+    if (!("references" in references)) fail("OpenCanon returned symbols where references were required.");
     return {
       symbols: symbols.symbols,
       references: references.references,

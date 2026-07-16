@@ -23,6 +23,8 @@ import {
 import { withRuntimeClient } from "./runtime-client.ts";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 export async function runFeedbackCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
   const rootDir = resolveRootDir(cwd);
   const paths = createPaths(rootDir);
@@ -70,7 +72,7 @@ export async function runFeedbackCommand(args = process.argv.slice(2), cwd = pro
   }
 
   const result = await withRuntimeClient(cwd, (client) =>
-    client.query<FeedbackResult>("feedback.query", {
+    client.query("feedback.query", {
       body: { files, host: "manual", dedupeScope: dedupeScopeOption(options.dedupeScope) },
     }),
   );
@@ -109,7 +111,7 @@ export async function runHookCommand(args = process.argv.slice(2), cwd = process
   const host = hookHostOption(command);
   const payload = parseHookPayload(await readStdin());
   const { response } = await withRuntimeClient(cwd, (client) =>
-    client.query<{ response: string }>("hooks.feedback", { body: { host, payload } }),
+    client.query("hooks.feedback", { body: { host, payload } }),
   );
   if (response) console.log(response);
 }
@@ -260,10 +262,10 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function parseHookPayload(value: string): unknown {
+function parseHookPayload(value: string): JsonValue {
   if (!value.trim()) return {};
   try {
-    return JSON.parse(value);
+    return JSON.parse(value) as JsonValue;
   } catch (error) {
     fail(`Invalid hook JSON: ${error instanceof Error ? error.message : String(error)}`);
   }

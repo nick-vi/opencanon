@@ -4,9 +4,12 @@ import {
   protocolInputFromSearchParams,
   resolveRootDir,
   type DoctorKnowledgeInspection,
+  type ProtocolCommandOperationId,
   type ProtocolExecutionOptions,
-  type ProtocolInput,
-  type ProtocolOperationId,
+  type ProtocolOperationInput,
+  type ProtocolOperationOutput,
+  type ProtocolQueryOperationId,
+  type ProtocolStreamOperationId,
   type ProtocolStreamOptions,
 } from "@opencanon/core";
 import {
@@ -26,9 +29,9 @@ const RunningRuntimeProducerProbeTimeoutMs = 2_000;
 const RunningRuntimeKnowledgeProbeTimeoutMs = 2_000;
 
 export type RuntimeClient = {
-  query<T>(operationId: ProtocolOperationId, input?: ProtocolInput, options?: ProtocolExecutionOptions): Promise<T>;
-  command<T>(operationId: ProtocolOperationId, input?: ProtocolInput, options?: ProtocolExecutionOptions): Promise<T>;
-  stream(operationId: ProtocolOperationId, input: ProtocolInput | undefined, options: ProtocolStreamOptions): Promise<void>;
+  query<TId extends ProtocolQueryOperationId>(operationId: TId, input?: ProtocolOperationInput<TId>, options?: ProtocolExecutionOptions): Promise<ProtocolOperationOutput<TId>>;
+  command<TId extends ProtocolCommandOperationId>(operationId: TId, input?: ProtocolOperationInput<TId>, options?: ProtocolExecutionOptions): Promise<ProtocolOperationOutput<TId>>;
+  stream<TId extends ProtocolStreamOperationId>(operationId: TId, input: ProtocolOperationInput<TId> | undefined, options: ProtocolStreamOptions): Promise<void>;
 };
 
 export type RuntimeClientOptions = {
@@ -38,10 +41,10 @@ export type RuntimeClientOptions = {
 export { protocolInputFromSearchParams };
 
 /** Query producer state only when the already-running process matches this CLI. */
-export async function fetchRunningRuntimeProducers<T = unknown>(
+export async function fetchRunningRuntimeProducers(
   cwd: string,
   options: { timeoutMs?: number } = {},
-): Promise<T | undefined> {
+): Promise<ProtocolOperationOutput<"producers.list">["producers"] | undefined> {
   const rootDir = resolveRootDir(cwd);
   const inspection = await inspectProjectRuntime(rootDir);
   if (inspection?.status !== RuntimeStatus.Running) return undefined;
@@ -49,7 +52,7 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
     const identity = runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir));
     if (!runtimeProbeIdentityMatches(inspection.entry, identity)) return undefined;
     const client = domainClientForEndpoint(() => localProtocolEndpointFromEntry(inspection.entry));
-    const projection = await client.query<{ producers: T }>("producers.list", {}, {
+    const projection = await client.query("producers.list", {}, {
       timeoutMs: options.timeoutMs ?? RunningRuntimeProducerProbeTimeoutMs,
     });
     return projection.data.producers;
@@ -71,7 +74,7 @@ export async function inspectRunningRuntimeKnowledge(cwd: string): Promise<Docto
       };
     }
     const client = domainClientForEndpoint(() => localProtocolEndpointFromEntry(inspection.entry));
-    const projection = await client.query<unknown>("knowledge.status", {}, {
+    const projection = await client.query("knowledge.status", {}, {
       timeoutMs: RunningRuntimeKnowledgeProbeTimeoutMs,
     });
     return {
@@ -108,13 +111,13 @@ export async function withRuntimeClient<T>(
   const client = domainClientForEndpoint(() => endpoint, repair, options.requestTimeoutMs);
 
   return await callback({
-    async query<TResult>(operationId: ProtocolOperationId, input?: ProtocolInput, executionOptions?: ProtocolExecutionOptions) {
-      return (await client.query<TResult>(operationId, input, executionOptions)).data;
+    async query<TId extends ProtocolQueryOperationId>(operationId: TId, input?: ProtocolOperationInput<TId>, executionOptions?: ProtocolExecutionOptions) {
+      return (await client.query(operationId, input, executionOptions)).data;
     },
-    async command<TResult>(operationId: ProtocolOperationId, input?: ProtocolInput, executionOptions?: ProtocolExecutionOptions) {
-      return await client.command<TResult>(operationId, input, executionOptions);
+    async command<TId extends ProtocolCommandOperationId>(operationId: TId, input?: ProtocolOperationInput<TId>, executionOptions?: ProtocolExecutionOptions) {
+      return await client.command(operationId, input, executionOptions);
     },
-    async stream(operationId, input, streamOptions) {
+    async stream<TId extends ProtocolStreamOperationId>(operationId: TId, input: ProtocolOperationInput<TId> | undefined, streamOptions: ProtocolStreamOptions) {
       await client.stream(operationId, input, streamOptions);
     },
   });

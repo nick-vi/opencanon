@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { z } from "zod";
 import { parseVersionParts } from "./core-utils.ts";
 import { ProjectFileLanguage, type LanguageId } from "./language-registry.ts";
 import { ProducerStatusKind, type ProducerStatus } from "./type-facts-provider.ts";
@@ -76,6 +77,24 @@ export type ProducerPolicy = {
   profile: ProducerRunProfile;
   sources: Partial<Record<LanguageId, ProducerSource>>;
 };
+
+export const ProducerSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal(ProducerSourceKind.Artifact), id: z.literal(ProducerArtifactId.TypedComparisons) }).strict(),
+  z.object({ kind: z.literal(ProducerSourceKind.Live), worker: z.literal(ProducerLiveWorkerId.TypeScriptWatch) }).strict(),
+  z.object({ kind: z.literal(ProducerSourceKind.NotImplemented), detail: z.string().optional() }).strict(),
+]) satisfies z.ZodType<ProducerSource>;
+
+export const ProducerPolicySchema = z.object({
+  profile: z.enum([ProducerRunProfile.Batch, ProducerRunProfile.Interactive]),
+  sources: z.partialRecord(z.enum([
+    ProjectFileLanguage.TypeScript,
+    ProjectFileLanguage.Svelte,
+    ProjectFileLanguage.Python,
+    ProjectFileLanguage.Json,
+    ProjectFileLanguage.Markdown,
+    ProjectFileLanguage.Text,
+  ]), ProducerSourceSchema),
+}).strict() satisfies z.ZodType<ProducerPolicy>;
 
 export type ProducerDefinition = {
   language: LanguageId;

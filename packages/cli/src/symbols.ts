@@ -35,17 +35,21 @@ export async function runSymbolsCommand(args = process.argv.slice(2), cwd = proc
   params.set("limit", String(engineLimit));
   if (query.references) {
     params.set("references", "1");
-    const result = await withRuntimeClient<CodeReferencesResponse>(rootDir, (client) =>
-      client.query("code.symbols", protocolInputFromSearchParams(params)),
-    );
+    const result = await withRuntimeClient(rootDir, async (client) => {
+      const response = await client.query("code.symbols", protocolInputFromSearchParams("code.symbols", params));
+      if (!("references" in response)) fail("OpenCanon returned symbols where references were required.");
+      return response;
+    });
     const references = filterReferences(result.references, query);
     if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, references }, null, 2));
     else printReferences(references, result.sourceFiles, query);
     return;
   }
-  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) =>
-    client.query("code.symbols", protocolInputFromSearchParams(params)),
-  );
+  const result = await withRuntimeClient(rootDir, async (client) => {
+    const response = await client.query("code.symbols", protocolInputFromSearchParams("code.symbols", params));
+    if (!("symbols" in response)) fail("OpenCanon returned references where symbols were required.");
+    return response;
+  });
   const symbols = filterSymbols(result.symbols, query);
   if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, symbols }, null, 2));
   else printSymbols(symbols, result.sourceFiles, query);

@@ -22,6 +22,7 @@ export const domainProtocolChanges = [
       { kind: DefinitionTargetKind.File, path: "scripts/generate-domain-protocol.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/contracts-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/errors.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/src/producer-registry.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/engine/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "crates/opencanon-engine/src/{contracts,project,state}.rs" },
@@ -92,7 +93,7 @@ export const domainProtocolChanges = [
       {
         id: "policy-and-cleanup",
         title: "Make protocol policy mandatory and remove snapshot contracts",
-        files: ["packages/core/src/protocol*.ts", "packages/core/package.json", "packages/core/generated/domain-protocol.openapi.json", "scripts/generate-domain-protocol.ts", "packages/runtime/src/protocol-policy.ts", "packages/runtime/src/server-http.ts", "packages/runtime/src/local-protocol.ts", "packages/runtime/src/routes.ts", "packages/cli/src/{brief,changes,context,feedback,gate,graph,mcp,opencode-plugin,refactor,review,runtime-client,search,symbols,validate}.ts", "packages/runtime/test/client-test-sources.ts", "packages/runtime/test/client.test.ts", "packages/runtime/test/protocol-policy.test.ts", "packages/runtime/test/protocol.test.ts", "package.json"],
+        files: ["packages/core/src/protocol*.ts", "packages/core/src/producer-registry.ts", "packages/core/package.json", "packages/core/generated/domain-protocol.openapi.json", "scripts/generate-domain-protocol.ts", "packages/runtime/src/protocol-policy.ts", "packages/runtime/src/server-http.ts", "packages/runtime/src/local-protocol.ts", "packages/runtime/src/routes.ts", "packages/cli/src/{brief,changes,context,feedback,gate,graph,mcp,opencode-plugin,refactor,review,runtime-client,search,symbols,validate}.ts", "packages/runtime/test/client-test-sources.ts", "packages/runtime/test/client.test.ts", "packages/runtime/test/protocol-policy.test.ts", "packages/runtime/test/protocol.test.ts", "package.json"],
         checks: ["protocol-tests", "protocol-contract-drift", "runtime-client-tests", "typecheck", "process-steady-state"],
         dependsOn: ["revision-events"],
       },

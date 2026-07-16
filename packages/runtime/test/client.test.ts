@@ -35,6 +35,16 @@ import {
 const HeavyRouteIntegrationTestTimeoutMs = 120_000;
 const HeavyRouteSubprocessTimeoutMs = 90_000;
 const RuntimeWatcherPropagationTimeoutMs = 30_000;
+const SourceCliPath = path.resolve("packages/cli/src/index.ts");
+
+function sourceRuntimeEnv(registryPath: string, overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    OPENCANON_CLI: SourceCliPath,
+    OPENCANON_SERVICE_REGISTRY_PATH: registryPath,
+    ...overrides,
+  };
+}
 
 type KnowledgeStatusForTest = {
   status?: string;
@@ -701,7 +711,7 @@ test("runtime observability and context packet routes expose bounded project act
   }
 });
 
-test("canon history route resolves conventions, areas, and changes", () => {
+test("canon history route resolves conventions, areas, and changes", { timeout: HeavyRouteIntegrationTestTimeoutMs }, () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-canon-history-route-"));
   createAuthoringProject(rootDir);
   mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -760,6 +770,7 @@ test("canon history route resolves conventions, areas, and changes", () => {
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", canonHistoryRouteCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
+      timeout: HeavyRouteSubprocessTimeoutMs,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {
@@ -859,12 +870,10 @@ test("runtime client lazily starts a supervised project runtime when none is run
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", ephemeralRuntimeClientCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: {
-        ...process.env,
+      env: sourceRuntimeEnv(registryPath, {
         NODE_ENV: "development",
-        OPENCANON_SERVICE_REGISTRY_PATH: registryPath,
         VITEST: "false",
-      },
+      }),
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
 
@@ -909,10 +918,7 @@ test("runtime client repairs a supervised runtime when the registered endpoint d
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", runtimeClientRepairCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: {
-        ...process.env,
-        OPENCANON_SERVICE_REGISTRY_PATH: registryPath,
-      },
+      env: sourceRuntimeEnv(registryPath),
       timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -937,10 +943,7 @@ test("runtime client repairs a supervised runtime before resuming a stream", asy
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", runtimeClientStreamRepairCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: {
-        ...process.env,
-        OPENCANON_SERVICE_REGISTRY_PATH: registryPath,
-      },
+      env: sourceRuntimeEnv(registryPath),
       timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -965,10 +968,7 @@ test("runtime client repairs a supervised runtime when the pipe endpoint disappe
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", runtimeClientPipeRepairCheckSource(), rootDir], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: {
-        ...process.env,
-        OPENCANON_SERVICE_REGISTRY_PATH: registryPath,
-      },
+      env: sourceRuntimeEnv(registryPath),
       timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);

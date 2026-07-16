@@ -64,8 +64,8 @@ export async function runBriefCommand(args: string[], cwd: string): Promise<void
   const limit = positiveIntegerOption(options.limit, "--limit", 25);
   const result = await withRuntimeClient(cwd, async (client) => {
     const [queue, packet] = await Promise.all([
-      client.query<BriefReadyQueue>("changes.ready"),
-      client.query<BriefPacket>("context.packet", { query: { mode: "agent-brief", limit: String(limit) } }),
+      client.query("changes.ready"),
+      client.query("context.packet", { query: { mode: "agent-brief", limit: String(limit) } }),
     ]);
     return { queue, packet, nextActions: briefNextActions(queue) };
   });

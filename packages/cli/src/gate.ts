@@ -127,7 +127,7 @@ async function currentCommitGates(cwd: string, rootDir: string, paths: ReturnTyp
   if (files.length === 0) fail("No changed project files are available for commit gate approval.");
 
   const result = await withRuntimeClient(cwd, (client) =>
-    client.query<ValidationResult>("validation.run", {
+    client.query("validation.run", {
       body: { files, topics: [], validatorIds: [], project: false },
     }),
   );

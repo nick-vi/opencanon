@@ -341,10 +341,11 @@ export function changeTaskRoutesCheckSource(): string {
       return body.data.data;
     }
     async function post(path, body) {
+      const activityId = path === "/api/changes/events" ? body.id ?? crypto.randomUUID() : undefined;
       const response = await fetch(server.url + path, {
         method: "POST",
-        headers: { ...headers, ...(path === "/api/changes/events" ? { "idempotency-key": body.id ?? crypto.randomUUID() } : {}) },
-        body: JSON.stringify(body),
+        headers: { ...headers, ...(activityId ? { "idempotency-key": activityId } : {}) },
+        body: JSON.stringify(activityId ? { ...body, id: activityId } : body),
       });
       const text = await response.text();
       assert(response.status >= 200 && response.status < 300, text);
@@ -428,6 +429,7 @@ export function changeTaskRoutesCheckSource(): string {
         method: "POST",
         headers: { ...headers, "idempotency-key": "duplicate-claim" },
         body: JSON.stringify({
+          id: "duplicate-claim",
           changeId: "task-change",
           taskId: "model",
           type: "task-claimed",
@@ -452,6 +454,7 @@ export function changeTaskRoutesCheckSource(): string {
         method: "POST",
         headers: { ...headers, "idempotency-key": "early-close" },
         body: JSON.stringify({
+          id: "early-close",
           changeId: "task-change",
           type: "change-closed",
           summary: "Tried to close unfinished Change.",

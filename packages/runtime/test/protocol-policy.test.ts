@@ -39,7 +39,18 @@ test("protocol policy rejects unknown, unauthorized, unversioned, and invalid re
 
 test("keyed commands bind the idempotency key to the declared domain identity", async () => {
   const policy = createRuntimeProtocolPolicy({ authToken: TestToken, currentRevision: () => 1 });
-  const handler = async () => json({ ok: true, data: { recorded: true } });
+  const handler = async () => json({
+    ok: true,
+    data: {
+      event: {
+        id: "event-1",
+        type: "change-started",
+        timestamp: "2026-07-16T08:00:00.000Z",
+        summary: "Started change.",
+      },
+      changes: [],
+    },
+  });
   const request = (key?: string) => new Request(`http://opencanon.runtime${ProtocolRoute.ChangeEvents}`, {
     method: ProtocolHttpMethod.Post,
     headers: {
@@ -47,7 +58,7 @@ test("keyed commands bind the idempotency key to the declared domain identity", 
       "content-type": "application/json",
       ...(key ? { [ProtocolHeader.IdempotencyKey]: key } : {}),
     },
-    body: JSON.stringify({ id: "event-1", changeId: "change", type: "started" }),
+    body: JSON.stringify({ id: "event-1", changeId: "change", type: "change-started", summary: "Started change." }),
   });
 
   assert.equal((await policy.execute(request(), handler)).status, 400);
@@ -107,7 +118,7 @@ test("published queries retry against one stable revision and fail on repeated c
   const stabilized = await policy.execute(request(), async () => {
     attempts += 1;
     if (attempts === 1) revision += 1;
-    return json({ ok: true, data: { results: [] } });
+    return json({ ok: true, data: { index: null, query: "policy", results: [] } });
   });
   assert.equal(stabilized.status, 200);
   assert.equal(attempts, 2);
@@ -115,7 +126,7 @@ test("published queries retry against one stable revision and fail on repeated c
 
   const conflicted = await policy.execute(request(), async () => {
     revision += 1;
-    return json({ ok: true, data: { results: [] } });
+    return json({ ok: true, data: { index: null, query: "policy", results: [] } });
   });
   assert.equal(conflicted.status, 409);
 });
@@ -137,7 +148,7 @@ test("operation capacity is shared across HTTP and pipe until response delivery 
     entered += 1;
     if (entered === 2) signalEntered();
     await released;
-    return json({ ok: true, data: { results: [] } });
+    return json({ ok: true, data: { index: null, query: "policy", results: [] } });
   };
   const routeRequest = (request: Request) => policy.execute(request, handler);
   const http = await serveRuntime({

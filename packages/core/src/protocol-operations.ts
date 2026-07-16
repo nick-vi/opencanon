@@ -1,13 +1,3 @@
-import { z } from "zod";
-import {
-  ReadSemanticIndexStatusResultSchema,
-} from "./contracts-semantic.ts";
-import {
-  RuntimeHealthSchema,
-  RuntimeLiveStateSchema,
-  RuntimeProjectSummarySchema,
-  RuntimeValidatorCatalogSchema,
-} from "./contracts-runtime.ts";
 import {
   DomainProtocolVersion,
   ProtocolAuthorization,
@@ -15,14 +5,13 @@ import {
   ProtocolCost,
   ProtocolHttpMethod,
   ProtocolIdempotency,
-  ProtocolInputSchema,
   ProtocolOperationKind,
-  ProjectProtocolEventSchema,
-  ProtocolEventReplaySchema,
   ProjectionResponseSchema,
   defineProtocolOperation,
   type ProtocolOperationDefinition,
 } from "./protocol.ts";
+import { ProtocolOperationInputSchemas, type ProtocolOperationInputSchemaMap } from "./protocol-inputs.ts";
+import { ProtocolOperationOutputSchemas, type ProtocolOperationOutputSchemaMap } from "./protocol-projections.ts";
 
 export const ProtocolRoute = {
   CanonRelated: "/api/canon/related",
@@ -73,10 +62,6 @@ export const ProtocolRoute = {
 
 export const ProtocolApiPathPrefix = "/api/";
 
-const JsonValueSchema = z.json();
-const PublicHealthSchema = z.object({ status: z.literal("ok") }).strict();
-const HealthOutputSchema = z.union([PublicHealthSchema, RuntimeHealthSchema]);
-
 const Limits = {
   Tiny: Object.freeze({ requestBytes: 16 * 1024, responseBytes: 256 * 1024, concurrency: 32 }),
   Bounded: Object.freeze({ requestBytes: 256 * 1024, responseBytes: 4 * 1024 * 1024, concurrency: 16 }),
@@ -84,10 +69,16 @@ const Limits = {
   Stream: Object.freeze({ requestBytes: 16 * 1024, responseBytes: 64 * 1024, concurrency: 32 }),
 } as const;
 
-type OperationInput<TId extends string = string> = {
+type ProtocolSchemaOperationId = keyof ProtocolOperationInputSchemaMap & keyof ProtocolOperationOutputSchemaMap;
+
+type OperationInput<
+  TId extends ProtocolSchemaOperationId = ProtocolSchemaOperationId,
+  TKind extends ProtocolOperationKind = ProtocolOperationKind,
+  TMethod extends ProtocolHttpMethod = ProtocolHttpMethod,
+> = {
   id: TId;
-  kind: (typeof ProtocolOperationKind)[keyof typeof ProtocolOperationKind];
-  method: (typeof ProtocolHttpMethod)[keyof typeof ProtocolHttpMethod];
+  kind: TKind;
+  method: TMethod;
   path: (typeof ProtocolRoute)[keyof typeof ProtocolRoute];
   authorization?: (typeof ProtocolAuthorization)[keyof typeof ProtocolAuthorization];
   consistency?: (typeof ProtocolConsistency)[keyof typeof ProtocolConsistency];
@@ -96,12 +87,15 @@ type OperationInput<TId extends string = string> = {
   idempotencyKey?: { source: "body"; path: string[] };
   cancellable?: boolean;
   limits?: (typeof Limits)[keyof typeof Limits];
-  outputSchema?: z.ZodType;
 };
 
-function operation<const TId extends string>(input: OperationInput<TId>): ProtocolOperationDefinition<TId> {
+function operation<
+  const TId extends ProtocolSchemaOperationId,
+  const TKind extends ProtocolOperationKind,
+  const TMethod extends ProtocolHttpMethod,
+>(input: OperationInput<TId, TKind, TMethod>) {
   const cost = input.cost ?? ProtocolCost.Bounded;
-  const domainOutputSchema = input.outputSchema ?? JsonValueSchema;
+  const domainOutputSchema = ProtocolOperationOutputSchemas[input.id];
   const idempotency = input.idempotency ?? (input.kind === ProtocolOperationKind.Query || input.kind === ProtocolOperationKind.Stream
     ? ProtocolIdempotency.Safe
     : ProtocolIdempotency.Unsafe);
@@ -117,7 +111,7 @@ function operation<const TId extends string>(input: OperationInput<TId>): Protoc
     cancellable: input.cancellable ?? false,
     limits: input.limits ?? (cost === ProtocolCost.Tiny ? Limits.Tiny : cost === ProtocolCost.Operation ? Limits.Operation : Limits.Bounded),
     span: `opencanon.${input.id}`,
-    inputSchema: ProtocolInputSchema,
+    inputSchema: ProtocolOperationInputSchemas[input.id],
     outputSchema: input.kind === ProtocolOperationKind.Query ? ProjectionResponseSchema(domainOutputSchema) : domainOutputSchema,
   };
   if (idempotency === ProtocolIdempotency.Keyed) {
@@ -127,11 +121,11 @@ function operation<const TId extends string>(input: OperationInput<TId>): Protoc
   return defineProtocolOperation({ ...definition, idempotency });
 }
 
-const query = <const TId extends string>(id: TId, path: OperationInput["path"], input: Omit<OperationInput, "id" | "kind" | "method" | "path"> = {}) =>
+const query = <const TId extends ProtocolSchemaOperationId>(id: TId, path: OperationInput["path"], input: Omit<OperationInput<TId>, "id" | "kind" | "method" | "path"> = {}) =>
   operation({ id, kind: ProtocolOperationKind.Query, method: ProtocolHttpMethod.Get, path, ...input });
-const postQuery = <const TId extends string>(id: TId, path: OperationInput["path"], input: Omit<OperationInput, "id" | "kind" | "method" | "path"> = {}) =>
+const postQuery = <const TId extends ProtocolSchemaOperationId>(id: TId, path: OperationInput["path"], input: Omit<OperationInput<TId>, "id" | "kind" | "method" | "path"> = {}) =>
   operation({ id, kind: ProtocolOperationKind.Query, method: ProtocolHttpMethod.Post, path, ...input });
-const command = <const TId extends string>(id: TId, path: OperationInput["path"], input: Omit<OperationInput, "id" | "kind" | "method" | "path"> = {}) =>
+const command = <const TId extends ProtocolSchemaOperationId>(id: TId, path: OperationInput["path"], input: Omit<OperationInput<TId>, "id" | "kind" | "method" | "path"> = {}) =>
   operation({ id, kind: ProtocolOperationKind.Command, method: ProtocolHttpMethod.Post, path, ...input });
 
 export const ProtocolOperations = Object.freeze([
@@ -140,11 +134,10 @@ export const ProtocolOperations = Object.freeze([
     consistency: ProtocolConsistency.Lifecycle,
     cost: ProtocolCost.Tiny,
     limits: Limits.Tiny,
-    outputSchema: HealthOutputSchema,
   }),
-  query("project.state", ProtocolRoute.State, { consistency: ProtocolConsistency.Lifecycle, cost: ProtocolCost.Tiny, outputSchema: RuntimeLiveStateSchema }),
-  query("project.summary", ProtocolRoute.ProjectSummary, { cost: ProtocolCost.Tiny, outputSchema: RuntimeProjectSummarySchema }),
-  query("knowledge.status", ProtocolRoute.ContextStatus, { cost: ProtocolCost.Tiny, outputSchema: ReadSemanticIndexStatusResultSchema }),
+  query("project.state", ProtocolRoute.State, { consistency: ProtocolConsistency.Lifecycle, cost: ProtocolCost.Tiny }),
+  query("project.summary", ProtocolRoute.ProjectSummary, { cost: ProtocolCost.Tiny }),
+  query("knowledge.status", ProtocolRoute.ContextStatus, { cost: ProtocolCost.Tiny }),
   query("code.symbols", ProtocolRoute.CodeSymbols),
   query("code.graph", ProtocolRoute.CodeGraph),
   query("knowledge.chunks", ProtocolRoute.ContextChunks),
@@ -175,9 +168,8 @@ export const ProtocolOperations = Object.freeze([
     cost: ProtocolCost.Tiny,
     idempotency: ProtocolIdempotency.Safe,
     limits: Limits.Stream,
-    outputSchema: ProjectProtocolEventSchema,
   }),
-  query("events.list", ProtocolRoute.Events, { outputSchema: ProtocolEventReplaySchema }),
+  query("events.list", ProtocolRoute.Events),
   query("observability.list", ProtocolRoute.Observability),
   query("canon.history", ProtocolRoute.CanonHistory),
   query("git.history", ProtocolRoute.GitHistory),
@@ -185,7 +177,7 @@ export const ProtocolOperations = Object.freeze([
   query("producers.list", ProtocolRoute.Producers, { consistency: ProtocolConsistency.Lifecycle, cost: ProtocolCost.Tiny }),
   query("doctor.run", ProtocolRoute.Doctor, { consistency: ProtocolConsistency.Lifecycle, cost: ProtocolCost.Operation, limits: Limits.Operation }),
   postQuery("validation.run", ProtocolRoute.Validate, { cost: ProtocolCost.Operation, limits: Limits.Operation }),
-  query("validators.list", ProtocolRoute.Validators, { outputSchema: RuntimeValidatorCatalogSchema }),
+  query("validators.list", ProtocolRoute.Validators),
   postQuery("feedback.query", ProtocolRoute.Feedback, { cost: ProtocolCost.Operation, limits: Limits.Operation }),
   postQuery("hooks.feedback", ProtocolRoute.HookFeedback, { cost: ProtocolCost.Operation, limits: Limits.Operation }),
   command("knowledge.index", ProtocolRoute.Index, { cost: ProtocolCost.Operation, limits: Limits.Operation }),
@@ -202,14 +194,18 @@ export const ProtocolOperations = Object.freeze([
   query("findings.list", ProtocolRoute.Findings),
   query("gates.pending", ProtocolRoute.GatePending),
   command("gates.approve", ProtocolRoute.GateApprove),
-] satisfies ProtocolOperationDefinition[]);
+] as const satisfies readonly ProtocolOperationDefinition[]);
 
 const operationsById = new Map<string, ProtocolOperationDefinition>(ProtocolOperations.map((item) => [item.id, item]));
 const operationsByRequest = new Map<string, ProtocolOperationDefinition>(ProtocolOperations.map((item) => [operationRequestKey(item.method, item.path), item]));
 
 assertUniqueRegistry();
 
-export type ProtocolOperationId = (typeof ProtocolOperations)[number]["id"];
+export type ProtocolRegisteredOperation = (typeof ProtocolOperations)[number];
+export type ProtocolOperationId = ProtocolRegisteredOperation["id"];
+export type ProtocolQueryOperationId = Extract<ProtocolRegisteredOperation, { kind: typeof ProtocolOperationKind.Query }>["id"];
+export type ProtocolCommandOperationId = Extract<ProtocolRegisteredOperation, { kind: typeof ProtocolOperationKind.Command }>["id"];
+export type ProtocolStreamOperationId = Extract<ProtocolRegisteredOperation, { kind: typeof ProtocolOperationKind.Stream }>["id"];
 
 export function findProtocolOperation(method: string, path: string): ProtocolOperationDefinition | undefined {
   return operationsByRequest.get(operationRequestKey(method, path));

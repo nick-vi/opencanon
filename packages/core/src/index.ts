@@ -844,7 +844,14 @@ export {
   protocolMethodsForPath,
   protocolOperationById,
 } from "./protocol-operations.ts";
-export type { ProtocolOperationId } from "./protocol-operations.ts";
+export type {
+  ProtocolCommandOperationId,
+  ProtocolOperationId,
+  ProtocolQueryOperationId,
+  ProtocolStreamOperationId,
+} from "./protocol-operations.ts";
+export type { ProtocolOperationInput } from "./protocol-inputs.ts";
+export type { ProtocolOperationOutput } from "./protocol-projections.ts";
 export { createOpenCanonOpenApiDocument } from "./protocol-openapi.ts";
 export type { OpenCanonOpenApiDocument } from "./protocol-openapi.ts";
 export {

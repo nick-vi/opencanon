@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { z } from "zod";
 import {
+  BatchProducerPolicy,
   DomainProtocolVersion,
   ProjectProtocolEventSchema,
   ProjectionResponseSchema,
@@ -45,6 +46,7 @@ test("the protocol registry owns every route and method pair exactly once", () =
     assert(operation.limits.requestBytes > 0);
     assert(operation.limits.responseBytes > 0);
     assert(operation.limits.concurrency > 0);
+    assert.equal(operation.inputSchema.safeParse({ unexpected: true }).success, false, `${operation.id} accepted an unknown top-level input field`);
   }
 
   assert.deepEqual([...registeredPaths].sort(), [...new Set(Object.values(ProtocolRoute))].sort());
@@ -58,6 +60,10 @@ test("the protocol registry owns every route and method pair exactly once", () =
   assert.equal(protocolOperationById("gates.approve")?.idempotency, ProtocolIdempotency.Unsafe);
   assert.equal(findProtocolOperation(ProtocolHttpMethod.Get, "/api/snapshot"), undefined);
   assert.equal(protocolOperationById("project.snapshot"), undefined);
+  assert.equal(protocolOperationById("knowledge.search")?.inputSchema.safeParse({ query: { query: "canon", unexpected: "value" } }).success, false);
+  assert.equal(protocolOperationById("settings.write")?.inputSchema.safeParse({ body: { overrides: {}, unexpected: true } }).success, false);
+  assert.equal(protocolOperationById("activity.record")?.inputSchema.safeParse({ body: { changeId: "change", type: "updated", summary: "Updated." } }).success, false);
+  assert.equal(protocolOperationById("validation.run")?.inputSchema.safeParse({ body: { producerPolicy: BatchProducerPolicy } }).success, true);
 });
 
 test("projection and event contracts expose revisions without embedding snapshots", () => {
@@ -94,6 +100,20 @@ test("OpenAPI is deterministic and contains every registered operation", () => {
     const generated = first.paths[operation.path]?.[operation.method.toLowerCase()];
     assert(generated, `missing OpenAPI operation ${operation.id}`);
     assert.equal(generated.operationId, operation.id);
+    assert.equal("x-opencanon-input" in generated, false);
+  }
+
+  const search = first.paths[ProtocolRoute.ContextSearch]?.get;
+  const searchParameters = Array.isArray(search?.parameters) ? search.parameters : [];
+  assert(searchParameters.some((parameter) => recordValue(parameter).name === "query" && recordValue(parameter).required === true));
+  assert(first.paths[ProtocolRoute.Settings]?.post?.requestBody);
+  assert(recordValue(recordValue(recordValue(first.paths[ProtocolRoute.EventsStream]?.get?.responses)["200"]).content)["text/event-stream"]);
+
+  const references = collectSchemaReferences(first);
+  assert(references.length > 0);
+  for (const reference of references) {
+    assert.match(reference, /^#\/components\/schemas\/[A-Za-z0-9_]+$/);
+    assert(first.components.schemas[reference.slice("#/components/schemas/".length)], `missing OpenAPI component ${reference}`);
   }
 });
 
@@ -111,7 +131,7 @@ test("the domain client derives versioned requests from operation ids", async ()
             data: {
               protocolVersion: DomainProtocolVersion,
               revision: 4,
-              data: [{ id: "change-a" }],
+              data: { sourceFiles: 1, symbols: [] },
             },
           },
         };
@@ -122,14 +142,14 @@ test("the domain client derives versioned requests from operation ids", async ()
     },
   });
 
-  const result = await client.query<Array<{ id: string }>>("changes.list", {
-    query: { status: ["ready", "running"], limit: "20" },
+  const result = await client.query("code.symbols", {
+    query: { query: "change", path: "src/a.ts", limit: "20" },
   });
 
-  assert.deepEqual(result.data, [{ id: "change-a" }]);
+  assert.deepEqual(result.data, { sourceFiles: 1, symbols: [] });
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.method, ProtocolHttpMethod.Get);
-  assert.equal(requests[0]?.path, "/api/changes?status=ready&status=running&limit=20");
+  assert.equal(requests[0]?.path, "/api/code/symbols?query=change&path=src%2Fa.ts&limit=20");
   assert.equal(requests[0]?.headers[ProtocolHeader.Version], String(DomainProtocolVersion));
 });
 
@@ -199,7 +219,22 @@ test("keyed commands require and preserve their idempotency key across repair", 
         if (keys.length === 1) {
           throw new ProtocolTransportFailure(ProtocolTransportFailureCode.Unavailable, "endpoint unavailable");
         }
-        return { status: 200, statusText: "OK", body: { ok: true, data: { recorded: true } } };
+        return {
+          status: 200,
+          statusText: "OK",
+          body: {
+            ok: true,
+            data: {
+              event: {
+                id: "event-a",
+                type: "updated",
+                timestamp: "2026-07-16T08:00:00.000Z",
+                summary: "Updated change-a.",
+              },
+              changes: [],
+            },
+          },
+        };
       },
       async stream() {
         throw new Error("stream was not expected");
@@ -211,22 +246,22 @@ test("keyed commands require and preserve their idempotency key across repair", 
   });
 
   await assert.rejects(
-    client.command("activity.record", { body: { id: "event-a" } }),
+    client.command("activity.record", { body: { id: "event-a", changeId: "change-a", type: "updated", summary: "Updated change-a." } }),
     /requires an idempotency key/,
   );
   assert.equal(keys.length, 0);
   await assert.rejects(
-    client.command("activity.record", { body: { id: "event-a" } }, { idempotencyKey: "event-b" }),
+    client.command("activity.record", { body: { id: "event-a", changeId: "change-a", type: "updated", summary: "Updated change-a." } }, { idempotencyKey: "event-b" }),
     /idempotency key.*body\.id/,
   );
   assert.equal(keys.length, 0);
 
-  const result = await client.command<{ recorded: boolean }>(
+  const result = await client.command(
     "activity.record",
-    { body: { id: "event-a" } },
+    { body: { id: "event-a", changeId: "change-a", type: "updated", summary: "Updated change-a." } },
     { idempotencyKey: "event-a" },
   );
-  assert.deepEqual(result, { recorded: true });
+  assert.equal(result.event.id, "event-a");
   assert.deepEqual(keys, ["event-a", "event-a"]);
   assert.equal(repairs, 1);
 });
@@ -267,3 +302,13 @@ test("domain failures and malformed success envelopes remain distinct", async ()
   await assert.rejects(malformedClient.query("changes.list"), (error: unknown) =>
     error instanceof ProtocolTransportFailure && error.code === ProtocolTransportFailureCode.Malformed);
 });
+
+function collectSchemaReferences(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(collectSchemaReferences);
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, item]) => key === "$ref" && typeof item === "string" ? [item] : collectSchemaReferences(item));
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}

@@ -10,7 +10,14 @@ export {
   ProtocolOperations,
   protocolOperationById,
 } from "./protocol-operations.ts";
-export type { ProtocolOperationId } from "./protocol-operations.ts";
+export type {
+  ProtocolCommandOperationId,
+  ProtocolOperationId,
+  ProtocolQueryOperationId,
+  ProtocolStreamOperationId,
+} from "./protocol-operations.ts";
+export type { ProtocolOperationInput } from "./protocol-inputs.ts";
+export type { ProtocolOperationOutput } from "./protocol-projections.ts";
 export {
   ProtocolResponseFailure,
   ProtocolTransportFailure,

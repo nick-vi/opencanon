@@ -13,7 +13,15 @@ import {
   type ProtocolInput,
   type ProtocolOperationDefinition,
 } from "./protocol.ts";
-import { protocolOperationById, type ProtocolOperationId } from "./protocol-operations.ts";
+import type { ProtocolOperationInput } from "./protocol-inputs.ts";
+import {
+  protocolOperationById,
+  type ProtocolCommandOperationId,
+  type ProtocolOperationId,
+  type ProtocolQueryOperationId,
+  type ProtocolStreamOperationId,
+} from "./protocol-operations.ts";
+import type { ProtocolOperationOutput } from "./protocol-projections.ts";
 
 export const ProtocolTransportFailureCode = {
   Cancelled: "cancelled",
@@ -84,9 +92,9 @@ export type ProtocolStreamOptions = ProtocolExecutionOptions & {
 };
 
 export type DomainProtocolClient = {
-  query<T = unknown>(operationId: ProtocolOperationId, input?: ProtocolInput, options?: ProtocolExecutionOptions): Promise<ProjectionResponse<T>>;
-  command<T = unknown>(operationId: ProtocolOperationId, input?: ProtocolInput, options?: ProtocolExecutionOptions): Promise<T>;
-  stream(operationId: ProtocolOperationId, input: ProtocolInput | undefined, options: ProtocolStreamOptions): Promise<void>;
+  query<TId extends ProtocolQueryOperationId>(operationId: TId, input?: ProtocolOperationInput<TId>, options?: ProtocolExecutionOptions): Promise<ProjectionResponse<ProtocolOperationOutput<TId>>>;
+  command<TId extends ProtocolCommandOperationId>(operationId: TId, input?: ProtocolOperationInput<TId>, options?: ProtocolExecutionOptions): Promise<ProtocolOperationOutput<TId>>;
+  stream<TId extends ProtocolStreamOperationId>(operationId: TId, input: ProtocolOperationInput<TId> | undefined, options: ProtocolStreamOptions): Promise<void>;
 };
 
 const SuccessEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
@@ -97,46 +105,48 @@ export function createDomainProtocolClient(input: {
   repair?(failure: ProtocolTransportFailure, operation: ProtocolOperationDefinition): Promise<void>;
 }): DomainProtocolClient {
   return {
-    async query<T>(operationId: ProtocolOperationId, operationInput: ProtocolInput = {}, options: ProtocolExecutionOptions = {}) {
+    async query<TId extends ProtocolQueryOperationId>(operationId: TId, operationInput: ProtocolOperationInput<TId> | undefined, options: ProtocolExecutionOptions = {}) {
       const operation = requireOperation(operationId, ProtocolOperationKind.Query);
-      return await execute<T>(input, operation, operationInput, options) as ProjectionResponse<T>;
+      return await execute(input, operation, operationInput ?? {}, options) as ProjectionResponse<ProtocolOperationOutput<TId>>;
     },
-    async command<T>(operationId: ProtocolOperationId, operationInput: ProtocolInput = {}, options: ProtocolExecutionOptions = {}) {
+    async command<TId extends ProtocolCommandOperationId>(operationId: TId, operationInput: ProtocolOperationInput<TId> | undefined, options: ProtocolExecutionOptions = {}) {
       const operation = requireOperation(operationId, ProtocolOperationKind.Command);
-      return await execute<T>(input, operation, operationInput, options) as T;
+      return await execute(input, operation, operationInput ?? {}, options) as ProtocolOperationOutput<TId>;
     },
-    async stream(operationId, operationInput = {}, options) {
+    async stream<TId extends ProtocolStreamOperationId>(operationId: TId, operationInput: ProtocolOperationInput<TId> | undefined, options: ProtocolStreamOptions) {
       const operation = requireOperation(operationId, ProtocolOperationKind.Stream);
-      const request = protocolTransportRequest(operation, operationInput, options);
+      const request = protocolTransportRequest(operation, operationInput ?? {}, options);
       await withTransportRepair(input, operation, options, () => input.transport.stream({ ...request, ...options }));
     },
   };
 }
 
-export function protocolInputFromSearchParams(searchParams: URLSearchParams): ProtocolInput {
-  const query: NonNullable<ProtocolInput["query"]> = {};
+export function protocolInputFromSearchParams<TId extends ProtocolOperationId>(operationId: TId, searchParams: URLSearchParams): ProtocolOperationInput<TId> {
+  const query: Record<string, string | string[]> = {};
   for (const key of new Set(searchParams.keys())) {
     const values = searchParams.getAll(key);
     query[key] = values.length === 1 ? values[0]! : values;
   }
-  return Object.keys(query).length > 0 ? { query } : {};
+  const operation = protocolOperationById(operationId);
+  if (!operation) throw new Error(`Unknown OpenCanon protocol operation: ${operationId}.`);
+  return operation.inputSchema.parse(Object.keys(query).length > 0 ? { query } : {}) as ProtocolOperationInput<TId>;
 }
 
 export function isProtocolTransportFailure(error: unknown): error is ProtocolTransportFailure {
   return error instanceof ProtocolTransportFailure;
 }
 
-async function execute<T>(
+async function execute(
   client: { transport: ProtocolClientTransport; repair?(failure: ProtocolTransportFailure, operation: ProtocolOperationDefinition): Promise<void> },
   operation: ProtocolOperationDefinition,
   operationInput: ProtocolInput,
   options: ProtocolExecutionOptions,
-): Promise<T | ProjectionResponse<T>> {
+): Promise<unknown> {
   const request = protocolTransportRequest(operation, operationInput, options);
   const response = await withTransportRepair(client, operation, options, () => client.transport.request(request));
   const success = SuccessEnvelopeSchema.safeParse(response.body);
   if (response.status >= 200 && response.status < 300 && success.success) {
-    return operation.outputSchema.parse(success.data.data) as T | ProjectionResponse<T>;
+    return operation.outputSchema.parse(success.data.data);
   }
   const failure = OpenCanonFailureSchema.safeParse(response.body);
   if (failure.success) throw new ProtocolResponseFailure(response.status, failure.data);

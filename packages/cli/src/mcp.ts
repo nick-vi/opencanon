@@ -186,7 +186,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       params.set("limit", String(input.limit ?? 20));
       for (const item of input.paths ?? []) params.append("path", item);
       const result = await withRuntimeClient<ProjectContextSearchResult>(query.rootDir, (client) =>
-        client.query("knowledge.search", protocolInputFromSearchParams(params)),
+        client.query("knowledge.search", protocolInputFromSearchParams("knowledge.search", params)),
       );
       return jsonToolResult(result);
     },
@@ -205,7 +205,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       const params = new URLSearchParams();
       params.set("query", input.question);
       const result = await withRuntimeClient<ProjectContextAskResult>(query.rootDir, (client) =>
-        client.query("knowledge.ask", protocolInputFromSearchParams(params)),
+        client.query("knowledge.ask", protocolInputFromSearchParams("knowledge.ask", params)),
       );
       return jsonToolResult(result);
     },
@@ -230,7 +230,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       for (const item of input.paths ?? []) params.append("path", item);
       for (const item of input.definitions ?? []) params.append("definition", item);
       const result = await withRuntimeClient<ListSemanticChunksResult>(query.rootDir, (client) =>
-        client.query("knowledge.chunks", protocolInputFromSearchParams(params)),
+        client.query("knowledge.chunks", protocolInputFromSearchParams("knowledge.chunks", params)),
       );
       return jsonToolResult(result);
     },
@@ -262,7 +262,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       const params = new URLSearchParams();
       params.set("query", input.query);
       const result = await withRuntimeClient<ProjectContextBacklinksResult>(query.rootDir, (client) =>
-        client.query("knowledge.backlinks", protocolInputFromSearchParams(params)),
+        client.query("knowledge.backlinks", protocolInputFromSearchParams("knowledge.backlinks", params)),
       );
       return jsonToolResult(result);
     },
