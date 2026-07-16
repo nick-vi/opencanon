@@ -14,6 +14,8 @@ export function unchangedProjectRefreshCandidate(input: {
   store: ProjectStore;
   summary: string;
   finishWorkerJob(id: string, status: typeof RuntimeWorkerJobStatusValue.Succeeded, patch: WorkerJobPatch): void;
+  cancelWorkerJob(id: string): void;
+  finalizeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot;
 }): RuntimeRebuildCandidate {
   return {
     snapshot: input.snapshot,
@@ -25,7 +27,7 @@ export function unchangedProjectRefreshCandidate(input: {
       });
       return { snapshot: input.snapshot, event: result.event };
     },
-    afterPublished() {
+    finalizePublished(snapshot) {
       input.finishWorkerJob(input.jobId, RuntimeWorkerJobStatusValue.Succeeded, {
         label: "Project state current",
         current: input.snapshot.files.length,
@@ -42,6 +44,10 @@ export function unchangedProjectRefreshCandidate(input: {
         total: input.snapshot.files.length,
         unit: "files",
       }));
+      return input.finalizeSnapshot(snapshot);
+    },
+    discard() {
+      input.cancelWorkerJob(input.jobId);
     },
   };
 }

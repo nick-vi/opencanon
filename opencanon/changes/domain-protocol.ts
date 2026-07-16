@@ -110,7 +110,7 @@ export const domainProtocolChanges = [
       {
         id: "shutdown-integrity",
         title: "Cancel runtime work before shutdown waits",
-        files: ["opencanon/specs/index.ts", "docs/opencanon/specs/project-runtime-lifecycle-spec.md", "packages/runtime/src/{server,state-manager}.ts", "packages/runtime/test/{client,state-manager,service}.test.ts"],
+        files: ["opencanon/specs/index.ts", "docs/opencanon/specs/project-runtime-lifecycle-spec.md", "packages/core/src/contracts-runtime.ts", "packages/runtime/src/{project-refresh-publication,runtime-health,runtime-shutdown,runtime-worker-jobs,server,state-manager}.ts", "packages/runtime/test/{client,state-manager,service}.test.ts"],
         checks: ["coordinator-tests", "runtime-client-tests", "typecheck", "process-steady-state"],
         dependsOn: ["publication-integrity"],
       },

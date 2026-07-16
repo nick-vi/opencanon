@@ -17,7 +17,6 @@ test("RuntimeStateManager serializes rebuilds and publishes only the latest obse
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary) {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -55,7 +54,6 @@ test("RuntimeStateManager coalesces queued watch rebuilds to the latest revision
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary) {
       calls.push(summary);
       return candidate(snapshot(summary));
@@ -89,7 +87,6 @@ test("RuntimeStateManager cancels superseded active analysis and publishes the n
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary, _options, signal) {
       calls.push(summary);
       if (summary === "first") {
@@ -134,7 +131,6 @@ test("RuntimeStateManager commits only the accepted analysis candidate", async (
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary) {
       if (summary === "first") await firstBlocked;
       const value = snapshot(summary);
@@ -179,7 +175,6 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary) {
       await blocked;
       return candidate(snapshot(summary));
@@ -205,6 +200,7 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
 
 test("RuntimeStateManager continues persisted revisions and isolates post-publication observers", async () => {
   const notifications: string[] = [];
+  const observerSnapshots: string[] = [];
   let committedRevision = 0;
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("persisted"),
@@ -212,7 +208,6 @@ test("RuntimeStateManager continues persisted revisions and isolates post-public
     initialChangeCatalog: catalog("persisted"),
     initialProjectInventory: inventory("persisted"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary) {
       const value = snapshot(summary);
       return {
@@ -222,14 +217,16 @@ test("RuntimeStateManager continues persisted revisions and isolates post-public
           committedRevision = revision;
           return { snapshot: value, event: publicationEvent(revision) };
         },
-        afterPublished() {
+        finalizePublished() {
           notifications.push("candidate");
+          return snapshot("finalized");
         },
       };
     },
     readProjectInventory: () => inventory("next"),
-    onPublished() {
+    onPublished(publication) {
       notifications.push("observer");
+      observerSnapshots.push(snapshotId(publication.snapshot));
       throw new Error("observer failed after commit");
     },
     onPublicationNotificationError() {
@@ -243,10 +240,12 @@ test("RuntimeStateManager continues persisted revisions and isolates post-public
 
   const published = await manager.rebuildAndPublish("next");
 
-  assert.equal(snapshotId(published), "next");
+  assert.equal(snapshotId(published), "finalized");
+  assert.equal(snapshotId(manager.currentSnapshot()), "finalized");
   assert.equal(committedRevision, 8);
   assert.deepEqual(manager.lifecycle().revision, { observed: 8, accepted: 8, published: 8 });
-  assert.deepEqual(notifications, ["observer", "reported", "candidate"]);
+  assert.deepEqual(notifications, ["candidate", "observer", "reported"]);
+  assert.deepEqual(observerSnapshots, ["finalized"]);
 });
 
 test("RuntimeStateManager starts exclusive operations only after project analysis settles", async () => {
@@ -265,7 +264,6 @@ test("RuntimeStateManager starts exclusive operations only after project analysi
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary) {
       order.push(`analysis:${summary}`);
       markAnalysisStarted();
@@ -309,7 +307,6 @@ test("RuntimeStateManager queues project refresh behind an exclusive operation",
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow(summary) {
       order.push(`analysis:${summary}`);
       return candidate(snapshot(summary));
@@ -350,7 +347,6 @@ test("RuntimeStateManager revision waits fail with lifecycle diagnostics", async
     initialChangeCatalog: catalog("initial"),
     initialProjectInventory: inventory("initial"),
     initialValidationResultCache: createEphemeralValidationResultCache(),
-    isStopped: () => false,
     async rebuildNow() {
       return await new Promise<ReturnType<typeof candidate>>(() => undefined);
     },
@@ -365,7 +361,164 @@ test("RuntimeStateManager revision waits fail with lifecycle diagnostics", async
     manager.waitForRevision(revision, { timeoutMs: 10 }),
     /Current lifecycle:.*\"observed\":2.*\"published\":1/,
   );
-  manager.stop();
+  manager.beginShutdown();
+});
+
+test("RuntimeStateManager cancels active analysis and drops queued refreshes before shutdown waits", async () => {
+  const calls: string[] = [];
+  const rebuildErrors: unknown[] = [];
+  let markStarted!: () => void;
+  let markAborted!: () => void;
+  let releaseCancellation!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const aborted = new Promise<void>((resolve) => {
+    markAborted = resolve;
+  });
+  const cancellationSettled = new Promise<void>((resolve) => {
+    releaseCancellation = resolve;
+  });
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
+    initialChangeCatalog: catalog("initial"),
+    initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    async rebuildNow(summary, _options, signal) {
+      calls.push(summary);
+      markStarted();
+      await new Promise<void>((resolve) => {
+        signal.addEventListener("abort", () => {
+          markAborted();
+          void cancellationSettled.then(resolve);
+        }, { once: true });
+      });
+      throw new Error("analysis cancelled");
+    },
+    readProjectInventory: () => inventory("never"),
+    onRebuildError(error) {
+      rebuildErrors.push(error);
+    },
+  });
+
+  manager.scheduleRebuild("active");
+  await started;
+  const queuedRevision = manager.scheduleRebuild("queued");
+  manager.beginShutdown();
+
+  await aborted;
+  assert.equal(manager.lifecycle().phase, "stopping");
+  assert.equal(manager.lifecycle().failure, undefined);
+  await assert.rejects(manager.waitForRevision(queuedRevision), /stopped before the requested revision/u);
+  assert.throws(() => manager.scheduleRebuild("late"), /runtime is stopping/u);
+  await assert.rejects(
+    manager.runExclusiveOperation("late operation", async () => undefined),
+    /runtime is stopping/u,
+  );
+
+  let idle = false;
+  const waiting = manager.waitForIdle({ timeoutMs: 1_000 }).then(() => {
+    idle = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(idle, false, "shutdown must wait for the cancelled callback to settle");
+  releaseCancellation();
+  await waiting;
+  manager.finishShutdown();
+
+  assert.deepEqual(calls, ["active"]);
+  assert.deepEqual(rebuildErrors, []);
+  assert.equal(manager.lifecycle().phase, "stopped");
+  assert.equal(manager.hasPendingWork(), false);
+});
+
+test("RuntimeStateManager owns cancellation for an active exclusive operation", async () => {
+  let markStarted!: () => void;
+  let markAborted!: () => void;
+  let releaseCancellation!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const aborted = new Promise<void>((resolve) => {
+    markAborted = resolve;
+  });
+  const cancellationSettled = new Promise<void>((resolve) => {
+    releaseCancellation = resolve;
+  });
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
+    initialChangeCatalog: catalog("initial"),
+    initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    async rebuildNow(summary) {
+      return candidate(snapshot(summary));
+    },
+    readProjectInventory: () => inventory("ready"),
+    onRebuildError() {
+      throw new Error("unexpected rebuild error");
+    },
+  });
+
+  const operation = manager.runExclusiveOperation("Project Knowledge indexing", async (signal) => {
+    markStarted();
+    await new Promise<void>((resolve) => {
+      signal.addEventListener("abort", () => {
+        markAborted();
+        void cancellationSettled.then(resolve);
+      }, { once: true });
+    });
+    throw new Error("index cancelled");
+  });
+  await started;
+  manager.beginShutdown();
+  await aborted;
+  assert.deepEqual(manager.lifecycle().operation, { label: "Project Knowledge indexing" });
+
+  const rejected = assert.rejects(operation, /index cancelled/u);
+  releaseCancellation();
+  await rejected;
+  await manager.waitForIdle({ timeoutMs: 1_000 });
+  manager.finishShutdown();
+
+  assert.equal(manager.lifecycle().operation, undefined);
+  assert.equal(manager.lifecycle().phase, "stopped");
+});
+
+test("RuntimeStateManager reports an explicit timeout when owned work ignores cancellation", async () => {
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("initial"),
+    initialRevision: 1,
+    initialChangeCatalog: catalog("initial"),
+    initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    async rebuildNow(summary) {
+      return candidate(snapshot(summary));
+    },
+    readProjectInventory: () => inventory("ready"),
+    onRebuildError() {
+      throw new Error("unexpected rebuild error");
+    },
+  });
+
+  void manager.runExclusiveOperation("Non-cooperative operation", async () => {
+    markStarted();
+    return await new Promise<never>(() => undefined);
+  });
+  await started;
+  manager.beginShutdown();
+
+  await assert.rejects(
+    manager.waitForIdle({ timeoutMs: 10 }),
+    /did not become idle within .*"operation":\{"label":"Non-cooperative operation"\}/u,
+  );
+  assert.throws(() => manager.finishShutdown(), /cannot finish shutdown while work is active/u);
+  assert.equal(manager.lifecycle().phase, "stopping");
 });
 
 function snapshot(id: string): RuntimeSnapshot {

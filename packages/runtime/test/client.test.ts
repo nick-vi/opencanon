@@ -278,6 +278,113 @@ test("Project Knowledge worker failure leaves the serving runtime healthy", asyn
   }
 });
 
+test("runtime shutdown cancels Project Knowledge before waiting for operation settlement", { timeout: 30_000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-shutdown-index-"));
+  createAuthoringProject(rootDir);
+  let markStarted!: () => void;
+  let markAborted!: () => void;
+  let releaseCancellation!: () => void;
+  let stopped = false;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const aborted = new Promise<void>((resolve) => {
+    markAborted = resolve;
+  });
+  const cancellationSettled = new Promise<void>((resolve) => {
+    releaseCancellation = resolve;
+  });
+  const server = await startOpenCanonRuntime({
+    cwd: rootDir,
+    port: 0,
+    onStopped() {
+      stopped = true;
+    },
+    async runKnowledgeIndexOperation(input) {
+      markStarted();
+      return await new Promise<never>((_resolve, reject) => {
+        input.signal?.addEventListener("abort", () => {
+          markAborted();
+          void cancellationSettled.then(() => reject(new Error("index cancelled")));
+        }, { once: true });
+      });
+    },
+  });
+  try {
+    const request = fetch(server.url + "/api/index", {
+      method: "POST",
+      headers: runtimeAuthHeaders(server.authToken),
+    }).catch((error: unknown) => error);
+    await started;
+    const stopping = server.stop();
+    await aborted;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(stopped, false, "resource finalization must wait for the cancelled callback");
+
+    releaseCancellation();
+    await stopping;
+    await request;
+    assert.equal(stopped, true);
+  } finally {
+    await server.stop().catch(() => undefined);
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime shutdown fails explicitly when an operation misses the cancellation deadline", { timeout: 30_000 }, async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-shutdown-timeout-"));
+  createAuthoringProject(rootDir);
+  let markStarted!: () => void;
+  let releaseOperation!: () => void;
+  let markStopped!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    releaseOperation = resolve;
+  });
+  const stopped = new Promise<void>((resolve) => {
+    markStopped = resolve;
+  });
+  const server = await startOpenCanonRuntime({
+    cwd: rootDir,
+    port: 0,
+    shutdownTimeoutMs: 20,
+    onStopped: markStopped,
+    async runKnowledgeIndexOperation() {
+      markStarted();
+      await released;
+      throw new Error("delayed cancellation settlement");
+    },
+  });
+  const request = fetch(server.url + "/api/index", {
+    method: "POST",
+    headers: runtimeAuthHeaders(server.authToken),
+  }).catch((error: unknown) => error);
+  try {
+    await started;
+    await assert.rejects(
+      server.stop(),
+      /shutdown did not settle within 20ms.*Project coordinator.*"operation":\{"label":"Project Knowledge indexing"\}/u,
+    );
+
+    releaseOperation();
+    await new Promise<void>((resolve, reject) => {
+      const failure = setTimeout(() => reject(new Error("Deferred runtime cleanup did not finish.")), 2_000);
+      failure.unref?.();
+      void stopped.then(() => {
+        clearTimeout(failure);
+        resolve();
+      });
+    });
+    await request;
+  } finally {
+    releaseOperation();
+    await stopped;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("Project Knowledge watcher refreshes an existing index after file changes", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-watch-"));
   const registryPath = path.join(rootDir, ".opencanon/test-service-registry.json");

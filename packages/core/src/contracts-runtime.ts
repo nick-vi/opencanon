@@ -81,6 +81,10 @@ const RuntimeLifecycleOperationSchema = z.object({
   summary: z.string().min(1),
 });
 
+const RuntimeLifecycleExclusiveOperationSchema = z.object({
+  label: z.string().min(1),
+});
+
 export const RuntimeLifecycleStateSchema = z.object({
   phase: z.enum([
     RuntimeLifecyclePhaseValue.TransportReady,
@@ -94,6 +98,7 @@ export const RuntimeLifecycleStateSchema = z.object({
   settled: z.boolean(),
   active: RuntimeLifecycleOperationSchema.optional(),
   queued: RuntimeLifecycleOperationSchema.optional(),
+  operation: RuntimeLifecycleExclusiveOperationSchema.optional(),
   failure: z.object({ revision: z.number().int().positive(), message: z.string().min(1) }).optional(),
 });
 export type RuntimeLifecycleState = z.infer<typeof RuntimeLifecycleStateSchema>;

@@ -23,11 +23,12 @@ export type RuntimeStateManager = {
   lifecycle(): RuntimeLifecycleState;
   rebuildAndPublish(summary: string, options?: RuntimeRebuildOptions): Promise<RuntimeSnapshot>;
   scheduleRebuild(summary: string, options?: RuntimeRebuildOptions): number;
-  runExclusiveOperation<T>(label: string, operation: () => Promise<T>, options?: RuntimeWaitOptions): Promise<T>;
+  runExclusiveOperation<T>(label: string, operation: (signal: AbortSignal) => Promise<T>, options?: RuntimeWaitOptions): Promise<T>;
   waitForRevision(revision: number, options?: RuntimeWaitOptions): Promise<RuntimeSnapshot>;
   waitForIdle(options?: RuntimeWaitOptions): Promise<void>;
   hasPendingWork(): boolean;
-  stop(): void;
+  beginShutdown(): void;
+  finishShutdown(): void;
 };
 
 export type RuntimeRebuildOptions = Record<string, never>;
@@ -36,7 +37,7 @@ export type RuntimeRebuildCandidate = {
   snapshot: RuntimeSnapshot;
   changeCatalog: RuntimeChangeCatalog;
   commit(revision: number): RuntimeRebuildPublication;
-  afterPublished?(): void;
+  finalizePublished?(snapshot: RuntimeSnapshot): RuntimeSnapshot;
   discard?(): Promise<void> | void;
 };
 
@@ -51,7 +52,6 @@ export type RuntimeStateManagerOptions = {
   initialChangeCatalog: RuntimeChangeCatalog;
   initialProjectInventory: ProjectInventory;
   initialValidationResultCache: ValidationResultCache;
-  isStopped(): boolean;
   rebuildNow(summary: string, options: RuntimeRebuildOptions, signal: AbortSignal): Promise<RuntimeRebuildCandidate>;
   readProjectInventory(): ProjectInventory;
   onPublished?(input: { revision: number; snapshot: RuntimeSnapshot; summary: string; event: ProjectProtocolEvent }): void;
@@ -66,10 +66,18 @@ type RevisionWaiter = {
   reject(error: Error): void;
   cleanup(): void;
 };
-type IdleWaiter = {
-  resolve(): void;
-  reject(error: Error): void;
-  cleanup(): void;
+const RuntimeShutdownStateValue = {
+  Running: "running",
+  Stopping: "stopping",
+  Stopped: "stopped",
+} as const;
+type RuntimeShutdownState = (typeof RuntimeShutdownStateValue)[keyof typeof RuntimeShutdownStateValue];
+type ExclusiveOperation = {
+  label: string;
+  controller: AbortController;
+  completion: Promise<void>;
+  resolveCompletion(): void;
+  detachCallerSignal(): void;
 };
 
 export function createRuntimeStateManager(options: RuntimeStateManagerOptions): RuntimeStateManager {
@@ -91,24 +99,29 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   let failure: RuntimeLifecycleState["failure"];
   let loop: Promise<void> | undefined;
   let activeAbortController: AbortController | undefined;
-  let exclusiveOperation: string | undefined;
-  let stopped = false;
+  let exclusiveOperation: ExclusiveOperation | undefined;
+  let shutdownState: RuntimeShutdownState = RuntimeShutdownStateValue.Running;
   const waiters = new Set<RevisionWaiter>();
-  const idleWaiters = new Set<IdleWaiter>();
 
   function lifecycle(): RuntimeLifecycleState {
     return {
       phase,
       revision: { ...revision },
-      settled: !active && !queued && !exclusiveOperation && revision.observed === revision.published && phase !== RuntimeLifecyclePhaseValue.Failed,
+      settled:
+        phase === RuntimeLifecyclePhaseValue.Ready
+        && !active
+        && !queued
+        && !exclusiveOperation
+        && revision.observed === revision.published,
       ...(active ? { active: { revision: active.revision, summary: active.summary } } : {}),
       ...(queued ? { queued: { revision: queued.revision, summary: queued.summary } } : {}),
+      ...(exclusiveOperation ? { operation: { label: exclusiveOperation.label } } : {}),
       ...(failure ? { failure } : {}),
     };
   }
 
   function requestRebuild(summary: string, inputOptions?: RuntimeRebuildOptions): number {
-    if (stopped || options.isStopped()) throw new Error("Project runtime is stopping; no new rebuild can be scheduled.");
+    assertAcceptingWork("rebuild");
     const nextRevision = revision.observed + 1;
     revision = { ...revision, observed: nextRevision, accepted: nextRevision };
     queued = { revision: nextRevision, summary, options: inputOptions ?? {} };
@@ -120,16 +133,16 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   }
 
   function startLoop(): void {
-    if (loop || stopped || exclusiveOperation) return;
+    if (loop || shutdownState !== RuntimeShutdownStateValue.Running || exclusiveOperation) return;
     const running = runLoop().finally(() => {
       if (loop === running) loop = undefined;
-      if (queued && !stopped && !exclusiveOperation) startLoop();
+      if (queued && shutdownState === RuntimeShutdownStateValue.Running && !exclusiveOperation) startLoop();
     });
     loop = running;
   }
 
   async function runLoop(): Promise<void> {
-    while (queued && !stopped && !exclusiveOperation) {
+    while (queued && shutdownState === RuntimeShutdownStateValue.Running && !exclusiveOperation) {
       const intent = queued;
       queued = undefined;
       active = intent;
@@ -138,7 +151,9 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       phase = RuntimeLifecyclePhaseValue.Refreshing;
       try {
         const candidate = await options.rebuildNow(intent.summary, intent.options, abortController.signal);
-        if (intent.revision === revision.observed) {
+        if (shutdownState !== RuntimeShutdownStateValue.Running) {
+          await candidate.discard?.();
+        } else if (intent.revision === revision.observed) {
           const publication = candidate.commit(intent.revision);
           snapshot = publication.snapshot;
           changeCatalog = candidate.changeCatalog;
@@ -146,6 +161,11 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
           revision = { ...revision, published: intent.revision };
           phase = RuntimeLifecyclePhaseValue.Ready;
           failure = undefined;
+          try {
+            if (candidate.finalizePublished) snapshot = candidate.finalizePublished(snapshot);
+          } catch (error) {
+            reportPublicationNotificationError(error);
+          }
           try {
             options.onPublished?.({
               revision: intent.revision,
@@ -156,17 +176,12 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
           } catch (error) {
             reportPublicationNotificationError(error);
           }
-          try {
-            candidate.afterPublished?.();
-          } catch (error) {
-            reportPublicationNotificationError(error);
-          }
           resolvePublishedWaiters();
         } else {
           await candidate.discard?.();
         }
       } catch (error) {
-        if (abortController.signal.aborted && queued) continue;
+        if (abortController.signal.aborted && (queued || shutdownState !== RuntimeShutdownStateValue.Running)) continue;
         const normalized = error instanceof Error ? error : new Error(String(error));
         failure = { revision: intent.revision, message: normalized.message };
         phase = RuntimeLifecyclePhaseValue.Failed;
@@ -177,7 +192,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
         if (active?.revision === intent.revision) active = undefined;
       }
     }
-    if (!stopped && !failure && revision.published === revision.observed) phase = RuntimeLifecyclePhaseValue.Ready;
+    if (shutdownState === RuntimeShutdownStateValue.Running && !failure && revision.published === revision.observed) phase = RuntimeLifecyclePhaseValue.Ready;
   }
 
   function resolvePublishedWaiters(): void {
@@ -209,7 +224,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   function waitForRevision(target: number, waitOptions: RuntimeWaitOptions = {}): Promise<RuntimeSnapshot> {
     if (!Number.isSafeInteger(target) || target < 1) return Promise.reject(new Error(`Invalid runtime revision: ${target}.`));
     if (revision.published >= target) return Promise.resolve(snapshot);
-    if (stopped) return Promise.reject(new Error("Project runtime stopped before the requested revision was published."));
+    if (shutdownState !== RuntimeShutdownStateValue.Running) return Promise.reject(shutdownRevisionError());
     if (failure && failure.revision >= target && !queued && !active) return Promise.reject(new Error(failure.message));
     return new Promise<RuntimeSnapshot>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -245,51 +260,22 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   }
 
   async function waitForRebuildIdle(waitOptions: RuntimeWaitOptions): Promise<void> {
-    while (!stopped) {
+    while (shutdownState === RuntimeShutdownStateValue.Running) {
       const target = revision.observed;
       if (target > revision.published) await waitForRevision(target, waitOptions);
       const runningLoop = loop;
-      if (runningLoop) await runningLoop;
+      if (runningLoop) await awaitOperationSettlement(runningLoop, waitOptions, `Project analysis did not settle`);
       if (!active && !queued && revision.observed === revision.published) return;
     }
-    throw new Error("Project runtime stopped before project operations became idle.");
+    throw new Error("Project runtime is stopping; no new project operation can start.");
   }
 
-  function waitForExclusiveIdle(waitOptions: RuntimeWaitOptions): Promise<void> {
-    if (!exclusiveOperation) return Promise.resolve();
-    if (stopped) return Promise.reject(new Error("Project runtime stopped before project operations became idle."));
-    return new Promise<void>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const onAbort = () => finish(new Error("Waiting for project operations was cancelled."));
-      const finish = (error?: Error) => {
-        if (!idleWaiters.delete(waiter)) return;
-        waiter.cleanup();
-        if (error) reject(error);
-        else resolve();
-      };
-      const waiter: IdleWaiter = {
-        resolve: () => finish(),
-        reject: (error) => finish(error),
-        cleanup() {
-          if (timer) clearTimeout(timer);
-          waitOptions.signal?.removeEventListener("abort", onAbort);
-        },
-      };
-      if (waitOptions.signal?.aborted) {
-        reject(new Error("Waiting for project operations was cancelled."));
-        return;
-      }
-      idleWaiters.add(waiter);
-      waitOptions.signal?.addEventListener("abort", onAbort, { once: true });
-      if (waitOptions.timeoutMs && waitOptions.timeoutMs > 0) {
-        timer = setTimeout(() => finish(new Error(`Project operation ${exclusiveOperation ?? "unknown"} did not finish within ${waitOptions.timeoutMs}ms.`)), waitOptions.timeoutMs);
-        timer.unref?.();
-      }
-    });
+  function assertAcceptingWork(kind: string): void {
+    if (shutdownState !== RuntimeShutdownStateValue.Running) throw new Error(`Project runtime is stopping; no new ${kind} can start.`);
   }
 
-  function resolveIdleWaiters(): void {
-    for (const waiter of [...idleWaiters]) waiter.resolve();
+  function operationInProgress(): ExclusiveOperation | undefined {
+    return exclusiveOperation;
   }
 
   return {
@@ -311,45 +297,107 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     },
     scheduleRebuild: requestRebuild,
     async runExclusiveOperation(label, operation, waitOptions = {}) {
-      if (exclusiveOperation) throw new Error(`Project operation already running: ${exclusiveOperation}.`);
+      assertAcceptingWork("project operation");
+      const activeOperation = operationInProgress();
+      if (activeOperation) throw new Error(`Project operation already running: ${activeOperation.label}.`);
       await waitForRebuildIdle(waitOptions);
-      if (exclusiveOperation) throw new Error(`Project operation already running: ${exclusiveOperation}.`);
+      assertAcceptingWork("project operation");
+      const concurrentOperation = operationInProgress();
+      if (concurrentOperation) throw new Error(`Project operation already running: ${concurrentOperation.label}.`);
       if (waitOptions.signal?.aborted) throw new Error("Project operation was cancelled before it started.");
-      exclusiveOperation = label;
+      const controller = new AbortController();
+      const onCallerAbort = () => controller.abort(waitOptions.signal?.reason);
+      waitOptions.signal?.addEventListener("abort", onCallerAbort, { once: true });
+      if (waitOptions.signal?.aborted) controller.abort(waitOptions.signal.reason);
+      let resolveCompletion!: () => void;
+      const current: ExclusiveOperation = {
+        label,
+        controller,
+        completion: new Promise<void>((resolve) => {
+          resolveCompletion = resolve;
+        }),
+        resolveCompletion: () => resolveCompletion(),
+        detachCallerSignal: () => waitOptions.signal?.removeEventListener("abort", onCallerAbort),
+      };
+      exclusiveOperation = current;
       try {
-        return await operation();
+        return await operation(controller.signal);
       } finally {
-        exclusiveOperation = undefined;
-        resolveIdleWaiters();
-        if (queued && !stopped) startLoop();
+        current.detachCallerSignal();
+        if (exclusiveOperation === current) exclusiveOperation = undefined;
+        current.resolveCompletion();
+        if (queued && shutdownState === RuntimeShutdownStateValue.Running) startLoop();
       }
     },
     waitForRevision,
     async waitForIdle(waitOptions = {}) {
-      while (!stopped) {
-        await waitForRebuildIdle(waitOptions);
-        await waitForExclusiveIdle(waitOptions);
-        if (!active && !queued && !loop && !exclusiveOperation && revision.observed === revision.published) return;
+      const deadline = waitOptions.timeoutMs && waitOptions.timeoutMs > 0 ? Date.now() + waitOptions.timeoutMs : undefined;
+      while (active || queued || loop || exclusiveOperation) {
+        const pending = loop ?? exclusiveOperation?.completion;
+        if (!pending) continue;
+        const remaining = deadline === undefined ? undefined : Math.max(1, deadline - Date.now());
+        await awaitOperationSettlement(
+          pending,
+          { ...waitOptions, ...(remaining === undefined ? {} : { timeoutMs: remaining }) },
+          `Project runtime did not become idle`,
+        );
       }
-      throw new Error("Project runtime stopped before project operations became idle.");
     },
     hasPendingWork() {
-      return Boolean(active || queued || loop || exclusiveOperation) || revision.observed !== revision.published;
+      return Boolean(active || queued || loop || exclusiveOperation)
+        || (shutdownState === RuntimeShutdownStateValue.Running && revision.observed !== revision.published);
     },
-    stop() {
-      if (stopped) return;
-      stopped = true;
-      activeAbortController?.abort();
+    beginShutdown() {
+      if (shutdownState !== RuntimeShutdownStateValue.Running) return;
+      shutdownState = RuntimeShutdownStateValue.Stopping;
       phase = RuntimeLifecyclePhaseValue.Stopping;
       queued = undefined;
-      const error = new Error("Project runtime stopped before the requested revision was published.");
+      activeAbortController?.abort();
+      exclusiveOperation?.controller.abort();
+      const error = shutdownRevisionError();
       for (const waiter of [...waiters]) {
         waiters.delete(waiter);
         waiter.cleanup();
         waiter.reject(error);
       }
-      for (const waiter of [...idleWaiters]) waiter.reject(error);
+    },
+    finishShutdown() {
+      if (shutdownState === RuntimeShutdownStateValue.Running) throw new Error("Project runtime shutdown has not started.");
+      if (active || queued || loop || exclusiveOperation) {
+        throw new Error(`Project runtime cannot finish shutdown while work is active. Current lifecycle: ${JSON.stringify(lifecycle())}.`);
+      }
+      shutdownState = RuntimeShutdownStateValue.Stopped;
       phase = RuntimeLifecyclePhaseValue.Stopped;
     },
   };
+
+  function shutdownRevisionError(): Error {
+    return new Error("Project runtime stopped before the requested revision was published.");
+  }
+
+  async function awaitOperationSettlement(
+    operation: Promise<unknown>,
+    waitOptions: RuntimeWaitOptions,
+    timeoutPrefix: string,
+  ): Promise<void> {
+    if (waitOptions.signal?.aborted) throw new Error("Waiting for project operations was cancelled.");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    const interruption = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(new Error("Waiting for project operations was cancelled."));
+      waitOptions.signal?.addEventListener("abort", onAbort, { once: true });
+      if (waitOptions.timeoutMs && waitOptions.timeoutMs > 0) {
+        timer = setTimeout(() => {
+          reject(new Error(`${timeoutPrefix} within ${waitOptions.timeoutMs}ms. Current lifecycle: ${JSON.stringify(lifecycle())}.`));
+        }, waitOptions.timeoutMs);
+        timer.unref?.();
+      }
+    });
+    try {
+      await Promise.race([operation, interruption]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (onAbort) waitOptions.signal?.removeEventListener("abort", onAbort);
+    }
+  }
 }
