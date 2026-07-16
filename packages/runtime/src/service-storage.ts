@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -73,6 +73,25 @@ export function runtimeLogPath(rootDir: string, registryPath = serviceRegistryPa
 
 export function serviceLogPath(registryPath = serviceRegistryPath()): string {
   return path.join(path.dirname(registryPath), "service.log");
+}
+
+export function readProcessLogTail(logPath: string, maxBytes = 8 * 1024): string | undefined {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error("Process log tail size must be a positive integer.");
+  let fd: number | undefined;
+  try {
+    const size = statSync(logPath).size;
+    if (size <= 0) return undefined;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.allocUnsafe(length);
+    fd = openSync(logPath, "r");
+    const bytesRead = readSync(fd, buffer, 0, length, size - length);
+    const tail = buffer.subarray(0, bytesRead).toString("utf8").trim();
+    return tail || undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeFileDescriptor(fd);
+  }
 }
 
 export function readRuntimeRegistry(registryPath = serviceRegistryPath()): RuntimeRegistryEntry[] {

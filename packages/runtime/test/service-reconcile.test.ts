@@ -921,6 +921,7 @@ test("service startup cleanup kills an unready spawned process", { timeout: 3000
         'import { createServer } from "node:http";',
         'import { writeFileSync } from "node:fs";',
         'writeFileSync(process.env.OPENCANON_FAKE_SERVICE_PID_PATH, String(process.pid));',
+        'console.error("fake service remained unready");',
         'const portArg = process.argv.indexOf("--port");',
         "const port = Number(process.argv[portArg + 1]);",
         "createServer((_request, response) => {",
@@ -933,7 +934,10 @@ test("service startup cleanup kills an unready spawned process", { timeout: 3000
     process.env.OPENCANON_CLI = fakeCliPath;
     process.env.OPENCANON_FAKE_SERVICE_PID_PATH = fakePidPath;
 
-    await assert.rejects(() => startService({ cwd: rootDir, registryPath }), /did not become ready/);
+    await assert.rejects(
+      () => startService({ cwd: rootDir, registryPath }),
+      /did not become ready \(timeout\)\.[\s\S]*Service log tail:[\s\S]*fake service remained unready/,
+    );
     spawnedPid = Number(readFileSync(fakePidPath, "utf8"));
     assert.equal(readServiceEntry(registryPath), undefined);
     assert.equal(await waitUntilProcessStops(spawnedPid, 2000), true);
