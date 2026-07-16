@@ -2,6 +2,7 @@ import { SpanKind, type SimpleTracer } from "@opencanon/observability";
 import {
   createOpenCanonDiagnostic,
   ChangeCheckRunEventType,
+  ChangeCheckRunStatus,
   ChangeCheckRunStatusSchema,
   ChangeTaskEventType,
   ProtocolOperationKind,
@@ -13,6 +14,7 @@ import {
   loadProjectContext,
   normalizeProducerStatusesForProject,
   findProtocolOperation,
+  ProtocolEventReplaySchema,
   protocolProjection,
   resolveProducerStatuses,
   validateChangeLifecycleTransition,
@@ -21,7 +23,7 @@ import {
 } from "@opencanon/core";
 import { buildProjectSummary, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot, refreshChangeActivitySnapshot, type RuntimeSnapshot } from "./snapshot.ts";
 import { TreeScope, buildTreeResponse, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
-import { eventStream, operationEvent, snapshotEvent, type EventBroadcaster } from "./server-events.ts";
+import { activityChangedEvent, eventStream, type EventBroadcaster } from "./server-events.ts";
 import { isAuthorizedRuntimeRequest } from "./auth.ts";
 import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
@@ -39,7 +41,7 @@ import {
 } from "./worktree-coordination.ts";
 import { buildContextPacket } from "./server-context-packet.ts";
 import { canonHistoryFromRuntime } from "./server-history.ts";
-import { listChangeEvents, listCompleteChangeHistories, listRuntimeEvents, sameCanonEventRequest, writeRuntimeEvent } from "./server-canon-events.ts";
+import { listChangeEvents, listCompleteChangeHistories, sameCanonEventRequest, writeRuntimeEvent } from "./server-canon-events.ts";
 import {
   ChangeEventType,
   applyTaskOwnershipEvent,
@@ -488,7 +490,11 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
           store: currentStore(),
         });
         stateManager.setSnapshot(snapshot);
-        events.broadcast(snapshotEvent(snapshot, ownership.event.summary));
+        events.broadcast(activityChangedEvent(ownership.event.summary, [
+          ...ownership.event.changeIds,
+          ...ownership.event.taskIds,
+          ...ownership.event.checkIds,
+        ]));
         return json({ ok: true, data: { event: ownership.event, changes: snapshot.changes } });
       }
       if (url.pathname === ApiRoute.CanonRelated) {
@@ -517,32 +523,49 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
         });
       }
       if (url.pathname === ApiRoute.EventsStream) {
-        const runIds = [...new Set(url.searchParams.getAll(UrlSearchParam.RunId).filter(Boolean))];
-        const unknownRunId = runIds.find((runId) => !changeCheckRunner.describe(runId));
-        if (unknownRunId) return json(diagnosticsFailure([runtimeInputDiagnostic(`Unknown Change check run: ${unknownRunId}.`)]), 404);
-        const pendingRunIds = new Set(runIds);
-        return eventStream(events.connect(() => {
-          const initial = [snapshotEvent(stateManager.currentSnapshot(), "Connected to runtime stream.")];
-          for (const runId of runIds) {
-            const after = streamCursor(url, runId);
-            for (const event of changeCheckRunner.listEvents(runId, after)) initial.push(operationEvent(event));
-          }
-          return initial;
-        }, runIds.length === 0 ? {} : {
-          closeWhen(event) {
-            const operation = event.operation;
-            if (operation && pendingRunIds.has(operation.runId) && isTerminalChangeCheckEvent(operation.type)) {
-              pendingRunIds.delete(operation.runId);
-            }
-            return pendingRunIds.size === 0;
-          },
+        const cursor = protocolEventCursor(request, url);
+        if (!cursor.ok) return json(cursor.error, 400);
+        const operationId = url.searchParams.get(UrlSearchParam.OperationId)?.trim() || undefined;
+        const afterSequence = cursor.present ? cursor.value : Number.MAX_SAFE_INTEGER;
+        const window = currentStore().listProtocolEvents({ afterSequence, limit: 501, operationId });
+        const retentionGap = cursor.present && hasProtocolEventRetentionGap(cursor.value, window.oldestAvailableSequence);
+        const replayOverflow = window.events.length > 500;
+        if (retentionGap || replayOverflow) {
+          return json(
+            diagnostic(
+              diagnosticCodes.resyncRequired,
+              `Protocol event replay cannot cover sequence ${cursor.value}; refetch affected projections and reconnect from sequence ${window.latestSequence}.`,
+            ),
+            409,
+          );
+        }
+        const replay = window.events.slice(0, 500);
+        const describedRun = operationId ? changeCheckRunner.describe(operationId) : null;
+        const runAlreadyTerminal = Boolean(describedRun && isTerminalChangeCheckRunStatus(describedRun.run.status));
+        return eventStream(events.connect(replay, {
+          ...(operationId ? { filter: (event) => event.operationId === operationId } : {}),
+          ...(operationId ? { closeWhen: (event) => event.operationId === operationId && isTerminalChangeCheckEvent(event.type) } : {}),
+          closeAfterReplay: runAlreadyTerminal && replay.length === 0,
         }));
       }
-      if (url.pathname === ApiRoute.Events)
+      if (url.pathname === ApiRoute.Events) {
+        const cursor = protocolEventCursor(request, url);
+        if (!cursor.ok) return json(cursor.error, 400);
+        const operationId = url.searchParams.get(UrlSearchParam.OperationId)?.trim() || undefined;
+        const window = currentStore().listProtocolEvents({
+          afterSequence: cursor.value,
+          limit: Math.min(500, numberParam(url, UrlSearchParam.Limit, 100)),
+          operationId,
+        });
         return json({
           ok: true,
-          data: listRuntimeEvents(rootDir, currentStore(), { mode: "recent", limit: numberParam(url, UrlSearchParam.Limit, 50) }),
+          data: ProtocolEventReplaySchema.parse({
+            ...window,
+            resyncRequired: cursor.present && hasProtocolEventRetentionGap(cursor.value, window.oldestAvailableSequence),
+            revision: stateManager.lifecycle().revision.published,
+          }),
         });
+      }
       if (url.pathname === ApiRoute.Observability) {
         const traceId = url.searchParams.get(UrlSearchParam.TraceId)?.trim() || undefined;
         return json({
@@ -738,13 +761,31 @@ async function projectSuccessfulResponse(response: Response, revision: number): 
   return json({ ok: true, data: protocolProjection(revision, body.data) }, response.status);
 }
 
-function isTerminalChangeCheckEvent(type: ChangeCheckRunEventType): boolean {
+function isTerminalChangeCheckEvent(type: string): boolean {
   return type === ChangeCheckRunEventType.Passed || type === ChangeCheckRunEventType.Failed || type === ChangeCheckRunEventType.Cancelled;
 }
 
-function streamCursor(url: URL, _runId: string): number {
-  const value = Number(url.searchParams.get(UrlSearchParam.After) ?? "0");
-  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+function isTerminalChangeCheckRunStatus(status: string): boolean {
+  return status === ChangeCheckRunStatus.Passed || status === ChangeCheckRunStatus.Failed || status === ChangeCheckRunStatus.Cancelled;
+}
+
+function protocolEventCursor(request: Request, url: URL): { ok: true; value: number; present: boolean } | { ok: false; error: ReturnType<typeof diagnostic> } {
+  const query = url.searchParams.get(UrlSearchParam.AfterSequence);
+  const header = request.headers.get("last-event-id");
+  if (query !== null && header !== null && query !== header) {
+    return { ok: false, error: diagnostic(diagnosticCodes.invalidRuntimeResponse, "afterSequence and Last-Event-ID must identify the same protocol event sequence.") };
+  }
+  const raw = query ?? header;
+  if (raw === null) return { ok: true, value: 0, present: false };
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return { ok: false, error: diagnostic(diagnosticCodes.invalidRuntimeResponse, "Protocol event sequence must be a non-negative safe integer.") };
+  }
+  return { ok: true, value, present: true };
+}
+
+function hasProtocolEventRetentionGap(afterSequence: number, oldestAvailableSequence: number | undefined): boolean {
+  return oldestAvailableSequence !== undefined && afterSequence < oldestAvailableSequence - 1;
 }
 
 function semanticIndexReady(index: SemanticIndexSnapshot | undefined): boolean {

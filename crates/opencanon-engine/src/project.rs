@@ -41,6 +41,7 @@ mod job_store;
 mod json_fields;
 mod observability_store;
 mod product_model_store;
+mod protocol_event_store;
 mod semantic_delta_store;
 mod semantic_status;
 mod semantic_store;
@@ -576,6 +577,16 @@ impl EngineProjectHandle {
             events.push(value);
         }
         encode(&events)
+    }
+
+    #[napi(js_name = "appendProtocolEventJson")]
+    pub fn append_protocol_event_json(&self, request: String) -> napi::Result<String> {
+        protocol_event_store::append_protocol_event_json(self, request)
+    }
+
+    #[napi(js_name = "listProtocolEventsJson")]
+    pub fn list_protocol_events_json(&self, request: String) -> napi::Result<String> {
+        protocol_event_store::list_protocol_events_json(self, request)
     }
 
     #[napi(js_name = "writeJobJson")]

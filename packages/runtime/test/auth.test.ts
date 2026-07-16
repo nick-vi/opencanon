@@ -97,10 +97,9 @@ test("runtime node http server reports ephemeral ports and cancels SSE streams",
       assert(response.body, "SSE response should have a body");
       const reader = response.body.getReader();
       const first = await reader.read();
-      assert.equal(first.done, false);
-      assert(new TextDecoder().decode(first.value).includes("Connected to runtime stream."));
+      assert.equal(new TextDecoder().decode(first.value).trim(), ": connected");
+      await reader.cancel();
       abortController.abort();
-      await reader.cancel().catch(() => undefined);
     } finally {
       await server.stop();
     }

@@ -71,6 +71,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "separate_code_graph",
         sql: include_str!("migrations/012_separate_code_graph.sql"),
     },
+    Migration {
+        version: 13,
+        name: "protocol_events",
+        sql: include_str!("migrations/013_protocol_events.sql"),
+    },
 ];
 
 pub(crate) fn schema_version() -> u32 {

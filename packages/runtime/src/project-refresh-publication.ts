@@ -1,5 +1,5 @@
-import { RuntimeWorkerJobStatusValue, type RuntimeWorkerJob } from "@opencanon/core";
-import { indexingEvent, type EventBroadcaster } from "./server-events.ts";
+import { ProtocolDomain, RuntimeWorkerJobStatusValue, type RuntimeWorkerJob } from "@opencanon/core";
+import { progressEvent, type EventBroadcaster } from "./server-events.ts";
 import type { RuntimeChangeCatalog, RuntimeSnapshot } from "./snapshot.ts";
 import type { RuntimeRebuildCandidate } from "./state-manager.ts";
 
@@ -23,9 +23,11 @@ export function unchangedProjectRefreshCandidate(input: {
         unit: "files",
         message: "No project inputs changed.",
       });
-      input.events.broadcast(indexingEvent("No project inputs changed.", {
+      input.events.broadcast(progressEvent({
+        domain: ProtocolDomain.Project,
+        operation: "project-refresh",
         phase: "ready",
-        label: "Project state current",
+        summary: "No project inputs changed.",
         current: input.snapshot.files.length,
         total: input.snapshot.files.length,
         unit: "files",

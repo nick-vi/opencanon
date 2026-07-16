@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const DomainProtocolVersion = 1 as const;
+const PositiveSafeIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const NonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 export const ProtocolOperationKind = {
   Query: "query",
@@ -128,7 +130,7 @@ export function operationMetadata(operation: ProtocolOperationDefinition): Proto
 export function ProjectionResponseSchema<TSchema extends z.ZodType>(dataSchema: TSchema) {
   return z.object({
     protocolVersion: z.literal(DomainProtocolVersion),
-    revision: z.number().int().positive(),
+    revision: PositiveSafeIntegerSchema,
     data: dataSchema,
     nextCursor: z.string().min(1).optional(),
   }).strict();
@@ -142,7 +144,7 @@ export type ProjectionResponse<T> = {
 };
 
 export function protocolProjection<T>(revision: number, data: T, nextCursor?: string): ProjectionResponse<T> {
-  if (!Number.isInteger(revision) || revision < 1) throw new Error("Protocol projections require a positive published revision.");
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("Protocol projections require a positive safe published revision.");
   return {
     protocolVersion: DomainProtocolVersion,
     revision,
@@ -158,34 +160,51 @@ export function parseProjectionResponse<T>(value: unknown): ProjectionResponse<T
 }
 
 export const ProtocolProgressSchema = z.object({
-  operation: z.string().min(1),
-  phase: z.string().min(1),
+  operation: z.string().min(1).max(128),
+  phase: z.string().min(1).max(128),
   current: z.number().int().min(0),
   total: z.number().int().min(0),
-  unit: z.string().min(1),
-  message: z.string().min(1).optional(),
+  unit: z.string().min(1).max(64),
+  message: z.string().min(1).max(512).optional(),
 }).strict();
 export type ProtocolProgress = z.infer<typeof ProtocolProgressSchema>;
 
 export const ProjectProtocolEventSchema = z.object({
   protocolVersion: z.literal(DomainProtocolVersion),
-  sequence: z.number().int().positive(),
+  sequence: PositiveSafeIntegerSchema,
   timestamp: z.string().datetime(),
-  revision: z.number().int().positive(),
+  revision: PositiveSafeIntegerSchema,
   domain: ProtocolDomainSchema,
-  type: z.string().min(1),
-  summary: z.string().min(1),
-  ids: z.array(z.string().min(1)),
-  operationId: z.string().min(1).optional(),
+  type: z.string().min(1).max(64),
+  summary: z.string().min(1).max(2_048),
+  ids: z.array(z.string().min(1).max(256)).max(128),
+  operationId: z.string().min(1).max(256).optional(),
   progress: ProtocolProgressSchema.optional(),
 }).strict();
 export type ProjectProtocolEvent = z.infer<typeof ProjectProtocolEventSchema>;
 
+export const ProjectProtocolEventDraftSchema = ProjectProtocolEventSchema.omit({
+  sequence: true,
+  timestamp: true,
+  revision: true,
+});
+export type ProjectProtocolEventDraft = z.infer<typeof ProjectProtocolEventDraftSchema>;
+
+export const PersistedProjectProtocolEventDraftSchema = ProjectProtocolEventSchema.omit({ sequence: true });
+export type PersistedProjectProtocolEventDraft = z.infer<typeof PersistedProjectProtocolEventDraftSchema>;
+
 export const ProtocolEventReplaySchema = z.object({
   events: z.array(ProjectProtocolEventSchema),
-  latestSequence: z.number().int().min(0),
-  oldestAvailableSequence: z.number().int().positive().optional(),
+  latestSequence: NonNegativeSafeIntegerSchema,
+  oldestAvailableSequence: PositiveSafeIntegerSchema.optional(),
   resyncRequired: z.boolean(),
-  revision: z.number().int().positive(),
+  revision: PositiveSafeIntegerSchema,
 }).strict();
 export type ProtocolEventReplay = z.infer<typeof ProtocolEventReplaySchema>;
+
+export const ProtocolEventWindowSchema = z.object({
+  events: z.array(ProjectProtocolEventSchema),
+  latestSequence: NonNegativeSafeIntegerSchema,
+  oldestAvailableSequence: PositiveSafeIntegerSchema.optional(),
+}).strict();
+export type ProtocolEventWindow = z.infer<typeof ProtocolEventWindowSchema>;

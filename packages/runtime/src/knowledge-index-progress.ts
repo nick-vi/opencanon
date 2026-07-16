@@ -1,7 +1,25 @@
-import type { SemanticIndexSnapshot } from "@opencanon/core";
+import { ProjectProtocolEventSchema, ProtocolDomain, type SemanticIndexSnapshot } from "@opencanon/core";
 import { requestLocalJson, streamLocalText, type LocalProtocolEndpoint } from "./local-protocol.ts";
 import { ApiRoute, ProjectIndexResponseMode } from "./routes.ts";
-import { StreamEventType } from "./server-events.ts";
+import { ProjectProtocolEventType } from "./server-events.ts";
+import type { KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
+
+export function knowledgeIndexProtocolPhase(phase: KnowledgeIndexProgress["phase"]): string {
+  switch (phase) {
+    case "scan":
+    case "diff":
+      return "file-discovery";
+    case "chunk":
+      return "chunking";
+    case "embed":
+      return "embedding";
+    case "write":
+    case "prewarm":
+      return "product-graph";
+    case "ready":
+      return "ready";
+  }
+}
 
 export async function requestKnowledgeIndex(input: {
   endpoint: LocalProtocolEndpoint;
@@ -71,12 +89,12 @@ function createKnowledgeProgressParser(onProgress: (line: string) => void): { pu
           .join("\n");
         if (!data) continue;
         try {
-          const event = JSON.parse(data) as { type?: string; progress?: { label?: string; current?: number; total?: number; unit?: string } };
-          if (event.type !== StreamEventType.Indexing || !event.progress?.label) continue;
-          const count = event.progress.current !== undefined && event.progress.total !== undefined
-            ? ` (${event.progress.current}/${event.progress.total}${event.progress.unit ? ` ${event.progress.unit}` : ""})`
+          const event = ProjectProtocolEventSchema.parse(JSON.parse(data));
+          if (event.domain !== ProtocolDomain.Knowledge || event.type !== ProjectProtocolEventType.Progress || !event.progress) continue;
+          const count = event.progress.total > 0
+            ? ` (${event.progress.current}/${event.progress.total} ${event.progress.unit})`
             : "";
-          const line = `${event.progress.label}${count}`;
+          const line = `${event.progress.message ?? event.summary}${count}`;
           if (line !== lastLine) {
             lastLine = line;
             onProgress(line);

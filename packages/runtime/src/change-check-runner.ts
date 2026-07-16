@@ -19,7 +19,7 @@ import {
 } from "@opencanon/core";
 import type { SimpleTracer } from "@opencanon/observability";
 import { SpanKind } from "@opencanon/observability";
-import { operationEvent, snapshotEvent, type EventBroadcaster } from "./server-events.ts";
+import { activityChangedEvent, proofEvent, type EventBroadcaster } from "./server-events.ts";
 import { writeRuntimeEvent } from "./server-canon-events.ts";
 import { refreshChangeActivitySnapshot } from "./snapshot.ts";
 import {
@@ -118,7 +118,7 @@ export async function createChangeCheckRunner(input: {
         const run = runs[index]!;
         const event = queuedEvents[index]!;
         completions.set(run.id, createRunCompletion());
-        input.events.broadcast(operationEvent(event));
+        input.events.broadcast(proofEvent(event));
         queue.push({ project: request.project, change: request.change, task: request.task, check: request.checks[index]!, runId: run.id });
       }
       input.onActivity?.();
@@ -366,7 +366,7 @@ export async function createChangeCheckRunner(input: {
 
   function appendEvent(run: ChangeCheckRun, type: ChangeCheckRunEvent["type"], text?: string): ChangeCheckRunEvent {
     const event = input.store().appendJobEvent(createOperationEventDraft(run, type, text));
-    input.events.broadcast(operationEvent(event));
+    input.events.broadcast(proofEvent(event));
     return event;
   }
 
@@ -398,7 +398,7 @@ export async function createChangeCheckRunner(input: {
       store: input.store(),
     });
     input.stateManager.setSnapshot(snapshot);
-    input.events.broadcast(snapshotEvent(snapshot, summary));
+    input.events.broadcast(activityChangedEvent(summary, snapshot.changes.map((change) => change.id)));
   }
 
   function finishCancelled(run: ChangeCheckRun): ChangeCheckRun {

@@ -6,6 +6,7 @@ import {
   ChangeCheckRunEventSchema,
   ChangeCheckRunEventType,
   ChangeCheckRunSchema,
+  ProjectProtocolEventSchema,
   type ChangeCheckRunEvent,
 } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
@@ -54,13 +55,31 @@ export async function readRunEvents(
   after = 0,
   onEvent?: (event: ChangeCheckRunEvent) => void | Promise<void>,
 ): Promise<ChangeCheckRunEvent[]> {
-  const response = await fetch(`${url}/api/events/stream?runId=${encodeURIComponent(runId)}&after=${after}`, { headers });
+  let cursor = after;
+  const events: ChangeCheckRunEvent[] = [];
+  const pull = async (): Promise<boolean> => {
+    const response = await fetch(`${url}/api/changes/check-runs?runId=${encodeURIComponent(runId)}&after=${cursor}`, { headers });
+    const text = await response.text();
+    assert.equal(response.status, 200, text);
+    const payload = JSON.parse(text) as { data: { data: { events: unknown[] } } };
+    for (const value of payload.data.data.events) {
+      const event = ChangeCheckRunEventSchema.parse(value);
+      if (event.runId !== runId || event.sequence <= cursor) continue;
+      cursor = event.sequence;
+      events.push(event);
+      await onEvent?.(event);
+      if (isTerminalEvent(event)) return true;
+    }
+    return false;
+  };
+  if (await pull()) return events;
+
+  const response = await fetch(`${url}/api/events/stream?operationId=${encodeURIComponent(runId)}`, { headers });
   if (response.status !== 200) throw new Error(await response.text());
   const body = response.body;
   assert(body);
   const reader = body.getReader();
   const decoder = new TextDecoder();
-  const events: ChangeCheckRunEvent[] = [];
   let buffer = "";
   try {
     while (true) {
@@ -74,13 +93,9 @@ export async function readRunEvents(
         buffer = buffer.slice(boundary + 2);
         const data = frame.split("\n").find((line) => line.startsWith("data:"))?.slice(5).trimStart();
         if (!data) continue;
-        const payload = JSON.parse(data) as { operation?: unknown };
-        if (!payload.operation) continue;
-        const event = ChangeCheckRunEventSchema.parse(payload.operation);
-        if (event.runId !== runId) continue;
-        events.push(event);
-        await onEvent?.(event);
-        if (event.type === ChangeCheckRunEventType.Passed || event.type === ChangeCheckRunEventType.Failed || event.type === ChangeCheckRunEventType.Cancelled) {
+        const protocolEvent = ProjectProtocolEventSchema.parse(JSON.parse(data));
+        if (protocolEvent.operationId !== runId) continue;
+        if (await pull()) {
           await reader.cancel();
           return events;
         }
@@ -89,7 +104,12 @@ export async function readRunEvents(
   } finally {
     reader.releaseLock();
   }
+  if (await pull()) return events;
   throw new Error(`Change check run ${runId} stream ended without a terminal event.`);
+}
+
+function isTerminalEvent(event: ChangeCheckRunEvent): boolean {
+  return event.type === ChangeCheckRunEventType.Passed || event.type === ChangeCheckRunEventType.Failed || event.type === ChangeCheckRunEventType.Cancelled;
 }
 
 export function quotedNode(): string {

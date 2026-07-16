@@ -9,7 +9,7 @@ import { createEngine } from "@opencanon/engine";
 import { createPaths } from "@opencanon/core";
 import { createKnowledgeIndexManager, createProjectStore, inspectProjectRuntime, projectRuntimeStatePath, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
-import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult } from "./engine-binding-test-support.ts";
 import {
   activityRoutesCheckSource,
   canonHistoryRouteCheckSource,
@@ -395,6 +395,8 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
         stopWatcher: () => undefined,
         writeEventJson: () => undefined,
         listEventsJson: () => JSON.stringify([]),
+        appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+        listProtocolEventsJson: () => emptyProtocolEventWindow(),
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
@@ -939,9 +941,9 @@ test("runtime client repairs a supervised runtime before resuming a stream", asy
       timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    const output = JSON.parse(result.stdout.trim()) as { beforePid: number; afterPid: number; receivedSnapshot: boolean };
+    const output = JSON.parse(result.stdout.trim()) as { beforePid: number; afterPid: number; connected: boolean };
     assert.notEqual(output.afterPid, output.beforePid);
-    assert.equal(output.receivedSnapshot, true);
+    assert.equal(output.connected, true);
   } finally {
     await stopService(registryPath);
     rmSync(rootDir, { recursive: true, force: true });

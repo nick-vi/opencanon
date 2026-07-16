@@ -47,6 +47,7 @@ import {
   resolveRootDir,
   upsertCommitApproval,
   validateConfig,
+  ProtocolDomain,
   ProjectRefreshModeValue,
   ProjectRefreshStatusValue,
   RuntimeWorkerJobKindValue,
@@ -73,7 +74,7 @@ import { unchangedProjectRefreshCandidate } from "./project-refresh-publication.
 import { knowledgeWatchSummary, watcherBatchSummary } from "./project-watch-summary.ts";
 import { projectAnalysisStatePath } from "./service-namespace.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
-import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
+import { createEventBroadcaster, failureEvent, indexedEvent, progressEvent, projectPublishedEvent } from "./server-events.ts";
 import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
 import { createRuntimeRouteHandler } from "./server-routes.ts";
 import { createRuntimeRequestAdmission } from "./request-admission.ts";
@@ -94,6 +95,7 @@ import { createChangeCheckRunner } from "./change-check-runner.ts";
 import { createKnowledgeQueryRuntime } from "./knowledge-query-runtime.ts";
 import { refreshActiveWorkProjection } from "./activity-projection.ts";
 import type { KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
+import { knowledgeIndexProtocolPhase } from "./knowledge-index-progress.ts";
 import { runKnowledgeIndexOperation, type KnowledgeIndexOperationInput, type KnowledgeIndexOperationResult } from "./knowledge-index-operation.ts";
 import { buildSnapshotFileCoverage } from "./snapshot-projection.ts";
 import { createRuntimeActivityTracker } from "./activity-tracker.ts";
@@ -216,7 +218,11 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       },
     }),
   });
-  const events = createEventBroadcaster();
+  let publishedRevision = 1;
+  const events = createEventBroadcaster({
+    currentRevision: () => publishedRevision,
+    append: (event) => store.appendProtocolEvent(event),
+  });
   let currentWorkerJob: RuntimeWorkerJob | undefined;
   let lastWorkerJob: RuntimeWorkerJob | undefined;
   const knowledgeIndexAbortController = new AbortController();
@@ -293,8 +299,12 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     isStopped: () => stopped,
     rebuildNow: rebuildAndPublishNow,
     readProjectInventory: () => listProjectInventory(rootDir),
+    onPublished(publication) {
+      publishedRevision = publication.revision;
+      events.broadcast(projectPublishedEvent(publication.summary));
+    },
     onRebuildError(error) {
-      events.broadcast(streamErrorEvent(formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error))));
+      events.broadcast(failureEvent(ProtocolDomain.Project, formatOpenCanonDiagnostics(getOpenCanonErrorDiagnostics(runtimeSnapshotFailure(error).error))));
     },
   });
   const changeCheckRunner = await createChangeCheckRunner({
@@ -307,7 +317,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     validationResultCache: () => stateManager.validationResultCache(),
     onActivity: resetIdleTimer,
     onError(error) {
-      events.broadcast(streamErrorEvent(`Change check runtime failed: ${errorMessage(error)}`));
+      events.broadcast(failureEvent(ProtocolDomain.Proof, `Change check runtime failed: ${errorMessage(error)}`));
     },
   });
   const knowledgeQueryRuntime = createKnowledgeQueryRuntime({ rootDir, statePath: () => store.statePath });
@@ -477,7 +487,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           await buildIndexedSnapshot(queuedSummary, { changedPaths: queuedPaths });
         })
         .catch((error) => {
-          events.broadcast(streamErrorEvent(`Project Knowledge update failed: ${errorMessage(error)}`));
+          events.broadcast(failureEvent(ProtocolDomain.Knowledge, `Project Knowledge update failed: ${errorMessage(error)}`));
         });
     }, KnowledgeWatchDebounceMs);
     if (typeof knowledgeWatchTimer === "object" && "unref" in knowledgeWatchTimer) {
@@ -493,31 +503,16 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       unit: progress.unit,
       message: progress.label,
     });
-    events.broadcast(indexingEvent(progress.label, {
-      phase: runtimeStreamPhaseForKnowledge(progress.phase),
-      label: progress.label,
+    events.broadcast(progressEvent({
+      domain: ProtocolDomain.Knowledge,
+      operation: "knowledge-index",
+      phase: knowledgeIndexProtocolPhase(progress.phase),
+      summary: progress.label,
       current: progress.current,
       total: progress.total,
       unit: progress.unit,
-      indeterminate: progress.current === undefined || progress.total === undefined,
+      operationId: jobId,
     }));
-  }
-
-  function runtimeStreamPhaseForKnowledge(phase: KnowledgeIndexProgress["phase"]): RuntimeStreamProgress["phase"] {
-    switch (phase) {
-      case "scan":
-      case "diff":
-        return "file-discovery";
-      case "chunk":
-        return "chunking";
-      case "embed":
-        return "embedding";
-      case "write":
-      case "prewarm":
-        return "product-graph";
-      case "ready":
-        return "ready";
-    }
   }
 
   function startStoreWatcher(): void {
@@ -533,10 +528,11 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     } catch (error) {
       const reason = `File watching is unavailable; manual refresh is required: ${errorMessage(error)}`;
       stateManager.setSnapshot(refreshSnapshotRefreshStatus(stateManager.currentSnapshot(), store, reason));
-      events.broadcast(indexingEvent(reason, {
+      events.broadcast(progressEvent({
+        domain: ProtocolDomain.Project,
+        operation: "project-refresh",
         phase: "file-discovery",
-        label: "Project refresh is stale",
-        indeterminate: false,
+        summary: reason,
       }));
     }
   }
@@ -563,7 +559,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       startCoordinationSignalWatcher(signalPath);
       scheduleCoordinationRefresh("startup");
     } catch (error) {
-      events.broadcast(streamErrorEvent(`Active work updates are unavailable: ${errorMessage(error)}`));
+      events.broadcast(failureEvent(ProtocolDomain.Activity, `Active work updates are unavailable: ${errorMessage(error)}`));
     }
   }
 
@@ -671,10 +667,12 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           label: "Discovering project files",
           message: "Indexing repository.",
         });
-        events.broadcast(indexingEvent("Indexing repository.", {
+        events.broadcast(progressEvent({
+          domain: ProtocolDomain.Project,
+          operation: "project-refresh",
           phase: "file-discovery",
-          label: "Discovering project files",
-          indeterminate: true,
+          summary: "Indexing repository.",
+          operationId: jobId,
         }));
         const outcome = await rebuildSnapshot({ store, signal });
         if (outcome.kind === RuntimeAnalysisOutcomeKind.Unchanged) {
@@ -721,12 +719,15 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               unit: "nodes",
               message: "Building project map and reading Project Knowledge state.",
             });
-            events.broadcast(indexingEvent("Building project map and reading Project Knowledge state.", {
+            events.broadcast(progressEvent({
+              domain: ProtocolDomain.Canon,
+              operation: "project-refresh",
               phase: "product-graph",
-              label: "Linking definitions and context",
+              summary: "Building project map and reading Project Knowledge state.",
               current: next.definitionGraph.nodes.length,
               total: next.definitionGraph.nodes.length,
               unit: "nodes",
+              operationId: jobId,
             }));
             store.writeEvent(indexedEvent(next, summary));
             finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
@@ -737,14 +738,16 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               message: summary,
             });
             const publishedSnapshot = withProcessIdentity(refreshSnapshotRefreshStatus(next, store));
-            events.broadcast(indexingEvent(summary, {
+            events.broadcast(progressEvent({
+              domain: ProtocolDomain.Project,
+              operation: "project-refresh",
               phase: "ready",
-              label: "Project state ready",
+              summary,
               current: next.files.length,
               total: next.files.length,
               unit: "files",
+              operationId: jobId,
             }));
-            events.broadcast(snapshotEvent(publishedSnapshot, summary));
             acceptedAnalysisInputHash = analysis.publication.analysisInputHash;
             return publishedSnapshot;
           },

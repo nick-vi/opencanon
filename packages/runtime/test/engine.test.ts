@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createEngine, loadEngine, engineBindingName, validateEngineVersion } from "@opencanon/engine";
+import { assignedProtocolEvent, emptyProtocolEventWindow } from "./engine-binding-test-support.ts";
 
 test("engine loader names pinned platform binaries and validates version payload", () => {
   assert.equal(engineBindingName("opencanon", "darwin", "arm64"), "opencanon.darwin-arm64.node");
@@ -112,6 +113,8 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
       stopWatcher: () => undefined,
       writeEventJson: () => undefined,
       listEventsJson: () => JSON.stringify([]),
+      appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+      listProtocolEventsJson: () => emptyProtocolEventWindow(),
       writeJobJson: (requestJson: string) => {
         job = (JSON.parse(requestJson) as { job: unknown }).job;
       },

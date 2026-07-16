@@ -11,3 +11,12 @@ export function assignedJobEvent(requestJson: string, sequence = 1): string {
   const request = JSON.parse(requestJson) as { event: Record<string, unknown> };
   return JSON.stringify({ ...request.event, sequence });
 }
+
+export function assignedProtocolEvent(requestJson: string, sequence = 1): string {
+  const request = JSON.parse(requestJson) as { event: Record<string, unknown> };
+  return JSON.stringify({ ...request.event, sequence });
+}
+
+export function emptyProtocolEventWindow(): string {
+  return JSON.stringify({ events: [], latestSequence: 0 });
+}

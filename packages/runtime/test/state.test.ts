@@ -6,7 +6,7 @@ import { test } from "vitest";
 import { createPaths } from "@opencanon/core";
 import { createProjectStore, projectRuntimeStatePath, StableRuntimeNamespace } from "@opencanon/runtime";
 import { createEngine } from "@opencanon/engine";
-import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult } from "./engine-binding-test-support.ts";
 
 test("runtime store can use an isolated state path", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-store-"));
@@ -71,6 +71,8 @@ test("runtime store can use an isolated state path", () => {
         stopWatcher: () => undefined,
         writeEventJson: () => undefined,
         listEventsJson: () => JSON.stringify([]),
+        appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+        listProtocolEventsJson: () => emptyProtocolEventWindow(),
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),

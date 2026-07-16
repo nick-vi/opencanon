@@ -25,6 +25,9 @@ import {
   ListSemanticChunksRequestSchema,
   ListSemanticChunksResultSchema,
   OpenCanonErrorCodeSchema,
+  PersistedProjectProtocolEventDraftSchema,
+  ProjectProtocolEventSchema,
+  ProtocolEventWindowSchema,
   OpenProjectRequestSchema,
   OpenCanonError,
   ReadProductModelProjectionResultSchema,
@@ -72,6 +75,9 @@ import {
   type ListSemanticChunksRequest,
   type ListSemanticChunksResult,
   type OpenProjectRequest,
+  type PersistedProjectProtocolEventDraft,
+  type ProjectProtocolEvent,
+  type ProtocolEventWindow,
   type ProductModelProjection,
   type ReadSemanticIndexStatusRequest,
   type ReadSemanticIndexStatusResult,
@@ -131,6 +137,8 @@ export type EngineProject = {
   stopWatcher(): void;
   writeEvent(event: CanonEvent): void;
   listEvents(query: CanonEventQuery): CanonEvent[];
+  appendProtocolEvent(input: { event: PersistedProjectProtocolEventDraft; maxCount: number; retainAfter: string }): ProjectProtocolEvent;
+  listProtocolEvents(input: { afterSequence: number; limit: number; operationId?: string }): ProtocolEventWindow;
   writeJob(job: ChangeCheckRun): void;
   readJob(jobId: string): ChangeCheckRun | null;
   listJobs(query: ChangeCheckRunQuery): ChangeCheckRun[];
@@ -189,6 +197,8 @@ type EngineProjectJsonBinding = {
   stopWatcher(): void;
   writeEventJson(request: string): void;
   listEventsJson(request: string): string;
+  appendProtocolEventJson(request: string): string;
+  listProtocolEventsJson(request: string): string;
   writeJobJson(request: string): void;
   readJobJson(request: string): string;
   listJobsJson(request: string): string;
@@ -343,6 +353,24 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     stopWatcher: () => callEngine(() => project.stopWatcher()),
     writeEvent: (event) => callEngine(() => project.writeEventJson(JSON.stringify({ event: CanonEventSchema.parse(event) }))),
     listEvents: (query) => (parseJson(callEngine(() => project.listEventsJson(JSON.stringify(query)))) as unknown[]).map((event) => CanonEventSchema.parse(event)),
+    appendProtocolEvent: (input) =>
+      ProjectProtocolEventSchema.parse(
+        parseJson(
+          callEngine(() =>
+            project.appendProtocolEventJson(
+              JSON.stringify({
+                event: PersistedProjectProtocolEventDraftSchema.parse(input.event),
+                maxCount: input.maxCount,
+                retainAfter: input.retainAfter,
+              }),
+            ),
+          ),
+        ),
+      ),
+    listProtocolEvents: (input) =>
+      ProtocolEventWindowSchema.parse(
+        parseJson(callEngine(() => project.listProtocolEventsJson(JSON.stringify(input)))),
+      ),
     writeJob: (job) => callEngine(() => project.writeJobJson(JSON.stringify({ job: ChangeCheckRunSchema.parse(job) }))),
     readJob: (jobId) => {
       const value = parseJson(callEngine(() => project.readJobJson(JSON.stringify({ jobId })))) as { job?: unknown };
@@ -420,6 +448,8 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "stopWatcher",
     "writeEventJson",
     "listEventsJson",
+    "appendProtocolEventJson",
+    "listProtocolEventsJson",
     "writeJobJson",
     "readJobJson",
     "listJobsJson",

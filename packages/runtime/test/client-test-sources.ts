@@ -339,34 +339,48 @@ export function changeTaskRoutesCheckSource(): string {
       return parsed.data;
     }
     async function waitForRun(runId) {
-      const response = await fetch(server.url + "/api/events/stream?runId=" + encodeURIComponent(runId), { headers: runtimeAuthHeaders(server.authToken) });
-      assert.equal(response.status, 200);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      try {
-        while (true) {
-          const read = await reader.read();
-          if (read.done) break;
-          buffer += decoder.decode(read.value, { stream: true });
-          while (buffer.includes("\\n\\n")) {
-            const boundary = buffer.indexOf("\\n\\n");
-            const frame = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-            const data = frame.split("\\n").find((line) => line.startsWith("data:"))?.slice(5).trimStart();
-            if (!data) continue;
-            const operation = JSON.parse(data).operation;
-            if (operation?.runId !== runId) continue;
-            if (["passed", "failed", "cancelled"].includes(operation.type)) {
-              await reader.cancel();
-              return operation.run;
+      let jobCursor = 0;
+      let protocolCursor = 0;
+      const deadline = Date.now() + 30000;
+      while (Date.now() < deadline) {
+        const snapshot = await get("/api/changes/check-runs?runId=" + encodeURIComponent(runId) + "&after=" + jobCursor);
+        for (const event of snapshot.events) {
+          jobCursor = Math.max(jobCursor, event.sequence);
+          if (["passed", "failed", "cancelled"].includes(event.type)) return event.run;
+        }
+        if (["passed", "failed", "cancelled"].includes(snapshot.run.status) && jobCursor >= snapshot.latestSequence) return snapshot.run;
+
+        const response = await fetch(
+          server.url + "/api/events/stream?operationId=" + encodeURIComponent(runId) + "&afterSequence=" + protocolCursor,
+          { headers: runtimeAuthHeaders(server.authToken) },
+        );
+        assert.equal(response.status, 200);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let woke = false;
+        try {
+          while (!woke) {
+            const read = await reader.read();
+            if (read.done) break;
+            buffer += decoder.decode(read.value, { stream: true });
+            while (buffer.includes("\\n\\n")) {
+              const boundary = buffer.indexOf("\\n\\n");
+              const frame = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              const data = frame.split("\\n").find((line) => line.startsWith("data:"))?.slice(5).trimStart();
+              if (!data) continue;
+              const event = JSON.parse(data);
+              protocolCursor = Math.max(protocolCursor, event.sequence);
+              woke = event.operationId === runId;
             }
           }
+        } finally {
+          await reader.cancel().catch(() => undefined);
+          reader.releaseLock();
         }
-      } finally {
-        reader.releaseLock();
       }
-      throw new Error("Change check stream ended without a terminal event.");
+      throw new Error("Timed out waiting for Change check completion.");
     }
 
     try {
@@ -414,8 +428,8 @@ export function changeTaskRoutesCheckSource(): string {
       const worktrees = await get("/api/worktrees");
       assert.deepEqual(worktrees.leases.filter((lease) => lease.status === "active").map((lease) => lease.taskId), ["model"]);
 
-      const startedSnapshot = await get("/api/snapshot");
-      const startedChange = startedSnapshot.changes.find((item) => item.id === "task-change");
+      const startedChanges = await get("/api/changes");
+      const startedChange = startedChanges.find((item) => item.id === "task-change");
       assert.equal(startedChange.tasks.find((task) => task.id === "model").status, "running");
       assert.deepEqual(startedChange.tasks.find((task) => task.id === "model").surfaces, ["company-workflow"]);
       assert.equal(startedChange.readyTaskCount, 0);
@@ -456,8 +470,8 @@ export function changeTaskRoutesCheckSource(): string {
         summary: "Closed model task.",
         actor: "test",
       });
-      const modelClosedSnapshot = await get("/api/snapshot");
-      const modelClosedChange = modelClosedSnapshot.changes.find((item) => item.id === "task-change");
+      const modelClosedChanges = await get("/api/changes");
+      const modelClosedChange = modelClosedChanges.find((item) => item.id === "task-change");
       assert.equal(modelClosedChange.lastEvent.type, "task-closed");
       assert.equal(modelClosedChange.boardColumn, "ready");
       const nextReady = await get("/api/changes/ready");
@@ -580,13 +594,8 @@ export function worktreeCoordinationStreamCheckSource(): string {
       assert.equal(stream.status, 200, "expected authorized runtime stream");
       assert(stream.body, "expected runtime stream body");
       const reader = stream.body.getReader();
-      await waitForRuntimeEvent(reader, (event) => event.type === "snapshot" && event.summary === "Connected to runtime stream.");
-      await delay(100);
       const updatePromise = waitForRuntimeEvent(reader, (event) => {
-        if (event.type !== "snapshot") return false;
-        const change = event.snapshot?.changes?.find((item) => item.id === "stream-change");
-        const task = change?.tasks?.find((item) => item.id === "model");
-        return task?.status === "claimed" && task?.lease?.agentId === "agent-a";
+        return event.domain === "activity" && event.ids.includes("stream-change");
       });
 
       const claim = claimTaskLease({
@@ -601,20 +610,20 @@ export function worktreeCoordinationStreamCheckSource(): string {
       assert.equal(claim.ok, true, JSON.stringify(claim));
 
       await updatePromise.catch(async (error) => {
-        const snapshotResponse = await fetch(server.url + "/api/snapshot", { headers: runtimeAuthHeaders(server.authToken) });
-        const snapshotBody = await snapshotResponse.json();
+        const changesResponse = await fetch(server.url + "/api/changes", { headers: runtimeAuthHeaders(server.authToken) });
+        const changesBody = await changesResponse.json();
         const eventResponse = await fetch(server.url + "/api/events?limit=10", { headers: runtimeAuthHeaders(server.authToken) });
         const eventBody = await eventResponse.json();
-        const task = snapshotBody.data?.data?.changes?.find((item) => item.id === "stream-change")?.tasks?.find((item) => item.id === "model");
-        const summaries = (eventBody.data?.data ?? []).map((item) => item.summary).join(" | ");
+        const task = changesBody.data?.data?.find((item) => item.id === "stream-change")?.tasks?.find((item) => item.id === "model");
+        const summaries = (eventBody.data?.data?.events ?? []).map((item) => item.summary).join(" | ");
         throw new Error(error.message + " Route task: " + (task?.status ?? "-") + ":" + (task?.lease?.agentId ?? "-") + ". Runtime events: " + summaries);
       });
       const worktreesResponse = await fetch(server.url + "/api/worktrees", { headers: runtimeAuthHeaders(server.authToken) });
       const worktreesBody = await worktreesResponse.json();
       const activeLease = worktreesBody.data.data.leases.find((lease) => lease.changeId === "stream-change" && lease.taskId === "model" && lease.status === "active");
       assert.equal(activeLease.agentId, "agent-a");
-      const snapshotBody = await waitForClaimedSnapshotRoute();
-      const change = snapshotBody.changes.find((item) => item.id === "stream-change");
+      const changes = await waitForClaimedChangesRoute();
+      const change = changes.find((item) => item.id === "stream-change");
       const task = change.tasks.find((item) => item.id === "model");
       assert.equal(change.readyTaskCount, 0);
       assert.equal(task.lease.worktreePath, realpathSync(rootDir));
@@ -642,27 +651,24 @@ export function worktreeCoordinationStreamCheckSource(): string {
           const frame = buffer.slice(0, frameEnd);
           buffer = buffer.slice(frameEnd + 2);
           const parsed = parseSseFrame(frame);
-          if (parsed) {
-            const task = parsed.snapshot?.changes?.find((item) => item.id === "stream-change")?.tasks?.find((item) => item.id === "model");
-            seenEvents.push(parsed.type + ":" + parsed.summary + ":" + (task?.status ?? "-") + ":" + (task?.lease?.agentId ?? "-"));
-          }
+          if (parsed) seenEvents.push(parsed.domain + ":" + parsed.type + ":" + parsed.summary);
           if (parsed && predicate(parsed)) return parsed;
         }
       }
       throw new Error("Timed out waiting for active-work stream update. Seen: " + seenEvents.join(" | "));
     }
 
-    async function waitForClaimedSnapshotRoute() {
+    async function waitForClaimedChangesRoute() {
       const deadline = Date.now() + 30000;
       while (Date.now() < deadline) {
-        const response = await fetch(server.url + "/api/snapshot", { headers: runtimeAuthHeaders(server.authToken) });
+        const response = await fetch(server.url + "/api/changes", { headers: runtimeAuthHeaders(server.authToken) });
         const body = await response.json();
-        const change = body.data?.data?.changes?.find((item) => item.id === "stream-change");
+        const change = body.data?.data?.find((item) => item.id === "stream-change");
         const task = change?.tasks?.find((item) => item.id === "model");
         if (task?.status === "claimed" && task?.lease?.agentId === "agent-a") return body.data.data;
         await delay(250);
       }
-      throw new Error("Timed out waiting for active-work snapshot route.");
+      throw new Error("Timed out waiting for active-work Changes projection.");
     }
 
     function parseSseFrame(frame) {
@@ -1036,26 +1042,26 @@ export function runtimeClientStreamRepairCheckSource(): string {
 
     const rootDir = process.argv[1];
     const output = await withRuntimeClient(rootDir, async (client) => {
-      await client.get(RuntimeApiRoute.Snapshot);
+      await client.get(RuntimeApiRoute.ProjectSummary);
       const before = await inspectProjectRuntime(rootDir);
       if (!before) throw new Error("expected registered runtime before stream repair");
       await stopProjectRuntime(rootDir);
       const controller = new AbortController();
-      let receivedSnapshot = false;
+      let connected = false;
       try {
         await client.stream(RuntimeApiRoute.EventsStream, {
           signal: controller.signal,
           onChunk(chunk) {
-            receivedSnapshot ||= chunk.includes('"type":"snapshot"') || chunk.includes('"type": "snapshot"');
-            if (receivedSnapshot) controller.abort();
+            connected ||= chunk.includes(": connected");
+            if (connected) controller.abort();
           },
         });
       } catch (error) {
-        if (!receivedSnapshot) throw error;
+        if (!connected) throw error;
       }
       const after = await inspectProjectRuntime(rootDir);
       if (!after) throw new Error("expected registered runtime after stream repair");
-      return { beforePid: before.entry.pid, afterPid: after.entry.pid, receivedSnapshot };
+      return { beforePid: before.entry.pid, afterPid: after.entry.pid, connected };
     });
     console.log(JSON.stringify(output));
   `;

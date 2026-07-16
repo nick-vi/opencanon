@@ -1,6 +1,6 @@
 import path from "node:path";
-import { generateProjectTypes, ProjectAuthoringGeneratedDirPath, relative, type ContextPaths } from "@opencanon/core";
-import { indexingEvent, type EventBroadcaster } from "./server-events.ts";
+import { generateProjectTypes, ProjectAuthoringGeneratedDirPath, ProtocolDomain, relative, type ContextPaths } from "@opencanon/core";
+import { progressEvent, type EventBroadcaster } from "./server-events.ts";
 
 const ProjectTypesDebounceMs = 500;
 
@@ -51,10 +51,11 @@ export function createProjectTypesRuntime(input: {
   }
 
   function reportGenerationMessage(summary: string): void {
-    input.events.broadcast(indexingEvent(summary, {
+    input.events.broadcast(progressEvent({
+      domain: ProtocolDomain.Canon,
+      operation: "project-types",
       phase: "definitions",
-      label: "Updating project authoring types",
-      indeterminate: true,
+      summary,
     }));
   }
 }

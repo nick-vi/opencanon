@@ -1,4 +1,5 @@
-import { snapshotEvent, streamErrorEvent, type EventBroadcaster } from "./server-events.ts";
+import { ProtocolDomain } from "@opencanon/core";
+import { activityChangedEvent, failureEvent, type EventBroadcaster } from "./server-events.ts";
 import { refreshChangeActivitySnapshot } from "./snapshot.ts";
 import type { RuntimeStateManager } from "./state-manager.ts";
 import type { ProjectStore } from "./state.ts";
@@ -16,8 +17,8 @@ export function refreshActiveWorkProjection(input: {
       store: input.store,
     });
     input.stateManager.setSnapshot(snapshot);
-    input.events.broadcast(snapshotEvent(snapshot, input.summary));
+    input.events.broadcast(activityChangedEvent(input.summary, snapshot.changes.map((change) => change.id)));
   } catch (error) {
-    input.events.broadcast(streamErrorEvent(`Active work update failed: ${error instanceof Error ? error.message : String(error)}`));
+    input.events.broadcast(failureEvent(ProtocolDomain.Activity, `Active work update failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 }

@@ -792,7 +792,9 @@ export { createEphemeralValidationResultCache, createValidationResultCache, vali
 export {
   DomainProtocolVersion,
   ProjectionResponseSchema,
+  PersistedProjectProtocolEventDraftSchema,
   ProjectProtocolEventSchema,
+  ProjectProtocolEventDraftSchema,
   ProtocolAuthorization,
   ProtocolAuthorizationSchema,
   ProtocolConsistency,
@@ -802,6 +804,7 @@ export {
   ProtocolDomain,
   ProtocolDomainSchema,
   ProtocolEventReplaySchema,
+  ProtocolEventWindowSchema,
   ProtocolHttpMethod,
   ProtocolHttpMethodSchema,
   ProtocolIdempotency,
@@ -819,6 +822,8 @@ export {
 } from "./protocol.ts";
 export type {
   ProjectProtocolEvent,
+  ProjectProtocolEventDraft,
+  PersistedProjectProtocolEventDraft,
   ProjectionResponse,
   ProtocolDomain as ProtocolDomainType,
   ProtocolInput,
@@ -826,6 +831,8 @@ export type {
   ProtocolOperationDefinition,
   ProtocolOperationMetadata,
   ProtocolProgress,
+  ProtocolEventReplay,
+  ProtocolEventWindow,
 } from "./protocol.ts";
 export {
   ProtocolApiPathPrefix,

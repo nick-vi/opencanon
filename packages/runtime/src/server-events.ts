@@ -1,59 +1,76 @@
-import type { CanonEvent, ChangeCheckRunEvent } from "@opencanon/core";
+import {
+  DomainProtocolVersion,
+  ProjectProtocolEventDraftSchema,
+  ProjectProtocolEventSchema,
+  ProtocolDomain,
+  type CanonEvent,
+  type ChangeCheckRunEvent,
+  type PersistedProjectProtocolEventDraft,
+  type ProjectProtocolEvent,
+  type ProjectProtocolEventDraft,
+  type ProtocolDomain as ProtocolDomainValue,
+} from "@opencanon/core";
 import type { RuntimeSnapshot } from "./snapshot.ts";
 
-export const StreamEventType = { Error: "error", Indexing: "indexing", Operation: "operation", Snapshot: "snapshot" } as const;
-export type StreamEventType = (typeof StreamEventType)[keyof typeof StreamEventType];
-export type RuntimeStreamProgress = {
-  phase:
-    | "runtime-start"
-    | "file-discovery"
-    | "definitions"
-    | "validator-graph"
-    | "validation"
-    | "chunking"
-    | "embedding"
-    | "product-graph"
-    | "doctor"
-    | "ready"
-    | "failure";
-  label?: string;
-  current?: number;
-  total?: number;
-  unit?: string;
-  indeterminate?: boolean;
-};
-export type RuntimeStreamEvent = {
-  type: StreamEventType;
-  timestamp: string;
-  summary: string;
-  progress?: RuntimeStreamProgress;
-  operation?: ChangeCheckRunEvent;
-  snapshot?: RuntimeSnapshot;
-};
+export const ProjectProtocolEventType = {
+  Changed: "changed",
+  Failed: "failed",
+  Progress: "progress",
+  Published: "published",
+} as const;
+
+const DefaultStreamQueueBytes = 256 * 1024;
+const DefaultMaxEventBytes = 64 * 1024;
+const HeartbeatIntervalMs = 30_000;
+const ConnectedFrame = new TextEncoder().encode(": connected\n\n");
 
 export type EventStreamOptions = {
-  closeWhen?(event: RuntimeStreamEvent): boolean;
+  filter?(event: ProjectProtocolEvent): boolean;
+  closeWhen?(event: ProjectProtocolEvent): boolean;
+  closeAfterReplay?: boolean;
+};
+
+export type EventBroadcasterInput = {
+  currentRevision(): number;
+  append(event: PersistedProjectProtocolEventDraft): ProjectProtocolEvent;
+  maxQueuedBytes?: number;
+  maxEventBytes?: number;
+};
+
+type StreamClient = {
+  heartbeat?: ReturnType<typeof setInterval>;
+  filter?: EventStreamOptions["filter"];
+  closeWhen?: EventStreamOptions["closeWhen"];
 };
 
 export function eventStream(stream: ReadableStream<Uint8Array>): Response {
   return new Response(stream, {
     headers: {
-      "cache-control": "no-cache",
+      "cache-control": "no-cache, no-store",
       "connection": "keep-alive",
       "content-type": "text/event-stream; charset=utf-8",
+      "x-accel-buffering": "no",
     },
   });
 }
 
-/** Max events buffered per SSE client before it is treated as stalled and dropped. */
-const StreamHighWaterMark = 32;
-
-export function createEventBroadcaster() {
+export function createEventBroadcaster(input: EventBroadcasterInput) {
   const encoder = new TextEncoder();
-  const clients = new Map<ReadableStreamDefaultController<Uint8Array>, { heartbeat?: ReturnType<typeof setInterval>; closeWhen?: EventStreamOptions["closeWhen"] }>();
+  const maxQueuedBytes = input.maxQueuedBytes ?? DefaultStreamQueueBytes;
+  const maxEventBytes = input.maxEventBytes ?? DefaultMaxEventBytes;
+  const clients = new Map<ReadableStreamDefaultController<Uint8Array>, StreamClient>();
 
-  function encode(event: RuntimeStreamEvent): Uint8Array {
-    return encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  if (!Number.isInteger(maxQueuedBytes) || maxQueuedBytes < 1) throw new Error("Event stream queue bytes must be positive.");
+  if (!Number.isInteger(maxEventBytes) || maxEventBytes < 1 || maxEventBytes > maxQueuedBytes) {
+    throw new Error("Event stream event bytes must be positive and no larger than the queue bound.");
+  }
+
+  function encode(event: ProjectProtocolEvent): Uint8Array {
+    const payload = encoder.encode(`id: ${event.sequence}\nevent: opencanon\ndata: ${JSON.stringify(event)}\n\n`);
+    if (payload.byteLength > maxEventBytes) {
+      throw new Error(`OpenCanon protocol event ${event.sequence} exceeds the ${maxEventBytes}-byte event bound.`);
+    }
+    return payload;
   }
 
   function removeClient(controller: ReadableStreamDefaultController<Uint8Array>): void {
@@ -62,70 +79,88 @@ export function createEventBroadcaster() {
     clients.delete(controller);
   }
 
+  function failClient(controller: ReadableStreamDefaultController<Uint8Array>, message: string): void {
+    removeClient(controller);
+    try {
+      controller.error(new Error(message));
+    } catch {
+      // The stream was already closed by its consumer.
+    }
+  }
+
+  function enqueue(controller: ReadableStreamDefaultController<Uint8Array>, payload: Uint8Array): boolean {
+    const desiredSize = controller.desiredSize;
+    if (desiredSize === null || desiredSize < payload.byteLength) {
+      failClient(controller, "OpenCanon event stream consumer fell behind; reconnect with the last event sequence.");
+      return false;
+    }
+    try {
+      controller.enqueue(payload);
+      return true;
+    } catch {
+      removeClient(controller);
+      return false;
+    }
+  }
+
   return {
-    connect(initial: RuntimeStreamEvent | RuntimeStreamEvent[] | (() => RuntimeStreamEvent[]), options: EventStreamOptions = {}): ReadableStream<Uint8Array> {
+    connect(initial: ProjectProtocolEvent[] | (() => ProjectProtocolEvent[]), options: EventStreamOptions = {}): ReadableStream<Uint8Array> {
       let activeController: ReadableStreamDefaultController<Uint8Array> | undefined;
       return new ReadableStream<Uint8Array>(
         {
           start(controller) {
             activeController = controller;
-            clients.set(controller, { closeWhen: options.closeWhen });
-            const initialEvents = typeof initial === "function" ? initial() : Array.isArray(initial) ? initial : [initial];
-            for (const event of initialEvents) {
-              controller.enqueue(encode(event));
+            clients.set(controller, { filter: options.filter, closeWhen: options.closeWhen });
+            if (!enqueue(controller, ConnectedFrame)) return;
+            const initialEvents = typeof initial === "function" ? initial() : initial;
+            for (const eventValue of initialEvents) {
+              const event = ProjectProtocolEventSchema.parse(eventValue);
+              if (!enqueue(controller, encode(event))) return;
               if (options.closeWhen?.(event)) {
                 removeClient(controller);
                 controller.close();
                 return;
               }
             }
+            if (options.closeAfterReplay) {
+              removeClient(controller);
+              controller.close();
+              return;
+            }
             const heartbeat = setInterval(() => {
-              try {
-                controller.enqueue(encoder.encode(": heartbeat\n\n"));
-              } catch {
-                removeClient(controller);
-              }
-            }, 30_000);
-            // Don't keep the runtime event loop alive solely for a client heartbeat.
-            if (typeof heartbeat === "object" && "unref" in heartbeat) (heartbeat as { unref: () => void }).unref();
-            clients.set(controller, { heartbeat, closeWhen: options.closeWhen });
+              enqueue(controller, encoder.encode(": heartbeat\n\n"));
+            }, HeartbeatIntervalMs);
+            if (typeof heartbeat === "object" && "unref" in heartbeat) heartbeat.unref();
+            clients.set(controller, { heartbeat, filter: options.filter, closeWhen: options.closeWhen });
           },
           cancel() {
             if (activeController) removeClient(activeController);
           },
         },
-        // Bound per-client buffering: with highWaterMark 32, desiredSize drops to
-        // <= 0 only once ~32 events are queued unpulled, which `broadcast` treats
-        // as a stalled client and disconnects. Healthy clients (queue drained by
-        // the socket) keep a positive desiredSize and are never dropped.
-        new CountQueuingStrategy({ highWaterMark: StreamHighWaterMark }),
+        new ByteLengthQueuingStrategy({ highWaterMark: maxQueuedBytes }),
       );
     },
-    broadcast(event: RuntimeStreamEvent): void {
+    broadcast(draftValue: ProjectProtocolEventDraft): ProjectProtocolEvent {
+      const draft = ProjectProtocolEventDraftSchema.parse(draftValue);
+      const persistedDraft = {
+        ...draft,
+        timestamp: new Date().toISOString(),
+        revision: input.currentRevision(),
+      } satisfies PersistedProjectProtocolEventDraft;
+      encode(ProjectProtocolEventSchema.parse({ ...persistedDraft, sequence: Number.MAX_SAFE_INTEGER }));
+      const persisted = input.append(persistedDraft);
+      const event = ProjectProtocolEventSchema.parse(persisted);
       const payload = encode(event);
       for (const controller of [...clients.keys()]) {
         const client = clients.get(controller);
-        const desiredSize = controller.desiredSize;
-        if (desiredSize === null || desiredSize <= 0) {
+        if (client?.filter && !client.filter(event)) continue;
+        if (!enqueue(controller, payload)) continue;
+        if (client?.closeWhen?.(event)) {
           removeClient(controller);
-          try {
-            if (desiredSize === null) controller.close();
-            else controller.error(new Error("OpenCanon event stream consumer fell behind; reconnect with the last event cursor."));
-          } catch {
-            // already closed/errored
-          }
-          continue;
-        }
-        try {
-          controller.enqueue(payload);
-          if (client?.closeWhen?.(event)) {
-            removeClient(controller);
-            controller.close();
-          }
-        } catch {
-          removeClient(controller);
+          controller.close();
         }
       }
+      return event;
     },
     close(): void {
       for (const controller of [...clients.keys()]) {
@@ -133,56 +168,78 @@ export function createEventBroadcaster() {
         try {
           controller.close();
         } catch {
-          continue;
+          // The stream was already closed by its consumer.
         }
       }
       clients.clear();
     },
   };
 }
+
 export type EventBroadcaster = ReturnType<typeof createEventBroadcaster>;
 
-export function snapshotEvent(snapshot: RuntimeSnapshot, summary: string): RuntimeStreamEvent {
-  return {
-    type: StreamEventType.Snapshot,
-    timestamp: new Date().toISOString(),
-    summary,
+export function projectPublishedEvent(summary: string, ids: string[] = []): ProjectProtocolEventDraft {
+  return eventDraft(ProtocolDomain.Project, ProjectProtocolEventType.Published, summary, ids);
+}
+
+export function activityChangedEvent(summary: string, ids: string[]): ProjectProtocolEventDraft {
+  return eventDraft(ProtocolDomain.Activity, ProjectProtocolEventType.Changed, summary, ids);
+}
+
+export function progressEvent(input: {
+  domain: ProtocolDomainValue;
+  operation: string;
+  phase: string;
+  summary: string;
+  current?: number;
+  total?: number;
+  unit?: string;
+  ids?: string[];
+  operationId?: string;
+}): ProjectProtocolEventDraft {
+  return eventDraft(input.domain, ProjectProtocolEventType.Progress, input.summary, input.ids ?? [], {
+    ...(input.operationId ? { operationId: input.operationId } : {}),
     progress: {
-      phase: "ready",
-      label: "Project context ready",
-      current: snapshot.files.length,
-      total: snapshot.files.length,
-      unit: "files",
+      operation: input.operation,
+      phase: input.phase,
+      current: input.current ?? 0,
+      total: input.total ?? 0,
+      unit: input.unit ?? "items",
+      message: input.summary,
     },
-    snapshot,
-  };
+  });
 }
 
-export function indexingEvent(summary: string, progress?: RuntimeStreamProgress): RuntimeStreamEvent {
-  return {
-    type: StreamEventType.Indexing,
-    timestamp: new Date().toISOString(),
+export function proofEvent(event: ChangeCheckRunEvent): ProjectProtocolEventDraft {
+  const run = "run" in event ? event.run : undefined;
+  return eventDraft(
+    ProtocolDomain.Proof,
+    event.type,
+    `Change check ${event.runId} ${event.type}.`,
+    [event.runId, event.batchId, run?.changeId, run?.taskId, run?.checkId].filter((id): id is string => Boolean(id)),
+    { operationId: event.runId },
+  );
+}
+
+export function failureEvent(domain: ProtocolDomainValue, summary: string, ids: string[] = []): ProjectProtocolEventDraft {
+  return eventDraft(domain, ProjectProtocolEventType.Failed, summary, ids);
+}
+
+function eventDraft(
+  domain: ProtocolDomainValue,
+  type: string,
+  summary: string,
+  ids: string[],
+  optional: Pick<ProjectProtocolEventDraft, "operationId" | "progress"> = {},
+): ProjectProtocolEventDraft {
+  return ProjectProtocolEventDraftSchema.parse({
+    protocolVersion: DomainProtocolVersion,
+    domain,
+    type,
     summary,
-    progress: progress ?? { phase: "validation", label: summary, indeterminate: true },
-  };
-}
-
-export function operationEvent(event: ChangeCheckRunEvent): RuntimeStreamEvent {
-  return {
-    type: StreamEventType.Operation,
-    timestamp: event.timestamp,
-    summary: `Change check ${event.runId} ${event.type}.`,
-    operation: event,
-  };
-}
-
-export function streamErrorEvent(summary: string): RuntimeStreamEvent {
-  return {
-    type: StreamEventType.Error,
-    timestamp: new Date().toISOString(),
-    summary,
-    progress: { phase: "failure", label: "Project context update failed" },
-  };
+    ids: [...new Set(ids.filter(Boolean))],
+    ...optional,
+  });
 }
 
 export function indexedEvent(snapshot: RuntimeSnapshot, summary: string): CanonEvent {

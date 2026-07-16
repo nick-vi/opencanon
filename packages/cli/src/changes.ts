@@ -11,11 +11,13 @@ import {
   ChangeTaskEventType,
   fail,
   Format,
+  ProjectProtocolEventSchema,
   StartChangeCheckRunsResponseSchema,
   type ChangeCheckRun,
   type ChangeCheckRunEvent,
   type StartChangeCheckRunsResponse,
   type DefinitionTarget,
+  type ProjectProtocolEvent,
 } from "@opencanon/core";
 import { booleanOption, formatOption, nonNegativeIntegerOption, positiveIntegerOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { changesDefinitionCommandSuggestion, isChangeDefinitionCommand, runChangesDefinitionCommand } from "./changes-definition.ts";
@@ -534,6 +536,7 @@ async function followChangeCheckRun(
 ): Promise<ChangeCheckRun> {
   let cursor = options.after ?? 0;
   let terminal: ChangeCheckRun | undefined;
+  let protocolCursor: number | undefined;
   let cancelRequested = false;
   let initialSnapshot = options.initialSnapshot;
   const processEvent = (event: ChangeCheckRunEvent) => {
@@ -567,16 +570,42 @@ async function followChangeCheckRun(
       }
       if (terminal) break;
       const controller = new AbortController();
+      let refreshRequested = false;
+      let refreshFailure: unknown;
+      let refreshPromise: Promise<void> | undefined;
+      const refreshOperation = () => {
+        refreshRequested = true;
+        if (refreshPromise) return;
+        refreshPromise = (async () => {
+          while (refreshRequested && !terminal) {
+            refreshRequested = false;
+            const snapshot = await readChangeCheckRunSnapshot(client, initial.id, cursor);
+            for (const event of snapshot.events) processEvent(event);
+            if (isTerminalRun(snapshot.run) && cursor >= snapshot.latestSequence) terminal = snapshot.run;
+          }
+        })().catch((error) => {
+          refreshFailure = error;
+        }).finally(() => {
+          refreshPromise = undefined;
+          if (terminal || refreshFailure) controller.abort();
+        });
+      };
       const parser = createSseParser((event) => {
-        processEvent(event);
-        if (terminal) controller.abort();
+        protocolCursor = Math.max(protocolCursor ?? 0, event.sequence);
+        if (event.operationId === initial.id) refreshOperation();
       });
+      const query = new URLSearchParams({ operationId: initial.id });
+      if (protocolCursor !== undefined) query.set("afterSequence", String(protocolCursor));
       try {
-        await client.stream(`${RuntimeApiRoute.EventsStream}?runId=${encodeURIComponent(initial.id)}&after=${cursor}`, {
+        await client.stream(`${RuntimeApiRoute.EventsStream}?${query.toString()}`, {
           signal: controller.signal,
           onChunk: parser.push,
         });
+        await refreshPromise;
+        if (refreshFailure) throw refreshFailure;
       } catch (error) {
+        await refreshPromise;
+        if (refreshFailure) throw refreshFailure;
         if (terminal) break;
         if (reconnect >= 2) throw error;
       }
@@ -612,7 +641,7 @@ function isTerminalRunEvent(event: ChangeCheckRunEvent): event is Extract<Change
   return event.type === ChangeCheckRunEventType.Passed || event.type === ChangeCheckRunEventType.Failed || event.type === ChangeCheckRunEventType.Cancelled;
 }
 
-function createSseParser(onOperation: (event: ChangeCheckRunEvent) => void): { push(chunk: string): void } {
+function createSseParser(onEvent: (event: ProjectProtocolEvent) => void): { push(chunk: string): void } {
   let buffer = "";
   return {
     push(chunk) {
@@ -629,10 +658,9 @@ function createSseParser(onOperation: (event: ChangeCheckRunEvent) => void): { p
           .join("\n");
         if (!data) continue;
         try {
-          const parsed = JSON.parse(data) as { operation?: unknown };
-          if (parsed.operation) onOperation(ChangeCheckRunEventSchema.parse(parsed.operation));
+          onEvent(ProjectProtocolEventSchema.parse(JSON.parse(data)));
         } catch (error) {
-          throw new Error(`OpenCanon returned a malformed Change check event: ${error instanceof Error ? error.message : String(error)}`);
+          throw new Error(`OpenCanon returned a malformed protocol event: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     },

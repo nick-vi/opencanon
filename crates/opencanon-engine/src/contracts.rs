@@ -43,6 +43,22 @@ pub(crate) struct ListEventsRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppendProtocolEventRequest {
+    pub(crate) event: serde_json::Value,
+    pub(crate) max_count: u32,
+    pub(crate) retain_after: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListProtocolEventsRequest {
+    pub(crate) after_sequence: u64,
+    pub(crate) limit: u32,
+    pub(crate) operation_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(crate) struct WriteJobRequest {
     pub(crate) job: serde_json::Value,
 }

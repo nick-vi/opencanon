@@ -11,7 +11,7 @@ import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapsh
 import { createEngine } from "@opencanon/engine";
 import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
-import { admittedJobs, assignedJobEvent, emptyPruneResult } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult } from "./engine-binding-test-support.ts";
 
 test("runtime source snapshots feed captured bytes into fact extraction", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-"));
@@ -361,6 +361,8 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         stopWatcher: () => undefined,
         writeEventJson: () => undefined,
         listEventsJson: () => JSON.stringify([]),
+        appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+        listProtocolEventsJson: () => emptyProtocolEventWindow(),
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
@@ -827,6 +829,8 @@ test("runtime snapshot reports missing semantic index with project embedding con
         stopWatcher: () => undefined,
         writeEventJson: () => undefined,
         listEventsJson: () => JSON.stringify([]),
+        appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+        listProtocolEventsJson: () => emptyProtocolEventWindow(),
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
@@ -1112,6 +1116,8 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         stopWatcher: () => undefined,
         writeEventJson: () => undefined,
         listEventsJson: () => JSON.stringify([]),
+        appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+        listProtocolEventsJson: () => emptyProtocolEventWindow(),
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
@@ -1268,6 +1274,8 @@ test("runtime snapshot marks cached semantic index stale after provider config c
         stopWatcher: () => undefined,
         writeEventJson: () => undefined,
         listEventsJson: () => JSON.stringify([]),
+        appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+        listProtocolEventsJson: () => emptyProtocolEventWindow(),
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
@@ -1566,6 +1574,8 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
         stopWatcher: () => undefined,
         writeEventJson: () => undefined,
         listEventsJson: () => JSON.stringify([]),
+        appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+        listProtocolEventsJson: () => emptyProtocolEventWindow(),
         writeJobJson: () => undefined,
         readJobJson: () => JSON.stringify({ job: null }),
         listJobsJson: () => JSON.stringify([]),
@@ -1709,6 +1719,8 @@ for (const scenario of [
           stopWatcher: () => undefined,
           writeEventJson: () => undefined,
           listEventsJson: () => JSON.stringify([]),
+          appendProtocolEventJson: (requestJson: string) => assignedProtocolEvent(requestJson),
+          listProtocolEventsJson: () => emptyProtocolEventWindow(),
           writeJobJson: () => undefined,
           readJobJson: () => JSON.stringify({ job: null }),
           listJobsJson: () => JSON.stringify([]),

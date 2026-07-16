@@ -40,6 +40,7 @@ export type RuntimeStateManagerOptions = {
   isStopped(): boolean;
   rebuildNow(summary: string, options: RuntimeRebuildOptions, signal: AbortSignal): Promise<RuntimeRebuildCandidate>;
   readProjectInventory(): ProjectInventory;
+  onPublished?(input: { revision: number; snapshot: RuntimeSnapshot; summary: string }): void;
   onRebuildError(error: unknown): void;
 };
 
@@ -116,6 +117,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
           revision = { ...revision, published: intent.revision };
           phase = RuntimeLifecyclePhaseValue.Ready;
           failure = undefined;
+          options.onPublished?.({ revision: intent.revision, snapshot, summary: intent.summary });
           resolvePublishedWaiters();
         } else {
           await candidate.discard?.();

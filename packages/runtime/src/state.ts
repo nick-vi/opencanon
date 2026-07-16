@@ -16,6 +16,9 @@ import {
   type ContextPaths,
   type RuntimeHealth,
   type ProductModelProjection,
+  type PersistedProjectProtocolEventDraft,
+  type ProjectProtocolEvent,
+  type ProtocolEventWindow,
   type RepoGraph,
   type ScanAndDiffResult,
   type ListSemanticChunksRequest,
@@ -46,6 +49,8 @@ export type ProjectStore = {
   readState(): StoreState;
   writeEvent(event: CanonEvent): void;
   listEvents(query: CanonEventQuery): CanonEvent[];
+  appendProtocolEvent(event: PersistedProjectProtocolEventDraft): ProjectProtocolEvent;
+  listProtocolEvents(input: { afterSequence: number; limit: number; operationId?: string }): ProtocolEventWindow;
   writeJob(job: ChangeCheckRun): void;
   readJob(jobId: string): ChangeCheckRun | null;
   listJobs(query: ChangeCheckRunQuery): ChangeCheckRun[];
@@ -85,6 +90,9 @@ export type StoreState = {
   };
   semanticIndex?: SemanticIndexSnapshot;
 };
+
+const ProtocolEventRetentionCount = 10_000;
+const ProtocolEventRetentionMs = 7 * 24 * 60 * 60 * 1000;
 
 export function openProjectStore(input: { rootDir: string; paths: ContextPaths; statePath?: string }): ProjectStore {
   return createProjectStore({ ...input, engine: loadEngine() });
@@ -158,6 +166,16 @@ export function createProjectStore(input: { rootDir: string; paths: ContextPaths
     },
     listEvents(query) {
       return project.listEvents(query);
+    },
+    appendProtocolEvent(event) {
+      return project.appendProtocolEvent({
+        event,
+        maxCount: ProtocolEventRetentionCount,
+        retainAfter: new Date(Date.now() - ProtocolEventRetentionMs).toISOString(),
+      });
+    },
+    listProtocolEvents(input) {
+      return project.listProtocolEvents(input);
     },
     writeJob(job) {
       project.writeJob(job);

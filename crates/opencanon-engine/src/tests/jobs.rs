@@ -100,6 +100,7 @@ fn migration_011_discards_pre_executor_jobs_without_touching_canon_events() {
     .unwrap();
     conn.execute("delete from migrations where version >= 11", [])
         .unwrap();
+    conn.execute("drop table protocol_events", []).unwrap();
     drop(conn);
 
     drop(open_test_project(&root));

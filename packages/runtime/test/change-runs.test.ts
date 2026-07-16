@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, ChangeCheckTimeout, createPaths, resolveChangeCheckTimeoutMs, type ChangeCheckRunEvent } from "@opencanon/core";
+import { ChangeCheckRunEventSchema, ChangeCheckRunEventType, ChangeCheckRunSchema, ChangeCheckRunStatus, ChangeCheckTimeout, createPaths, DomainProtocolVersion, ProtocolDomain, ProtocolEventReplaySchema, resolveChangeCheckTimeoutMs, type ChangeCheckRunEvent } from "@opencanon/core";
 import { openProjectStore, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
 import { createChangeRunProject, quotedNode, readRunEvents, shellQuote, startRun } from "./change-run-test-support.ts";
@@ -110,19 +110,62 @@ test("Change check runs stream output, persist terminal state, and replay from a
     const listedResponse = await fetch(`${server.url}/api/changes/check-runs?status=passed&limit=1`, { headers });
     const listedText = await listedResponse.text();
     assert.equal(listedResponse.status, 200, listedText);
-    const listedPayload = JSON.parse(listedText) as { data: { runs: unknown[] } };
-    assert.deepEqual(listedPayload.data.runs.map((run) => ChangeCheckRunSchema.parse(run).id), [started.id]);
+    const listedPayload = JSON.parse(listedText) as { data: { data: { runs: unknown[] } } };
+    assert.deepEqual(listedPayload.data.data.runs.map((run) => ChangeCheckRunSchema.parse(run).id), [started.id]);
     const snapshotResponse = await fetch(`${server.url}/api/changes/check-runs?runId=${encodeURIComponent(started.id)}&after=0`, { headers });
     const snapshotText = await snapshotResponse.text();
     assert.equal(snapshotResponse.status, 200, snapshotText);
-    const snapshotPayload = JSON.parse(snapshotText) as { data: { run: unknown; latestSequence: number; events: unknown[] } };
-    assert.equal(ChangeCheckRunSchema.parse(snapshotPayload.data.run).id, started.id);
-    assert(snapshotPayload.data.latestSequence >= events.at(-1)!.sequence);
-    assert.equal(snapshotPayload.data.events.at(-1) && ChangeCheckRunEventSchema.parse(snapshotPayload.data.events.at(-1)).type, ChangeCheckRunEventType.Passed);
+    const snapshotPayload = JSON.parse(snapshotText) as { data: { data: { run: unknown; latestSequence: number; events: unknown[] } } };
+    assert.equal(ChangeCheckRunSchema.parse(snapshotPayload.data.data.run).id, started.id);
+    assert(snapshotPayload.data.data.latestSequence >= events.at(-1)!.sequence);
+    assert.equal(snapshotPayload.data.data.events.at(-1) && ChangeCheckRunEventSchema.parse(snapshotPayload.data.data.events.at(-1)).type, ChangeCheckRunEventType.Passed);
+    const protocolResponse = await fetch(`${server.url}/api/events?operationId=${encodeURIComponent(started.id)}&afterSequence=0&limit=100`, { headers });
+    const protocolText = await protocolResponse.text();
+    assert.equal(protocolResponse.status, 200, protocolText);
+    const protocolPayload = JSON.parse(protocolText) as { data: { data: unknown } };
+    const protocolReplay = ProtocolEventReplaySchema.parse(protocolPayload.data.data);
+    assert.equal(protocolReplay.resyncRequired, false);
+    assert(protocolReplay.events.some((event) => event.operationId === started.id && event.type === ChangeCheckRunEventType.Passed));
+    assert(protocolReplay.events.every((event) => !("snapshot" in event) && !("operation" in event)));
     const after = stdout[0]?.sequence ?? 0;
     const replay = await readRunEvents(server.url, headers, started.id, after);
     assert(replay.every((event) => event.sequence > after));
     assert.equal(replay.at(-1)?.type, ChangeCheckRunEventType.Passed);
+  } finally {
+    await server.stop();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime event streams fail explicitly when their replay cursor expired", { timeout: IntegrationTimeoutMs }, async () => {
+  const rootDir = createChangeRunProject("expired-protocol-cursor", `${quotedNode()} -e ${shellQuote("process.exit(0)")}`);
+  const store = openProjectStore({ rootDir, paths: createPaths(rootDir) });
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      store.project.appendProtocolEvent({
+        event: {
+          protocolVersion: DomainProtocolVersion,
+          timestamp: `2026-07-16T10:00:0${index}.000Z`,
+          revision: 1,
+          domain: ProtocolDomain.Project,
+          type: "published",
+          summary: `Published revision ${index + 1}.`,
+          ids: [],
+        },
+        maxCount: 2,
+        retainAfter: "2026-07-01T00:00:00.000Z",
+      });
+    }
+  } finally {
+    store.close();
+  }
+
+  const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+  try {
+    const response = await fetch(`${server.url}/api/events/stream?afterSequence=0`, { headers: runtimeAuthHeaders(server.authToken) });
+    const text = await response.text();
+    assert.equal(response.status, 409, text);
+    assert.match(text, /resync-required/);
   } finally {
     await server.stop();
     rmSync(rootDir, { recursive: true, force: true });
@@ -435,6 +478,6 @@ async function readRun(url: string, headers: Record<string, string>, runId: stri
   const response = await fetch(`${url}/api/changes/check-runs?runId=${encodeURIComponent(runId)}`, { headers });
   const text = await response.text();
   assert.equal(response.status, 200, text);
-  const payload = JSON.parse(text) as { data: { run: unknown } };
-  return ChangeCheckRunSchema.parse(payload.data.run);
+  const payload = JSON.parse(text) as { data: { data: { run: unknown } } };
+  return ChangeCheckRunSchema.parse(payload.data.data.run);
 }
