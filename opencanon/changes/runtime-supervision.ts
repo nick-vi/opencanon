@@ -188,13 +188,15 @@ export const runtimeSupervisionChanges = [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/project-watch-summary.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/snapshot.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/validator-graph-runtime.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/test/client-test-sources.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/project-analysis.test.ts" },
       { kind: DefinitionTargetKind.File, path: "opencanon/specs/index.ts" },
       { kind: DefinitionTargetKind.File, path: "opencanon/changes/runtime-supervision.ts" },
     ],
     intent: {
       problem: "A watcher event that changed only file metadata still ran complete analysis and published a content-equivalent graph generation.",
-      outcome: "The analysis worker hashes every authoritative analysis input and returns an explicit unchanged result before reading source snapshots, extracting facts, validating, or staging a graph generation.",
+      outcome: "One watcher-driven analysis path hashes every authoritative input and returns an explicit unchanged result before reading source snapshots, extracting facts, validating, or staging a graph generation.",
       why: "Watcher notifications are hints rather than proof of content changes; accepted project state should change only when source, canon, configuration, or validation context content changes.",
     },
     tasks: [
@@ -207,14 +209,14 @@ export const runtimeSupervisionChanges = [
       {
         id: "short-circuit-unchanged-analysis",
         title: "Short-circuit analysis when complete input identity is unchanged",
-        files: ["packages/runtime/src/project-source-snapshot.ts", "packages/runtime/src/project-analysis-identity.ts", "packages/runtime/src/project-analysis-operation.ts", "packages/runtime/src/project-analysis-protocol.ts", "packages/runtime/src/project-analysis-worker.ts", "packages/runtime/src/project-refresh-publication.ts", "packages/runtime/src/project-watch-summary.ts", "packages/runtime/src/server.ts", "packages/runtime/src/snapshot.ts"],
+        files: ["packages/runtime/src/project-source-snapshot.ts", "packages/runtime/src/project-analysis-identity.ts", "packages/runtime/src/project-analysis-operation.ts", "packages/runtime/src/project-analysis-protocol.ts", "packages/runtime/src/project-analysis-worker.ts", "packages/runtime/src/project-refresh-publication.ts", "packages/runtime/src/project-watch-summary.ts", "packages/runtime/src/server.ts", "packages/runtime/src/snapshot.ts", "packages/runtime/src/validator-graph-runtime.ts"],
         checks: ["project-analysis-tests", "runtime-types"],
         dependsOn: ["define-content-stability"],
       },
       {
         id: "prove-content-stability",
         title: "Prove metadata-only events preserve accepted state",
-        files: ["packages/runtime/test/project-analysis.test.ts"],
+        files: ["packages/runtime/test/client-test-sources.ts", "packages/runtime/test/project-analysis.test.ts"],
         checks: ["project-analysis-tests", "runtime-integration", "process-steady-state", "full-ci"],
         dependsOn: ["short-circuit-unchanged-analysis"],
       },

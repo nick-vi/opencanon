@@ -902,7 +902,14 @@ export function runtimeValidatorReloadCheckSource(): string {
     try {
       assert.deepEqual(await getSnapshotValidatorIds(server.url, server.authToken), ["first-rule"]);
       writeFileSync(path.join(rootDir, "validator-helpers/rules.ts"), ${JSON.stringify(validatorHelperSource(["first-rule", "second-rule"]))});
-      assert.deepEqual(await getSnapshotValidatorIds(server.url, server.authToken), ["first-rule", "second-rule"]);
+      const requestStartedAt = Date.now();
+      const duringRefresh = await getSnapshotValidatorIds(server.url, server.authToken);
+      assert(Date.now() - requestStartedAt < 1000, "Snapshot request waited for validator analysis.");
+      assert(
+        JSON.stringify(duringRefresh) === JSON.stringify(["first-rule"]) ||
+          JSON.stringify(duringRefresh) === JSON.stringify(["first-rule", "second-rule"]),
+      );
+      await waitForSnapshotValidatorIds(server.url, server.authToken, ["first-rule", "second-rule"]);
       writeFileSync(path.join(rootDir, "conventions/rules.ts"), "export default { id: 1 };\\n");
       assert.deepEqual(await getSnapshotValidatorIds(server.url, server.authToken), ["first-rule", "second-rule"]);
     } finally {
@@ -914,6 +921,16 @@ export function runtimeValidatorReloadCheckSource(): string {
       if (response.status !== 200) throw new Error(await response.text());
       const body = await response.json();
       return body.data.validators.map((validator) => validator.id);
+    }
+
+    async function waitForSnapshotValidatorIds(url, authToken, expected) {
+      const deadline = Date.now() + ${RuntimeWatcherPropagationTimeoutMs};
+      while (Date.now() < deadline) {
+        const actual = await getSnapshotValidatorIds(url, authToken);
+        if (JSON.stringify(actual) === JSON.stringify(expected)) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("Timed out waiting for validator graph publication.");
     }
   `;
 }

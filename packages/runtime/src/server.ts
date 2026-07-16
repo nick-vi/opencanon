@@ -85,7 +85,6 @@ import { listProjects } from "./project-summary.ts";
 import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, validateRuntimeAuth, validateMethod, type RuntimeError } from "./routes.ts";
 import { localPipeEndpoint, serveLocalProtocolPipe, type LocalProtocolPipeServer } from "./local-protocol.ts";
 import { acquireProjectWorkerLease, stopService } from "./service.ts";
-import { createValidatorGraphRuntime } from "./validator-graph-runtime.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/runtime.ts";
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
@@ -285,7 +284,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
   let stopped = false;
   let acceptedAnalysisInputHash: string | undefined;
-  let validatorGraphRuntime: ReturnType<typeof createValidatorGraphRuntime> | undefined;
   const stateManager = createRuntimeStateManager({
     initialSnapshot: snapshot,
     initialChangeCatalog: startupChangeCatalog,
@@ -312,14 +310,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     },
   });
   const knowledgeQueryRuntime = createKnowledgeQueryRuntime({ rootDir, statePath: () => store.statePath });
-  validatorGraphRuntime = createValidatorGraphRuntime({
-    rootDir,
-    paths: () => paths,
-    events,
-    initialDependencyFiles: stateManager.currentSnapshot().health.validatorGraph?.dependencyFiles,
-    rebuildAndPublish: stateManager.rebuildAndPublish,
-    isStopped: () => stopped,
-  });
   let coordinationDirectoryWatcher: FSWatcher | undefined;
   let coordinationSignalWatcher: FSWatcher | undefined;
   let coordinationRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -395,9 +385,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   }
 
   async function refreshCurrentSnapshot(): Promise<RuntimeSnapshot> {
-    if (!validatorGraphRuntime) return stateManager.currentSnapshot();
-    const refreshed = await validatorGraphRuntime.refreshIfChanged(stateManager.currentSnapshot());
-    return stateManager.setSnapshot(withProcessIdentity(refreshed));
+    return stateManager.currentSnapshot();
   }
 
   async function ensureProjectSnapshot(summary: string): Promise<RuntimeSnapshot> {
@@ -737,7 +725,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               total: next.definitionGraph.nodes.length,
               unit: "nodes",
             }));
-            validatorGraphRuntime?.recordCurrentSourceSignature();
             store.writeEvent(indexedEvent(next, summary));
             finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
               label: "Project state ready",

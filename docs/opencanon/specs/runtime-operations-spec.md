@@ -147,7 +147,8 @@ Rule `diagnostics-do-not-start-project-work`: Doctor and status surfaces inspect
 Checks: `doctor-tests`, `cli-tests`, `runtime-client-tests`, `service-lifecycle-tests`
 
 Rule `source-refresh-preserves-transports`: Project source refresh keeps pipe and HTTP responsive by running complete analysis outside the serving runtime and publishing only a complete accepted revision.
-- the serving process does not perform discovery, fact extraction, graph construction, or project validation
+- the serving process does not perform discovery, canon bundling, fact extraction, graph construction, or project validation
+- source and canon watchers schedule one coalesced isolated analysis path instead of reloading definitions on a request
 - superseded analysis is cancelled and cannot publish
 - analysis failure preserves the previous snapshot and serving transports
 - watcher events settle without facts, validation, graph staging, or accepted-state replacement only when source inventory, canon graphs, effective configuration, and validation context are content-equivalent
