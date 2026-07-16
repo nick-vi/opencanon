@@ -74,22 +74,33 @@ function hashSourceRuntime(hash: ReturnType<typeof createHash>, rootDir: string)
       const manifest = path.join(packageDir, "package.json");
       if (existsSync(manifest)) files.push(manifest);
       collectFiles(path.join(packageDir, "src"), files);
-      collectFiles(path.join(packageDir, "binaries"), files);
     }
   }
+  collectNativeRuntimeSources(rootDir, files);
   files.sort();
   for (const file of files) {
     const relative = path.relative(rootDir, file).replaceAll(path.sep, "/");
     hash.update(`${relative}\0`);
-    if (relative.includes("/binaries/")) hashPathIdentity(hash, file);
-    else {
-      try {
-        hash.update(readFileSync(file));
-      } catch {
-        hashPathIdentity(hash, file);
-      }
+    try {
+      hash.update(readFileSync(file));
+    } catch {
+      hashPathIdentity(hash, file);
     }
     hash.update("\0");
+  }
+}
+
+function collectNativeRuntimeSources(rootDir: string, files: string[]): void {
+  const cratesDir = path.join(rootDir, "crates");
+  if (!existsSync(cratesDir)) return;
+  for (const entry of readdirSync(cratesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const crateDir = path.join(cratesDir, entry.name);
+    for (const file of ["Cargo.toml", "Cargo.lock", "build.rs"]) {
+      const candidate = path.join(crateDir, file);
+      if (existsSync(candidate)) files.push(candidate);
+    }
+    collectFiles(path.join(crateDir, "src"), files);
   }
 }
 

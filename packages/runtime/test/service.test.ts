@@ -567,6 +567,51 @@ test("source runtime identity changes when imported runtime source changes", () 
   }
 });
 
+test("source runtime identity changes when native runtime source changes", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-native-source-runtime-identity-"));
+  try {
+    const cli = path.join(rootDir, "packages", "cli", "src", "index.ts");
+    const nativeSource = path.join(rootDir, "crates", "opencanon-engine", "src", "lib.rs");
+    mkdirSync(path.dirname(cli), { recursive: true });
+    mkdirSync(path.dirname(nativeSource), { recursive: true });
+    writeFileSync(cli, "import '@opencanon/runtime';\n");
+    writeFileSync(nativeSource, "pub const GENERATION: u8 = 1;\n");
+    const entrypoint = { path: realpathSync(cli), kind: RuntimeCliInvocationKind.NodeScript, source: "test" } as const;
+
+    const first = runtimeIdentityForEntrypoint(entrypoint);
+    writeFileSync(nativeSource, "pub const GENERATION: u8 = 2;\n");
+    const second = runtimeIdentityForEntrypoint(entrypoint);
+
+    assert.notEqual(first.runtimeFingerprint, second.runtimeFingerprint);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("source runtime identity ignores generated native build outputs", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-native-output-runtime-identity-"));
+  try {
+    const cli = path.join(rootDir, "packages", "cli", "src", "index.ts");
+    const nativeSource = path.join(rootDir, "crates", "opencanon-engine", "src", "lib.rs");
+    const nativeOutput = path.join(rootDir, "packages", "engine", "binaries", "opencanon.test.node");
+    mkdirSync(path.dirname(cli), { recursive: true });
+    mkdirSync(path.dirname(nativeSource), { recursive: true });
+    mkdirSync(path.dirname(nativeOutput), { recursive: true });
+    writeFileSync(cli, "import '@opencanon/runtime';\n");
+    writeFileSync(nativeSource, "pub const GENERATION: u8 = 1;\n");
+    writeFileSync(nativeOutput, "first build\n");
+    const entrypoint = { path: realpathSync(cli), kind: RuntimeCliInvocationKind.NodeScript, source: "test" } as const;
+
+    const first = runtimeIdentityForEntrypoint(entrypoint);
+    writeFileSync(nativeOutput, "second build with different bytes\n");
+    const second = runtimeIdentityForEntrypoint(entrypoint);
+
+    assert.equal(first.runtimeFingerprint, second.runtimeFingerprint);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("project runtime inspection reports live identity mismatch as stale", { timeout: 10000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-identity-stale-"));
   const registryPath = path.join(rootDir, "global", "service.json");
