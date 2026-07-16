@@ -310,6 +310,24 @@ test("isolated check runtime pruning preserves live owners and removes dead or e
   }
 });
 
+test("isolated check runtimes do not inherit the owner runtime entrypoint", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-check-runtime-entrypoint-"));
+  const previousCli = process.env.OPENCANON_CLI;
+  let runtime: Awaited<ReturnType<typeof createIsolatedCheckRuntime>> | undefined;
+  try {
+    process.env.OPENCANON_CLI = path.join(rootDir, "owner-runtime", "cli.js");
+    runtime = await createIsolatedCheckRuntime(rootDir);
+
+    assert.equal(runtime.env.OPENCANON_CLI, undefined);
+    assert.equal(runtime.env.PATH, process.env.PATH);
+  } finally {
+    if (runtime) await cleanupIsolatedCheckRuntime(runtime).catch(() => undefined);
+    if (previousCli === undefined) delete process.env.OPENCANON_CLI;
+    else process.env.OPENCANON_CLI = previousCli;
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("an active check command exits when its runtime owner is killed", { timeout: 20000 }, async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-check-command-owner-"));
   const resultPath = path.join(rootDir, "owner-result.json");

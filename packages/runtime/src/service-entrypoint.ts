@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 export const RuntimeCliInvocationKind = { NodeScript: "node-script", Executable: "executable" } as const;
 export type RuntimeCliInvocationKind = (typeof RuntimeCliInvocationKind)[keyof typeof RuntimeCliInvocationKind];
 
+export const RuntimeCliEnv = {
+  Entrypoint: "OPENCANON_CLI",
+} as const;
+
 export type RuntimeCliEntrypoint = {
   path: string;
   kind: RuntimeCliInvocationKind;
@@ -33,7 +37,7 @@ export function nodeCommandForCliInvocation(): string {
 }
 
 export function resolveRuntimeCliEntrypoint(rootDir: string): RuntimeCliEntrypoint {
-  const envOverride = nonEmptyString(process.env.OPENCANON_CLI);
+  const envOverride = nonEmptyString(process.env[RuntimeCliEnv.Entrypoint]);
   if (envOverride) {
     const entrypoint = cliEntrypointFromCandidate(envOverride, "env");
     if (entrypoint) return entrypoint;

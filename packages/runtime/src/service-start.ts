@@ -22,7 +22,7 @@ import {
   terminateSpawnedProcess,
 } from "./service-process.ts";
 import { errorMessage, isLocalProtocolTransportFailure, projectNotFoundProblem } from "./service-http.ts";
-import { runtimeCliInvocation } from "./service-entrypoint.ts";
+import { RuntimeCliEnv, runtimeCliInvocation } from "./service-entrypoint.ts";
 import { clearRuntimeStartupResults, readRuntimeStartupFailure, removeRuntimeStartupResult, runtimeStartupResultPath } from "./service-startup-result.ts";
 import { privateProjectRuntimeStatePath, projectRuntimeStatePath, runtimeNamespaceForRegistry } from "./service-namespace.ts";
 import {
@@ -153,7 +153,7 @@ export async function startProjectRuntime(input: {
         stdio: ["ignore", logFd, logFd],
         env: {
           ...process.env,
-          OPENCANON_CLI: cli.entrypoint.path,
+          [RuntimeCliEnv.Entrypoint]: cli.entrypoint.path,
           [ProjectRuntimeEnv.AuthToken]: authToken,
           [ProjectRuntimeEnv.LeaseId]: leaseId,
           [ProjectRuntimeEnv.RegistryPath]: registryPath,
@@ -316,7 +316,7 @@ export async function startService(input: {
         stdio: ["ignore", logFd, logFd],
         env: {
           ...process.env,
-          OPENCANON_CLI: cli.entrypoint.path,
+          [RuntimeCliEnv.Entrypoint]: cli.entrypoint.path,
           [ServiceEnv.AuthToken]: authToken,
           [ServiceEnv.LeaseId]: leaseId,
           [ServiceEnv.RegistryPath]: registryPath,

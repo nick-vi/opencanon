@@ -8,7 +8,7 @@ import { cleanupLocalPipeEndpoints } from "./local-protocol.ts";
 import { isProcessRunning, terminateSpawnedProcess } from "./process-tree.ts";
 import { discoverProjectRuntimeRunPeers, discoverServiceRunPeers } from "./service-peer-discovery.ts";
 import { directoryExists } from "./service-discovery.ts";
-import { runtimeCliInvocation } from "./service-entrypoint.ts";
+import { RuntimeCliEnv, runtimeCliInvocation } from "./service-entrypoint.ts";
 import {
   appendLifecycleEvent,
   forgetRuntimeEntryIfPid,
@@ -248,7 +248,7 @@ export async function setupOpenCanonProject(rootDir: string): Promise<{ status: 
     cwd: absoluteRoot,
     env: {
       ...process.env,
-      OPENCANON_CLI: cli.entrypoint.path,
+      [RuntimeCliEnv.Entrypoint]: cli.entrypoint.path,
     },
   });
   const stdout = output.stdout.trim();

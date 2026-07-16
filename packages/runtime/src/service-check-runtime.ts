@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { ChangeCheckTimeout, writeAtomicJsonFileSync } from "@opencanon/core";
 import { isSpawnedProcessTreeRunning, terminateSpawnedProcess } from "./process-tree.ts";
 import { stopService } from "./service-control.ts";
+import { RuntimeCliEnv } from "./service-entrypoint.ts";
 import {
   isProcessRunning,
   readRuntimeRegistry,
@@ -50,6 +51,7 @@ export type IsolatedCheckRuntime = {
 };
 
 const IsolatedRuntimeEnvKeys = [
+  RuntimeCliEnv.Entrypoint,
   ServiceEnv.AuthToken,
   ServiceEnv.LeaseId,
   ServiceEnv.OwnerPid,
