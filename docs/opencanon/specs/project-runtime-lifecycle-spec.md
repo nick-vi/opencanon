@@ -72,6 +72,13 @@ Rule `idle-shutdown-requires-quiescence`: A runtime can stop for idleness only a
 - completed work receives a full idle window
 Checks: `activity-tests`, `runtime-client-tests`
 
+Rule `shutdown-cancels-before-waiting`: Explicit runtime shutdown rejects new work and cancels owned analysis and indexing before waiting for quiescence and disposing shared resources.
+- active analysis receives abort before shutdown waits
+- queued refreshes never start during shutdown
+- expected cancellation does not publish a failure
+- shutdown completes when an owned operation ignores cancellation only by an explicit timeout failure
+Checks: `coordinator-tests`, `service-lifecycle-tests`, `runtime-client-tests`
+
 Rule `ensure-means-ready`: A successful project ensure or start result must reference a runtime whose process identity and health endpoint have been verified.
 - process spawn is not returned as command success
 - starting remains observable while the request waits

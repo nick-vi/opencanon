@@ -10,6 +10,11 @@ CLI, MCP, browser, and desktop clients consume bounded revisioned projections an
 - Files: `packages/core/generated/domain-protocol.openapi.json`
 - Files: `scripts/generate-domain-protocol.ts`
 - Files: `packages/core/src/contracts-runtime.ts`
+- Files: `packages/engine/src/index.ts`
+- Files: `crates/opencanon-engine/src/{contracts,project,state}.rs`
+- Files: `crates/opencanon-engine/src/project/{code_graph_connection,product_model_store,protocol_event_store}.rs`
+- Files: `crates/opencanon-engine/src/migrations/014_project_publication.sql`
+- Files: `packages/runtime/src/{project-refresh-publication,state-manager,state}.ts`
 - Files: `packages/runtime/src/routes.ts`
 - Files: `packages/runtime/src/server-routes.ts`
 - Files: `packages/runtime/src/server-events.ts`
@@ -44,6 +49,8 @@ CLI, MCP, browser, and desktop clients consume bounded revisioned projections an
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
 - `cli-tests` test `tests/cli-reporting.test.ts`
 - `mcp-tests` test `tests/mcp.test.ts`
+- `engine-publication-tests` command `npm run check:engine`
+- `coordinator-tests` test `packages/runtime/test/state-manager.test.ts`
 - `project-doctor` doctor
 
 ## Rules
@@ -65,6 +72,13 @@ Rule `events-are-replayable-invalidations`: Live project events carry monotonic 
 - expired history requests explicit resynchronization
 - slow clients are bounded by queued bytes
 Checks: `runtime-event-tests`, `runtime-client-tests`
+
+Rule `publication-is-atomic-and-monotonic`: Project State commits each monotonic published revision, accepted product projection, active graph generation, Canon history, and replay event as one durable publication boundary.
+- failed publication keeps the previous graph and revision
+- runtime restart resumes above the last published revision
+- live delivery relays the committed replay event without appending it again
+- unchanged refreshes advance revision without rewriting the product projection
+Checks: `engine-publication-tests`, `coordinator-tests`, `runtime-event-tests`, `runtime-client-tests`
 
 Rule `transports-preserve-domain-semantics`: HTTP and local pipe are adapters over the same domain operations and return identical success, problem, revision, and cancellation semantics.
 - authorization precedes admission
