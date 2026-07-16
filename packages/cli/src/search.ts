@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { CodeSymbol, Convention, Validator } from "@opencanon/core";
 import { fail, Format, listFiles, matchesAny, relative, resolveRootDir, type ContextPaths } from "@opencanon/core";
 import { loadProjectContext } from "./project.ts";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { protocolInputFromSearchParams, withRuntimeClient } from "./runtime-client.ts";
 
 // Single source of truth for search kinds; reference members instead of inlining the strings.
 const SearchKind = { All: "all", Symbol: "symbol", Convention: "convention", Validator: "validator", Doc: "doc", Context: "context" } as const;
@@ -89,7 +89,9 @@ async function searchSymbols(rootDir: string, query: SearchQuery): Promise<Searc
     limit: String(engineLimit),
   });
   if (query.symbolKind) params.set("kind", query.symbolKind);
-  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeSymbols}?${params.toString()}`));
+  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) =>
+    client.query("code.symbols", protocolInputFromSearchParams(params)),
+  );
   return result.symbols.map((symbol) => symbolResult(symbol, query.query));
 }
 
@@ -100,7 +102,7 @@ async function searchProjectContext(rootDir: string, query: SearchQuery): Promis
     params.set("limit", String(query.limit));
     const response = await withRuntimeClient<ContextSearchResponse>(
       rootDir,
-      (client) => client.get(`${RuntimeApiRoute.ContextSearch}?${params.toString()}`),
+      (client) => client.query("knowledge.search", protocolInputFromSearchParams(params)),
       { requestTimeoutMs: ContextSearchRequestTimeoutMs },
     );
     return response.results.map((result) => ({

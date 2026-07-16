@@ -13,6 +13,7 @@
     "./problem": "./src/problem.ts",
     "./result": "./src/result.ts",
     "./retry": "./src/retry.ts",
+    "./protocol": "./src/protocol-public.ts",
     "./safe-json": "./src/safe-json.ts",
     "./singleflight": "./src/singleflight.ts",
     "./release-manifest": "./src/release-manifest.ts",

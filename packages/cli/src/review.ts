@@ -22,7 +22,7 @@ import {
 import type { Change, ContextPaths, DoctorReport, ImpactSurfaceConventionResolution, ProducerStatus, ResolvedCommitGate, ValidationResult } from "@opencanon/core";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { loadProjectContext } from "./project.ts";
-import { RuntimeApiRoute, fetchRunningRuntimeProducers, withRuntimeClient } from "./runtime-client.ts";
+import { fetchRunningRuntimeProducers, withRuntimeClient } from "./runtime-client.ts";
 import { validationExitCode } from "./validate.ts";
 
 const ReviewStatusValue = {
@@ -164,7 +164,7 @@ function resolveReviewFiles(query: ReviewQuery, rootDir: string, paths: ContextP
 
 async function fetchRuntimeKnowledge(rootDir: string): Promise<ReadSemanticIndexStatusResult | null> {
   try {
-    return await withRuntimeClient<ReadSemanticIndexStatusResult>(rootDir, (client) => client.get(RuntimeApiRoute.ContextStatus));
+    return await withRuntimeClient<ReadSemanticIndexStatusResult>(rootDir, (client) => client.query("knowledge.status"));
   } catch {
     return null;
   }
@@ -174,13 +174,8 @@ async function validateFilesForReview(rootDir: string, paths: ContextPaths, file
   const result = await withRuntimeClient<ValidationResult>(
     rootDir,
     (client) =>
-      client.post(RuntimeApiRoute.Validate, {
-        files,
-        topics: [],
-        validatorIds: [],
-        project: false,
-        dryRun: true,
-        strictProducers,
+      client.query("validation.run", {
+        body: { files, topics: [], validatorIds: [], project: false, dryRun: true, strictProducers },
       }),
   );
   if ((result.commitGates ?? []).length === 0) return { ...result, commitGates: [] };

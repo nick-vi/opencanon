@@ -15,7 +15,7 @@ import type {
 import { fail, resolveRootDir } from "@opencanon/core";
 import { z } from "zod";
 import { readCliPackageVersion } from "./package-version.ts";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { protocolInputFromSearchParams, withRuntimeClient } from "./runtime-client.ts";
 
 const McpTool = {
   ContextAsk: "opencanon_context_ask",
@@ -59,7 +59,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       inputSchema: {},
     },
     async () => {
-      const summary = await withRuntimeClient<RuntimeProjectSummary>(query.rootDir, (client) => client.get(RuntimeApiRoute.ProjectSummary));
+      const summary = await withRuntimeClient<RuntimeProjectSummary>(query.rootDir, (client) => client.query("project.summary"));
       const status = {
         rootDir: summary.rootDir,
         lifecycle: summary.lifecycle,
@@ -89,12 +89,14 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     },
     async (input) => {
       const result = await withRuntimeClient<RelatedCanon>(query.rootDir, (client) =>
-        client.post(RuntimeApiRoute.CanonRelated, {
-          files: input.files ?? [],
-          topics: input.topics ?? [],
-          conventionIds: input.conventionIds ?? [],
-          validatorIds: input.validatorIds ?? [],
-          findingIds: input.findingIds ?? [],
+        client.query("canon.related.query", {
+          body: {
+            files: input.files ?? [],
+            topics: input.topics ?? [],
+            conventionIds: input.conventionIds ?? [],
+            validatorIds: input.validatorIds ?? [],
+            findingIds: input.findingIds ?? [],
+          },
         }),
       );
       return jsonToolResult(result);
@@ -109,7 +111,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       inputSchema: {},
     },
     async () => {
-      const result = await withRuntimeClient(query.rootDir, (client) => client.get(RuntimeApiRoute.ChangeReady));
+      const result = await withRuntimeClient(query.rootDir, (client) => client.query("changes.ready"));
       return jsonToolResult(result);
     },
   );
@@ -126,8 +128,8 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     async ({ limit }) => {
       const result = await withRuntimeClient(query.rootDir, async (client) => {
         const [queue, packet] = await Promise.all([
-          client.get(RuntimeApiRoute.ChangeReady),
-          client.get(`${RuntimeApiRoute.ContextPacket}?mode=agent-brief&limit=${limit ?? 25}`),
+          client.query("changes.ready"),
+          client.query("context.packet", { query: { mode: "agent-brief", limit: String(limit ?? 25) } }),
         ]);
         return { queue, packet };
       });
@@ -152,13 +154,15 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       const files = input.files ?? [];
       const project = input.project ?? files.length === 0;
       const result = await withRuntimeClient<ValidationResult>(query.rootDir, (client) =>
-        client.post(RuntimeApiRoute.Validate, {
-          files,
-          topics: input.topics ?? [],
-          validatorIds: input.validatorIds ?? [],
-          project,
-          dryRun: true,
-          strictProducers: input.strictProducers ?? false,
+        client.query("validation.run", {
+          body: {
+            files,
+            topics: input.topics ?? [],
+            validatorIds: input.validatorIds ?? [],
+            project,
+            dryRun: true,
+            strictProducers: input.strictProducers ?? false,
+          },
         }),
       );
       return jsonToolResult(result);
@@ -181,7 +185,9 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       params.set("query", input.query);
       params.set("limit", String(input.limit ?? 20));
       for (const item of input.paths ?? []) params.append("path", item);
-      const result = await withRuntimeClient<ProjectContextSearchResult>(query.rootDir, (client) => client.get(`${RuntimeApiRoute.ContextSearch}?${params.toString()}`));
+      const result = await withRuntimeClient<ProjectContextSearchResult>(query.rootDir, (client) =>
+        client.query("knowledge.search", protocolInputFromSearchParams(params)),
+      );
       return jsonToolResult(result);
     },
   );
@@ -198,7 +204,9 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     async (input) => {
       const params = new URLSearchParams();
       params.set("query", input.question);
-      const result = await withRuntimeClient<ProjectContextAskResult>(query.rootDir, (client) => client.get(`${RuntimeApiRoute.ContextAsk}?${params.toString()}`));
+      const result = await withRuntimeClient<ProjectContextAskResult>(query.rootDir, (client) =>
+        client.query("knowledge.ask", protocolInputFromSearchParams(params)),
+      );
       return jsonToolResult(result);
     },
   );
@@ -221,7 +229,9 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       params.set("offset", String(input.offset ?? 0));
       for (const item of input.paths ?? []) params.append("path", item);
       for (const item of input.definitions ?? []) params.append("definition", item);
-      const result = await withRuntimeClient<ListSemanticChunksResult>(query.rootDir, (client) => client.get(`${RuntimeApiRoute.ContextChunks}?${params.toString()}`));
+      const result = await withRuntimeClient<ListSemanticChunksResult>(query.rootDir, (client) =>
+        client.query("knowledge.chunks", protocolInputFromSearchParams(params)),
+      );
       return jsonToolResult(result);
     },
   );
@@ -234,7 +244,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       inputSchema: {},
     },
     async () => {
-      const result = await withRuntimeClient<ProjectContextCoverageResult>(query.rootDir, (client) => client.get(RuntimeApiRoute.ContextCoverage));
+      const result = await withRuntimeClient<ProjectContextCoverageResult>(query.rootDir, (client) => client.query("knowledge.coverage"));
       return jsonToolResult(result);
     },
   );
@@ -251,7 +261,9 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     async (input) => {
       const params = new URLSearchParams();
       params.set("query", input.query);
-      const result = await withRuntimeClient<ProjectContextBacklinksResult>(query.rootDir, (client) => client.get(`${RuntimeApiRoute.ContextBacklinks}?${params.toString()}`));
+      const result = await withRuntimeClient<ProjectContextBacklinksResult>(query.rootDir, (client) =>
+        client.query("knowledge.backlinks", protocolInputFromSearchParams(params)),
+      );
       return jsonToolResult(result);
     },
   );
@@ -264,7 +276,7 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
       inputSchema: {},
     },
     async () => {
-      const result = await withRuntimeClient<DoctorReport>(query.rootDir, (client) => client.get(RuntimeApiRoute.Doctor));
+      const result = await withRuntimeClient<DoctorReport>(query.rootDir, (client) => client.query("doctor.run"));
       return jsonToolResult(result);
     },
   );

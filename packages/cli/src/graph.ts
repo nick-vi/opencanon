@@ -1,5 +1,5 @@
 import { fail, Format, resolveRootDir, type CodeGraphEdge } from "@opencanon/core";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { protocolInputFromSearchParams, withRuntimeClient } from "./runtime-client.ts";
 
 // Single source of truth for graph commands; reference members instead of inlining the strings.
 const GraphCommand = { Callers: "callers", Callees: "callees", Impact: "impact" } as const;
@@ -32,7 +32,9 @@ export async function runGraphCommand(args = process.argv.slice(2), cwd = proces
     direction: directionForCommand(query.command),
     limit: String(query.limit),
   });
-  const result = await withRuntimeClient<CodeGraphResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeGraph}?${params.toString()}`));
+  const result = await withRuntimeClient<CodeGraphResponse>(rootDir, (client) =>
+    client.query("code.graph", protocolInputFromSearchParams(params)),
+  );
   if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, command: query.command, query: query.query, edges: result.edges }, null, 2));
   else printEdges(query.command, result.edges, result.sourceFiles, query.query);
 }

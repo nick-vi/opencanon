@@ -7,6 +7,8 @@ CLI, MCP, browser, and desktop clients consume bounded revisioned projections an
 ## Scope
 
 - Files: `packages/core/src/protocol*.ts`
+- Files: `packages/core/generated/domain-protocol.openapi.json`
+- Files: `scripts/generate-domain-protocol.ts`
 - Files: `packages/core/src/contracts-runtime.ts`
 - Files: `packages/runtime/src/routes.ts`
 - Files: `packages/runtime/src/server-routes.ts`
@@ -14,8 +16,7 @@ CLI, MCP, browser, and desktop clients consume bounded revisioned projections an
 - Files: `packages/runtime/src/local-protocol.ts`
 - Files: `packages/runtime/src/server-http.ts`
 - Files: `packages/runtime/src/protocol-policy.ts`
-- Files: `packages/cli/src/runtime-client.ts`
-- Files: `packages/cli/src/{validate,review,mcp}.ts`
+- Files: `packages/cli/src/{brief,changes,context,feedback,gate,graph,mcp,opencode-plugin,refactor,review,runtime-client,search,symbols,validate}.ts`
 - Files: `packages/runtime/test/*.test.ts`
 - Files: `tests/{contracts,cli-reporting,runtime-events,mcp}.test.ts`
 - Docs: `docs/opencanon/specs/domain-protocol-spec.md`
@@ -35,6 +36,7 @@ CLI, MCP, browser, and desktop clients consume bounded revisioned projections an
 ## Checks
 
 - `protocol-tests` test `packages/runtime/test/protocol.test.ts`
+- `protocol-contract-drift` command `npm run protocol:check`
 - `contracts-tests` test `tests/contracts.test.ts`
 - `runtime-event-tests` test `tests/runtime-events.test.ts`
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
@@ -48,7 +50,7 @@ Rule `one-operation-registry`: One typed operation registry owns request, respon
 - runtime routing and clients use the same operation ids
 - every operation has complete policy
 - the generated API description is deterministic
-Checks: `protocol-tests`, `contracts-tests`
+Checks: `protocol-tests`, `protocol-contract-drift`, `contracts-tests`
 
 Rule `projections-are-bounded-and-revisioned`: Every project read returns a bounded projection tied to the exact published revision used to compute it.
 - collections have fixed limits and opaque cursors

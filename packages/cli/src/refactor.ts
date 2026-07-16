@@ -14,7 +14,7 @@ import {
   type CodeSymbol,
   type RefactorPlan,
 } from "@opencanon/core";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { protocolInputFromSearchParams, withRuntimeClient } from "./runtime-client.ts";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
 type RefactorQuery = {
@@ -118,8 +118,8 @@ async function graphRenameInputs(rootDir: string, name: string): Promise<Pick<Pa
     const symbolsParams = new URLSearchParams({ query: name, limit: "500" });
     const referencesParams = new URLSearchParams({ query: name, limit: "1000", references: "1" });
     const [symbols, references] = await Promise.all([
-      client.get<CodeSymbolsResponse>(`${RuntimeApiRoute.CodeSymbols}?${symbolsParams.toString()}`),
-      client.get<CodeReferencesResponse>(`${RuntimeApiRoute.CodeSymbols}?${referencesParams.toString()}`),
+      client.query<CodeSymbolsResponse>("code.symbols", protocolInputFromSearchParams(symbolsParams)),
+      client.query<CodeReferencesResponse>("code.symbols", protocolInputFromSearchParams(referencesParams)),
     ]);
     return {
       symbols: symbols.symbols,

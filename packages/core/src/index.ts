@@ -847,4 +847,21 @@ export {
 export type { ProtocolOperationId } from "./protocol-operations.ts";
 export { createOpenCanonOpenApiDocument } from "./protocol-openapi.ts";
 export type { OpenCanonOpenApiDocument } from "./protocol-openapi.ts";
+export {
+  ProtocolResponseFailure,
+  ProtocolTransportFailure,
+  ProtocolTransportFailureCode,
+  createDomainProtocolClient,
+  isProtocolTransportFailure,
+  protocolInputFromSearchParams,
+} from "./protocol-client.ts";
+export type {
+  DomainProtocolClient,
+  ProtocolClientTransport,
+  ProtocolExecutionOptions,
+  ProtocolStreamOptions,
+  ProtocolStreamRequest,
+  ProtocolTransportRequest,
+  ProtocolTransportResponse,
+} from "./protocol-client.ts";
 export * from "./worktree.ts";

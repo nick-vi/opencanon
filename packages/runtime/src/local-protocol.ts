@@ -5,6 +5,10 @@ import { homedir } from "node:os";
 import path from "node:path";
 import {
   ProtocolHttpMethod,
+  ProtocolResponseFailure,
+  ProtocolTransportFailure,
+  ProtocolTransportFailureCode,
+  OpenCanonFailureSchema,
   maximumProtocolRequestBytes,
   createOpenCanonDiagnostic,
   createOpenCanonDiagnosticsError,
@@ -50,6 +54,7 @@ export type LocalProtocolRequest = {
   headers?: Record<string, string>;
   body?: unknown;
   timeoutMs?: number;
+  signal?: AbortSignal;
 };
 
 export type LocalProtocolRawResponse = {
@@ -141,6 +146,8 @@ export const httpLoopbackTransport: LocalProtocolTransport = {
     }
     const timeout = request.timeoutMs && request.timeoutMs > 0 ? request.timeoutMs : undefined;
     const controller = timeout ? new AbortController() : undefined;
+    const abortFromCaller = () => controller?.abort(request.signal?.reason);
+    request.signal?.addEventListener("abort", abortFromCaller, { once: true });
     const timer = timeout ? setTimeout(() => controller?.abort(), timeout) : undefined;
     try {
       const response = await fetch(`${endpoint.url.replace(/\/$/, "")}${request.path}`, {
@@ -151,7 +158,7 @@ export const httpLoopbackTransport: LocalProtocolTransport = {
           ...request.headers,
         },
         body: request.body === undefined ? undefined : JSON.stringify(request.body),
-        signal: controller?.signal,
+        signal: controller?.signal ?? request.signal,
       });
       return {
         status: response.status,
@@ -160,11 +167,12 @@ export const httpLoopbackTransport: LocalProtocolTransport = {
       };
     } catch (error) {
       if (isAbortError(error) && timeout) {
-        throw new Error(`OpenCanon local request timed out after ${timeout}ms.`);
+        throw new ProtocolTransportFailure(ProtocolTransportFailureCode.Timeout, `OpenCanon local request timed out after ${timeout}ms.`, { cause: error });
       }
-      throw error;
+      throw normalizeLocalTransportFailure(error);
     } finally {
       if (timer) clearTimeout(timer);
+      request.signal?.removeEventListener("abort", abortFromCaller);
     }
   },
 };
@@ -187,9 +195,9 @@ export const pipeProtocolTransport: LocalProtocolTransport = {
       },
       body: request.body,
     };
-    const response = await sendPipeFrame(endpoint.pipeEndpoint, frame, request.timeoutMs);
+    const response = await sendPipeFrame(endpoint.pipeEndpoint, frame, request.timeoutMs, request.signal);
     if (response.id !== id) {
-      throw new Error("OpenCanon pipe response id did not match the request id.");
+      throw new ProtocolTransportFailure(ProtocolTransportFailureCode.Malformed, "OpenCanon pipe response id did not match the request id.");
     }
     return {
       status: response.status,
@@ -245,39 +253,44 @@ export async function requestLocalProjectionData<T>(
 }
 
 export async function streamLocalText(endpoint: LocalProtocolEndpoint, request: LocalProtocolStreamRequest): Promise<void> {
-  if (endpoint.transport === LocalTransportKind.Pipe) {
-    await streamPipeText(endpoint, request);
-    return;
-  }
-  const response = await fetch(`${endpoint.url.replace(/\/$/, "")}${request.path}`, {
-    method: request.method,
-    headers: {
-      ...(endpoint.authToken ? runtimeAuthHeaders(endpoint.authToken) : {}),
-      ...(request.body === undefined ? {} : { "content-type": "application/json; charset=utf-8" }),
-      ...request.headers,
-    },
-    body: request.body === undefined ? undefined : JSON.stringify(request.body),
-    signal: request.signal,
-  });
-  if (!response.ok || !response.body) {
-    throw new Error(`OpenCanon event stream failed: ${response.status} ${response.statusText}.`);
-  }
-  request.onOpen?.();
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      if (chunk) request.onChunk(chunk);
+    if (endpoint.transport === LocalTransportKind.Pipe) {
+      await streamPipeText(endpoint, request);
+      return;
     }
-    const trailing = decoder.decode();
-    if (trailing) request.onChunk(trailing);
+    const response = await fetch(`${endpoint.url.replace(/\/$/, "")}${request.path}`, {
+      method: request.method,
+      headers: {
+        ...(endpoint.authToken ? runtimeAuthHeaders(endpoint.authToken) : {}),
+        ...(request.body === undefined ? {} : { "content-type": "application/json; charset=utf-8" }),
+        ...request.headers,
+      },
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
+      signal: request.signal,
+    });
+    if (!response.ok) throw protocolResponseFailure(response.status, await parseResponseBody(response));
+    if (!response.body) throw new ProtocolTransportFailure(ProtocolTransportFailureCode.Malformed, "OpenCanon event stream returned no body.");
+    request.onOpen?.();
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk) request.onChunk(chunk);
+      }
+      const trailing = decoder.decode();
+      if (trailing) request.onChunk(trailing);
+    } finally {
+      reader.releaseLock();
+    }
   } catch (error) {
-    if (!request.signal?.aborted) throw error;
-  } finally {
-    reader.releaseLock();
+    if (request.signal?.aborted) {
+      throw new ProtocolTransportFailure(ProtocolTransportFailureCode.Cancelled, "OpenCanon event stream was cancelled.", { cause: error });
+    }
+    if (error instanceof ProtocolResponseFailure) throw error;
+    throw normalizeLocalTransportFailure(error);
   }
 }
 
@@ -402,28 +415,39 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException ? error.name === "AbortError" : error instanceof Error && error.name === "AbortError";
 }
 
-async function sendPipeFrame(endpoint: string, frame: PipeRequestFrame, timeoutMs?: number): Promise<PipeResponseFrame> {
+async function sendPipeFrame(endpoint: string, frame: PipeRequestFrame, timeoutMs?: number, signal?: AbortSignal): Promise<PipeResponseFrame> {
   return await new Promise((resolve, reject) => {
     const socket = net.createConnection(endpoint);
+    const onAbort = () => socket.destroy(new ProtocolTransportFailure(ProtocolTransportFailureCode.Cancelled, "OpenCanon local request was cancelled."));
+    signal?.addEventListener("abort", onAbort, { once: true });
     if (timeoutMs && timeoutMs > 0) {
-      socket.setTimeout(timeoutMs, () => socket.destroy(new Error(`OpenCanon local request timed out after ${timeoutMs}ms.`)));
+      socket.setTimeout(timeoutMs, () => socket.destroy(new ProtocolTransportFailure(
+        ProtocolTransportFailureCode.Timeout,
+        `OpenCanon local request timed out after ${timeoutMs}ms.`,
+      )));
     }
-    socket.once("error", reject);
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    socket.once("error", (error) => {
+      cleanup();
+      reject(normalizeLocalTransportFailure(error));
+    });
     socket.once("connect", () => {
       socket.write(`${JSON.stringify(frame)}${PipeFrameDelimiter}`);
     });
     readPipeFrame(socket, PipeFrameMaxBytes).then(
       (response) => {
+        cleanup();
         socket.end();
         if (!isPipeResponseFrame(response)) {
-          reject(new Error("OpenCanon pipe returned a malformed response frame."));
+          reject(new ProtocolTransportFailure(ProtocolTransportFailureCode.Malformed, "OpenCanon pipe returned a malformed response frame."));
           return;
         }
         resolve(response);
       },
       (error) => {
+        cleanup();
         socket.destroy();
-        reject(error);
+        reject(normalizeLocalTransportFailure(error));
       },
     );
   });
@@ -478,12 +502,16 @@ async function streamPipeText(endpoint: LocalProtocolPipeEndpoint, request: Loca
           finish(error instanceof Error ? error : new Error(String(error)));
           return;
         }
+        if (isPipeResponseFrame(parsed) && parsed.id === id) {
+          finish(protocolResponseFailure(parsed.status, parsed.body));
+          return;
+        }
         if (!isPipeStreamFrame(parsed) || parsed.id !== id) {
           finish(new Error("OpenCanon pipe returned a malformed stream frame."));
           return;
         }
         if (parsed.status < 200 || parsed.status >= 300) {
-          finish(new Error(`OpenCanon event stream failed: ${parsed.status} ${parsed.statusText}.`));
+          finish(new ProtocolTransportFailure(ProtocolTransportFailureCode.Malformed, `OpenCanon event stream failed: ${parsed.status} ${parsed.statusText}.`));
           return;
         }
         if (!opened) {
@@ -700,14 +728,14 @@ function readPipeFrame(socket: Socket, maxFrameBytes: number): Promise<unknown> 
     const onData = (chunk: Buffer) => {
       buffer += chunk.toString("utf8");
       if (Buffer.byteLength(buffer, "utf8") > maxFrameBytes) {
-        fail(new Error("OpenCanon pipe frame exceeded the maximum allowed size."));
+        fail(new ProtocolTransportFailure(ProtocolTransportFailureCode.Malformed, "OpenCanon pipe frame exceeded the maximum allowed size."));
         return;
       }
       parseBuffer();
     };
-    const onEnd = () => fail(new Error("OpenCanon pipe closed before a complete frame was received."));
-    const onClose = () => fail(new Error("OpenCanon pipe closed before a complete frame was received."));
-    const onError = (error: Error) => fail(error);
+    const onEnd = () => fail(new ProtocolTransportFailure(ProtocolTransportFailureCode.Closed, "OpenCanon pipe closed before a complete frame was received."));
+    const onClose = () => fail(new ProtocolTransportFailure(ProtocolTransportFailureCode.Closed, "OpenCanon pipe closed before a complete frame was received."));
+    const onError = (error: Error) => fail(normalizeLocalTransportFailure(error));
     socket.on("data", onData);
     socket.once("end", onEnd);
     socket.once("close", onClose);
@@ -770,12 +798,12 @@ function errorFrame(id: string | undefined, status: number, statusText: string, 
     statusText,
     body: {
       ok: false,
-      diagnostics: [
+      error: createOpenCanonDiagnosticsError([
         createOpenCanonDiagnostic({
           code: "invalid-runtime-response",
           message,
         }),
-      ],
+      ]),
     },
   };
 }
@@ -792,10 +820,42 @@ function isPipeRequestFrame(value: unknown): value is PipeRequestFrame {
   return (
     value.protocol === PipeProtocolName &&
     typeof value.id === "string" &&
-    (value.method === "GET" || value.method === "POST") &&
+    (value.method === ProtocolHttpMethod.Get || value.method === ProtocolHttpMethod.Post) &&
     typeof value.path === "string" &&
     (value.headers === undefined || isStringRecord(value.headers))
   );
+}
+
+function protocolResponseFailure(status: number, body: unknown): ProtocolResponseFailure | ProtocolTransportFailure {
+  const failure = OpenCanonFailureSchema.safeParse(body);
+  if (failure.success) return new ProtocolResponseFailure(status, failure.data);
+  return new ProtocolTransportFailure(
+    ProtocolTransportFailureCode.Malformed,
+    `OpenCanon local protocol returned an invalid ${status} failure envelope.`,
+  );
+}
+
+function normalizeLocalTransportFailure(error: unknown): ProtocolTransportFailure {
+  if (error instanceof ProtocolTransportFailure) return error;
+  if (isAbortError(error)) {
+    return new ProtocolTransportFailure(ProtocolTransportFailureCode.Cancelled, "OpenCanon local request was cancelled.", { cause: error });
+  }
+  const code = nestedErrorCode(error);
+  if (code === "ECONNRESET" || code === "EPIPE" || code === "UND_ERR_SOCKET") {
+    return new ProtocolTransportFailure(ProtocolTransportFailureCode.Closed, "OpenCanon local connection closed before the operation completed.", { cause: error });
+  }
+  if (code === "ECONNREFUSED" || code === "ENOENT") {
+    return new ProtocolTransportFailure(ProtocolTransportFailureCode.Unavailable, "OpenCanon local endpoint is unavailable.", { cause: error });
+  }
+  return new ProtocolTransportFailure(ProtocolTransportFailureCode.Unavailable, "OpenCanon local transport failed.", { cause: error });
+}
+
+function nestedErrorCode(error: unknown, seen = new Set<unknown>()): string | undefined {
+  if (!error || typeof error !== "object" || seen.has(error)) return undefined;
+  seen.add(error);
+  const record = error as { code?: unknown; cause?: unknown };
+  if (typeof record.code === "string" && record.code.trim()) return record.code;
+  return nestedErrorCode(record.cause, seen);
 }
 
 function isPipeResponseFrame(value: unknown): value is PipeResponseFrame {

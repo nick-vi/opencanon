@@ -962,19 +962,19 @@ export function ephemeralRuntimeClientCheckSource(): string {
   return `
     import { existsSync } from "node:fs";
     import path from "node:path";
-    import { RuntimeApiRoute, withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
+    import { withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
     import { inspectProjectRuntime, projectRuntimePath, projectRuntimeStatePath, readRuntimeRegistry, readServiceEntry, runtimeNamespaceForRegistry, serviceRegistryPath } from ${JSON.stringify(runtimeUrl)};
 
     const rootDir = process.argv[1];
     if (await inspectProjectRuntime(rootDir)) throw new Error("expected no runtime before request");
     const result = await withRuntimeClient(rootDir, async (client) => {
-      const related = await client.get(RuntimeApiRoute.CanonRelated + "?file=" + encodeURIComponent("src/company.ts"));
-      const stateAfterRelated = await client.get(RuntimeApiRoute.State);
-      const snapshot = await client.get(RuntimeApiRoute.Snapshot);
-      return { snapshotFiles: snapshot.files, related, stateAfterRelated };
+      const related = await client.query("canon.related.read", { query: { file: "src/company.ts" } });
+      const stateAfterRelated = await client.query("project.state");
+      const summary = await client.query("project.summary");
+      return { summaryRootDir: summary.rootDir, related, stateAfterRelated };
     });
     console.log(JSON.stringify({
-      files: result.snapshotFiles,
+      summaryRootDir: result.summaryRootDir,
       relatedConventionIds: result.related.conventions.map((convention) => convention.id),
       relatedValidatorIds: result.related.validators.map((validator) => validator.id),
       lifecycleAfterRelated: result.stateAfterRelated.lifecycle,
@@ -991,21 +991,21 @@ export function runtimeClientRepairCheckSource(): string {
   const runtimeClientUrl = pathToFileURL(path.join(process.cwd(), "packages/cli/src/runtime-client.ts")).href;
   const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
   return `
-    import { RuntimeApiRoute, withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
+    import { withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
     import { inspectProjectRuntime, stopProjectRuntime } from ${JSON.stringify(runtimeUrl)};
 
     const rootDir = process.argv[1];
     const output = await withRuntimeClient(rootDir, async (client) => {
-      const first = await client.get(RuntimeApiRoute.Snapshot);
+      const first = await client.query("project.summary");
       const before = await inspectProjectRuntime(rootDir);
       if (!before) throw new Error("expected registered runtime before repair");
       await stopProjectRuntime(rootDir);
-      const second = await client.get(RuntimeApiRoute.Snapshot);
+      const second = await client.query("project.summary");
       const after = await inspectProjectRuntime(rootDir);
       if (!after) throw new Error("expected registered runtime after repair");
       return {
-        firstFiles: first.files,
-        secondFiles: second.files,
+        firstRootDir: first.rootDir,
+        secondRootDir: second.rootDir,
         beforePid: before.entry.pid,
         afterPid: after.entry.pid,
       };
@@ -1019,21 +1019,21 @@ export function runtimeClientPipeRepairCheckSource(): string {
   const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
   return `
     import { rmSync } from "node:fs";
-    import { RuntimeApiRoute, withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
+    import { withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
     import { inspectProjectRuntime } from ${JSON.stringify(runtimeUrl)};
 
     const rootDir = process.argv[1];
     const output = await withRuntimeClient(rootDir, async (client) => {
-      const first = await client.get(RuntimeApiRoute.Snapshot);
+      const first = await client.query("project.summary");
       const before = await inspectProjectRuntime(rootDir);
       if (!before) throw new Error("expected registered runtime before pipe repair");
       rmSync(before.entry.pipeEndpoint, { force: true });
-      const second = await client.get(RuntimeApiRoute.Snapshot);
+      const second = await client.query("project.summary");
       const after = await inspectProjectRuntime(rootDir);
       if (!after) throw new Error("expected registered runtime after pipe repair");
       return {
-        firstFiles: first.files,
-        secondFiles: second.files,
+        firstRootDir: first.rootDir,
+        secondRootDir: second.rootDir,
         beforePid: before.entry.pid,
         afterPid: after.entry.pid,
       };
@@ -1046,19 +1046,19 @@ export function runtimeClientStreamRepairCheckSource(): string {
   const runtimeClientUrl = pathToFileURL(path.join(process.cwd(), "packages/cli/src/runtime-client.ts")).href;
   const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
   return `
-    import { RuntimeApiRoute, withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
+    import { withRuntimeClient } from ${JSON.stringify(runtimeClientUrl)};
     import { inspectProjectRuntime, stopProjectRuntime } from ${JSON.stringify(runtimeUrl)};
 
     const rootDir = process.argv[1];
     const output = await withRuntimeClient(rootDir, async (client) => {
-      await client.get(RuntimeApiRoute.ProjectSummary);
+      await client.query("project.summary");
       const before = await inspectProjectRuntime(rootDir);
       if (!before) throw new Error("expected registered runtime before stream repair");
       await stopProjectRuntime(rootDir);
       const controller = new AbortController();
       let connected = false;
       try {
-        await client.stream(RuntimeApiRoute.EventsStream, {
+        await client.stream("events.stream", undefined, {
           signal: controller.signal,
           onChunk(chunk) {
             connected ||= chunk.includes(": connected");

@@ -20,7 +20,7 @@ import {
   toRepoRelativePath,
   unique,
 } from "@opencanon/core";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { withRuntimeClient } from "./runtime-client.ts";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 
 export async function runFeedbackCommand(args = process.argv.slice(2), cwd = process.cwd()): Promise<void> {
@@ -70,10 +70,8 @@ export async function runFeedbackCommand(args = process.argv.slice(2), cwd = pro
   }
 
   const result = await withRuntimeClient(cwd, (client) =>
-    client.post<FeedbackResult>(RuntimeApiRoute.Feedback, {
-      files,
-      host: "manual",
-      dedupeScope: dedupeScopeOption(options.dedupeScope),
+    client.query<FeedbackResult>("feedback.query", {
+      body: { files, host: "manual", dedupeScope: dedupeScopeOption(options.dedupeScope) },
     }),
   );
   console.log(formatFeedbackResult(result, format, { emptyMessage: true }));
@@ -110,7 +108,9 @@ export async function runHookCommand(args = process.argv.slice(2), cwd = process
 
   const host = hookHostOption(command);
   const payload = parseHookPayload(await readStdin());
-  const { response } = await withRuntimeClient(cwd, (client) => client.post<{ response: string }>(RuntimeApiRoute.HookFeedback, { host, payload }));
+  const { response } = await withRuntimeClient(cwd, (client) =>
+    client.query<{ response: string }>("hooks.feedback", { body: { host, payload } }),
+  );
   if (response) console.log(response);
 }
 

@@ -37,7 +37,7 @@ import { createRuntime, createValidationContextFromFixture, createValidationCont
 import type { ValidationResult } from "@opencanon/core";
 import type { ResolvedCommitGate } from "@opencanon/core";
 import { selectValidators, validatorGraphHash, validatorMatchesFile } from "@opencanon/core";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { withRuntimeClient } from "./runtime-client.ts";
 import { DiagnosticSeverity, ProducerStatusKind, ValidatorDomain, ValidatorOutcomeStatus } from "@opencanon/core";
 import { BatchProducerPolicy, InteractiveProducerPolicy } from "@opencanon/core";
 
@@ -82,7 +82,9 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
   resolveChangedFiles(query);
 
   if (query.list) {
-    const catalog = await withRuntimeClient(cwd, (client) => client.get<RuntimeValidatorCatalog>(`${RuntimeApiRoute.Validators}?limit=500`));
+    const catalog = await withRuntimeClient(cwd, (client) =>
+      client.query<RuntimeValidatorCatalog>("validators.list", { query: { limit: "500" } }),
+    );
     const rows = catalog.validators.map((validator) => ({
       id: validator.id,
       severity: validator.severity,
@@ -143,16 +145,18 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
   let result = await withRuntimeClient(
     cwd,
     (client) =>
-      client.post<ValidationResult>(RuntimeApiRoute.Validate, {
-        files: query.files,
-        topics: query.topics,
-        validatorIds: query.validatorIds,
-        project: query.project,
-        fixMode: query.fixMode,
-        dryRun: query.dryRun,
-        profile: query.profile,
-        strictProducers: query.strictProducers,
-        producerPolicy: query.project ? BatchProducerPolicy : InteractiveProducerPolicy,
+      client.query<ValidationResult>("validation.run", {
+        body: {
+          files: query.files,
+          topics: query.topics,
+          validatorIds: query.validatorIds,
+          project: query.project,
+          dryRun: query.dryRun,
+          profile: query.profile,
+          strictProducers: query.strictProducers,
+          producerPolicy: query.project ? BatchProducerPolicy : InteractiveProducerPolicy,
+          ...(query.fixMode ? { fixMode: query.fixMode } : {}),
+        },
       }),
     query.project
       ? {

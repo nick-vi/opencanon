@@ -1,5 +1,5 @@
 import { appendOpenCodeFeedback, normalizeHookPayload, renderFeedbackMarkdown, type FeedbackResult } from "@opencanon/core";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { withRuntimeClient } from "./runtime-client.ts";
 
 const editTools = new Set(["write", "edit", "apply_patch"]);
 const FeedbackPluginHost = {
@@ -32,14 +32,18 @@ export const OpenCanonPlugin = async ({ directory, worktree }: { directory: stri
       const afterFiles = normalizeHookPayload(FeedbackPluginHost.OpenCode, event, cwd).files;
       const files = [...new Set([...beforeFiles, ...afterFiles])];
       if (files.length === 0) return;
+      const sessionId = typeof input.sessionID === "string" ? input.sessionID : undefined;
+      const turnId = callId || undefined;
 
       const result = await withRuntimeClient(cwd, (client) =>
-        client.post<FeedbackResult>(RuntimeApiRoute.Feedback, {
-          files,
-          host: FeedbackPluginHost.OpenCode,
-          sessionId: typeof input.sessionID === "string" ? input.sessionID : undefined,
-          turnId: callId || undefined,
-          dedupeScope: "turn",
+        client.query<FeedbackResult>("feedback.query", {
+          body: {
+            files,
+            host: FeedbackPluginHost.OpenCode,
+            dedupeScope: "turn",
+            ...(sessionId ? { sessionId } : {}),
+            ...(turnId ? { turnId } : {}),
+          },
         }),
       );
       appendOpenCodeFeedback(output, renderFeedbackMarkdown(result, { maxFindings: 20, maxChars: 6000 }));

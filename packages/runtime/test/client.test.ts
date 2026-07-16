@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -869,7 +869,7 @@ test("runtime client lazily starts a supervised project runtime when none is run
     assert.equal(result.status, 0, result.stderr || result.stdout);
 
     const output = JSON.parse(result.stdout.trim()) as {
-      files: string[];
+      summaryRootDir: string;
       relatedConventionIds: string[];
       relatedValidatorIds: string[];
       lifecycleAfterRelated: { revision: { observed: number; accepted: number; published: number } };
@@ -879,7 +879,7 @@ test("runtime client lazily starts a supervised project runtime when none is run
       registryRoots: string[];
       service: boolean;
     };
-    assert.deepEqual(output.files, ["src/company.ts"]);
+    assert.equal(output.summaryRootDir, realpathSync(rootDir));
     assert.deepEqual(output.relatedConventionIds, ["test-rule"]);
     assert.deepEqual(output.relatedValidatorIds, ["test-rule"]);
     assert.deepEqual(output.lifecycleAfterRelated.revision, { observed: 1, accepted: 1, published: 1 });
@@ -913,9 +913,9 @@ test("runtime client repairs a supervised runtime when the registered endpoint d
       timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    const output = JSON.parse(result.stdout.trim()) as { firstFiles: string[]; secondFiles: string[]; beforePid: number; afterPid: number };
-    assert.deepEqual(output.firstFiles, ["src/company.ts"]);
-    assert.deepEqual(output.secondFiles, ["src/company.ts"]);
+    const output = JSON.parse(result.stdout.trim()) as { firstRootDir: string; secondRootDir: string; beforePid: number; afterPid: number };
+    assert.equal(output.firstRootDir, realpathSync(rootDir));
+    assert.equal(output.secondRootDir, realpathSync(rootDir));
     assert.notEqual(output.afterPid, output.beforePid);
   } finally {
     await stopService(registryPath);
@@ -969,9 +969,9 @@ test("runtime client repairs a supervised runtime when the pipe endpoint disappe
       timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    const output = JSON.parse(result.stdout.trim()) as { firstFiles: string[]; secondFiles: string[]; beforePid: number; afterPid: number };
-    assert.deepEqual(output.firstFiles, ["src/company.ts"]);
-    assert.deepEqual(output.secondFiles, ["src/company.ts"]);
+    const output = JSON.parse(result.stdout.trim()) as { firstRootDir: string; secondRootDir: string; beforePid: number; afterPid: number };
+    assert.equal(output.firstRootDir, realpathSync(rootDir));
+    assert.equal(output.secondRootDir, realpathSync(rootDir));
     assert.notEqual(output.afterPid, output.beforePid);
   } finally {
     await stopService(registryPath);

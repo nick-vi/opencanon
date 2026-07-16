@@ -1,5 +1,5 @@
 import { fail, Format, matchesAny, resolveRootDir, type CodeReference, type CodeSymbol } from "@opencanon/core";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { protocolInputFromSearchParams, withRuntimeClient } from "./runtime-client.ts";
 
 type SymbolsQuery = {
   query?: string;
@@ -35,13 +35,17 @@ export async function runSymbolsCommand(args = process.argv.slice(2), cwd = proc
   params.set("limit", String(engineLimit));
   if (query.references) {
     params.set("references", "1");
-    const result = await withRuntimeClient<CodeReferencesResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeSymbols}?${params.toString()}`));
+    const result = await withRuntimeClient<CodeReferencesResponse>(rootDir, (client) =>
+      client.query("code.symbols", protocolInputFromSearchParams(params)),
+    );
     const references = filterReferences(result.references, query);
     if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, references }, null, 2));
     else printReferences(references, result.sourceFiles, query);
     return;
   }
-  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) => client.get(`${RuntimeApiRoute.CodeSymbols}?${params.toString()}`));
+  const result = await withRuntimeClient<CodeSymbolsResponse>(rootDir, (client) =>
+    client.query("code.symbols", protocolInputFromSearchParams(params)),
+  );
   const symbols = filterSymbols(result.symbols, query);
   if (query.format === Format.Json) console.log(JSON.stringify({ sourceFiles: result.sourceFiles, symbols }, null, 2));
   else printSymbols(symbols, result.sourceFiles, query);

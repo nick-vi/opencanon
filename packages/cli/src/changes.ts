@@ -21,7 +21,7 @@ import {
 } from "@opencanon/core";
 import { booleanOption, formatOption, nonNegativeIntegerOption, positiveIntegerOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { changesDefinitionCommandSuggestion, isChangeDefinitionCommand, runChangesDefinitionCommand } from "./changes-definition.ts";
-import { RuntimeApiRoute, withRuntimeClient, type RuntimeClient } from "./runtime-client.ts";
+import { protocolInputFromSearchParams, withRuntimeClient, type RuntimeClient } from "./runtime-client.ts";
 
 const ChangeEventType = {
   Started: ChangeLifecycleEventType.Started,
@@ -224,7 +224,7 @@ async function runChangesListCommand(args: string[], cwd: string, commandName: s
   }
   if (parsed.args.length > 0) fail(`Unexpected ${commandName} arguments: ${parsed.args.join(", ")}`);
 
-  const changes = await withChangesRuntimeClient(cwd, (client) => client.get<ChangeSummary[]>(RuntimeApiRoute.Changes));
+  const changes = await withChangesRuntimeClient(cwd, (client) => client.query<ChangeSummary[]>("changes.list"));
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ changes }, null, 2));
   else console.log(renderChangesListMarkdown(changes));
 }
@@ -243,7 +243,7 @@ async function runChangesReadyCommand(args: string[], cwd: string): Promise<void
   }
   if (parsed.args.length > 0) fail(`Unexpected opencanon changes ready arguments: ${parsed.args.join(", ")}`);
 
-  const queue = await withChangesRuntimeClient(cwd, (client) => client.get<ChangeWorkQueue>(RuntimeApiRoute.ChangeReady));
+  const queue = await withChangesRuntimeClient(cwd, (client) => client.query<ChangeWorkQueue>("changes.ready"));
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(queue, null, 2));
   else console.log(renderChangesReadyMarkdown(queue));
 }
@@ -264,8 +264,8 @@ async function runChangesShowCommand(args: string[], cwd: string): Promise<void>
   const changeId = requiredSingleArgument(parsed.args, "changes show");
   const limit = positiveIntegerOption(options.events, "--events", 25);
   const { changes, events } = await withChangesRuntimeClient(cwd, async (client) => ({
-    changes: await client.get<ChangeSummary[]>(RuntimeApiRoute.Changes),
-    events: await client.get<ChangeEvent[]>(`${RuntimeApiRoute.ChangeEvents}?changeId=${encodeURIComponent(changeId)}&limit=${limit}`),
+    changes: await client.query<ChangeSummary[]>("changes.list"),
+    events: await client.query<ChangeEvent[]>("activity.list", { query: { changeId, limit: String(limit) } }),
   }));
   const change = changes.find((item) => item.id === changeId);
   if (!change) fail(`Unknown change id: ${changeId}`);
@@ -297,8 +297,9 @@ async function runChangesEventsCommand(args: string[], cwd: string): Promise<voi
   const checkId = optionalStringOption(options.check, "--check");
   if (taskId) query.set("taskId", taskId);
   if (checkId) query.set("checkId", checkId);
-  const path = `${RuntimeApiRoute.ChangeEvents}?${query.toString()}`;
-  const events = await withChangesRuntimeClient(cwd, (client) => client.get<ChangeEvent[]>(path));
+  const events = await withChangesRuntimeClient(cwd, (client) =>
+    client.query<ChangeEvent[]>("activity.list", protocolInputFromSearchParams(query)),
+  );
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ events }, null, 2));
   else console.log(renderChangeEventsMarkdown(String(changeId), events));
 }
@@ -329,14 +330,11 @@ async function runChangesRecordCommand(args: string[], cwd: string): Promise<voi
   const eventId = createChangeRequestEventId(String(changeId), type);
 
   const result = await withChangesRuntimeClient(cwd, (client) =>
-    client.post<RecordChangeEventResponse>(RuntimeApiRoute.ChangeEvents, {
-      id: eventId,
-      changeId: String(changeId),
-      type,
-      summary,
-      actor,
-      files,
-    }),
+    client.command<RecordChangeEventResponse>(
+      "activity.record",
+      { body: { id: eventId, changeId: String(changeId), type, summary, files, ...(actor ? { actor } : {}) } },
+      { idempotencyKey: eventId },
+    ),
   );
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(result, null, 2));
   else console.log(renderRecordedChangeEventMarkdown(result.event));
@@ -364,16 +362,23 @@ async function runChangesLifecycleCommand(command: string, args: string[], cwd: 
   const type = lifecycleEventType(command, taskId);
   const summary = optionalStringOption(options.summary, "--summary") ?? defaultLifecycleSummary(command, changeId, taskId);
   const eventId = createChangeRequestEventId(changeId, type);
+  const actor = optionalStringOption(options.agent, "--agent") ?? optionalStringOption(options.actor, "--actor");
   const result = await withChangesRuntimeClient(cwd, (client) =>
-    client.post<RecordChangeEventResponse>(RuntimeApiRoute.ChangeEvents, {
-      id: eventId,
-      changeId,
-      taskId,
-      type,
-      summary,
-      actor: optionalStringOption(options.agent, "--agent") ?? optionalStringOption(options.actor, "--actor"),
-      files: stringValues(options.file),
-    }),
+    client.command<RecordChangeEventResponse>(
+      "activity.record",
+      {
+        body: {
+          id: eventId,
+          changeId,
+          type,
+          summary,
+          files: stringValues(options.file),
+          ...(taskId ? { taskId } : {}),
+          ...(actor ? { actor } : {}),
+        },
+      },
+      { idempotencyKey: eventId },
+    ),
   );
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(result, null, 2));
   else console.log(renderRecordedChangeEventMarkdown(result.event));
@@ -398,14 +403,19 @@ async function runChangesCheckCommand(args: string[], cwd: string): Promise<void
   if (values.length < 1 || values.length > 2 || !values[0]) fail("Usage: opencanon changes check <change-id> [check-id] [--task <task-id>] [--all]");
   const all = booleanOption(options.all);
   const format = formatOption(options.format);
+  const checkId = values[1];
+  const taskId = optionalStringOption(options.task, "--task");
+  const actor = optionalStringOption(options.actor, "--actor");
   const result = await withChangesRuntimeClient(cwd, async (client) => {
     const started = StartChangeCheckRunsResponseSchema.parse(
-      await client.post<StartChangeCheckRunsResponse>(RuntimeApiRoute.ChangeCheckRuns, {
-        changeId: values[0],
-        checkId: values[1],
-        taskId: optionalStringOption(options.task, "--task"),
-        all,
-        actor: optionalStringOption(options.actor, "--actor"),
+      await client.command<StartChangeCheckRunsResponse>("proof.runs.start", {
+        body: {
+          changeId: values[0],
+          all,
+          ...(checkId ? { checkId } : {}),
+          ...(taskId ? { taskId } : {}),
+          ...(actor ? { actor } : {}),
+        },
       }),
     );
     const runs: ChangeCheckRun[] = [];
@@ -458,7 +468,7 @@ async function runChangesRunsListCommand(args: string[], cwd: string): Promise<v
   const query = new URLSearchParams({ limit: String(limit) });
   if (status?.success) query.set("status", status.data);
   const result = await withChangesRuntimeClient(cwd, (client) =>
-    client.get<{ runs: ChangeCheckRun[] }>(`${RuntimeApiRoute.ChangeCheckRuns}?${query.toString()}`),
+    client.query<{ runs: ChangeCheckRun[] }>("proof.runs.read", protocolInputFromSearchParams(query)),
   );
   const runs = result.runs.map((run) => ChangeCheckRunSchema.parse(run));
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify({ runs }, null, 2));
@@ -521,7 +531,7 @@ async function runChangesRunsCancelCommand(args: string[], cwd: string): Promise
   }
   const runId = requiredSingleArgument(parsed.args, "changes runs cancel");
   const result = await withChangesRuntimeClient(cwd, async (client) => {
-    const raw = await client.post<ChangeCheckRunSnapshot>(RuntimeApiRoute.ChangeCheckRunsCancel, { runId });
+    const raw = await client.command<ChangeCheckRunSnapshot>("proof.runs.cancel", { body: { runId } });
     return parseChangeCheckRunSnapshot(raw);
   });
   if (formatOption(options.format) === Format.Json) console.log(JSON.stringify(result, null, 2));
@@ -552,7 +562,7 @@ async function followChangeCheckRun(
   const onInterrupt = () => {
     if (cancelRequested) return;
     cancelRequested = true;
-    void client.post(RuntimeApiRoute.ChangeCheckRunsCancel, { runId: initial.id }).catch((error) => {
+    void client.command("proof.runs.cancel", { body: { runId: initial.id } }).catch((error) => {
       process.stderr.write(`Could not cancel Change check ${initial.checkId}: ${error instanceof Error ? error.message : String(error)}\n`);
     });
   };
@@ -597,7 +607,7 @@ async function followChangeCheckRun(
       const query = new URLSearchParams({ operationId: initial.id });
       if (protocolCursor !== undefined) query.set("afterSequence", String(protocolCursor));
       try {
-        await client.stream(`${RuntimeApiRoute.EventsStream}?${query.toString()}`, {
+        await client.stream("events.stream", protocolInputFromSearchParams(query), {
           signal: controller.signal,
           onChunk: parser.push,
         });
@@ -620,7 +630,7 @@ async function followChangeCheckRun(
 async function readChangeCheckRunSnapshot(client: RuntimeClient, runId: string, after?: number): Promise<ChangeCheckRunSnapshot> {
   const query = new URLSearchParams({ runId });
   if (after !== undefined) query.set("after", String(after));
-  const raw = await client.get<ChangeCheckRunSnapshot>(`${RuntimeApiRoute.ChangeCheckRuns}?${query.toString()}`);
+  const raw = await client.query<ChangeCheckRunSnapshot>("proof.runs.read", protocolInputFromSearchParams(query));
   return parseChangeCheckRunSnapshot(raw);
 }
 

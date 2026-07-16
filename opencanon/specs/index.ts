@@ -8,6 +8,8 @@ export default [
     surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index"],
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/protocol*.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/core/generated/domain-protocol.openapi.json" },
+      { kind: DefinitionTargetKind.File, path: "scripts/generate-domain-protocol.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/contracts-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/routes.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-routes.ts" },
@@ -15,8 +17,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/local-protocol.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-http.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/protocol-policy.ts" },
-      { kind: DefinitionTargetKind.File, path: "packages/cli/src/runtime-client.ts" },
-      { kind: DefinitionTargetKind.File, path: "packages/cli/src/{validate,review,mcp}.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/cli/src/{brief,changes,context,feedback,gate,graph,mcp,opencode-plugin,refactor,review,runtime-client,search,symbols,validate}.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/*.test.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/{contracts,cli-reporting,runtime-events,mcp}.test.ts" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/specs/domain-protocol-spec.md" },
@@ -27,7 +28,7 @@ export default [
         id: "one-operation-registry",
         statement: "One typed operation registry owns request, response, authorization, consistency, cost, idempotency, cancellation, and transport mappings.",
         acceptance: ["runtime routing and clients use the same operation ids", "every operation has complete policy", "the generated API description is deterministic"],
-        checks: ["protocol-tests", "contracts-tests"],
+        checks: ["protocol-tests", "protocol-contract-drift", "contracts-tests"],
       },
       {
         id: "projections-are-bounded-and-revisioned",
@@ -72,6 +73,7 @@ export default [
     ],
     checks: [
       { id: "protocol-tests", kind: "test", target: "packages/runtime/test/protocol.test.ts" },
+      { id: "protocol-contract-drift", kind: "command", command: "npm run protocol:check" },
       { id: "contracts-tests", kind: "test", target: "tests/contracts.test.ts" },
       { id: "runtime-event-tests", kind: "test", target: "tests/runtime-events.test.ts" },
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },

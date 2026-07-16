@@ -94,7 +94,11 @@ export const ProtocolInputSchema = z.object({
   query: z.record(z.string(), ProtocolQueryValueSchema).optional(),
   body: z.json().optional(),
 }).strict();
-export type ProtocolInput = z.infer<typeof ProtocolInputSchema>;
+export type ProtocolInput = {
+  query?: Record<string, string | string[]>;
+  body?: unknown;
+};
+export type ParsedProtocolInput = z.output<typeof ProtocolInputSchema>;
 
 export type ProtocolOperationDefinition<
   TId extends string = string,

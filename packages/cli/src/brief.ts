@@ -1,7 +1,7 @@
 import { cac } from "cac";
 import { fail, Format } from "@opencanon/core";
 import { booleanOption, formatOption, positiveIntegerOption, rejectUnknownOptions } from "./options.ts";
-import { RuntimeApiRoute, withRuntimeClient } from "./runtime-client.ts";
+import { withRuntimeClient } from "./runtime-client.ts";
 
 type BriefPacket = {
   schema: string;
@@ -64,8 +64,8 @@ export async function runBriefCommand(args: string[], cwd: string): Promise<void
   const limit = positiveIntegerOption(options.limit, "--limit", 25);
   const result = await withRuntimeClient(cwd, async (client) => {
     const [queue, packet] = await Promise.all([
-      client.get<BriefReadyQueue>(RuntimeApiRoute.ChangeReady),
-      client.get<BriefPacket>(`${RuntimeApiRoute.ContextPacket}?mode=agent-brief&limit=${limit}`),
+      client.query<BriefReadyQueue>("changes.ready"),
+      client.query<BriefPacket>("context.packet", { query: { mode: "agent-brief", limit: String(limit) } }),
     ]);
     return { queue, packet, nextActions: briefNextActions(queue) };
   });

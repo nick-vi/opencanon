@@ -1,61 +1,61 @@
 import {
   DoctorKnowledgeInspectionKind,
-  ProtocolOperationKind,
-  ProtocolRoute,
   ReadSemanticIndexStatusResultSchema,
-  findProtocolOperation,
-  parseProjectionResponse,
+  createDomainProtocolClient,
+  protocolInputFromSearchParams,
   resolveRootDir,
   type DoctorKnowledgeInspection,
+  type ProtocolExecutionOptions,
+  type ProtocolInput,
+  type ProtocolOperationId,
+  type ProtocolStreamOptions,
 } from "@opencanon/core";
 import {
   ensureProjectRuntimeViaService,
   inspectProjectRuntime,
   localProtocolEndpointFromEntry,
-  requestLocalJson,
+  localProtocolTransport,
   RuntimeStatus,
   streamLocalText,
   resolveRuntimeCliEntrypoint,
   runtimeIdentityForEntrypoint,
   serviceRegistryPath,
   stopProjectRuntime,
+  type LocalProtocolEndpoint,
   type RuntimeRegistryEntry,
 } from "@opencanon/runtime";
-
-export const RuntimeApiRoute = ProtocolRoute;
 
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
 const RunningRuntimeKnowledgeProbeTimeoutMs = 2_000;
 
-/**
- * Authoritative producer statuses from an ALREADY-running runtime, or undefined
- * if none is running / the query fails. Never lazily starts a runtime — a fresh
- * runtime's lazy producer would be cold, giving a misleading status. Callers
- * (e.g. `doctor`) fall back to a headless resolve when this returns undefined.
- */
+export type RuntimeClient = {
+  query<T>(operationId: ProtocolOperationId, input?: ProtocolInput, options?: ProtocolExecutionOptions): Promise<T>;
+  command<T>(operationId: ProtocolOperationId, input?: ProtocolInput, options?: ProtocolExecutionOptions): Promise<T>;
+  stream(operationId: ProtocolOperationId, input: ProtocolInput | undefined, options: ProtocolStreamOptions): Promise<void>;
+};
+
+export type RuntimeClientOptions = {
+  requestTimeoutMs?: number;
+};
+
+export { protocolInputFromSearchParams };
+
+/** Query producer state only when the already-running process matches this CLI. */
 export async function fetchRunningRuntimeProducers<T = unknown>(
   cwd: string,
   options: { timeoutMs?: number } = {},
 ): Promise<T | undefined> {
   const rootDir = resolveRootDir(cwd);
   const inspection = await inspectProjectRuntime(rootDir);
-  if (inspection?.status !== "running") return undefined;
+  if (inspection?.status !== RuntimeStatus.Running) return undefined;
   try {
     const identity = runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir));
     if (!runtimeProbeIdentityMatches(inspection.entry, identity)) return undefined;
-  } catch {
-    return undefined;
-  }
-  try {
-    const payload = await requestLocalJson<unknown>(
-      localProtocolEndpointFromEntry(inspection.entry),
-      {
-        method: "GET",
-        path: RuntimeApiRoute.Producers,
-        timeoutMs: options.timeoutMs ?? RunningRuntimeProducerProbeTimeoutMs,
-      },
-    );
-    return parseProjectionResponse<{ producers: T }>(payload).data.producers;
+    const client = domainClientForEndpoint(() => localProtocolEndpointFromEntry(inspection.entry));
+    const projection = await client.query<{ producers: T }>("producers.list", {}, {
+      timeoutMs: options.timeoutMs ?? RunningRuntimeProducerProbeTimeoutMs,
+    });
+    return projection.data.producers;
   } catch {
     return undefined;
   }
@@ -64,9 +64,7 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
 export async function inspectRunningRuntimeKnowledge(cwd: string): Promise<DoctorKnowledgeInspection> {
   const rootDir = resolveRootDir(cwd);
   const inspection = await inspectProjectRuntime(rootDir);
-  if (inspection?.status !== RuntimeStatus.Running) {
-    return { kind: DoctorKnowledgeInspectionKind.NotInspected };
-  }
+  if (inspection?.status !== RuntimeStatus.Running) return { kind: DoctorKnowledgeInspectionKind.NotInspected };
   try {
     const identity = runtimeIdentityForEntrypoint(resolveRuntimeCliEntrypoint(rootDir));
     if (!runtimeProbeIdentityMatches(inspection.entry, identity)) {
@@ -75,45 +73,18 @@ export async function inspectRunningRuntimeKnowledge(cwd: string): Promise<Docto
         error: "The running project runtime identity does not match this OpenCanon CLI.",
       };
     }
-    const payload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(inspection.entry), {
-      method: "GET",
-      path: RuntimeApiRoute.ContextStatus,
+    const client = domainClientForEndpoint(() => localProtocolEndpointFromEntry(inspection.entry));
+    const projection = await client.query<unknown>("knowledge.status", {}, {
       timeoutMs: RunningRuntimeKnowledgeProbeTimeoutMs,
     });
     return {
       kind: DoctorKnowledgeInspectionKind.Available,
-      index: ReadSemanticIndexStatusResultSchema.parse(parseProjectionResponse<unknown>(payload).data).index,
+      index: ReadSemanticIndexStatusResultSchema.parse(projection.data).index,
     };
   } catch (error) {
-    return {
-      kind: DoctorKnowledgeInspectionKind.Failed,
-      error: errorMessage(error),
-    };
+    return { kind: DoctorKnowledgeInspectionKind.Failed, error: errorMessage(error) };
   }
 }
-
-function runtimeProbeIdentityMatches(
-  entry: RuntimeRegistryEntry,
-  identity: Pick<RuntimeRegistryEntry, "transport" | "protocolVersion" | "runtimeVersion" | "runtimeFingerprint" | "cliPath">,
-): boolean {
-  return (
-    entry.transport === identity.transport &&
-    entry.protocolVersion === identity.protocolVersion &&
-    entry.runtimeVersion === identity.runtimeVersion &&
-    entry.runtimeFingerprint === identity.runtimeFingerprint &&
-    entry.cliPath === identity.cliPath
-  );
-}
-
-export type RuntimeClient = {
-  get<T>(path: string): Promise<T>;
-  post<T>(path: string, body: unknown): Promise<T>;
-  stream(path: string, input: { signal?: AbortSignal; onChunk(chunk: string): void }): Promise<void>;
-};
-
-export type RuntimeClientOptions = {
-  requestTimeoutMs?: number;
-};
 
 export async function withRuntimeClient<T>(
   cwd: string,
@@ -123,84 +94,79 @@ export async function withRuntimeClient<T>(
   const rootDir = resolveRootDir(cwd);
   const registryPath = serviceRegistryPath();
   let supervisedRuntimeRepair: Promise<RuntimeRegistryEntry> | undefined;
+  let endpoint = localProtocolEndpointFromEntry(await ensureSupervisedRuntimeReady(rootDir, registryPath));
 
-  const entry = await ensureSupervisedRuntimeReady(rootDir, registryPath);
-  let endpoint = localProtocolEndpointFromEntry(entry);
-
-  const requestWithRepair = async <T>(request: { method: "GET" | "POST"; path: string; body?: unknown }): Promise<T> => {
-    if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
-    let initialError: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        return await requestLocalJson<T>(endpoint, { ...request, timeoutMs: options.requestTimeoutMs });
-      } catch (error) {
-        if (attempt > 0 || !isLocalTransportFailure(error)) {
-          if (initialError) {
-            throw new Error(
-              `OpenCanon runtime request failed after repairing the project runtime: ${errorMessage(error)}. Initial failure: ${errorMessage(initialError)}`,
-            );
-          }
-          throw error;
-        }
-        initialError = error;
-        const repaired = await repairSupervisedRuntime();
-        endpoint = localProtocolEndpointFromEntry(repaired);
-      }
-    }
-    throw new Error("OpenCanon runtime request failed before it returned a response.");
-  };
-
-  const repairSupervisedRuntime = async (): Promise<RuntimeRegistryEntry> => {
+  const repair = async (): Promise<void> => {
     if (!supervisedRuntimeRepair) {
       supervisedRuntimeRepair = repairSupervisedRuntimeAfterTransportFailure(rootDir, registryPath);
     }
     try {
-      return await supervisedRuntimeRepair;
-    } catch (repairError) {
+      endpoint = localProtocolEndpointFromEntry(await supervisedRuntimeRepair);
       supervisedRuntimeRepair = undefined;
-      throw repairError;
+    } catch (error) {
+      supervisedRuntimeRepair = undefined;
+      throw error;
     }
   };
+  const client = domainClientForEndpoint(() => endpoint, repair, options.requestTimeoutMs);
 
   return await callback({
-    async get<T>(path: string) {
-      return projectionData<T>(path, "GET", await requestWithRepair<unknown>({ method: "GET", path }));
+    async query<TResult>(operationId: ProtocolOperationId, input?: ProtocolInput, executionOptions?: ProtocolExecutionOptions) {
+      return (await client.query<TResult>(operationId, input, executionOptions)).data;
     },
-    async post<T>(path: string, body: unknown) {
-      const value = await requestWithRepair<unknown>({ method: "POST", path, body });
-      return projectionData<T>(path, "POST", value);
+    async command<TResult>(operationId: ProtocolOperationId, input?: ProtocolInput, executionOptions?: ProtocolExecutionOptions) {
+      return await client.command<TResult>(operationId, input, executionOptions);
     },
-    async stream(path, input) {
-      if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
-      let initialError: unknown;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          await streamLocalText(endpoint, { method: "GET", path, ...input });
-          return;
-        } catch (error) {
-          if (input.signal?.aborted) throw error;
-          if (attempt > 0 || !isLocalTransportFailure(error)) {
-            if (initialError) {
-              throw new Error(
-                `OpenCanon runtime stream failed after repairing the project runtime: ${errorMessage(error)}. Initial failure: ${errorMessage(initialError)}`,
-              );
-            }
-            throw error;
-          }
-          initialError = error;
-          const repaired = await repairSupervisedRuntime();
-          endpoint = localProtocolEndpointFromEntry(repaired);
-        }
-      }
+    async stream(operationId, input, streamOptions) {
+      await client.stream(operationId, input, streamOptions);
     },
   });
 }
 
-function projectionData<T>(path: string, method: "GET" | "POST", value: unknown): T {
-  const pathname = new URL(path, "http://opencanon.runtime").pathname;
-  const operation = findProtocolOperation(method, pathname);
-  if (operation?.kind !== ProtocolOperationKind.Query) return value as T;
-  return parseProjectionResponse<T>(value).data;
+function domainClientForEndpoint(
+  endpoint: () => LocalProtocolEndpoint,
+  repair?: () => Promise<void>,
+  defaultTimeoutMs?: number,
+) {
+  return createDomainProtocolClient({
+    transport: {
+      async request(request) {
+        return await localProtocolTransport.request(endpoint(), {
+          method: request.method,
+          path: request.path,
+          headers: request.headers,
+          body: request.body,
+          signal: request.signal,
+          timeoutMs: request.timeoutMs ?? defaultTimeoutMs,
+        });
+      },
+      async stream(request) {
+        await streamLocalText(endpoint(), {
+          method: request.method,
+          path: request.path,
+          headers: request.headers,
+          body: request.body,
+          signal: request.signal,
+          onOpen: request.onOpen,
+          onChunk: request.onChunk,
+        });
+      },
+    },
+    ...(repair ? { repair: async () => repair() } : {}),
+  });
+}
+
+function runtimeProbeIdentityMatches(
+  entry: RuntimeRegistryEntry,
+  identity: Pick<RuntimeRegistryEntry, "transport" | "protocolVersion" | "runtimeVersion" | "runtimeFingerprint" | "cliPath">,
+): boolean {
+  return (
+    entry.transport === identity.transport
+    && entry.protocolVersion === identity.protocolVersion
+    && entry.runtimeVersion === identity.runtimeVersion
+    && entry.runtimeFingerprint === identity.runtimeFingerprint
+    && entry.cliPath === identity.cliPath
+  );
 }
 
 async function repairSupervisedRuntimeAfterTransportFailure(rootDir: string, registryPath: string): Promise<RuntimeRegistryEntry> {
@@ -209,37 +175,7 @@ async function repairSupervisedRuntimeAfterTransportFailure(rootDir: string, reg
 }
 
 async function ensureSupervisedRuntimeReady(rootDir: string, registryPath: string): Promise<RuntimeRegistryEntry> {
-  const ensured = await ensureProjectRuntimeViaService({ cwd: rootDir, registryPath });
-  return ensured.project.entry;
-}
-
-function isLocalTransportFailure(error: unknown): boolean {
-  const message = errorMessages(error).join("\n");
-  return (
-    message.includes("OpenCanon pipe closed before a complete frame was received") ||
-    message.includes("OpenCanon pipe socket is already closed") ||
-    message.includes("OpenCanon local request timed out") ||
-    message.includes("fetch failed") ||
-    message.includes("other side closed") ||
-    message.includes("UND_ERR_SOCKET") ||
-    message.includes("ECONNREFUSED") ||
-    message.includes("ECONNRESET") ||
-    message.includes("EPIPE") ||
-    message.includes("ENOENT") ||
-    message.includes("No such file or directory")
-  );
-}
-
-function errorMessages(error: unknown, seen = new Set<unknown>()): string[] {
-  if (error === null || error === undefined || seen.has(error)) return [];
-  seen.add(error);
-  const messages = [errorMessage(error)];
-  if (typeof error === "object") {
-    const record = error as { cause?: unknown; code?: unknown };
-    if (typeof record.code === "string" && record.code.trim()) messages.push(record.code);
-    messages.push(...errorMessages(record.cause, seen));
-  }
-  return messages.filter((message) => message.trim().length > 0);
+  return (await ensureProjectRuntimeViaService({ cwd: rootDir, registryPath })).project.entry;
 }
 
 function errorMessage(error: unknown): string {
