@@ -191,6 +191,28 @@ export const RuntimeProjectSummarySchema = z.object({
 });
 export type RuntimeProjectSummary = z.infer<typeof RuntimeProjectSummarySchema>;
 
+export const RuntimeValidatorSummarySchema = z.object({
+  id: z.string().min(1),
+  severity: z.enum(["error", "warning"]),
+  scope: z.enum(["file", "folder", "import-edge", "package", "project"]),
+  domain: z.enum(["file", "import-edge", "impact-surface", "definition", "project", "custom"]),
+  facts: z.array(z.string().min(1)),
+  topics: z.array(z.string().min(1)),
+  appliesScopes: z.array(z.array(z.string().min(1))),
+  conventionIds: z.array(z.string().min(1)),
+  docs: z.array(z.string().min(1)),
+  summary: z.string().min(1).optional(),
+}).strict();
+export type RuntimeValidatorSummary = z.infer<typeof RuntimeValidatorSummarySchema>;
+
+export const RuntimeValidatorCatalogSchema = z.object({
+  validators: z.array(RuntimeValidatorSummarySchema),
+  total: z.number().int().min(0),
+  offset: z.number().int().min(0),
+  limit: z.number().int().positive(),
+}).strict();
+export type RuntimeValidatorCatalog = z.infer<typeof RuntimeValidatorCatalogSchema>;
+
 export const ValidateRequestSchema = z.object({
   files: z.array(z.string().min(1)).default([]),
   changed: z.boolean().default(false),

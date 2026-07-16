@@ -286,6 +286,8 @@ export type {
   RuntimeLiveState,
   RuntimeState,
   RuntimeProjectSummary,
+  RuntimeValidatorCatalog,
+  RuntimeValidatorSummary,
   RuntimeWorkerJob,
   DeclarationFact,
   DiagnosticFact,
@@ -410,6 +412,8 @@ export {
   RuntimeWorkerJobSchema,
   RuntimeWorkerJobStatusValue,
   RuntimeProjectSummarySchema,
+  RuntimeValidatorCatalogSchema,
+  RuntimeValidatorSummarySchema,
   summarizeRuntimeHealth,
   type RuntimeLifecycleState,
   type RuntimeRevision,
@@ -810,6 +814,8 @@ export {
   ProtocolProgressSchema,
   defineProtocolOperation,
   operationMetadata,
+  parseProjectionResponse,
+  protocolProjection,
 } from "./protocol.ts";
 export type {
   ProjectProtocolEvent,

@@ -1,6 +1,6 @@
 import { RuntimeProjectSummarySchema, createOpenCanonProblem, OpenCanonProblemCode, OpenCanonProblemSource } from "@opencanon/core";
 import { assertSafeRuntimeHost, createRuntimeAuthToken, isAuthorizedRuntimeRequest, usableRuntimeAuthToken } from "./auth.ts";
-import { localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, requestLocalJson, serveLocalProtocolPipe } from "./local-protocol.ts";
+import { localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, requestLocalJson, requestLocalProjectionData, serveLocalProtocolPipe } from "./local-protocol.ts";
 import { formatHttpBaseUrl } from "./runtime.ts";
 import { ApiRoute } from "./routes.ts";
 import { discoverOpenCanonProject } from "./service-discovery.ts";
@@ -204,7 +204,7 @@ export async function startServiceServer(options: {
       } catch (error) {
         return runtimeUnavailableResponse(project.rootDir, error);
       }
-      const summaryPayload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(started.entry), {
+      const summaryPayload = await requestLocalProjectionData<unknown>(localProtocolEndpointFromEntry(started.entry), {
         method: "GET",
         path: ApiRoute.ProjectSummary,
       });

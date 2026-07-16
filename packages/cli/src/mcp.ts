@@ -1,7 +1,7 @@
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { RelatedCanon, RuntimeSnapshot } from "@opencanon/runtime";
+import type { RelatedCanon } from "@opencanon/runtime";
 import type {
   DoctorReport,
   ListSemanticChunksResult,
@@ -9,6 +9,7 @@ import type {
   ProjectContextBacklinksResult,
   ProjectContextCoverageResult,
   ProjectContextSearchResult,
+  RuntimeProjectSummary,
   ValidationResult,
 } from "@opencanon/core";
 import { fail, resolveRootDir } from "@opencanon/core";
@@ -54,27 +55,20 @@ export async function runMcpCommand(args = process.argv.slice(2), cwd = process.
     McpTool.Status,
     {
       title: "OpenCanon Status",
-      description: `Read-only. Return the current project snapshot summary, runtime health, and Project Knowledge status. ${McpPermissionModel}`,
-      inputSchema: {
-        includeSnapshot: z.boolean().optional().describe("Include the full runtime snapshot. Defaults to false."),
-      },
+      description: `Read-only. Return the bounded project summary, runtime health, and Project Knowledge status. ${McpPermissionModel}`,
+      inputSchema: {},
     },
-    async ({ includeSnapshot }) => {
-      const snapshot = await withRuntimeClient<RuntimeSnapshot>(query.rootDir, (client) => client.get(RuntimeApiRoute.Snapshot));
+    async () => {
+      const summary = await withRuntimeClient<RuntimeProjectSummary>(query.rootDir, (client) => client.get(RuntimeApiRoute.ProjectSummary));
       const status = {
-        rootDir: query.rootDir,
-        health: snapshot.health,
-        counts: {
-          areas: snapshot.areas.length,
-          specs: snapshot.specs.length,
-          changes: snapshot.changes.length,
-          conventions: snapshot.conventions.length,
-          validators: snapshot.validators.length,
-          findings: snapshot.findings.length,
-          impactSurfaces: snapshot.impactSurfaces.length,
-        },
-        semanticIndex: snapshot.semanticIndex,
-        snapshot: includeSnapshot ? snapshot : undefined,
+        rootDir: summary.rootDir,
+        lifecycle: summary.lifecycle,
+        health: summary.health,
+        counts: summary.productModel,
+        files: summary.files,
+        findings: summary.findings,
+        staleFiles: summary.staleFiles,
+        semanticIndex: summary.semanticIndex,
       };
       return jsonToolResult(status);
     },

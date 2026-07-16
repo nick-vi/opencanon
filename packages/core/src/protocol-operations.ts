@@ -6,6 +6,7 @@ import {
   RuntimeHealthSchema,
   RuntimeLiveStateSchema,
   RuntimeProjectSummarySchema,
+  RuntimeValidatorCatalogSchema,
 } from "./contracts-runtime.ts";
 import {
   DomainProtocolVersion,
@@ -16,6 +17,7 @@ import {
   ProtocolIdempotency,
   ProtocolInputSchema,
   ProtocolOperationKind,
+  ProjectionResponseSchema,
   defineProtocolOperation,
   type ProtocolOperationDefinition,
 } from "./protocol.ts";
@@ -64,6 +66,7 @@ export const ProtocolRoute = {
   AuthoringValidatorsRunFixtures: "/api/authoring/validators/run-fixtures",
   ServiceProjects: "/api/service/projects",
   Validate: "/api/validate",
+  Validators: "/api/validators",
   Worktrees: "/api/worktrees",
 } as const;
 
@@ -96,6 +99,7 @@ type OperationInput<TId extends string = string> = {
 
 function operation<const TId extends string>(input: OperationInput<TId>): ProtocolOperationDefinition<TId> {
   const cost = input.cost ?? ProtocolCost.Bounded;
+  const domainOutputSchema = input.outputSchema ?? JsonValueSchema;
   return defineProtocolOperation({
     id: input.id,
     version: DomainProtocolVersion,
@@ -112,7 +116,7 @@ function operation<const TId extends string>(input: OperationInput<TId>): Protoc
     limits: input.limits ?? (cost === ProtocolCost.Tiny ? Limits.Tiny : cost === ProtocolCost.Operation ? Limits.Operation : Limits.Bounded),
     span: `opencanon.${input.id}`,
     inputSchema: ProtocolInputSchema,
-    outputSchema: input.outputSchema ?? JsonValueSchema,
+    outputSchema: input.kind === ProtocolOperationKind.Query ? ProjectionResponseSchema(domainOutputSchema) : domainOutputSchema,
   });
 }
 
@@ -171,6 +175,7 @@ export const ProtocolOperations = Object.freeze([
   query("producers.list", ProtocolRoute.Producers, { consistency: ProtocolConsistency.Lifecycle, cost: ProtocolCost.Tiny }),
   query("doctor.run", ProtocolRoute.Doctor, { consistency: ProtocolConsistency.Lifecycle, cost: ProtocolCost.Operation, limits: Limits.Operation }),
   postQuery("validation.run", ProtocolRoute.Validate, { cost: ProtocolCost.Operation, limits: Limits.Operation }),
+  query("validators.list", ProtocolRoute.Validators, { outputSchema: RuntimeValidatorCatalogSchema }),
   postQuery("feedback.query", ProtocolRoute.Feedback, { cost: ProtocolCost.Operation, limits: Limits.Operation }),
   postQuery("hooks.feedback", ProtocolRoute.HookFeedback, { cost: ProtocolCost.Operation, limits: Limits.Operation }),
   command("knowledge.index", ProtocolRoute.Index, { cost: ProtocolCost.Operation, limits: Limits.Operation }),

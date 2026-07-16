@@ -4,6 +4,7 @@ import {
   ChangeCheckRunEventType,
   ChangeCheckRunStatusSchema,
   ChangeTaskEventType,
+  ProtocolOperationKind,
   createPaths,
   createValidationResultCache,
   buildDoctorReport,
@@ -11,6 +12,8 @@ import {
   loadPendingCommitGates,
   loadProjectContext,
   normalizeProducerStatusesForProject,
+  findProtocolOperation,
+  protocolProjection,
   resolveProducerStatuses,
   validateChangeLifecycleTransition,
   type CanonEvent,
@@ -122,8 +125,12 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       { kind: SpanKind.SERVER, attributes: { method: request.method, path: url.pathname } },
       async (span) => {
         const response = await routeRequestInner(request, url);
-        span.setOutput({ status: response.status });
-        return response;
+        const operation = findProtocolOperation(request.method, url.pathname);
+        const projected = operation?.kind === ProtocolOperationKind.Query
+          ? await projectSuccessfulResponse(response, stateManager.lifecycle().revision.published)
+          : response;
+        span.setOutput({ status: projected.status, operationId: operation?.id });
+        return projected;
       },
     );
   };
@@ -156,6 +163,22 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
       if (url.pathname === ApiRoute.ContextStatus) {
         const snapshot = await refreshCurrentSnapshot();
         return json({ ok: true, data: { index: snapshot.state.semanticIndex ?? snapshot.semanticIndex } });
+      }
+      if (url.pathname === ApiRoute.Validators) {
+        const snapshot = await refreshCurrentSnapshot();
+        const offset = nonNegativeNumberParam(url, UrlSearchParam.Offset, 0);
+        const limit = Math.min(500, numberParam(url, UrlSearchParam.Limit, 100));
+        return json({
+          ok: true,
+          data: {
+            validators: snapshot.validators
+              .slice(offset, offset + limit)
+              .map(({ visuals: _visuals, analysisGlobs: _analysisGlobs, ...validator }) => validator),
+            total: snapshot.validators.length,
+            offset,
+            limit,
+          },
+        });
       }
       if (url.pathname === ApiRoute.CodeSymbols) {
         const safePath = optionalRelativePathParam(url, UrlSearchParam.Path);
@@ -706,6 +729,13 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): (req
   };
 
   return routeRequest;
+}
+
+async function projectSuccessfulResponse(response: Response, revision: number): Promise<Response> {
+  if (response.status < 200 || response.status >= 300 || !response.headers.get("content-type")?.includes("application/json")) return response;
+  const body = await response.clone().json().catch(() => undefined) as { ok?: unknown; data?: unknown } | undefined;
+  if (!body || body.ok !== true || !("data" in body)) return response;
+  return json({ ok: true, data: protocolProjection(revision, body.data) }, response.status);
 }
 
 function isTerminalChangeCheckEvent(type: ChangeCheckRunEventType): boolean {

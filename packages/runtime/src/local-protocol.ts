@@ -9,7 +9,9 @@ import {
   formatOpenCanonErrorPayload,
   getOpenCanonErrorProblem,
   parseOpenCanonErrorPayload,
+  parseProjectionResponse,
   serializeOpenCanonProblem,
+  type ProjectionResponse,
 } from "@opencanon/core";
 import { runtimeAuthHeaders } from "./auth.ts";
 import type { RuntimeRequestAdmission } from "./request-admission.ts";
@@ -121,7 +123,7 @@ type PipeErrorFrame = {
   body: unknown;
 };
 
-const PipeProtocolName = "opencanon.local.v1";
+const PipeProtocolName = "opencanon.local.v2";
 const PipeFrameDelimiter = "\n";
 const PipeFrameMaxBytes = 64 * 1024 * 1024;
 const PipeHost = "opencanon.local";
@@ -221,6 +223,22 @@ export async function requestLocalJson<T>(
   const problem = getOpenCanonErrorProblem(error);
   if (problem) throw new Error(serializeOpenCanonProblem(problem));
   throw new Error(formatOpenCanonErrorPayload(error));
+}
+
+export async function requestLocalProjection<T>(
+  endpoint: LocalProtocolEndpoint,
+  request: LocalProtocolRequest,
+  transport?: LocalProtocolTransport,
+): Promise<ProjectionResponse<T>> {
+  return parseProjectionResponse<T>(await requestLocalJson<unknown>(endpoint, request, transport));
+}
+
+export async function requestLocalProjectionData<T>(
+  endpoint: LocalProtocolEndpoint,
+  request: LocalProtocolRequest,
+  transport?: LocalProtocolTransport,
+): Promise<T> {
+  return (await requestLocalProjection<T>(endpoint, request, transport)).data;
 }
 
 export async function streamLocalText(endpoint: LocalProtocolEndpoint, request: LocalProtocolStreamRequest): Promise<void> {

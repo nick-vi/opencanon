@@ -48,7 +48,7 @@ test("active Change checks leave process readiness running", { timeout: Integrat
       authToken: server.authToken,
       lifecycle: { status: "running", updatedAt: new Date().toISOString(), message: "Runtime health endpoint is ready.", restart: { attempts: 0 } },
       transport: "pipe",
-      protocolVersion: 1,
+      protocolVersion: 2,
       runtimeVersion: "test",
       runtimeFingerprint: "test",
       cliPath: process.argv[1] ?? "test",

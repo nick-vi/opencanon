@@ -20,21 +20,21 @@ export function doctorRouteCheckSource(): string {
       const headers = runtimeAuthHeaders(server.authToken);
       const beforeState = await fetch(server.url + "/api/state", { headers }).then((response) => response.json());
       const beforeProducers = await fetch(server.url + "/api/producers", { headers }).then((response) => response.json());
-      assert.equal(beforeProducers.data.producers.find((producer) => producer.language === "typescript")?.kind, "idle");
+      assert.equal(beforeProducers.data.data.producers.find((producer) => producer.language === "typescript")?.kind, "idle");
 
       const response = await fetch(server.url + "/api/doctor", { headers });
       const text = await response.text();
       assert(response.status >= 200 && response.status < 300, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true);
-      assert(["pass", "warn", "fail"].includes(body.data.status));
-      assert(body.data.checks.some((check) => check.id === "config"));
-      assert(body.data.checks.some((check) => check.id === "context-files"));
+      assert(["pass", "warn", "fail"].includes(body.data.data.status));
+      assert(body.data.data.checks.some((check) => check.id === "config"));
+      assert(body.data.data.checks.some((check) => check.id === "context-files"));
 
       const afterState = await fetch(server.url + "/api/state", { headers }).then((next) => next.json());
       const afterProducers = await fetch(server.url + "/api/producers", { headers }).then((next) => next.json());
-      assert.deepEqual(afterState.data.lifecycle.revision, beforeState.data.lifecycle.revision, "Doctor must not advance project revisions");
-      assert.deepEqual(afterProducers.data.producers, beforeProducers.data.producers, "Doctor must not change producer state");
+      assert.deepEqual(afterState.data.data.lifecycle.revision, beforeState.data.data.lifecycle.revision, "Doctor must not advance project revisions");
+      assert.deepEqual(afterProducers.data.data.producers, beforeProducers.data.data.producers, "Doctor must not change producer state");
     } finally {
       await server.stop();
     }
@@ -67,19 +67,21 @@ export function runtimeSummaryRouteCheckSource(): string {
       assert.equal(response.status, 200, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true, text);
-      assert.equal(body.data.rootDir, rootDir);
-      assert.equal(body.data.lifecycle.settled, body.data.lifecycle.revision.observed === body.data.lifecycle.revision.published);
-      assert(["ready", "indexing"].includes(body.data.health.status));
-      assert.equal(typeof body.data.health.validatorGraph.dependencyCount, "number");
-      assert.equal("dependencyFiles" in body.data.health.validatorGraph, false);
-      assert.equal("entrypoint" in body.data.health.validatorGraph, false);
-      assert.equal(typeof body.data.files, "number");
-      assert.equal(typeof body.data.findings, "number");
-      assert.equal(typeof body.data.staleFiles, "number");
-      assert.equal(typeof body.data.semanticIndex.status, "string");
-      assert.equal(typeof body.data.productModel.nodes, "number");
-      assert.equal("files" in body.data && Array.isArray(body.data.files), false);
-      assert.equal("definitionGraph" in body.data, false);
+      assert.equal(body.data.protocolVersion, 1);
+      assert.equal(body.data.revision, body.data.data.lifecycle.revision.published);
+      assert.equal(body.data.data.rootDir, rootDir);
+      assert.equal(body.data.data.lifecycle.settled, body.data.data.lifecycle.revision.observed === body.data.data.lifecycle.revision.published);
+      assert(["ready", "indexing"].includes(body.data.data.health.status));
+      assert.equal(typeof body.data.data.health.validatorGraph.dependencyCount, "number");
+      assert.equal("dependencyFiles" in body.data.data.health.validatorGraph, false);
+      assert.equal("entrypoint" in body.data.data.health.validatorGraph, false);
+      assert.equal(typeof body.data.data.files, "number");
+      assert.equal(typeof body.data.data.findings, "number");
+      assert.equal(typeof body.data.data.staleFiles, "number");
+      assert.equal(typeof body.data.data.semanticIndex.status, "string");
+      assert.equal(typeof body.data.data.productModel.nodes, "number");
+      assert.equal("files" in body.data.data && Array.isArray(body.data.data.files), false);
+      assert.equal("definitionGraph" in body.data.data, false);
     } finally {
       await server.stop();
     }
@@ -101,7 +103,7 @@ export function codeGraphRouteCheckSource(): string {
       assert.equal(response.status, 200, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true, text);
-      return body.data;
+      return body.data.data;
     }
     try {
       await get("/api/snapshot");
@@ -135,7 +137,7 @@ export function projectContextRouteCheckSource(): string {
       assert.equal(response.status, 200, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true, text);
-      return body.data;
+      return body.data.data;
     }
     async function post(path) {
       const response = await fetch(server.url + path, { method: "POST", headers });
@@ -219,8 +221,8 @@ export function canonRelatedChangeRouteCheckSource(): string {
       assert.equal(response.status, 200, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true);
-      assert.deepEqual(body.data.areas.map((item) => item.id), ["company-area"]);
-      assert.deepEqual(body.data.changes.map((item) => item.id), ["company-change"]);
+      assert.deepEqual(body.data.data.areas.map((item) => item.id), ["company-area"]);
+      assert.deepEqual(body.data.data.changes.map((item) => item.id), ["company-change"]);
 
       const postResponse = await fetch(server.url + "/api/canon/related", {
         method: "POST",
@@ -231,8 +233,8 @@ export function canonRelatedChangeRouteCheckSource(): string {
       assert.equal(postResponse.status, 200, postText);
       const postBody = JSON.parse(postText);
       assert.equal(postBody.ok, true);
-      assert.deepEqual(postBody.data.areas.map((item) => item.id), ["company-area"]);
-      assert.deepEqual(postBody.data.changes.map((item) => item.id), ["company-change"]);
+      assert.deepEqual(postBody.data.data.areas.map((item) => item.id), ["company-area"]);
+      assert.deepEqual(postBody.data.data.changes.map((item) => item.id), ["company-change"]);
     } finally {
       await server.stop();
     }
@@ -267,14 +269,14 @@ export function activityRoutesCheckSource(): string {
       assert.equal(observability.status, 200, observabilityText);
       const observabilityBody = JSON.parse(observabilityText);
       assert.equal(observabilityBody.ok, true);
-      assert(observabilityBody.data.spans.some((span) => span.name === "runtime.request" && span.attributes.path === "/api/changes/events"));
+      assert(observabilityBody.data.data.spans.some((span) => span.name === "runtime.request" && span.attributes.path === "/api/changes/events"));
 
-      const traceId = observabilityBody.data.spans[0]?.traceId;
+      const traceId = observabilityBody.data.data.spans[0]?.traceId;
       if (traceId) {
         const filtered = await fetch(server.url + "/api/observability?traceId=" + encodeURIComponent(traceId), { headers: runtimeAuthHeaders(server.authToken) });
         const filteredBody = await filtered.json();
         assert.equal(filteredBody.ok, true);
-        assert(filteredBody.data.spans.every((span) => span.traceId === traceId));
+        assert(filteredBody.data.data.spans.every((span) => span.traceId === traceId));
       }
 
       const packet = await fetch(server.url + "/api/context/packet?file=src/company.ts&changeId=activity-change&mode=review&limit=10", { headers: runtimeAuthHeaders(server.authToken) });
@@ -282,19 +284,19 @@ export function activityRoutesCheckSource(): string {
       assert.equal(packet.status, 200, packetText);
       const packetBody = JSON.parse(packetText);
       assert.equal(packetBody.ok, true);
-      assert.equal(packetBody.data.schema, "opencanon.context-packet.v1");
-      assert.equal(packetBody.data.mode, "review");
-      assert.deepEqual(packetBody.data.filters.files, ["src/company.ts"]);
-      assert.deepEqual(packetBody.data.filters.changeIds, ["activity-change"]);
-      assert(packetBody.data.xml.includes('<changes>'));
-      assert(packetBody.data.xml.includes('activity-change'));
-      assert(packetBody.data.xml.includes('Started &lt;activity &amp; change&gt;.'));
-      assert(packetBody.data.xml.includes('embedded="'));
-      assert(packetBody.data.xml.includes('reused="'));
-      assert.equal(packetBody.data.facts.changes, 1);
-      assert.equal(packetBody.data.facts.checks, 1);
-      assert.equal(typeof packetBody.data.facts.semanticIndexEmbeddedChunks, "number");
-      assert.equal(typeof packetBody.data.facts.semanticIndexReusedChunks, "number");
+      assert.equal(packetBody.data.data.schema, "opencanon.context-packet.v1");
+      assert.equal(packetBody.data.data.mode, "review");
+      assert.deepEqual(packetBody.data.data.filters.files, ["src/company.ts"]);
+      assert.deepEqual(packetBody.data.data.filters.changeIds, ["activity-change"]);
+      assert(packetBody.data.data.xml.includes('<changes>'));
+      assert(packetBody.data.data.xml.includes('activity-change'));
+      assert(packetBody.data.data.xml.includes('Started &lt;activity &amp; change&gt;.'));
+      assert(packetBody.data.data.xml.includes('embedded="'));
+      assert(packetBody.data.data.xml.includes('reused="'));
+      assert.equal(packetBody.data.data.facts.changes, 1);
+      assert.equal(packetBody.data.data.facts.checks, 1);
+      assert.equal(typeof packetBody.data.data.facts.semanticIndexEmbeddedChunks, "number");
+      assert.equal(typeof packetBody.data.data.facts.semanticIndexReusedChunks, "number");
 
       const unsafe = await fetch(server.url + "/api/context/packet?file=../escape.ts", { headers: runtimeAuthHeaders(server.authToken) });
       assert.equal(unsafe.status, 400);
@@ -326,7 +328,7 @@ export function changeTaskRoutesCheckSource(): string {
       assert.equal(response.status, 200, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true, text);
-      return body.data;
+      return body.data.data;
     }
     async function post(path, body) {
       const response = await fetch(server.url + path, { method: "POST", headers, body: JSON.stringify(body) });
@@ -542,7 +544,7 @@ export function completeReadyHistoryCheckSource(): string {
       assert.equal(response.status, 200, text);
       const body = JSON.parse(text);
       assert.equal(body.ok, true, text);
-      return body.data;
+      return body.data.data;
     }
     try {
       const queue = await get("/api/changes/ready");
@@ -603,13 +605,13 @@ export function worktreeCoordinationStreamCheckSource(): string {
         const snapshotBody = await snapshotResponse.json();
         const eventResponse = await fetch(server.url + "/api/events?limit=10", { headers: runtimeAuthHeaders(server.authToken) });
         const eventBody = await eventResponse.json();
-        const task = snapshotBody.data?.changes?.find((item) => item.id === "stream-change")?.tasks?.find((item) => item.id === "model");
-        const summaries = (eventBody.data ?? []).map((item) => item.summary).join(" | ");
+        const task = snapshotBody.data?.data?.changes?.find((item) => item.id === "stream-change")?.tasks?.find((item) => item.id === "model");
+        const summaries = (eventBody.data?.data ?? []).map((item) => item.summary).join(" | ");
         throw new Error(error.message + " Route task: " + (task?.status ?? "-") + ":" + (task?.lease?.agentId ?? "-") + ". Runtime events: " + summaries);
       });
       const worktreesResponse = await fetch(server.url + "/api/worktrees", { headers: runtimeAuthHeaders(server.authToken) });
       const worktreesBody = await worktreesResponse.json();
-      const activeLease = worktreesBody.data.leases.find((lease) => lease.changeId === "stream-change" && lease.taskId === "model" && lease.status === "active");
+      const activeLease = worktreesBody.data.data.leases.find((lease) => lease.changeId === "stream-change" && lease.taskId === "model" && lease.status === "active");
       assert.equal(activeLease.agentId, "agent-a");
       const snapshotBody = await waitForClaimedSnapshotRoute();
       const change = snapshotBody.changes.find((item) => item.id === "stream-change");
@@ -655,9 +657,9 @@ export function worktreeCoordinationStreamCheckSource(): string {
       while (Date.now() < deadline) {
         const response = await fetch(server.url + "/api/snapshot", { headers: runtimeAuthHeaders(server.authToken) });
         const body = await response.json();
-        const change = body.data?.changes?.find((item) => item.id === "stream-change");
+        const change = body.data?.data?.changes?.find((item) => item.id === "stream-change");
         const task = change?.tasks?.find((item) => item.id === "model");
-        if (task?.status === "claimed" && task?.lease?.agentId === "agent-a") return body.data;
+        if (task?.status === "claimed" && task?.lease?.agentId === "agent-a") return body.data.data;
         await delay(250);
       }
       throw new Error("Timed out waiting for active-work snapshot route.");
@@ -701,10 +703,10 @@ export function canonHistoryRouteCheckSource(): string {
         assert.equal(response.status, 200, text);
         const body = JSON.parse(text);
         assert.equal(body.ok, true);
-        assert.equal(body.data.target.kind, item.kind);
-        assert.equal(body.data.target.id, item.id);
-        assert(body.data.target.files.includes(item.file), item.file + " missing from " + JSON.stringify(body.data.target.files));
-        assert(body.data.target.files.includes(item.doc), item.doc + " missing from " + JSON.stringify(body.data.target.files));
+        assert.equal(body.data.data.target.kind, item.kind);
+        assert.equal(body.data.data.target.id, item.id);
+        assert(body.data.data.target.files.includes(item.file), item.file + " missing from " + JSON.stringify(body.data.data.target.files));
+        assert(body.data.data.target.files.includes(item.doc), item.doc + " missing from " + JSON.stringify(body.data.data.target.files));
       }
     } finally {
       await server.stop();
@@ -730,8 +732,8 @@ export function changeEventsRouteCheckSource(): string {
       const changesText = await changesResponse.text();
       assert.equal(changesResponse.status, 200, changesText);
       const changesBody = JSON.parse(changesText);
-      assert.equal(changesBody.data[0].id, "route-change");
-      assert.equal(changesBody.data[0].boardColumn, "planned");
+      assert.equal(changesBody.data.data[0].id, "route-change");
+      assert.equal(changesBody.data.data[0].boardColumn, "planned");
 
       // Activity is evaluated against the last accepted catalog. An invalid
       // in-progress source revision must not force a route-local Canon reload.
@@ -758,7 +760,7 @@ export function changeEventsRouteCheckSource(): string {
       writeFileSync(changesPath, originalChanges, "utf8");
       for (let attempt = 0; attempt < 100; attempt += 1) {
         const state = await fetch(server.url + "/api/state", { headers }).then((response) => response.json());
-        if (state.data?.lifecycle?.settled) break;
+        if (state.data?.data?.lifecycle?.settled) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
@@ -795,14 +797,14 @@ export function changeEventsRouteCheckSource(): string {
       const eventsText = await eventsResponse.text();
       assert.equal(eventsResponse.status, 200, eventsText);
       const eventsBody = JSON.parse(eventsText);
-      assert.equal(eventsBody.data[0].summary, "Started route change.");
-      assert.equal(eventsBody.data.filter((event) => event.id === "route-change-started-idempotent").length, 1);
+      assert.equal(eventsBody.data.data[0].summary, "Started route change.");
+      assert.equal(eventsBody.data.data.filter((event) => event.id === "route-change-started-idempotent").length, 1);
 
       const snapshotResponse = await fetch(server.url + "/api/snapshot", { headers });
       const snapshotText = await snapshotResponse.text();
       assert.equal(snapshotResponse.status, 200, snapshotText);
       const snapshotBody = JSON.parse(snapshotText);
-      const change = snapshotBody.data.changes.find((item) => item.id === "route-change");
+      const change = snapshotBody.data.data.changes.find((item) => item.id === "route-change");
       assert.equal(change.boardColumn, "running");
       assert.equal(change.lastEvent.type, "change-started");
     } finally {
@@ -917,10 +919,10 @@ export function runtimeValidatorReloadCheckSource(): string {
     }
 
     async function getSnapshotValidatorIds(url, authToken) {
-      const response = await fetch(url + "/api/snapshot", { headers: runtimeAuthHeaders(authToken) });
+      const response = await fetch(url + "/api/validators?limit=500", { headers: runtimeAuthHeaders(authToken) });
       if (response.status !== 200) throw new Error(await response.text());
       const body = await response.json();
-      return body.data.validators.map((validator) => validator.id);
+      return body.data.data.validators.map((validator) => validator.id);
     }
 
     async function waitForSnapshotValidatorIds(url, authToken, expected) {

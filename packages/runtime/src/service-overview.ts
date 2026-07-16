@@ -1,4 +1,5 @@
-import { localPipeEndpoint, localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
+import { localPipeEndpoint, localProtocolEndpointFromEntry, requestLocalJson, requestLocalProjectionData } from "./local-protocol.ts";
+import { ProtocolOperationKind, findProtocolOperation } from "@opencanon/core";
 import { ServiceActionCategory, ServiceActionId, ServiceActionScope, ServiceActionStatusValue, ServiceActionSurface, ServiceEffectKind, ServiceProjectStatusValue, type ServiceActionDefinition, type ServiceActionResult, type ServiceClientEffect, type ServiceProjectStatus } from "@opencanon/service-contracts";
 import { formatHttpBaseUrl } from "./runtime.ts";
 import { ApiRoute, ProjectIndexResponseMode } from "./routes.ts";
@@ -277,7 +278,11 @@ async function invokeProjectRuntimeAction(
   }
   try {
     const started = await startProjectRuntime({ cwd: project.rootDir, registryPath });
-    const details = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(started.entry), { method, path: route, body: method === "POST" ? body ?? {} : undefined });
+    const request = { method, path: route, body: method === "POST" ? body ?? {} : undefined } as const;
+    const operation = findProtocolOperation(method, new URL(route, "http://opencanon.runtime").pathname);
+    const details = operation?.kind === ProtocolOperationKind.Query
+      ? await requestLocalProjectionData<unknown>(localProtocolEndpointFromEntry(started.entry), request)
+      : await requestLocalJson<unknown>(localProtocolEndpointFromEntry(started.entry), request);
     return {
       status: ServiceActionStatusValue.Ok,
       title,

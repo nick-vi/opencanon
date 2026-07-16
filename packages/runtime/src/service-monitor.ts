@@ -1,5 +1,5 @@
 import { RuntimeHealthSchema, RuntimeLiveStateSchema, resolveRootDir, type RuntimeHealth, type RuntimeLiveState } from "@opencanon/core";
-import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
+import { localProtocolEndpointFromEntry, requestLocalJson, requestLocalProjectionData } from "./local-protocol.ts";
 import { ServiceApiRoute } from "./service-types.ts";
 import {
   LocalControlProtocolVersion,
@@ -248,7 +248,7 @@ async function projectRuntimeStatus(
   entry: RuntimeRegistryEntry,
 ): Promise<{ ok: true; health: RuntimeHealth; state?: RuntimeLiveState } | { ok: false; message: string }> {
   try {
-    const healthPayload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(entry), {
+    const healthPayload = await requestLocalProjectionData<unknown>(localProtocolEndpointFromEntry(entry), {
       method: "GET",
       path: "/api/health",
       timeoutMs: LocalHealthProbeTimeoutMs,
@@ -301,7 +301,7 @@ function serviceHealthFromValue(value: unknown): ServiceHealth | undefined {
 
 async function runtimeState(entry: RuntimeRegistryEntry): Promise<{ ok: true; state: RuntimeLiveState } | { ok: false }> {
   try {
-    const statePayload = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(entry), {
+    const statePayload = await requestLocalProjectionData<unknown>(localProtocolEndpointFromEntry(entry), {
       method: "GET",
       path: "/api/state",
       timeoutMs: LocalHealthProbeTimeoutMs,

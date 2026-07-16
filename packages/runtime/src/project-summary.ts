@@ -1,7 +1,8 @@
 import path from "node:path";
 import type { RuntimeSnapshot } from "./snapshot.ts";
 import { RuntimeStatus, inspectAllRuntimes, type RuntimeRegistryEntry, type RuntimeStatus as RuntimeStatusType } from "./service.ts";
-import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
+import { localProtocolEndpointFromEntry, requestLocalProjectionData } from "./local-protocol.ts";
+import type { RuntimeProjectSummary } from "@opencanon/core";
 
 export type ProjectSummary = {
   id: string;
@@ -52,9 +53,9 @@ export async function listProjects(cwd: string, snapshot: RuntimeSnapshot): Prom
 async function hydrateProjectSummary(summary: ProjectSummary, entry: RuntimeRegistryEntry | undefined): Promise<void> {
   if (summary.status !== RuntimeStatus.Running || !entry) return;
   try {
-    const payload = await requestLocalJson<RuntimeSnapshot>(localProtocolEndpointFromEntry(entry), { method: "GET", path: "/api/snapshot" });
-    summary.files = payload.state.files;
-    summary.findings = payload.state.findings;
+    const payload = await requestLocalProjectionData<RuntimeProjectSummary>(localProtocolEndpointFromEntry(entry), { method: "GET", path: "/api/project/summary" });
+    summary.files = payload.files;
+    summary.findings = payload.findings;
   } catch {
     return;
   }

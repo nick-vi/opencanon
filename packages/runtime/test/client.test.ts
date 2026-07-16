@@ -57,8 +57,8 @@ async function waitForKnowledgeStatus(
     const response = await fetch(serverUrl + "/api/context/status", { headers });
     const text = await response.text();
     assert.equal(response.status, 200, text);
-    const body = JSON.parse(text) as { data?: { index?: KnowledgeStatusForTest } };
-    last = body.data?.index;
+    const body = JSON.parse(text) as { data?: { data?: { index?: KnowledgeStatusForTest } } };
+    last = body.data?.data?.index;
     if (last && predicate(last)) return last;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -256,8 +256,8 @@ test("Project Knowledge worker failure leaves the serving runtime healthy", asyn
     const healthResponse = await fetch(server.url + "/api/health", { headers });
     const healthText = await healthResponse.text();
     assert.equal(healthResponse.status, 200, healthText);
-    const health = JSON.parse(healthText) as { data?: { jobs?: Array<{ status?: string; message?: string }> } };
-    assert(health.data?.jobs?.some((job) => job.status === "failed" && job.message === "isolated index failure"));
+    const health = JSON.parse(healthText) as { data?: { data?: { jobs?: Array<{ status?: string; message?: string }> } } };
+    assert(health.data?.data?.jobs?.some((job) => job.status === "failed" && job.message === "isolated index failure"));
 
     const statusResponse = await fetch(server.url + "/api/context/status", { headers });
     assert.equal(statusResponse.status, 200, await statusResponse.text());

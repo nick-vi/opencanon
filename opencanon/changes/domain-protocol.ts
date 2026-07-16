@@ -18,11 +18,13 @@ export const domainProtocolChanges = [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/protocol*.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/contracts-runtime.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/src/index.ts" },
-      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/{routes,server-routes,server-events,local-protocol,server-http,request-admission}.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/{routes,server-routes,server-events,local-protocol,server-http,request-admission,service-types}.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/index.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/cli/src/{runtime-client,validate,review,mcp}.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/test/{protocol,client,request-admission}.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/test/{client-test-sources,runtime-supervision,service-support}.ts" },
       { kind: DefinitionTargetKind.File, path: "tests/{contracts,cli-reporting,runtime-events,mcp}.test.ts" },
+      { kind: DefinitionTargetKind.File, path: "tests/setup-vitest.ts" },
       { kind: DefinitionTargetKind.File, path: "package.json" },
     ],
     intent: {
@@ -47,7 +49,7 @@ export const domainProtocolChanges = [
       {
         id: "bounded-projections",
         title: "Migrate runtime clients to bounded revisioned projections",
-        files: ["packages/runtime/src/routes.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/index.ts", "packages/cli/src/runtime-client.ts", "packages/cli/src/validate.ts", "packages/cli/src/review.ts", "packages/cli/src/mcp.ts", "packages/runtime/test/client.test.ts", "tests/cli-reporting.test.ts", "tests/mcp.test.ts"],
+        files: ["packages/runtime/src/routes.ts", "packages/runtime/src/server-routes.ts", "packages/runtime/src/index.ts", "packages/runtime/src/local-protocol.ts", "packages/runtime/src/service-types.ts", "packages/cli/src/runtime-client.ts", "packages/cli/src/validate.ts", "packages/cli/src/review.ts", "packages/cli/src/mcp.ts", "packages/runtime/test/client.test.ts", "packages/runtime/test/client-test-sources.ts", "packages/runtime/test/runtime-supervision.test.ts", "packages/runtime/test/service-support.ts", "tests/cli-reporting.test.ts", "tests/mcp.test.ts", "tests/runtime-events.test.ts", "tests/setup-vitest.ts"],
         checks: ["runtime-client-tests", "cli-tests", "mcp-tests", "typecheck"],
         dependsOn: ["protocol-registry"],
       },

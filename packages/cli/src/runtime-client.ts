@@ -1,6 +1,10 @@
 import {
   DoctorKnowledgeInspectionKind,
+  ProtocolOperationKind,
+  ProtocolRoute,
   ReadSemanticIndexStatusResultSchema,
+  findProtocolOperation,
+  parseProjectionResponse,
   resolveRootDir,
   type DoctorKnowledgeInspection,
 } from "@opencanon/core";
@@ -18,33 +22,7 @@ import {
   type RuntimeRegistryEntry,
 } from "@opencanon/runtime";
 
-export const RuntimeApiRoute = {
-  CanonRelated: "/api/canon/related",
-  Changes: "/api/changes",
-  ChangeCheckRuns: "/api/changes/check-runs",
-  ChangeCheckRunsCancel: "/api/changes/check-runs/cancel",
-  EventsStream: "/api/events/stream",
-  ChangeEvents: "/api/changes/events",
-  ChangeReady: "/api/changes/ready",
-  CodeGraph: "/api/code/graph",
-  CodeSymbols: "/api/code/symbols",
-  ContextPacket: "/api/context/packet",
-  ContextAsk: "/api/context/ask",
-  ContextBacklinks: "/api/context/backlinks",
-  ContextChunks: "/api/context/chunks",
-  ContextCoverage: "/api/context/coverage",
-  ContextSearch: "/api/context/search",
-  ContextStatus: "/api/context/status",
-  Doctor: "/api/doctor",
-  Feedback: "/api/feedback",
-  HookFeedback: "/api/hook-feedback",
-  Index: "/api/index",
-  Producers: "/api/producers",
-  Snapshot: "/api/snapshot",
-  State: "/api/state",
-  Validate: "/api/validate",
-  Worktrees: "/api/worktrees",
-} as const;
+export const RuntimeApiRoute = ProtocolRoute;
 
 const RunningRuntimeProducerProbeTimeoutMs = 2_000;
 const RunningRuntimeKnowledgeProbeTimeoutMs = 2_000;
@@ -69,7 +47,7 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
     return undefined;
   }
   try {
-    const payload = await requestLocalJson<{ producers: T }>(
+    const payload = await requestLocalJson<unknown>(
       localProtocolEndpointFromEntry(inspection.entry),
       {
         method: "GET",
@@ -77,7 +55,7 @@ export async function fetchRunningRuntimeProducers<T = unknown>(
         timeoutMs: options.timeoutMs ?? RunningRuntimeProducerProbeTimeoutMs,
       },
     );
-    return payload.producers;
+    return parseProjectionResponse<{ producers: T }>(payload).data.producers;
   } catch {
     return undefined;
   }
@@ -104,7 +82,7 @@ export async function inspectRunningRuntimeKnowledge(cwd: string): Promise<Docto
     });
     return {
       kind: DoctorKnowledgeInspectionKind.Available,
-      index: ReadSemanticIndexStatusResultSchema.parse(payload).index,
+      index: ReadSemanticIndexStatusResultSchema.parse(parseProjectionResponse<unknown>(payload).data).index,
     };
   } catch (error) {
     return {
@@ -186,10 +164,11 @@ export async function withRuntimeClient<T>(
 
   return await callback({
     async get<T>(path: string) {
-      return requestWithRepair<T>({ method: "GET", path });
+      return projectionData<T>(path, "GET", await requestWithRepair<unknown>({ method: "GET", path }));
     },
     async post<T>(path: string, body: unknown) {
-      return requestWithRepair<T>({ method: "POST", path, body });
+      const value = await requestWithRepair<unknown>({ method: "POST", path, body });
+      return projectionData<T>(path, "POST", value);
     },
     async stream(path, input) {
       if (!endpoint) throw new Error("OpenCanon runtime endpoint was not initialized.");
@@ -215,6 +194,13 @@ export async function withRuntimeClient<T>(
       }
     },
   });
+}
+
+function projectionData<T>(path: string, method: "GET" | "POST", value: unknown): T {
+  const pathname = new URL(path, "http://opencanon.runtime").pathname;
+  const operation = findProtocolOperation(method, pathname);
+  if (operation?.kind !== ProtocolOperationKind.Query) return value as T;
+  return parseProjectionResponse<T>(value).data;
 }
 
 async function repairSupervisedRuntimeAfterTransportFailure(rootDir: string, registryPath: string): Promise<RuntimeRegistryEntry> {

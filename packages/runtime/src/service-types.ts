@@ -305,7 +305,7 @@ export type ProjectWorkerLeaseHandle = {
   release(): void;
 };
 
-export const LocalControlProtocolVersion = 1;
+export const LocalControlProtocolVersion = 2;
 export const registryVersion = 1;
 export const defaultServicePort = 4766;
 export const defaultRuntimePort = 4767;

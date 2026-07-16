@@ -10,7 +10,7 @@ import {
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
 import { ApiRoute } from "./routes.ts";
-import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
+import { localProtocolEndpointFromEntry, requestLocalProjectionData } from "./local-protocol.ts";
 import {
   RuntimeStatus,
   formatRefreshStatus,
@@ -64,7 +64,7 @@ export async function readProducerStatuses(entry: {
   runtimeFingerprint?: string;
 }): Promise<{ producers: ProducerStatus[] } | { error: string }> {
   try {
-    const body = await requestLocalJson<{ producers?: ProducerStatus[] }>(localProtocolEndpointFromEntry(entry), { method: "GET", path: ApiRoute.Producers });
+    const body = await requestLocalProjectionData<{ producers?: ProducerStatus[] }>(localProtocolEndpointFromEntry(entry), { method: "GET", path: ApiRoute.Producers });
     return { producers: body.producers ?? [] };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
@@ -104,14 +104,14 @@ export async function readProjectIndexStatus(entry: {
   runtimeFingerprint?: string;
 }): Promise<ReadSemanticIndexStatusResult | { error: string }> {
   try {
-    return await requestLocalJson<ReadSemanticIndexStatusResult>(localProtocolEndpointFromEntry(entry), { method: "GET", path: ApiRoute.ContextStatus });
+    return await requestLocalProjectionData<ReadSemanticIndexStatusResult>(localProtocolEndpointFromEntry(entry), { method: "GET", path: ApiRoute.ContextStatus });
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 
 export async function readProjectSummary(entry: RuntimeRegistryEntry): Promise<RuntimeProjectSummary> {
-  const value = await requestLocalJson<unknown>(localProtocolEndpointFromEntry(entry), { method: "GET", path: ApiRoute.ProjectSummary });
+  const value = await requestLocalProjectionData<unknown>(localProtocolEndpointFromEntry(entry), { method: "GET", path: ApiRoute.ProjectSummary });
   return RuntimeProjectSummarySchema.parse(value);
 }
 

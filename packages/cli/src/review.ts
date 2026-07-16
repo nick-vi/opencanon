@@ -15,11 +15,11 @@ import {
   resolveCommitGates,
   resolveImpactSurfaceConventionsForFiles,
   resolveRootDir,
+  type ReadSemanticIndexStatusResult,
   toRepoRelativePath,
   unique,
 } from "@opencanon/core";
 import type { Change, ContextPaths, DoctorReport, ImpactSurfaceConventionResolution, ProducerStatus, ResolvedCommitGate, ValidationResult } from "@opencanon/core";
-import type { RuntimeSnapshot } from "@opencanon/runtime";
 import { booleanOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { loadProjectContext } from "./project.ts";
 import { RuntimeApiRoute, fetchRunningRuntimeProducers, withRuntimeClient } from "./runtime-client.ts";
@@ -79,7 +79,7 @@ export async function runReviewCommand(args = process.argv.slice(2), cwd = proce
 
   const project = await loadProjectContext(rootDir);
   const files = resolveReviewFiles(query, rootDir, project.paths);
-  const snapshot = await fetchRuntimeSnapshot(rootDir);
+  const knowledge = await fetchRuntimeKnowledge(rootDir);
   const validation = files.length > 0 ? await validateFilesForReview(rootDir, project.paths, files, query.strictProducers) : null;
   const producerStatuses = await fetchRunningRuntimeProducers<ProducerStatus[]>(rootDir);
   const doctor = buildDoctorReport({
@@ -91,7 +91,7 @@ export async function runReviewCommand(args = process.argv.slice(2), cwd = proce
     validators: project.validators,
     runExternalTools: query.runExternalTools,
     producerStatuses,
-    knowledgeInspection: { kind: "available", index: snapshot?.semanticIndex ?? null },
+    knowledgeInspection: { kind: "available", index: knowledge?.index ?? null },
   });
   const impact = resolveImpactSurfaceConventionsForFiles({
     files,
@@ -162,9 +162,9 @@ function resolveReviewFiles(query: ReviewQuery, rootDir: string, paths: ContextP
   return unique(files.filter((file) => matchesProjectFileScope(paths, file))).sort();
 }
 
-async function fetchRuntimeSnapshot(rootDir: string): Promise<RuntimeSnapshot | null> {
+async function fetchRuntimeKnowledge(rootDir: string): Promise<ReadSemanticIndexStatusResult | null> {
   try {
-    return await withRuntimeClient<RuntimeSnapshot>(rootDir, (client) => client.get(RuntimeApiRoute.Snapshot));
+    return await withRuntimeClient<ReadSemanticIndexStatusResult>(rootDir, (client) => client.get(RuntimeApiRoute.ContextStatus));
   } catch {
     return null;
   }

@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import type { RuntimeSnapshot } from "@opencanon/runtime";
 import { booleanOption, fixModeOption, formatOption, rejectUnknownOptions, stringValues } from "./options.ts";
 import { loadProjectContext } from "./project.ts";
 import {
@@ -33,7 +32,7 @@ import { Format } from "@opencanon/core";
 import { applyFindingFixes } from "@opencanon/core";
 import type { FixMode } from "@opencanon/core";
 import { createProfiler, renderProfileMarkdown } from "@opencanon/core";
-import type { Finding, Validator } from "@opencanon/core";
+import type { Finding, RuntimeValidatorCatalog, Validator } from "@opencanon/core";
 import { createRuntime, createValidationContextFromFixture, createValidationContextFromFixtureFile, flushValidationContextCache, validateFindings } from "@opencanon/core";
 import type { ValidationResult } from "@opencanon/core";
 import type { ResolvedCommitGate } from "@opencanon/core";
@@ -83,8 +82,8 @@ export async function runValidateCommand(args = process.argv.slice(2), cwd = pro
   resolveChangedFiles(query);
 
   if (query.list) {
-    const snapshot = await withRuntimeClient(cwd, (client) => client.get<RuntimeSnapshot>(RuntimeApiRoute.Snapshot));
-    const rows = snapshot.validators.map((validator) => ({
+    const catalog = await withRuntimeClient(cwd, (client) => client.get<RuntimeValidatorCatalog>(`${RuntimeApiRoute.Validators}?limit=500`));
+    const rows = catalog.validators.map((validator) => ({
       id: validator.id,
       severity: validator.severity,
       summary: validator.summary,

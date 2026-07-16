@@ -104,7 +104,7 @@ test("local pipe protocol streams SSE responses as chunk frames", async () => {
 
   try {
     const frames = await requestPipeFrames(endpoint, {
-      protocol: "opencanon.local.v1",
+      protocol: "opencanon.local.v2",
       id: "stream-test",
       method: "GET",
       path: "/api/events/stream",
@@ -112,7 +112,7 @@ test("local pipe protocol streams SSE responses as chunk frames", async () => {
     });
     const streamText = frames.map((frame) => typeof frame.chunk === "string" ? frame.chunk : "").join("");
 
-    assert.ok(frames.every((frame) => frame.protocol === "opencanon.local.v1"));
+    assert.ok(frames.every((frame) => frame.protocol === "opencanon.local.v2"));
     assert.ok(frames.every((frame) => frame.id === "stream-test"));
     assert.ok(frames.every((frame) => frame.stream === true));
     assert.equal(frames.at(-1)?.done, true);

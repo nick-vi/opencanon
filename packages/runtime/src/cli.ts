@@ -25,7 +25,7 @@ import { startOpenCanonRuntime, checkRuntimePrerequisites } from "./server.ts";
 import { requestKnowledgeIndex } from "./knowledge-index-progress.ts";
 import { runtimeStartupProblem, writeRuntimeStartupFailure } from "./service-startup-result.ts";
 import { stopAllProjectRuntimes } from "./service-control.ts";
-import { localProtocolEndpointFromEntry, requestLocalJson } from "./local-protocol.ts";
+import { localProtocolEndpointFromEntry, requestLocalProjectionData } from "./local-protocol.ts";
 import { HiddenServiceRegistryArg } from "./service-peer-discovery.ts";
 import { ProjectRuntimeEnv } from "./service-types.ts";
 import { defaultRuntimeNamespace, projectRuntimeStatePath } from "./service-namespace.ts";
@@ -417,7 +417,7 @@ async function runProjectInspectCommand(args: string[], cwd: string): Promise<vo
     writeJson(runtimeInspectionJson(inspection, cwd));
     return;
   }
-  const state = await requestLocalJson<{ health?: { validatorGraph?: unknown } }>(localProtocolEndpointFromEntry(inspection.entry), {
+  const state = await requestLocalProjectionData<{ health?: { validatorGraph?: unknown } }>(localProtocolEndpointFromEntry(inspection.entry), {
     method: "GET",
     path: ApiRoute.State,
   });

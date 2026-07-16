@@ -141,6 +141,22 @@ export type ProjectionResponse<T> = {
   nextCursor?: string;
 };
 
+export function protocolProjection<T>(revision: number, data: T, nextCursor?: string): ProjectionResponse<T> {
+  if (!Number.isInteger(revision) || revision < 1) throw new Error("Protocol projections require a positive published revision.");
+  return {
+    protocolVersion: DomainProtocolVersion,
+    revision,
+    data,
+    ...(nextCursor ? { nextCursor } : {}),
+  };
+}
+
+const UnknownProjectionResponseSchema = ProjectionResponseSchema(z.unknown());
+
+export function parseProjectionResponse<T>(value: unknown): ProjectionResponse<T> {
+  return UnknownProjectionResponseSchema.parse(value) as ProjectionResponse<T>;
+}
+
 export const ProtocolProgressSchema = z.object({
   operation: z.string().min(1),
   phase: z.string().min(1),
