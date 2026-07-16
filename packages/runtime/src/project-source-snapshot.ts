@@ -30,6 +30,8 @@ export type RuntimeSourceSnapshot = {
   facts: FileFacts[];
 };
 
+export type RuntimeSourceInventory = Pick<RuntimeSourceSnapshot, "discovery" | "scan">;
+
 export type RuntimeFactFile = {
   path: string;
   contentHash: string;
@@ -42,11 +44,9 @@ export function captureRuntimeSourceSnapshot(input: {
   paths: Parameters<typeof discoverProjectFiles>[0];
   store: ProjectStore;
   changedPaths?: string[];
+  inventory?: RuntimeSourceInventory;
 }): RuntimeSourceSnapshot {
-  const discovery = discoverProjectFiles(input.paths);
-  if (discovery.failed) throw new Error(discovery.diagnostics.join("\n"));
-
-  const scan = applyChangeHint(input.store.scanAndDiff(discovery.files), input.changedPaths);
+  const { discovery, scan } = input.inventory ?? scanRuntimeSourceInventory(input);
   const sourceFileSnapshots = snapshotScanFiles(input.rootDir, scan);
   const sourceSnapshotPaths = new Set(sourceFileSnapshots.map((file) => file.path));
   const contextFileSnapshots = snapshotFiles(
@@ -65,6 +65,19 @@ export function captureRuntimeSourceSnapshot(input: {
     fileSnapshots,
     factFiles,
     facts: extracted.files,
+  };
+}
+
+export function scanRuntimeSourceInventory(input: {
+  paths: Parameters<typeof discoverProjectFiles>[0];
+  store: ProjectStore;
+  changedPaths?: string[];
+}): RuntimeSourceInventory {
+  const discovery = discoverProjectFiles(input.paths);
+  if (discovery.failed) throw new Error(discovery.diagnostics.join("\n"));
+  return {
+    discovery,
+    scan: applyChangeHint(input.store.scanAndDiff(discovery.files), input.changedPaths),
   };
 }
 

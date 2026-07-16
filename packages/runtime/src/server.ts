@@ -67,8 +67,10 @@ import {
   type ValidationResultCache,
   type WatcherEventBatch,
 } from "@opencanon/core";
-import { buildStartupRuntimeState, buildProjectSummary, buildRelatedCanon, prepareRuntimeAnalysisPublication, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeChangeCatalog, type RuntimeSnapshot } from "./snapshot.ts";
+import { buildStartupRuntimeState, buildProjectSummary, buildRelatedCanon, prepareRuntimeAnalysisPublication, RuntimeAnalysisOutcomeKind, runtimeSnapshotFailure, gitDiffSnapshot, gitHistorySnapshot, type RuntimeChangeCatalog, type RuntimeSnapshot } from "./snapshot.ts";
 import { runProjectAnalysisOperation } from "./project-analysis-operation.ts";
+import { unchangedProjectRefreshCandidate } from "./project-refresh-publication.ts";
+import { knowledgeWatchSummary, watcherBatchSummary } from "./project-watch-summary.ts";
 import { projectAnalysisStatePath } from "./service-namespace.ts";
 import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, treeScopeParam, validateCommitHash, validateOptionalRelativePaths, validateRelativePath, validateRelativePaths } from "./server-fs.ts";
 import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
@@ -282,6 +284,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     throw error;
   }
   let stopped = false;
+  let acceptedAnalysisInputHash: string | undefined;
   let validatorGraphRuntime: ReturnType<typeof createValidatorGraphRuntime> | undefined;
   const stateManager = createRuntimeStateManager({
     initialSnapshot: snapshot,
@@ -682,7 +685,19 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
           label: "Discovering project files",
           indeterminate: true,
         }));
-        const analysis = await rebuildSnapshot({ store, signal });
+        const outcome = await rebuildSnapshot({ store, signal });
+        if (outcome.kind === RuntimeAnalysisOutcomeKind.Unchanged) {
+          const current = stateManager.currentSnapshot();
+          span.setOutput({ unchanged: true, files: current.files.length });
+          return unchangedProjectRefreshCandidate({
+            snapshot: current,
+            changeCatalog: stateManager.currentChangeCatalog(),
+            jobId,
+            events,
+            finishWorkerJob,
+          });
+        }
+        const analysis = outcome.analysis;
         const publication = prepareRuntimeAnalysisPublication({
           analysis,
           store,
@@ -740,6 +755,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
               unit: "files",
             }));
             events.broadcast(snapshotEvent(publishedSnapshot, summary));
+            acceptedAnalysisInputHash = analysis.publication.analysisInputHash;
             return publishedSnapshot;
           },
         };
@@ -758,6 +774,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       return await runProjectAnalysisOperation({
         rootDir,
         analysisStatePath: projectAnalysisStatePath(input.store.statePath),
+        previousAnalysisInputHash: acceptedAnalysisInputHash,
         signal: input.signal,
       });
     } catch (error) {
@@ -884,17 +901,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     workerLease.release();
     await options.onStopped?.();
   }
-}
-
-function watcherBatchSummary(batch: WatcherEventBatch): string | undefined {
-  if (batch.stale) return batch.reason ?? "Engine watcher requested a full reindex.";
-  if (batch.paths.length === 0) return undefined;
-  return batch.paths.length === 1 ? `Indexed changed file ${batch.paths[0]}.` : `Indexed ${batch.paths.length} changed files.`;
-}
-
-function knowledgeWatchSummary(paths: string[]): string {
-  if (paths.length === 0) return "Project Knowledge source changed; refreshing index.";
-  return paths.length === 1 ? `Project Knowledge source changed: ${paths[0]}.` : `Project Knowledge source changed in ${paths.length} files.`;
 }
 
 function errorMessage(error: unknown): string {

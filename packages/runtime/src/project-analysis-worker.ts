@@ -11,7 +11,7 @@ import { createCliAstFactsProvider, engineProjectAstFactsProvider } from "./ast-
 import { ProjectAnalysisProtocolVersion, type ProjectAnalysisResult } from "./project-analysis-protocol.ts";
 import { assertRuntimePrerequisites } from "./runtime.ts";
 import { ProjectRuntimeEnv } from "./service-types.ts";
-import { buildRuntimeAnalysis } from "./snapshot.ts";
+import { buildRuntimeAnalysisOutcome } from "./snapshot.ts";
 import { createProjectStore } from "./state.ts";
 
 export async function runProjectAnalysisWorkerCommand(args: string[], cwd = process.cwd()): Promise<void> {
@@ -26,17 +26,18 @@ export async function runProjectAnalysisWorkerCommand(args: string[], cwd = proc
   const fixtureAst = createCliAstFactsProvider();
   setProjectAstFactsProviderFactory((queryRoot) => (queryRoot === rootDir ? engineAstProvider : fixtureAst.factory(queryRoot)));
   try {
-    const analysis = await buildRuntimeAnalysis({
+    const outcome = await buildRuntimeAnalysisOutcome({
       cwd: rootDir,
       engine: prerequisites.engine,
       store,
       producerPolicy: BatchProducerPolicy,
       validationResultCache: createValidationResultCache(paths),
+      previousAnalysisInputHash: input.previousAnalysisInputHash,
     });
     const result: ProjectAnalysisResult = {
       version: ProjectAnalysisProtocolVersion,
       requestId: input.requestId,
-      analysis,
+      outcome,
     };
     await mkdir(path.dirname(input.resultPath), { recursive: true });
     const partialPath = `${input.resultPath}.partial`;
@@ -49,20 +50,22 @@ export async function runProjectAnalysisWorkerCommand(args: string[], cwd = proc
   }
 }
 
-function parseWorkerArgs(args: string[]): { rootDir?: string; resultPath: string; requestId: string } {
+function parseWorkerArgs(args: string[]): { rootDir?: string; resultPath: string; requestId: string; previousAnalysisInputHash?: string } {
   let rootDir: string | undefined;
   let resultPath: string | undefined;
   let requestId: string | undefined;
+  let previousAnalysisInputHash: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     const value = args[index + 1]?.trim();
     if (arg === "--root" && value) rootDir = value;
     else if (arg === "--result" && value) resultPath = path.resolve(value);
     else if (arg === "--request-id" && value) requestId = value;
+    else if (arg === "--previous-analysis-input-hash" && value) previousAnalysisInputHash = value;
     else throw new Error(`Unknown or incomplete project analysis worker option: ${String(arg)}.`);
     index += 1;
   }
   if (!resultPath) throw new Error("Project analysis worker requires --result <path>.");
   if (!requestId) throw new Error("Project analysis worker requires --request-id <id>.");
-  return { rootDir, resultPath, requestId };
+  return { rootDir, resultPath, requestId, previousAnalysisInputHash };
 }

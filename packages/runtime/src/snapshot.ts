@@ -54,7 +54,8 @@ import {
   unique,
 } from "./snapshot-projection.ts";
 import { findingSnapshotId } from "./snapshot-related.ts";
-import { captureRuntimeSourceSnapshot, indexRuntimeCodeGraph } from "./project-source-snapshot.ts";
+import { captureRuntimeSourceSnapshot, indexRuntimeCodeGraph, scanRuntimeSourceInventory } from "./project-source-snapshot.ts";
+import { projectAnalysisIdentity } from "./project-analysis-identity.ts";
 
 const FindingSeverity = {
   Error: "error",
@@ -471,11 +472,21 @@ export type RuntimeAnalysis = {
   snapshot: RuntimeSnapshot;
   publication: {
     codeGraphGeneration: string;
+    analysisInputHash: string;
     sourceInventoryHash: string;
     productModel: ProductModelProjection;
     changeCatalog: RuntimeChangeCatalog;
   };
 };
+
+export const RuntimeAnalysisOutcomeKind = {
+  Unchanged: "unchanged",
+  Candidate: "candidate",
+} as const;
+
+export type RuntimeAnalysisOutcome =
+  | { kind: typeof RuntimeAnalysisOutcomeKind.Unchanged; analysisInputHash: string; sourceInventoryHash: string }
+  | { kind: typeof RuntimeAnalysisOutcomeKind.Candidate; analysis: RuntimeAnalysis };
 
 type RuntimeSnapshotInput = {
   cwd: string;
@@ -501,8 +512,32 @@ export async function buildRuntimeSnapshot(input: RuntimeSnapshotInput): Promise
 }
 
 export async function buildRuntimeAnalysis(input: RuntimeSnapshotInput): Promise<RuntimeAnalysis> {
+  const outcome = await buildRuntimeAnalysisOutcome(input);
+  if (outcome.kind !== RuntimeAnalysisOutcomeKind.Candidate) {
+    throw new Error("Project analysis unexpectedly returned unchanged without a previous source identity.");
+  }
+  return outcome.analysis;
+}
+
+export async function buildRuntimeAnalysisOutcome(
+  input: RuntimeSnapshotInput & { previousAnalysisInputHash?: string },
+): Promise<RuntimeAnalysisOutcome> {
   const project = await loadProjectContext(input.cwd);
-  const sourceSnapshot = captureRuntimeSourceSnapshot({ rootDir: project.paths.rootDir, paths: project.paths, store: input.store });
+  const inventory = scanRuntimeSourceInventory({ paths: project.paths, store: input.store });
+  const analysisIdentity = projectAnalysisIdentity({ project, sourceInventoryHash: inventory.scan.inventoryHash });
+  if (input.previousAnalysisInputHash && analysisIdentity.hash === input.previousAnalysisInputHash) {
+    return {
+      kind: RuntimeAnalysisOutcomeKind.Unchanged,
+      analysisInputHash: analysisIdentity.hash,
+      sourceInventoryHash: analysisIdentity.sourceInventoryHash,
+    };
+  }
+  const sourceSnapshot = captureRuntimeSourceSnapshot({
+    rootDir: project.paths.rootDir,
+    paths: project.paths,
+    store: input.store,
+    inventory,
+  });
   const { discovery, scan, fileSnapshots, factFiles, facts } = sourceSnapshot;
   const codeGraph = await indexRuntimeCodeGraph({
     store: input.store,
@@ -694,15 +729,19 @@ export async function buildRuntimeAnalysis(input: RuntimeSnapshotInput): Promise
     validators,
   };
   return {
-    snapshot,
-    publication: {
-      codeGraphGeneration: codeGraph.generation,
-      sourceInventoryHash: scan.inventoryHash,
-      productModel,
-      changeCatalog: {
-        rootDir: project.paths.rootDir,
-        changesPath: project.paths.changesPath,
-        changes: project.changes,
+    kind: RuntimeAnalysisOutcomeKind.Candidate,
+    analysis: {
+      snapshot,
+      publication: {
+        codeGraphGeneration: codeGraph.generation,
+        analysisInputHash: analysisIdentity.hash,
+        sourceInventoryHash: scan.inventoryHash,
+        productModel,
+        changeCatalog: {
+          rootDir: project.paths.rootDir,
+          changesPath: project.paths.changesPath,
+          changes: project.changes,
+        },
       },
     },
   };

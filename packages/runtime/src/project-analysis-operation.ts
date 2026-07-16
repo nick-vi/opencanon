@@ -9,20 +9,21 @@ import { parseProjectAnalysisResult } from "./project-analysis-protocol.ts";
 import { terminateSpawnedProcess } from "./process-tree.ts";
 import { nodeCommandForCliInvocation } from "./service-entrypoint.ts";
 import { ProjectRuntimeEnv } from "./service-types.ts";
-import type { RuntimeAnalysis } from "./snapshot.ts";
+import type { RuntimeAnalysisOutcome } from "./snapshot.ts";
 
 export type ProjectAnalysisOperationInput = {
   rootDir: string;
   analysisStatePath: string;
+  previousAnalysisInputHash?: string;
   signal?: AbortSignal;
 };
 
-export async function runProjectAnalysisOperation(input: ProjectAnalysisOperationInput): Promise<RuntimeAnalysis> {
+export async function runProjectAnalysisOperation(input: ProjectAnalysisOperationInput): Promise<RuntimeAnalysisOutcome> {
   if (input.signal?.aborted) throw new Error("Project analysis was superseded.");
   const requestId = randomUUID();
   const operationDir = await mkdtemp(path.join(os.tmpdir(), "opencanon-project-analysis-"));
   const resultPath = path.join(operationDir, "result.json");
-  const child = spawn(nodeCommandForCliInvocation(), [
+  const childArgs = [
     projectAnalysisWorkerPath(),
     "--root",
     input.rootDir,
@@ -30,7 +31,9 @@ export async function runProjectAnalysisOperation(input: ProjectAnalysisOperatio
     resultPath,
     "--request-id",
     requestId,
-  ], {
+    ...(input.previousAnalysisInputHash ? ["--previous-analysis-input-hash", input.previousAnalysisInputHash] : []),
+  ];
+  const child = spawn(nodeCommandForCliInvocation(), childArgs, {
     cwd: input.rootDir,
     stdio: ["ignore", "ignore", "pipe"],
     env: { ...process.env, [ProjectRuntimeEnv.StatePath]: input.analysisStatePath },
@@ -56,7 +59,7 @@ export async function runProjectAnalysisOperation(input: ProjectAnalysisOperatio
       throw new Error(`Project analysis worker failed: ${detail}.`);
     }
     const result = parseProjectAnalysisResult(await readProjectAnalysisResult(resultPath), requestId);
-    return result.analysis;
+    return result.outcome;
   } finally {
     input.signal?.removeEventListener("abort", onAbort);
     if (child.exitCode === null && child.signalCode === null && child.pid) await terminateSpawnedProcess(child.pid).catch(() => undefined);

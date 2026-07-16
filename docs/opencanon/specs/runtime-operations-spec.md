@@ -150,6 +150,7 @@ Rule `source-refresh-preserves-transports`: Project source refresh keeps pipe an
 - the serving process does not perform discovery, fact extraction, graph construction, or project validation
 - superseded analysis is cancelled and cannot publish
 - analysis failure preserves the previous snapshot and serving transports
+- watcher events settle without facts, validation, graph staging, or accepted-state replacement only when source inventory, canon graphs, effective configuration, and validation context are content-equivalent
 - graph indexing writes a private generation that stays invisible until the serving runtime accepts it
 - the product projection and graph generation commit only for the newest observed revision
 - native graph writes do not run on the serving JavaScript event loop
