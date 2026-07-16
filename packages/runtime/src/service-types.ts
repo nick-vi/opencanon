@@ -346,8 +346,8 @@ export const LocalHealthWaitFailure = {
   Timeout: "timeout",
 } as const;
 export type LocalHealthWaitFailure = (typeof LocalHealthWaitFailure)[keyof typeof LocalHealthWaitFailure];
-export type RuntimeHealthWaitResult = { ready: true } | { ready: false; reason: LocalHealthWaitFailure };
-export type ServiceHealthWaitResult = { ready: true } | { ready: false; reason: LocalHealthWaitFailure };
+export type RuntimeHealthWaitResult = { ready: true } | { ready: false; reason: LocalHealthWaitFailure; message: string };
+export type ServiceHealthWaitResult = { ready: true } | { ready: false; reason: LocalHealthWaitFailure; message: string };
 
 export const ServiceApiRoute = {
   ActionInvoke: "/api/actions/invoke",

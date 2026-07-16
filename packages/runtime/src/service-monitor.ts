@@ -197,12 +197,17 @@ export async function waitForRuntimeHealth(entry: RuntimeRegistryEntry): Promise
 }
 
 export async function waitForRuntimeHealthResult(entry: RuntimeRegistryEntry): Promise<RuntimeHealthWaitResult> {
+  let message = "Project runtime health endpoint did not respond.";
   for (let attempt = 0; attempt < RuntimeStartupHealthAttempts; attempt += 1) {
-    if (!isProcessRunning(entry.pid)) return { ready: false, reason: LocalHealthWaitFailure.ProcessExited };
-    if (await runtimeHealthOk(entry)) return { ready: true };
+    if (!isProcessRunning(entry.pid)) {
+      return { ready: false, reason: LocalHealthWaitFailure.ProcessExited, message: "Project runtime process exited during startup." };
+    }
+    const status = await projectRuntimeStatus(entry);
+    if (status.ok) return { ready: true };
+    message = status.message;
     await sleep(RuntimeStartupHealthIntervalMs);
   }
-  return { ready: false, reason: LocalHealthWaitFailure.Timeout };
+  return { ready: false, reason: LocalHealthWaitFailure.Timeout, message };
 }
 
 export async function waitForServiceHealth(entry: ServiceRegistryEntry): Promise<boolean> {
@@ -210,20 +215,17 @@ export async function waitForServiceHealth(entry: ServiceRegistryEntry): Promise
 }
 
 export async function waitForServiceHealthResult(entry: ServiceRegistryEntry): Promise<ServiceHealthWaitResult> {
+  let message = "OpenCanon service health endpoint did not respond.";
   for (let attempt = 0; attempt < ServiceStartupHealthAttempts; attempt += 1) {
-    if (!isProcessRunning(entry.pid)) return { ready: false, reason: LocalHealthWaitFailure.ProcessExited };
-    if (await serviceHealthOk(entry)) return { ready: true };
+    if (!isProcessRunning(entry.pid)) {
+      return { ready: false, reason: LocalHealthWaitFailure.ProcessExited, message: "OpenCanon service process exited during startup." };
+    }
+    const status = await serviceStatus(entry);
+    if (status.ok) return { ready: true };
+    message = status.message;
     await sleep(ServiceStartupHealthIntervalMs);
   }
-  return { ready: false, reason: LocalHealthWaitFailure.Timeout };
-}
-
-async function runtimeHealthOk(entry: RuntimeRegistryEntry): Promise<boolean> {
-  return (await projectRuntimeStatus(entry)).ok;
-}
-
-async function serviceHealthOk(entry: ServiceRegistryEntry): Promise<boolean> {
-  return (await serviceStatus(entry)).ok;
+  return { ready: false, reason: LocalHealthWaitFailure.Timeout, message };
 }
 
 async function serviceStatus(entry: ServiceRegistryEntry): Promise<{ ok: true; health: ServiceHealth } | { ok: false; message: string }> {
@@ -239,8 +241,8 @@ async function serviceStatus(entry: ServiceRegistryEntry): Promise<{ ok: true; h
       return { ok: false, message: "Service health endpoint responded for a different process lease." };
     }
     return { ok: true, health };
-  } catch {
-    return { ok: false, message: "OpenCanon service process is running but health endpoint did not respond." };
+  } catch (error) {
+    return { ok: false, message: `OpenCanon service process is running but health failed: ${errorMessage(error)}` };
   }
 }
 
@@ -262,9 +264,13 @@ async function projectRuntimeStatus(
     const state = await runtimeState(entry);
     if (!state.ok) return { ok: true, health: health.data };
     return { ok: true, health: health.data, state: state.state };
-  } catch {
-    return { ok: false, message: "Process is running but health endpoint did not respond." };
+  } catch (error) {
+    return { ok: false, message: `Process is running but health failed: ${errorMessage(error)}` };
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function runtimeProcessIdentityMatches(entry: RuntimeRegistryEntry, health: RuntimeHealth): boolean {

@@ -226,7 +226,7 @@ export async function startProjectRuntime(input: {
       removeRuntimeStartupResult(startupResultPath);
       lastStartupError = startupProblem
         ? new Error(serializeOpenCanonProblem(startupProblem))
-        : startupFailure("runtime", health.reason, logPath);
+        : startupFailure("runtime", health.reason, logPath, health.message);
       appendLifecycleEvent(registryPath, {
         kind: ProcessLifecycleEventKind.RuntimeStartupFailed,
         scope: ProcessLifecycleScope.Runtime,
@@ -376,7 +376,7 @@ export async function startService(input: {
 
       forgetServiceEntryIfPid(childPid, registryPath);
       await terminateSpawnedProcess(childPid);
-      lastStartupError = startupFailure("service", health.reason, logPath);
+      lastStartupError = startupFailure("service", health.reason, logPath, health.message);
       appendLifecycleEvent(registryPath, {
         kind: ProcessLifecycleEventKind.ServiceStartupFailed,
         scope: ProcessLifecycleScope.Service,
@@ -392,11 +392,11 @@ export async function startService(input: {
   });
 }
 
-function startupFailure(kind: "runtime" | "service", reason: string, logPath: string): Error {
+function startupFailure(kind: "runtime" | "service", reason: string, logPath: string, healthMessage: string): Error {
   const logTail = readProcessLogTail(logPath);
   const title = `${kind[0]?.toUpperCase()}${kind.slice(1)}`;
   const evidence = logTail ? `\n${title} log tail:\n${logTail}` : ` Log was empty: ${logPath}.`;
-  return new Error(`OpenCanon ${kind} did not become ready (${reason}).${evidence}`);
+  return new Error(`OpenCanon ${kind} did not become ready (${reason}).\nLast health failure: ${healthMessage}${evidence}`);
 }
 
 export async function ensureProjectRuntimeViaService(input: {

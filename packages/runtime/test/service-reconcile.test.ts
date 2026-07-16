@@ -936,7 +936,7 @@ test("service startup cleanup kills an unready spawned process", { timeout: 3000
 
     await assert.rejects(
       () => startService({ cwd: rootDir, registryPath }),
-      /did not become ready \(timeout\)\.[\s\S]*Service log tail:[\s\S]*fake service remained unready/,
+      /did not become ready \(timeout\)\.[\s\S]*Last health failure: OpenCanon service process is running but health failed: OpenCanon local endpoint is unavailable\.[\s\S]*Service log tail:[\s\S]*fake service remained unready/,
     );
     spawnedPid = Number(readFileSync(fakePidPath, "utf8"));
     assert.equal(readServiceEntry(registryPath), undefined);
