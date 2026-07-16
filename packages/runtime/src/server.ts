@@ -83,7 +83,7 @@ import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
 import { assertSafeRuntimeHost, createRuntimeAuthToken, isAuthorizedRuntimeRequest, usableRuntimeAuthToken } from "./auth.ts";
 import { listProjects } from "./project-summary.ts";
-import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, type RuntimeError } from "./routes.ts";
+import { ApiPathPrefix, ApiRoute, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json, type RuntimeError } from "./routes.ts";
 import { ProjectProtocolPipeFrameMaxBytes, localPipeEndpoint, serveLocalProtocolPipe, type LocalProtocolPipeServer } from "./local-protocol.ts";
 import { acquireProjectWorkerLease, stopService } from "./service.ts";
 import { createProjectTypesRuntime } from "./project-types-runtime.ts";
@@ -360,7 +360,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       store: () => store,
       resetIdleTimer,
       refreshCurrentSnapshot,
-      ensureProjectSnapshot,
       buildIndexedSnapshot,
       restartStore,
     });
@@ -385,6 +384,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       preflightRequest: protocolHandler.preflightRequest,
       requestBodyLimit: protocolHandler.requestBodyLimit,
     });
+    stateManager.scheduleRebuild("Initial project analysis completed.");
     resetIdleTimer();
   } catch (error) {
     await pipeServer?.stop(true).catch(() => undefined);
@@ -407,65 +407,58 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     return stateManager.currentSnapshot();
   }
 
-  async function ensureProjectSnapshot(summary: string): Promise<RuntimeSnapshot> {
-    const snapshot = await refreshCurrentSnapshot();
-    if (snapshot.files.length > 0) return snapshot;
-    return await stateManager.rebuildAndPublish(summary);
-  }
-
   async function buildIndexedSnapshot(summary: string, options: { force?: boolean; changedPaths?: string[] } = {}): Promise<RuntimeSnapshot> {
-    if (currentWorkerJob) throw new Error(`Project operation already running: ${currentWorkerJob.label}.`);
-    const jobId = beginWorkerJob({
-      kind: RuntimeWorkerJobKindValue.ProjectSnapshot,
-      label: options.force ? "Rebuilding Project Knowledge" : "Indexing Project Knowledge",
-      message: summary,
-    });
-    const result = await executeKnowledgeIndex({
-      rootDir,
-      statePath: store.statePath,
-      force: options.force,
-      changedPaths: options.changedPaths,
-      signal: knowledgeIndexAbortController.signal,
-      onProgress(progress) {
-        publishKnowledgeIndexProgress(jobId, progress);
-      },
-    }).then(
-      (publishedResult) => {
+    return await stateManager.runExclusiveOperation("Project Knowledge indexing", async () => {
+      const jobId = beginWorkerJob({
+        kind: RuntimeWorkerJobKindValue.KnowledgeIndex,
+        label: options.force ? "Rebuilding Project Knowledge" : "Indexing Project Knowledge",
+        message: summary,
+      });
+      try {
+        const result = await executeKnowledgeIndex({
+          rootDir,
+          statePath: store.statePath,
+          force: options.force,
+          changedPaths: options.changedPaths,
+          signal: knowledgeIndexAbortController.signal,
+          onProgress(progress) {
+            publishKnowledgeIndexProgress(jobId, progress);
+          },
+        });
+        await restartStore(false);
+        const current = await refreshCurrentSnapshot();
+        const definitionGraph = {
+          ...current.definitionGraph,
+          fileCoverage: buildSnapshotFileCoverage({
+            files: result.files,
+            areas: current.areas,
+            specs: current.specs,
+            changes: current.changes,
+            conventions: current.conventions,
+            impactSurfaces: current.impactSurfaces,
+          }),
+        };
+        const indexedSnapshot = stateManager.setSnapshot(withProcessIdentity({
+          ...current,
+          files: result.files,
+          definitionGraph,
+          semanticIndex: result.index,
+          state: { ...current.state, files: result.files.length, semanticIndex: result.index },
+        }));
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Succeeded, {
           label: "Project Knowledge ready",
           message: summary,
         });
-        return publishedResult;
-      },
-      (error) => {
+        return indexedSnapshot;
+      } catch (error) {
         finishWorkerJob(jobId, RuntimeWorkerJobStatusValue.Failed, {
           label: "Project Knowledge indexing failed",
           message: errorMessage(error),
         });
         stateManager.setSnapshot(withProcessIdentity(stateManager.currentSnapshot()));
         throw error;
-      },
-    );
-    await restartStore();
-    const current = await refreshCurrentSnapshot();
-    const definitionGraph = {
-      ...current.definitionGraph,
-      fileCoverage: buildSnapshotFileCoverage({
-        files: result.files,
-        areas: current.areas,
-        specs: current.specs,
-        changes: current.changes,
-        conventions: current.conventions,
-        impactSurfaces: current.impactSurfaces,
-      }),
-    };
-    return stateManager.setSnapshot(withProcessIdentity({
-      ...current,
-      files: result.files,
-      definitionGraph,
-      semanticIndex: result.index,
-      state: { ...current.state, files: result.files.length, semanticIndex: result.index },
-    }));
+      }
+    }, { signal: knowledgeIndexAbortController.signal });
   }
 
   function scheduleKnowledgeRefreshForWatch(batch: WatcherEventBatch, summary: string | undefined): void {
@@ -652,8 +645,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     }
   }
 
-  async function restartStore(): Promise<void> {
-    await stateManager.waitForIdle();
+  async function restartStore(waitForProjectIdle = true): Promise<void> {
+    if (waitForProjectIdle) await stateManager.waitForIdle();
     stopStoreWatcher();
     await storeResource.dispose();
     store = await storeResource.get();
@@ -663,7 +656,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
 
   async function rebuildAndPublishNow(summary: string, _options: RuntimeRebuildOptions, signal: AbortSignal): Promise<RuntimeRebuildCandidate> {
     const jobId = beginWorkerJob({
-      kind: RuntimeWorkerJobKindValue.SemanticIndex,
+      kind: RuntimeWorkerJobKindValue.ProjectAnalysis,
       label: "Refreshing Project State",
       message: summary,
     });

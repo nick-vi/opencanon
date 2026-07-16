@@ -251,8 +251,8 @@ test("runtime health contract exposes explicit worker jobs", () => {
     startedAt: "2026-06-27T00:00:00.000Z",
     jobs: [
       {
-        id: "semantic-index:test",
-        kind: RuntimeWorkerJobKindValue.SemanticIndex,
+        id: "knowledge-index:test",
+        kind: RuntimeWorkerJobKindValue.KnowledgeIndex,
         status: RuntimeWorkerJobStatusValue.Running,
         label: "Refreshing Project Knowledge",
         current: 2,
@@ -262,7 +262,7 @@ test("runtime health contract exposes explicit worker jobs", () => {
     ],
   });
 
-  assert.equal(health.jobs?.[0]?.kind, RuntimeWorkerJobKindValue.SemanticIndex);
+  assert.equal(health.jobs?.[0]?.kind, RuntimeWorkerJobKindValue.KnowledgeIndex);
   assert.equal(health.jobs?.[0]?.status, RuntimeWorkerJobStatusValue.Running);
   assert.equal(RuntimeHealthSchema.safeParse({ ...health, jobs: [{ ...health.jobs?.[0], status: "unknown" }] }).success, false);
 });

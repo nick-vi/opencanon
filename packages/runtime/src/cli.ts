@@ -739,12 +739,12 @@ async function runProjectIndexCommand(args: string[], cwd: string): Promise<void
     console.log(options.force === true ? "Rebuilding Project Knowledge..." : "Indexing Project Knowledge...");
     console.log("");
   }
-  const snapshot = await requestKnowledgeIndex({
+  const result = await requestKnowledgeIndex({
     endpoint,
     force: options.force === true,
     onProgress: (line) => process.stderr.write(`${line}\n`),
   });
-  const index = snapshot.state?.semanticIndex ?? snapshot.semanticIndex;
+  const index = result.semanticIndex;
   if (format === Format.Json) {
     writeJson({ index: index ?? null });
     return;

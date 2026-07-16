@@ -27,7 +27,7 @@ import { readProjectSettings, writeProjectSettings } from "./settings.ts";
 import { applyAuthoringValidator, listAuthoringFactories, listAuthoringValidators, previewAuthoringValidator, runAuthoringValidatorFixtures } from "./authoring.ts";
 import { listProjects } from "./project-summary.ts";
 import { askProjectContext, listProjectContextChunks, projectContextBacklinks, projectContextCoverage, searchProjectContext } from "./project-context.ts";
-import { ApiPathPrefix, ApiRoute, ProjectIndexResponseMode, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json } from "./routes.ts";
+import { ApiPathPrefix, ApiRoute, UrlSearchParam, diagnostic, diagnosticCodes, diagnosticsFailure, json } from "./routes.ts";
 import { createRuntimeProtocolPolicy } from "./protocol-policy.ts";
 import type { RuntimeStateManager } from "./state-manager.ts";
 import type { ProjectStore } from "./state.ts";
@@ -89,7 +89,6 @@ export type RuntimeRouteHandlerInput = {
   store(): ProjectStore;
   resetIdleTimer(): void;
   refreshCurrentSnapshot(): Promise<RuntimeSnapshot>;
-  ensureProjectSnapshot(summary: string): Promise<RuntimeSnapshot>;
   buildIndexedSnapshot(summary: string, options?: { force?: boolean; changedPaths?: string[] }): Promise<RuntimeSnapshot>;
   restartStore(): Promise<void>;
 };
@@ -99,7 +98,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
   routeRequest(request: Request): Promise<Response>;
   requestBodyLimit(method: string, pathname: string): number;
 } {
-  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, knowledgeQueryRuntime, resetIdleTimer, refreshCurrentSnapshot, ensureProjectSnapshot, buildIndexedSnapshot, restartStore } = input;
+  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, knowledgeQueryRuntime, resetIdleTimer, refreshCurrentSnapshot, buildIndexedSnapshot, restartStore } = input;
   let paths = input.paths();
   const currentStore = () => input.store();
   const protocolPolicy = createRuntimeProtocolPolicy({
@@ -153,10 +152,6 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
       if (url.pathname === ApiRoute.State) {
         const snapshot = await refreshCurrentSnapshot();
         return json({ ok: true, data: { ...snapshot.state, lifecycle: stateManager.lifecycle() } });
-      }
-      if (url.pathname === ApiRoute.Snapshot) {
-        const snapshot = await ensureProjectSnapshot("Snapshot requested current project state.");
-        return json({ ok: true, data: snapshot });
       }
       if (url.pathname === ApiRoute.ProjectSummary) {
         const snapshot = await refreshCurrentSnapshot();
@@ -648,10 +643,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
         const body = await readJsonBody(request);
         try {
           const snapshot = await buildIndexedSnapshot("Manual reindex completed.", { force: body.force === true });
-          if (body.response === ProjectIndexResponseMode.SemanticIndex) {
-            return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
-          }
-          return json({ ok: true, data: snapshot });
+          return json({ ok: true, data: { semanticIndex: snapshot.state.semanticIndex ?? snapshot.semanticIndex ?? null } });
         } catch (error) {
           return json(
             diagnostic(

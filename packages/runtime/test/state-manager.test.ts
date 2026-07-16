@@ -198,6 +198,98 @@ test("RuntimeStateManager exposes revision progress and deterministic readiness"
   assert.equal(manager.lifecycle().settled, true);
 });
 
+test("RuntimeStateManager starts exclusive operations only after project analysis settles", async () => {
+  const order: string[] = [];
+  let releaseAnalysis!: () => void;
+  let markAnalysisStarted!: () => void;
+  const analysisBlocked = new Promise<void>((resolve) => {
+    releaseAnalysis = resolve;
+  });
+  const analysisStarted = new Promise<void>((resolve) => {
+    markAnalysisStarted = resolve;
+  });
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
+    initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    isStopped: () => false,
+    async rebuildNow(summary) {
+      order.push(`analysis:${summary}`);
+      markAnalysisStarted();
+      await analysisBlocked;
+      return candidate(snapshot(summary));
+    },
+    readProjectInventory: () => inventory("ready"),
+    onRebuildError() {
+      throw new Error("unexpected rebuild error");
+    },
+  });
+
+  manager.scheduleRebuild("initial-analysis");
+  await analysisStarted;
+  const operation = manager.runExclusiveOperation("Knowledge indexing", async () => {
+    order.push("knowledge:index");
+    return "ready";
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(order, ["analysis:initial-analysis"]);
+
+  releaseAnalysis();
+  assert.equal(await operation, "ready");
+  assert.deepEqual(order, ["analysis:initial-analysis", "knowledge:index"]);
+  assert.equal(manager.lifecycle().settled, true);
+});
+
+test("RuntimeStateManager queues project refresh behind an exclusive operation", async () => {
+  const order: string[] = [];
+  let releaseOperation!: () => void;
+  let markOperationStarted!: () => void;
+  const operationBlocked = new Promise<void>((resolve) => {
+    releaseOperation = resolve;
+  });
+  const operationStarted = new Promise<void>((resolve) => {
+    markOperationStarted = resolve;
+  });
+  const manager = createRuntimeStateManager({
+    initialSnapshot: snapshot("initial"),
+    initialChangeCatalog: catalog("initial"),
+    initialProjectInventory: inventory("initial"),
+    initialValidationResultCache: createEphemeralValidationResultCache(),
+    isStopped: () => false,
+    async rebuildNow(summary) {
+      order.push(`analysis:${summary}`);
+      return candidate(snapshot(summary));
+    },
+    readProjectInventory: () => inventory("ready"),
+    onRebuildError() {
+      throw new Error("unexpected rebuild error");
+    },
+  });
+
+  const operation = manager.runExclusiveOperation("Knowledge indexing", async () => {
+    order.push("knowledge:start");
+    markOperationStarted();
+    await operationBlocked;
+    order.push("knowledge:finish");
+  });
+  await operationStarted;
+  const revision = manager.scheduleRebuild("source-change");
+  assert.equal(manager.lifecycle().settled, false);
+  await assert.rejects(
+    manager.runExclusiveOperation("Second index", async () => undefined),
+    /Project operation already running: Knowledge indexing/u,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(order, ["knowledge:start"]);
+
+  releaseOperation();
+  await operation;
+  await manager.waitForRevision(revision, { timeoutMs: 1_000 });
+  assert.deepEqual(order, ["knowledge:start", "knowledge:finish", "analysis:source-change"]);
+  assert.equal(manager.lifecycle().settled, true);
+});
+
 test("RuntimeStateManager revision waits fail with lifecycle diagnostics", async () => {
   const manager = createRuntimeStateManager({
     initialSnapshot: snapshot("initial"),

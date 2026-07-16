@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { DomainProtocolVersion } from "@opencanon/core";
 import {
   LocalControlProtocolVersion,
   LocalTransportKind,
@@ -178,7 +179,9 @@ export function readyFakeRuntimeCliSource(options: { exitOnceMarkerPath?: string
     "const port = Number(process.argv[portArg + 1]);",
     'const host = hostArg >= 0 ? process.argv[hostArg + 1] : "127.0.0.1";',
     "const pipeEndpoint = process.env.OPENCANON_RUNTIME_PIPE_ENDPOINT;",
-    "const health = { ok: true, data: { status: 'stale', process: { kind: 'runtime', pid: process.pid, leaseId: process.env.OPENCANON_RUNTIME_LEASE_ID }, engine: { engineVersion: '0.4.0-test', packageVersion: '0.4.0-test', napiVersion: 'test', schemaVersion: 1 }, refresh: { status: 'stale', mode: 'manual', bufferedEvents: 0, reason: 'File watching is not running; manual refresh is required.' }, startedAt: new Date().toISOString() } };",
+    `const protocolVersion = ${DomainProtocolVersion};`,
+    "const runtimeHealth = { status: 'stale', process: { kind: 'runtime', pid: process.pid, leaseId: process.env.OPENCANON_RUNTIME_LEASE_ID }, engine: { engineVersion: '0.4.0-test', packageVersion: '0.4.0-test', napiVersion: 'test', schemaVersion: 1 }, refresh: { status: 'stale', mode: 'manual', bufferedEvents: 0, reason: 'File watching is not running; manual refresh is required.' }, startedAt: new Date().toISOString() };",
+    "const health = { ok: true, data: { protocolVersion, revision: 1, data: runtimeHealth } };",
     "createServer((_request, response) => {",
     '  response.writeHead(200, { "content-type": "application/json; charset=utf-8" });',
     "  response.end(JSON.stringify(health));",

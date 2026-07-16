@@ -30,7 +30,7 @@ export type { RuntimeSnapshot, RelatedCanon, RelatedCanonQuery } from "./snapsho
 export { buildRuntimeSnapshot, buildRelatedCanon, gitDiffSnapshot, gitHistorySnapshot } from "./snapshot.ts";
 export { normalizeRuntimePort, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand } from "./cli.ts";
 export type { LocalProtocolEndpoint, LocalProtocolPipeServer, LocalProtocolRawResponse, LocalProtocolRequest, LocalProtocolTransport } from "./local-protocol.ts";
-export { httpLoopbackTransport, localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, LocalTransportKind, pipeProtocolTransport, requestLocalJson, serveLocalProtocolPipe, streamLocalText } from "./local-protocol.ts";
+export { createLocalDomainProtocolClient, httpLoopbackTransport, localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, LocalTransportKind, pipeProtocolTransport, requestLocalJson, serveLocalProtocolPipe, streamLocalText } from "./local-protocol.ts";
 export { defaultRuntimeNamespace, defaultServiceRegistryPath, privateProjectRuntimeStatePath, projectAnalysisStatePath, projectProcessStateDirectory, projectRuntimeStatePath, projectRuntimeStatePathInRoot, runtimeNamespaceForRegistry, RuntimeNamespaceEnv, StableRuntimeNamespace, validateRuntimeNamespace } from "./service-namespace.ts";
 export { ProjectRuntimeEnv } from "./service-types.ts";
 export type { LocalProtocolStreamRequest } from "./local-protocol.ts";

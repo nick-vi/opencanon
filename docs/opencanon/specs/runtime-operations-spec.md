@@ -98,12 +98,14 @@ Rule `operation-resources-are-bounded`: A project runtime bounds active operatio
 - terminal history is pruned by age and count
 - run events cascade when their run is removed
 - active operations leave process readiness running and expose work through operation resources
+- project analysis and Project Knowledge indexing never overlap
+- explicit Knowledge indexing waits for current analysis while later source refresh queues behind indexing
 - process inspection cannot overwrite a concurrent lifecycle transition
 - Project State allocates monotonic run-event sequences atomically across runtime connections
 Checks: `contracts-tests`, `change-run-tests`, `runtime-supervision-tests`, `engine-tests`
 
 Rule `heavy-responses-have-shared-admission`: Every transport shares one fail-fast capacity boundary for heavyweight project responses and holds capacity until delivery completes.
-- concurrent full snapshots cannot accumulate response copies
+- concurrent heavy requests cannot accumulate response copies
 - overload returns an explicit diagnostic instead of queueing
 - bounded health and projection routes remain available
 - HTTP and pipe consume the same capacity

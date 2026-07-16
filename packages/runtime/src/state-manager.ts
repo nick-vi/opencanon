@@ -17,6 +17,7 @@ export type RuntimeStateManager = {
   lifecycle(): RuntimeLifecycleState;
   rebuildAndPublish(summary: string, options?: RuntimeRebuildOptions): Promise<RuntimeSnapshot>;
   scheduleRebuild(summary: string, options?: RuntimeRebuildOptions): number;
+  runExclusiveOperation<T>(label: string, operation: () => Promise<T>, options?: RuntimeWaitOptions): Promise<T>;
   waitForRevision(revision: number, options?: RuntimeWaitOptions): Promise<RuntimeSnapshot>;
   waitForIdle(options?: RuntimeWaitOptions): Promise<void>;
   hasPendingWork(): boolean;
@@ -51,6 +52,11 @@ type RevisionWaiter = {
   reject(error: Error): void;
   cleanup(): void;
 };
+type IdleWaiter = {
+  resolve(): void;
+  reject(error: Error): void;
+  cleanup(): void;
+};
 
 export function createRuntimeStateManager(options: RuntimeStateManagerOptions): RuntimeStateManager {
   let snapshot = options.initialSnapshot;
@@ -64,14 +70,16 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   let failure: RuntimeLifecycleState["failure"];
   let loop: Promise<void> | undefined;
   let activeAbortController: AbortController | undefined;
+  let exclusiveOperation: string | undefined;
   let stopped = false;
   const waiters = new Set<RevisionWaiter>();
+  const idleWaiters = new Set<IdleWaiter>();
 
   function lifecycle(): RuntimeLifecycleState {
     return {
       phase,
       revision: { ...revision },
-      settled: !active && !queued && revision.observed === revision.published && phase !== RuntimeLifecyclePhaseValue.Failed,
+      settled: !active && !queued && !exclusiveOperation && revision.observed === revision.published && phase !== RuntimeLifecyclePhaseValue.Failed,
       ...(active ? { active: { revision: active.revision, summary: active.summary } } : {}),
       ...(queued ? { queued: { revision: queued.revision, summary: queued.summary } } : {}),
       ...(failure ? { failure } : {}),
@@ -91,16 +99,16 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
   }
 
   function startLoop(): void {
-    if (loop || stopped) return;
+    if (loop || stopped || exclusiveOperation) return;
     const running = runLoop().finally(() => {
       if (loop === running) loop = undefined;
-      if (queued && !stopped) startLoop();
+      if (queued && !stopped && !exclusiveOperation) startLoop();
     });
     loop = running;
   }
 
   async function runLoop(): Promise<void> {
-    while (queued && !stopped) {
+    while (queued && !stopped && !exclusiveOperation) {
       const intent = queued;
       queued = undefined;
       active = intent;
@@ -193,6 +201,54 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
     });
   }
 
+  async function waitForRebuildIdle(waitOptions: RuntimeWaitOptions): Promise<void> {
+    while (!stopped) {
+      const target = revision.observed;
+      if (target > revision.published) await waitForRevision(target, waitOptions);
+      const runningLoop = loop;
+      if (runningLoop) await runningLoop;
+      if (!active && !queued && revision.observed === revision.published) return;
+    }
+    throw new Error("Project runtime stopped before project operations became idle.");
+  }
+
+  function waitForExclusiveIdle(waitOptions: RuntimeWaitOptions): Promise<void> {
+    if (!exclusiveOperation) return Promise.resolve();
+    if (stopped) return Promise.reject(new Error("Project runtime stopped before project operations became idle."));
+    return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onAbort = () => finish(new Error("Waiting for project operations was cancelled."));
+      const finish = (error?: Error) => {
+        if (!idleWaiters.delete(waiter)) return;
+        waiter.cleanup();
+        if (error) reject(error);
+        else resolve();
+      };
+      const waiter: IdleWaiter = {
+        resolve: () => finish(),
+        reject: (error) => finish(error),
+        cleanup() {
+          if (timer) clearTimeout(timer);
+          waitOptions.signal?.removeEventListener("abort", onAbort);
+        },
+      };
+      if (waitOptions.signal?.aborted) {
+        reject(new Error("Waiting for project operations was cancelled."));
+        return;
+      }
+      idleWaiters.add(waiter);
+      waitOptions.signal?.addEventListener("abort", onAbort, { once: true });
+      if (waitOptions.timeoutMs && waitOptions.timeoutMs > 0) {
+        timer = setTimeout(() => finish(new Error(`Project operation ${exclusiveOperation ?? "unknown"} did not finish within ${waitOptions.timeoutMs}ms.`)), waitOptions.timeoutMs);
+        timer.unref?.();
+      }
+    });
+  }
+
+  function resolveIdleWaiters(): void {
+    for (const waiter of [...idleWaiters]) waiter.resolve();
+  }
+
   return {
     currentSnapshot: () => snapshot,
     setSnapshot(next) {
@@ -211,14 +267,31 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
       return await waitForRevision(target);
     },
     scheduleRebuild: requestRebuild,
+    async runExclusiveOperation(label, operation, waitOptions = {}) {
+      if (exclusiveOperation) throw new Error(`Project operation already running: ${exclusiveOperation}.`);
+      await waitForRebuildIdle(waitOptions);
+      if (exclusiveOperation) throw new Error(`Project operation already running: ${exclusiveOperation}.`);
+      if (waitOptions.signal?.aborted) throw new Error("Project operation was cancelled before it started.");
+      exclusiveOperation = label;
+      try {
+        return await operation();
+      } finally {
+        exclusiveOperation = undefined;
+        resolveIdleWaiters();
+        if (queued && !stopped) startLoop();
+      }
+    },
     waitForRevision,
     async waitForIdle(waitOptions = {}) {
-      const target = revision.observed;
-      if (target > revision.published) await waitForRevision(target, waitOptions);
-      while (loop) await loop.catch(() => undefined);
+      while (!stopped) {
+        await waitForRebuildIdle(waitOptions);
+        await waitForExclusiveIdle(waitOptions);
+        if (!active && !queued && !loop && !exclusiveOperation && revision.observed === revision.published) return;
+      }
+      throw new Error("Project runtime stopped before project operations became idle.");
     },
     hasPendingWork() {
-      return Boolean(active || queued || loop) || revision.observed !== revision.published;
+      return Boolean(active || queued || loop || exclusiveOperation) || revision.observed !== revision.published;
     },
     stop() {
       if (stopped) return;
@@ -232,6 +305,7 @@ export function createRuntimeStateManager(options: RuntimeStateManagerOptions): 
         waiter.cleanup();
         waiter.reject(error);
       }
+      for (const waiter of [...idleWaiters]) waiter.reject(error);
       phase = RuntimeLifecyclePhaseValue.Stopped;
     },
   };

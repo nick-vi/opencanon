@@ -27,7 +27,7 @@ test("runtime start rejects unknown config fields", async () => {
 
 test("runtime auth accepts bearer headers and limits query tokens to explicit opt-in", () => {
   const token = "test-token";
-  const route = new URL("http://127.0.0.1:4767/api/snapshot");
+  const route = new URL("http://127.0.0.1:4767/api/project/summary");
   const bootstrap = new URL(`http://127.0.0.1:4767/?token=${token}`);
 
   assert.equal(isAuthorizedRuntimeRequest(new Request(route.toString()), route, token), false);
@@ -39,7 +39,7 @@ test("runtime auth accepts bearer headers and limits query tokens to explicit op
 });
 
 test("runtime auth rejects empty configured tokens", () => {
-  const route = new URL("http://127.0.0.1:4767/api/snapshot?token=");
+  const route = new URL("http://127.0.0.1:4767/api/project/summary?token=");
 
   assert.equal(usableRuntimeAuthToken(""), undefined);
   assert.equal(usableRuntimeAuthToken("   "), undefined);

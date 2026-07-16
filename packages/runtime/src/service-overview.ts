@@ -2,7 +2,7 @@ import { localPipeEndpoint, localProtocolEndpointFromEntry, requestLocalJson, re
 import { ProtocolOperationKind, findProtocolOperation } from "@opencanon/core";
 import { ServiceActionCategory, ServiceActionId, ServiceActionScope, ServiceActionStatusValue, ServiceActionSurface, ServiceEffectKind, ServiceProjectStatusValue, type ServiceActionDefinition, type ServiceActionResult, type ServiceClientEffect, type ServiceProjectStatus } from "@opencanon/service-contracts";
 import { formatHttpBaseUrl } from "./runtime.ts";
-import { ApiRoute, ProjectIndexResponseMode } from "./routes.ts";
+import { ApiRoute } from "./routes.ts";
 import { discoverOpenCanonProject, discoverOpenCanonProjectsFromRoots } from "./service-discovery.ts";
 import { defaultServicePort, ProcessLifecycleScope, type ProcessLifecycleEvent, type RuntimeInspection, type ServiceActivityItem, type ServiceInspection, type ServiceOverview, type ServiceOverviewRequest, type ServiceProjectSummary, type ServiceSummary } from "./service-types.ts";
 import { inspectAllRuntimes, inspectService } from "./service-monitor.ts";
@@ -75,9 +75,7 @@ export async function invokeServiceAction(input: { id: string; rootDir?: string;
       return serviceActionOk("Select project", `Open ${path.basename(rootDir)}.`, [{ kind: ServiceEffectKind.SelectProject, rootDir }, { kind: ServiceEffectKind.ShowClient }]);
     case ServiceActionId.ProjectReindex:
       if (!rootDir) return serviceActionWarning("Project required", "Open a project before reindexing.");
-      return invokeProjectRuntimeAction(rootDir, registryPath, ApiRoute.Index, "POST", "Project reindexed", "Refreshed project knowledge.", {
-        response: ProjectIndexResponseMode.SemanticIndex,
-      });
+      return invokeProjectRuntimeAction(rootDir, registryPath, ApiRoute.Index, "POST", "Project reindexed", "Refreshed project knowledge.");
     case ServiceActionId.ProjectDoctor:
       if (!rootDir) return serviceActionWarning("Project required", "Open a project before running Doctor.");
       return invokeProjectRuntimeAction(rootDir, registryPath, ApiRoute.Doctor, "GET", "Doctor completed", "Refreshed project health.");
@@ -279,7 +277,7 @@ async function invokeProjectRuntimeAction(
   try {
     const started = await startProjectRuntime({ cwd: project.rootDir, registryPath });
     const request = { method, path: route, body: method === "POST" ? body ?? {} : undefined } as const;
-    const operation = findProtocolOperation(method, new URL(route, "http://opencanon.runtime").pathname);
+    const operation = findProtocolOperation(method, route);
     const details = operation?.kind === ProtocolOperationKind.Query
       ? await requestLocalProjectionData<unknown>(localProtocolEndpointFromEntry(started.entry), request)
       : await requestLocalJson<unknown>(localProtocolEndpointFromEntry(started.entry), request);

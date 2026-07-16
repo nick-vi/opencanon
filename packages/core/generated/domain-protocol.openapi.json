@@ -6919,8 +6919,8 @@
                                       "kind": {
                                         "type": "string",
                                         "enum": [
-                                          "project-snapshot",
-                                          "semantic-index",
+                                          "project-analysis",
+                                          "knowledge-index",
                                           "project-map",
                                           "doctor"
                                         ]
@@ -8113,8 +8113,8 @@
                                       "kind": {
                                         "type": "string",
                                         "enum": [
-                                          "project-snapshot",
-                                          "semantic-index",
+                                          "project-analysis",
+                                          "knowledge-index",
                                           "project-map",
                                           "doctor"
                                         ]
@@ -9236,190 +9236,6 @@
         }
       }
     },
-    "/api/snapshot": {
-      "get": {
-        "operationId": "project.snapshot",
-        "tags": [
-          "project"
-        ],
-        "security": [
-          {
-            "projectToken": []
-          }
-        ],
-        "x-opencanon-policy": {
-          "id": "project.snapshot",
-          "version": 1,
-          "kind": "query",
-          "method": "GET",
-          "path": "/api/snapshot",
-          "authorization": "project",
-          "consistency": "published",
-          "cost": "operation",
-          "idempotency": "safe",
-          "cancellable": false,
-          "limits": {
-            "requestBytes": 1048576,
-            "responseBytes": 4194304,
-            "concurrency": 2
-          },
-          "span": "opencanon.project.snapshot"
-        },
-        "x-opencanon-input": {
-          "type": "object",
-          "properties": {
-            "query": {
-              "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                ]
-              }
-            },
-            "body": {
-              "$ref": "#/$defs/__schema0"
-            }
-          },
-          "additionalProperties": false,
-          "$defs": {
-            "__schema0": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/__schema0"
-                  }
-                },
-                {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string"
-                  },
-                  "additionalProperties": {
-                    "$ref": "#/$defs/__schema0"
-                  }
-                }
-              ]
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful OpenCanon response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "ok",
-                    "data"
-                  ],
-                  "properties": {
-                    "ok": {
-                      "const": true
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "protocolVersion": {
-                          "type": "number",
-                          "const": 1
-                        },
-                        "revision": {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "data": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "nextCursor": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": [
-                        "protocolVersion",
-                        "revision",
-                        "data"
-                      ],
-                      "additionalProperties": false,
-                      "$defs": {
-                        "__schema0": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "array",
-                              "items": {
-                                "$ref": "#/$defs/__schema0"
-                              }
-                            },
-                            {
-                              "type": "object",
-                              "propertyNames": {
-                                "type": "string"
-                              },
-                              "additionalProperties": {
-                                "$ref": "#/$defs/__schema0"
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Structured OpenCanon failure.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpenCanonFailure"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/state": {
       "get": {
         "operationId": "project.state",
@@ -9658,8 +9474,8 @@
                                       "kind": {
                                         "type": "string",
                                         "enum": [
-                                          "project-snapshot",
-                                          "semantic-index",
+                                          "project-analysis",
+                                          "knowledge-index",
                                           "project-map",
                                           "doctor"
                                         ]

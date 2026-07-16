@@ -397,18 +397,24 @@ The service registry stores the runtime endpoint, and a namespaced project-local
 }
 ```
 
-Endpoints:
+Representative protocol operations are listed below. The canonical transport
+contract is generated at `packages/core/generated/domain-protocol.openapi.json`.
 
 ```text
 GET  /api/health
 GET  /api/state
-GET  /api/snapshot
+GET  /api/project/summary
+GET  /api/changes
+GET  /api/changes/ready
+GET  /api/code/symbols
+GET  /api/code/graph
+GET  /api/canon/related
+POST /api/canon/related
 GET  /api/context/status
 GET  /api/context/search
 GET  /api/context/ask
 GET  /api/context/chunks
 GET  /api/context/coverage
-GET  /api/context/status
 GET  /api/context/backlinks
 GET  /api/doctor
 GET  /api/events
@@ -648,7 +654,7 @@ export type DocSnippet = {
 };
 ```
 
-Convention and docs context is surfaced through `context`, `rules`, validation output, history helpers, and runtime/UI snapshot APIs.
+Convention and docs context is surfaced through `context`, `rules`, validation output, history helpers, and bounded runtime protocol projections.
 
 ## CLI Surface
 

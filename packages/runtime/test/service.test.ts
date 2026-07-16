@@ -81,7 +81,7 @@ import {
   writeStartupLock,
 } from "./service-support.ts";
 import { createAuthoringProject } from "./support.ts";
-import { parseOpenCanonProblemFromError } from "@opencanon/core";
+import { parseOpenCanonProblemFromError, protocolProjection } from "@opencanon/core";
 import { cleanupIsolatedCheckRuntime, createIsolatedCheckRuntime, pruneOrphanedCheckRuntimes } from "../src/service-check-runtime.ts";
 
 test("runtime namespaces isolate installed, source, and explicit registries", () => {
@@ -643,7 +643,7 @@ test("local protocol does not fall back from pipe to loopback", async () => {
         },
         { method: "GET", path: "/api/health", timeoutMs: 500 },
       ),
-      /ENOENT|ECONNREFUSED|connect|pipe/i,
+      /endpoint is unavailable/i,
     );
     assert.equal(loopbackHit, false);
   } finally {
@@ -1410,17 +1410,17 @@ test("service registry stores project runtime entries and lazily starts isolated
     assert.equal(existsSync(projectRuntimeStatePath(projectA, namespace)), true);
     assert.equal(existsSync(projectRuntimeStatePath(projectB, namespace)), true);
 
-    const proxiedSnapshot = await fetch(`${serviceServer.url}/api/projects/request`, {
+    const proxiedSummary = await fetch(`${serviceServer.url}/api/projects/request`, {
       method: "POST",
       headers: { ...runtimeAuthHeaders(serviceServer.authToken), "content-type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ rootDir: projectA, method: "GET", path: "/api/snapshot" }),
+      body: JSON.stringify({ rootDir: projectA, method: "GET", path: "/api/project/summary" }),
     });
-    const proxiedText = await proxiedSnapshot.text();
-    assert.equal(proxiedSnapshot.status, 200, proxiedText);
-    const proxiedPayload = JSON.parse(proxiedText) as { data?: { status?: number; body?: { ok?: boolean; data?: { graph?: { rootDir?: string } } } } };
+    const proxiedText = await proxiedSummary.text();
+    assert.equal(proxiedSummary.status, 200, proxiedText);
+    const proxiedPayload = JSON.parse(proxiedText) as { data?: { status?: number; body?: { ok?: boolean; data?: { data?: { rootDir?: string } } } } };
     assert.equal(proxiedPayload.data?.status, 200);
     assert.equal(proxiedPayload.data?.body?.ok, true);
-    assert.equal(proxiedPayload.data?.body?.data?.graph?.rootDir, realpathSync(projectA));
+    assert.equal(proxiedPayload.data?.body?.data?.data?.rootDir, realpathSync(projectA));
 
     const summaryResponse = await fetch(`${serviceServer.url}/api/projects/summary?rootDir=${encodeURIComponent(projectA)}`, {
       headers: runtimeAuthHeaders(serviceServer.authToken),
@@ -1637,13 +1637,13 @@ test("runtime inspection cannot overwrite a process that begins stopping during 
       await healthProbeRelease;
       return new Response(JSON.stringify({
         ok: true,
-        data: {
+        data: protocolProjection(1, {
           status: "ready",
           process: { kind: "runtime", pid: process.pid, leaseId },
           engine: { engineVersion: "0.4.0-test", packageVersion: "0.4.0-test", napiVersion: "test", schemaVersion: 1 },
           refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
           startedAt: new Date().toISOString(),
-        },
+        }),
       }), { status: 200, headers: { "content-type": "application/json; charset=utf-8" } });
     },
   });
@@ -1695,13 +1695,13 @@ test("runtime inspection rejects health from a different process lease", async (
     async routeRequest() {
       return new Response(JSON.stringify({
         ok: true,
-        data: {
+        data: protocolProjection(1, {
           status: "ready",
           process: { kind: "runtime", pid: process.pid, leaseId: "wrong-lease" },
           engine: { engineVersion: "0.4.0-test", packageVersion: "0.4.0-test", napiVersion: "test", schemaVersion: 1 },
           refresh: { status: "live", mode: "watch", bufferedEvents: 0 },
           startedAt: new Date().toISOString(),
-        },
+        }),
       }), {
         status: 200,
         headers: { "content-type": "application/json; charset=utf-8" },

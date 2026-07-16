@@ -429,7 +429,7 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
       const initial = await fetch(server.url + "/api/index", {
         method: "POST",
         headers: { ...headers, "content-type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ response: "semantic-index" }),
+        body: JSON.stringify({}),
       });
       const initialText = await initial.text();
       assert.equal(initial.status, 200, initialText);
@@ -872,6 +872,7 @@ test("runtime client lazily starts a supervised project runtime when none is run
       summaryRootDir: string;
       relatedConventionIds: string[];
       relatedValidatorIds: string[];
+      lifecycleBeforeRelated: { revision: { observed: number; accepted: number; published: number }; settled: boolean };
       lifecycleAfterRelated: { revision: { observed: number; accepted: number; published: number } };
       registered: boolean;
       projectState: boolean;
@@ -882,7 +883,9 @@ test("runtime client lazily starts a supervised project runtime when none is run
     assert.equal(output.summaryRootDir, realpathSync(rootDir));
     assert.deepEqual(output.relatedConventionIds, ["test-rule"]);
     assert.deepEqual(output.relatedValidatorIds, ["test-rule"]);
-    assert.deepEqual(output.lifecycleAfterRelated.revision, { observed: 1, accepted: 1, published: 1 });
+    assert.equal(output.lifecycleBeforeRelated.settled, true);
+    assert(output.lifecycleBeforeRelated.revision.published >= 2);
+    assert.deepEqual(output.lifecycleAfterRelated.revision, output.lifecycleBeforeRelated.revision);
     assert.equal(output.registered, true);
     assert.equal(output.projectRuntimeFile, true);
     assert.equal(output.projectState, true);

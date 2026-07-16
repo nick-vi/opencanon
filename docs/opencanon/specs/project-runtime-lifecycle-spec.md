@@ -56,8 +56,10 @@ Rule `readiness-is-revision-driven`: Project readiness is determined by publishe
 - summary responses expose observed, accepted, and published revisions
 Checks: `coordinator-tests`, `change-run-tests`, `runtime-client-tests`, `contracts-tests`
 
-Rule `transport-and-project-readiness-are-distinct`: Transport liveness, project snapshot readiness, and Project Knowledge readiness are independently observable states.
+Rule `transport-and-project-readiness-are-distinct`: Transport liveness, project revision readiness, and Project Knowledge readiness are independently observable states.
+- both transport adapters are listening before initial project analysis is scheduled
 - transport can accept status requests while project refresh is active
+- read operations never trigger project analysis
 - project summary reports freshness without pretending transient work is failure
 - project selection is independent from process and revision status
 - Knowledge routes reject missing, indexing, stale, or failed indexes explicitly

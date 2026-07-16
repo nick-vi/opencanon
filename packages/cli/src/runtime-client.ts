@@ -1,7 +1,6 @@
 import {
   DoctorKnowledgeInspectionKind,
   ReadSemanticIndexStatusResultSchema,
-  createDomainProtocolClient,
   protocolInputFromSearchParams,
   resolveRootDir,
   type DoctorKnowledgeInspection,
@@ -12,16 +11,14 @@ import {
 } from "@opencanon/core";
 import {
   ensureProjectRuntimeViaService,
+  createLocalDomainProtocolClient,
   inspectProjectRuntime,
   localProtocolEndpointFromEntry,
-  localProtocolTransport,
   RuntimeStatus,
-  streamLocalText,
   resolveRuntimeCliEntrypoint,
   runtimeIdentityForEntrypoint,
   serviceRegistryPath,
   stopProjectRuntime,
-  type LocalProtocolEndpoint,
   type RuntimeRegistryEntry,
 } from "@opencanon/runtime";
 
@@ -124,35 +121,14 @@ export async function withRuntimeClient<T>(
 }
 
 function domainClientForEndpoint(
-  endpoint: () => LocalProtocolEndpoint,
+  endpoint: () => ReturnType<typeof localProtocolEndpointFromEntry>,
   repair?: () => Promise<void>,
   defaultTimeoutMs?: number,
 ) {
-  return createDomainProtocolClient({
-    transport: {
-      async request(request) {
-        return await localProtocolTransport.request(endpoint(), {
-          method: request.method,
-          path: request.path,
-          headers: request.headers,
-          body: request.body,
-          signal: request.signal,
-          timeoutMs: request.timeoutMs ?? defaultTimeoutMs,
-        });
-      },
-      async stream(request) {
-        await streamLocalText(endpoint(), {
-          method: request.method,
-          path: request.path,
-          headers: request.headers,
-          body: request.body,
-          signal: request.signal,
-          onOpen: request.onOpen,
-          onChunk: request.onChunk,
-        });
-      },
-    },
+  return createLocalDomainProtocolClient({
+    endpoint,
     ...(repair ? { repair: async () => repair() } : {}),
+    ...(defaultTimeoutMs ? { defaultTimeoutMs } : {}),
   });
 }
 

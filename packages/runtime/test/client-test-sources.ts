@@ -106,7 +106,12 @@ export function codeGraphRouteCheckSource(): string {
       return body.data.data;
     }
     try {
-      await get("/api/snapshot");
+      const analysisDeadline = Date.now() + 30000;
+      while (Date.now() < analysisDeadline) {
+        const state = await get("/api/state");
+        if (state.lifecycle.settled && state.files > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       const symbols = await get("/api/code/symbols?query=loadCompany&limit=10");
       assert.equal(typeof symbols.sourceFiles, "number");
       assert(symbols.symbols.some((symbol) => symbol.name === "loadCompany" && symbol.path === "src/company.ts"));
@@ -160,7 +165,7 @@ export function projectContextRouteCheckSource(): string {
       const compactResponse = await fetch(server.url + "/api/index", {
         method: "POST",
         headers: { ...headers, "content-type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ response: "semantic-index" }),
+        body: JSON.stringify({}),
       });
       const compactText = await compactResponse.text();
       assert.equal(compactResponse.status, 200, compactText);
@@ -575,8 +580,8 @@ export function completeReadyHistoryCheckSource(): string {
       assert(!queue.blocked.some((item) => item.changeId === "closed-change"));
       assert(queue.ready.some((item) => item.changeId === "unrelated-change"));
 
-      const snapshot = await get("/api/snapshot");
-      const closed = snapshot.changes.find((change) => change.id === "closed-change");
+      const changes = await get("/api/changes");
+      const closed = changes.find((change) => change.id === "closed-change");
       assert.equal(closed.boardColumn, "closed");
       assert.equal(closed.tasks[0].status, "closed");
     } finally {
@@ -743,9 +748,9 @@ export function changeEventsRouteCheckSource(): string {
     const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
     const headers = { ...runtimeAuthHeaders(server.authToken), "content-type": "application/json" };
     try {
-      const changesResponse = await fetch(server.url + "/api/changes", { headers });
-      const changesText = await changesResponse.text();
-      assert.equal(changesResponse.status, 200, changesText);
+      const projectedChangesResponse = await fetch(server.url + "/api/changes", { headers });
+      const changesText = await projectedChangesResponse.text();
+      assert.equal(projectedChangesResponse.status, 200, changesText);
       const changesBody = JSON.parse(changesText);
       assert.equal(changesBody.data.data[0].id, "route-change");
       assert.equal(changesBody.data.data[0].boardColumn, "planned");
@@ -815,11 +820,11 @@ export function changeEventsRouteCheckSource(): string {
       assert.equal(eventsBody.data.data[0].summary, "Started route change.");
       assert.equal(eventsBody.data.data.filter((event) => event.id === "route-change-started-idempotent").length, 1);
 
-      const snapshotResponse = await fetch(server.url + "/api/snapshot", { headers });
-      const snapshotText = await snapshotResponse.text();
-      assert.equal(snapshotResponse.status, 200, snapshotText);
-      const snapshotBody = JSON.parse(snapshotText);
-      const change = snapshotBody.data.data.changes.find((item) => item.id === "route-change");
+      const updatedChangesResponse = await fetch(server.url + "/api/changes", { headers });
+      const updatedChangesText = await updatedChangesResponse.text();
+      assert.equal(updatedChangesResponse.status, 200, updatedChangesText);
+      const updatedChangesBody = JSON.parse(updatedChangesText);
+      const change = updatedChangesBody.data.data.find((item) => item.id === "route-change");
       assert.equal(change.boardColumn, "running");
       assert.equal(change.lastEvent.type, "change-started");
     } finally {
@@ -917,33 +922,33 @@ export function runtimeValidatorReloadCheckSource(): string {
     const rootDir = process.argv[1];
     const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
     try {
-      assert.deepEqual(await getSnapshotValidatorIds(server.url, server.authToken), ["first-rule"]);
+      assert.deepEqual(await getValidatorIds(server.url, server.authToken), ["first-rule"]);
       writeFileSync(path.join(rootDir, "validator-helpers/rules.ts"), ${JSON.stringify(validatorHelperSource(["first-rule", "second-rule"]))});
       const requestStartedAt = Date.now();
-      const duringRefresh = await getSnapshotValidatorIds(server.url, server.authToken);
-      assert(Date.now() - requestStartedAt < 1000, "Snapshot request waited for validator analysis.");
+      const duringRefresh = await getValidatorIds(server.url, server.authToken);
+      assert(Date.now() - requestStartedAt < 1000, "Validator query waited for project analysis.");
       assert(
         JSON.stringify(duringRefresh) === JSON.stringify(["first-rule"]) ||
           JSON.stringify(duringRefresh) === JSON.stringify(["first-rule", "second-rule"]),
       );
-      await waitForSnapshotValidatorIds(server.url, server.authToken, ["first-rule", "second-rule"]);
+      await waitForValidatorIds(server.url, server.authToken, ["first-rule", "second-rule"]);
       writeFileSync(path.join(rootDir, "conventions/rules.ts"), "export default { id: 1 };\\n");
-      assert.deepEqual(await getSnapshotValidatorIds(server.url, server.authToken), ["first-rule", "second-rule"]);
+      assert.deepEqual(await getValidatorIds(server.url, server.authToken), ["first-rule", "second-rule"]);
     } finally {
       await server.stop();
     }
 
-    async function getSnapshotValidatorIds(url, authToken) {
+    async function getValidatorIds(url, authToken) {
       const response = await fetch(url + "/api/validators?limit=500", { headers: runtimeAuthHeaders(authToken) });
       if (response.status !== 200) throw new Error(await response.text());
       const body = await response.json();
       return body.data.data.validators.map((validator) => validator.id);
     }
 
-    async function waitForSnapshotValidatorIds(url, authToken, expected) {
+    async function waitForValidatorIds(url, authToken, expected) {
       const deadline = Date.now() + ${RuntimeWatcherPropagationTimeoutMs};
       while (Date.now() < deadline) {
-        const actual = await getSnapshotValidatorIds(url, authToken);
+        const actual = await getValidatorIds(url, authToken);
         if (JSON.stringify(actual) === JSON.stringify(expected)) return;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -968,15 +973,24 @@ export function ephemeralRuntimeClientCheckSource(): string {
     const rootDir = process.argv[1];
     if (await inspectProjectRuntime(rootDir)) throw new Error("expected no runtime before request");
     const result = await withRuntimeClient(rootDir, async (client) => {
+      let stateBeforeRelated;
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        stateBeforeRelated = await client.query("project.state");
+        if (stateBeforeRelated.lifecycle.settled) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (!stateBeforeRelated?.lifecycle.settled) throw new Error("initial project analysis did not settle");
       const related = await client.query("canon.related.read", { query: { file: "src/company.ts" } });
       const stateAfterRelated = await client.query("project.state");
       const summary = await client.query("project.summary");
-      return { summaryRootDir: summary.rootDir, related, stateAfterRelated };
+      return { summaryRootDir: summary.rootDir, related, stateBeforeRelated, stateAfterRelated };
     });
     console.log(JSON.stringify({
       summaryRootDir: result.summaryRootDir,
       relatedConventionIds: result.related.conventions.map((convention) => convention.id),
       relatedValidatorIds: result.related.validators.map((validator) => validator.id),
+      lifecycleBeforeRelated: result.stateBeforeRelated.lifecycle,
       lifecycleAfterRelated: result.stateAfterRelated.lifecycle,
       registered: Boolean(await inspectProjectRuntime(rootDir)),
       projectRuntimeFile: existsSync(projectRuntimePath(rootDir)),

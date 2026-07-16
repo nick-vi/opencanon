@@ -51,6 +51,8 @@ test("the protocol registry owns every route and method pair exactly once", () =
   assert.deepEqual(protocolMethodsForPath(ProtocolRoute.Health), [ProtocolHttpMethod.Get]);
   assert.equal(findProtocolOperation(ProtocolHttpMethod.Post, ProtocolRoute.Health), undefined);
   assert.equal(protocolOperationById("health.read")?.authorization, ProtocolAuthorization.Public);
+  assert.equal(findProtocolOperation(ProtocolHttpMethod.Get, "/api/snapshot"), undefined);
+  assert.equal(protocolOperationById("project.snapshot"), undefined);
 });
 
 test("projection and event contracts expose revisions without embedding snapshots", () => {

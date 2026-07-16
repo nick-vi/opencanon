@@ -16,12 +16,6 @@ export const ApiRoute = ProtocolRoute;
 
 export const ApiPathPrefix = ProtocolApiPathPrefix;
 
-export const ProjectIndexResponseMode = {
-  Snapshot: "snapshot",
-  SemanticIndex: "semantic-index",
-} as const;
-export type ProjectIndexResponseMode = (typeof ProjectIndexResponseMode)[keyof typeof ProjectIndexResponseMode];
-
 export const UrlSearchParam = {
   Commit: "commit",
   ChangeId: "changeId",

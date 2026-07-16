@@ -9,6 +9,7 @@ import {
   ProtocolTransportFailure,
   ProtocolTransportFailureCode,
   OpenCanonFailureSchema,
+  createDomainProtocolClient,
   maximumProtocolRequestBytes,
   createOpenCanonDiagnostic,
   createOpenCanonDiagnosticsError,
@@ -18,6 +19,7 @@ import {
   parseProjectionResponse,
   serializeOpenCanonProblem,
   type ProjectionResponse,
+  type ProtocolOperationDefinition,
 } from "@opencanon/core";
 import { runtimeAuthHeaders } from "./auth.ts";
 
@@ -215,6 +217,39 @@ export const localProtocolTransport: LocalProtocolTransport = {
     return httpLoopbackTransport.request(endpoint, request);
   },
 };
+
+export function createLocalDomainProtocolClient(input: {
+  endpoint(): LocalProtocolEndpoint;
+  repair?(failure: ProtocolTransportFailure, operation: ProtocolOperationDefinition): Promise<void>;
+  defaultTimeoutMs?: number;
+}) {
+  return createDomainProtocolClient({
+    transport: {
+      async request(request) {
+        return await localProtocolTransport.request(input.endpoint(), {
+          method: request.method,
+          path: request.path,
+          headers: request.headers,
+          body: request.body,
+          signal: request.signal,
+          timeoutMs: request.timeoutMs ?? input.defaultTimeoutMs,
+        });
+      },
+      async stream(request) {
+        await streamLocalText(input.endpoint(), {
+          method: request.method,
+          path: request.path,
+          headers: request.headers,
+          body: request.body,
+          signal: request.signal,
+          onOpen: request.onOpen,
+          onChunk: request.onChunk,
+        });
+      },
+    },
+    ...(input.repair ? { repair: input.repair } : {}),
+  });
+}
 
 export async function requestLocalJson<T>(
   endpoint: LocalProtocolEndpoint,

@@ -5,7 +5,7 @@ export default [
     id: "domain-protocol-spec",
     title: "Domain Protocol Spec",
     summary: "CLI, MCP, browser, and desktop clients consume bounded revisioned projections and replayable events through one transport-independent runtime contract.",
-    surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index"],
+    surfaces: ["local-service-control", "project-canon-model", "project-knowledge-index", "release-update"],
     scope: [
       { kind: DefinitionTargetKind.File, path: "packages/core/src/protocol*.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/core/generated/domain-protocol.openapi.json" },
@@ -22,7 +22,7 @@ export default [
       { kind: DefinitionTargetKind.File, path: "tests/{contracts,cli-reporting,runtime-events,mcp}.test.ts" },
       { kind: DefinitionTargetKind.Doc, path: "docs/opencanon/specs/domain-protocol-spec.md" },
     ],
-    areas: ["local-service-and-runtimes", "project-map-governance", "project-knowledge-index"],
+    areas: ["local-service-and-runtimes", "project-map-governance", "project-knowledge-index", "runtime-release-update"],
     rules: [
       {
         id: "one-operation-registry",
@@ -153,13 +153,13 @@ export default [
       {
         id: "operation-resources-are-bounded",
         statement: "A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.",
-        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations leave process readiness running and expose work through operation resources", "process inspection cannot overwrite a concurrent lifecycle transition", "Project State allocates monotonic run-event sequences atomically across runtime connections"],
+        acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations leave process readiness running and expose work through operation resources", "project analysis and Project Knowledge indexing never overlap", "explicit Knowledge indexing waits for current analysis while later source refresh queues behind indexing", "process inspection cannot overwrite a concurrent lifecycle transition", "Project State allocates monotonic run-event sequences atomically across runtime connections"],
         checks: ["contracts-tests", "change-run-tests", "runtime-supervision-tests", "engine-tests"],
       },
       {
         id: "heavy-responses-have-shared-admission",
         statement: "Every transport shares one fail-fast capacity boundary for heavyweight project responses and holds capacity until delivery completes.",
-        acceptance: ["concurrent full snapshots cannot accumulate response copies", "overload returns an explicit diagnostic instead of queueing", "bounded health and projection routes remain available", "HTTP and pipe consume the same capacity"],
+        acceptance: ["concurrent heavy requests cannot accumulate response copies", "overload returns an explicit diagnostic instead of queueing", "bounded health and projection routes remain available", "HTTP and pipe consume the same capacity"],
         checks: ["runtime-client-tests"],
       },
       {
@@ -555,8 +555,8 @@ export default [
       },
       {
         id: "transport-and-project-readiness-are-distinct",
-        statement: "Transport liveness, project snapshot readiness, and Project Knowledge readiness are independently observable states.",
-        acceptance: ["transport can accept status requests while project refresh is active", "project summary reports freshness without pretending transient work is failure", "project selection is independent from process and revision status", "Knowledge routes reject missing, indexing, stale, or failed indexes explicitly"],
+        statement: "Transport liveness, project revision readiness, and Project Knowledge readiness are independently observable states.",
+        acceptance: ["both transport adapters are listening before initial project analysis is scheduled", "transport can accept status requests while project refresh is active", "read operations never trigger project analysis", "project summary reports freshness without pretending transient work is failure", "project selection is independent from process and revision status", "Knowledge routes reject missing, indexing, stale, or failed indexes explicitly"],
         checks: ["runtime-client-tests", "contracts-tests"],
       },
       {

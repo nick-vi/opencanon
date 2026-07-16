@@ -1,6 +1,5 @@
 import { ProjectProtocolEventSchema, ProtocolDomain, type SemanticIndexSnapshot } from "@opencanon/core";
-import { requestLocalJson, streamLocalText, type LocalProtocolEndpoint } from "./local-protocol.ts";
-import { ApiRoute, ProjectIndexResponseMode } from "./routes.ts";
+import { createLocalDomainProtocolClient, type LocalProtocolEndpoint } from "./local-protocol.ts";
 import { ProjectProtocolEventType } from "./server-events.ts";
 import type { KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
 
@@ -25,7 +24,7 @@ export async function requestKnowledgeIndex(input: {
   endpoint: LocalProtocolEndpoint;
   force: boolean;
   onProgress(line: string): void;
-}): Promise<{ state?: { semanticIndex?: SemanticIndexSnapshot }; semanticIndex?: SemanticIndexSnapshot | null }> {
+}): Promise<{ semanticIndex: SemanticIndexSnapshot | null }> {
   const controller = new AbortController();
   let streamOpened!: () => void;
   let streamOpenFailed!: (error: Error) => void;
@@ -35,9 +34,8 @@ export async function requestKnowledgeIndex(input: {
     streamOpenFailed = reject;
   });
   const parser = createKnowledgeProgressParser(input.onProgress);
-  const stream = streamLocalText(input.endpoint, {
-    method: "GET",
-    path: ApiRoute.EventsStream,
+  const client = createLocalDomainProtocolClient({ endpoint: () => input.endpoint });
+  const stream = client.stream("events.stream", undefined, {
     signal: controller.signal,
     onOpen() {
       streamIsOpen = true;
@@ -61,10 +59,9 @@ export async function requestKnowledgeIndex(input: {
     throw error;
   }
   try {
-    return await requestLocalJson(
-      input.endpoint,
-      { method: "POST", path: ApiRoute.Index, body: { response: ProjectIndexResponseMode.SemanticIndex, force: input.force } },
-    );
+    return await client.command<{ semanticIndex: SemanticIndexSnapshot | null }>("knowledge.index", {
+      body: { force: input.force },
+    });
   } finally {
     controller.abort();
     await stream;

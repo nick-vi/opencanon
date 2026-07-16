@@ -26,12 +26,14 @@ CLI, MCP, browser, and desktop clients consume bounded revisioned projections an
 - [Local service control plane](../areas/local-service-and-runtimes.md#local-service-and-project-runtimes)
 - [Project Canon model](../areas/project-map-governance.md#project-map-governance)
 - [Project Knowledge](../areas/project-knowledge-index.md#project-knowledge)
+- [Release and update path](../areas/runtime-release-update.md#runtime-updates)
 
 ## Areas
 
 - [Local Service and Project Runtimes](../areas/local-service-and-runtimes.md)
 - [Project Map Governance](../areas/project-map-governance.md)
 - [Project Knowledge](../areas/project-knowledge-index.md)
+- [Runtime Updates](../areas/runtime-release-update.md)
 
 ## Checks
 

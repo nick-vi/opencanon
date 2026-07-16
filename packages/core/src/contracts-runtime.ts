@@ -28,8 +28,8 @@ export const RuntimeWorkerJobStatusValue = {
 export type RuntimeWorkerJobStatusValue = (typeof RuntimeWorkerJobStatusValue)[keyof typeof RuntimeWorkerJobStatusValue];
 
 export const RuntimeWorkerJobKindValue = {
-  ProjectSnapshot: "project-snapshot",
-  SemanticIndex: "semantic-index",
+  ProjectAnalysis: "project-analysis",
+  KnowledgeIndex: "knowledge-index",
   ProjectMap: "project-map",
   Doctor: "doctor",
 } as const;
@@ -38,8 +38,8 @@ export type RuntimeWorkerJobKindValue = (typeof RuntimeWorkerJobKindValue)[keyof
 export const RuntimeWorkerJobSchema = z.object({
   id: z.string().min(1),
   kind: z.enum([
-    RuntimeWorkerJobKindValue.ProjectSnapshot,
-    RuntimeWorkerJobKindValue.SemanticIndex,
+    RuntimeWorkerJobKindValue.ProjectAnalysis,
+    RuntimeWorkerJobKindValue.KnowledgeIndex,
     RuntimeWorkerJobKindValue.ProjectMap,
     RuntimeWorkerJobKindValue.Doctor,
   ]),
