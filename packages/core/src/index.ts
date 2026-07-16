@@ -785,4 +785,51 @@ export type { ValidationInput, ValidationResult, ValidatorOutcome } from "./vali
 export { runValidation, selectValidators, sortFindings, validatorGraphHash, ValidatorOutcomeStatus } from "./validation.ts";
 export type { ValidationResultCache } from "./validation-result-cache.ts";
 export { createEphemeralValidationResultCache, createValidationResultCache, validationContextFiles, validationRuntimeFingerprint, validatorRunCacheKey } from "./validation-result-cache.ts";
+export {
+  DomainProtocolVersion,
+  ProjectionResponseSchema,
+  ProjectProtocolEventSchema,
+  ProtocolAuthorization,
+  ProtocolAuthorizationSchema,
+  ProtocolConsistency,
+  ProtocolConsistencySchema,
+  ProtocolCost,
+  ProtocolCostSchema,
+  ProtocolDomain,
+  ProtocolDomainSchema,
+  ProtocolEventReplaySchema,
+  ProtocolHttpMethod,
+  ProtocolHttpMethodSchema,
+  ProtocolIdempotency,
+  ProtocolIdempotencySchema,
+  ProtocolInputSchema,
+  ProtocolLimitsSchema,
+  ProtocolOperationKind,
+  ProtocolOperationKindSchema,
+  ProtocolOperationMetadataSchema,
+  ProtocolProgressSchema,
+  defineProtocolOperation,
+  operationMetadata,
+} from "./protocol.ts";
+export type {
+  ProjectProtocolEvent,
+  ProjectionResponse,
+  ProtocolDomain as ProtocolDomainType,
+  ProtocolInput,
+  ProtocolLimits,
+  ProtocolOperationDefinition,
+  ProtocolOperationMetadata,
+  ProtocolProgress,
+} from "./protocol.ts";
+export {
+  ProtocolApiPathPrefix,
+  ProtocolOperations,
+  ProtocolRoute,
+  findProtocolOperation,
+  protocolMethodsForPath,
+  protocolOperationById,
+} from "./protocol-operations.ts";
+export type { ProtocolOperationId } from "./protocol-operations.ts";
+export { createOpenCanonOpenApiDocument } from "./protocol-openapi.ts";
+export type { OpenCanonOpenApiDocument } from "./protocol-openapi.ts";
 export * from "./worktree.ts";

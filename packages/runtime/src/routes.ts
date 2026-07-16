@@ -1,7 +1,12 @@
 import {
   OpenCanonDiagnosticSchema,
+  ProtocolApiPathPrefix,
+  ProtocolAuthorization,
+  ProtocolRoute,
   createOpenCanonDiagnostic,
   createOpenCanonDiagnosticsError,
+  findProtocolOperation,
+  protocolMethodsForPath,
   type OpenCanonDiagnostic,
   type OpenCanonErrorPayload,
 } from "@opencanon/core";
@@ -11,54 +16,9 @@ const HttpHeaderValue = {
   Json: "application/json; charset=utf-8",
 } as const;
 
-export const ApiRoute = {
-  CanonRelated: "/api/canon/related",
-  CanonHistory: "/api/canon/history",
-  Changes: "/api/changes",
-  ChangeCheckRuns: "/api/changes/check-runs",
-  ChangeCheckRunsCancel: "/api/changes/check-runs/cancel",
-  ChangeEvents: "/api/changes/events",
-  ChangeReady: "/api/changes/ready",
-  CodeGraph: "/api/code/graph",
-  CodeSymbols: "/api/code/symbols",
-  ContextAsk: "/api/context/ask",
-  ContextBacklinks: "/api/context/backlinks",
-  ContextChunks: "/api/context/chunks",
-  ContextCoverage: "/api/context/coverage",
-  ContextPacket: "/api/context/packet",
-  ContextSearch: "/api/context/search",
-  ContextStatus: "/api/context/status",
-  Doctor: "/api/doctor",
-  Events: "/api/events",
-  EventsStream: "/api/events/stream",
-  Feedback: "/api/feedback",
-  Findings: "/api/findings",
-  FsFile: "/api/fs/file",
-  FsTree: "/api/fs/tree",
-  GitDiff: "/api/git/diff",
-  GitHistory: "/api/git/history",
-  GateApprove: "/api/gates/approve",
-  GatePending: "/api/gates/pending",
-  Health: "/api/health",
-  HookFeedback: "/api/hook-feedback",
-  Index: "/api/index",
-  Observability: "/api/observability",
-  Producers: "/api/producers",
-  ProjectSummary: "/api/project/summary",
-  Settings: "/api/settings",
-  Snapshot: "/api/snapshot",
-  State: "/api/state",
-  AuthoringFactories: "/api/authoring/factories",
-  AuthoringValidators: "/api/authoring/validators",
-  AuthoringValidatorsApply: "/api/authoring/validators/apply",
-  AuthoringValidatorsPreview: "/api/authoring/validators/preview",
-  AuthoringValidatorsRunFixtures: "/api/authoring/validators/run-fixtures",
-  ServiceProjects: "/api/service/projects",
-  Validate: "/api/validate",
-  Worktrees: "/api/worktrees",
-} as const;
+export const ApiRoute = ProtocolRoute;
 
-export const ApiPathPrefix = "/api/";
+export const ApiPathPrefix = ProtocolApiPathPrefix;
 
 export const ProjectIndexResponseMode = {
   Snapshot: "snapshot",
@@ -113,22 +73,6 @@ export type ApiSuccess<T> = {
   data: T;
 };
 
-const postApiRoutes = new Set<string>([
-  ApiRoute.CanonRelated,
-  ApiRoute.ChangeCheckRuns,
-  ApiRoute.ChangeCheckRunsCancel,
-  ApiRoute.ChangeEvents,
-  ApiRoute.Feedback,
-  ApiRoute.GateApprove,
-  ApiRoute.HookFeedback,
-  ApiRoute.Index,
-  ApiRoute.AuthoringValidatorsApply,
-  ApiRoute.AuthoringValidatorsPreview,
-  ApiRoute.AuthoringValidatorsRunFixtures,
-  ApiRoute.Validate,
-]);
-const publicApiRoutes = new Set<string>([ApiRoute.Health]);
-
 type DiagnosticCode = (typeof diagnosticCodes)[keyof typeof diagnosticCodes];
 export type RuntimeError = { ok: false; error: OpenCanonErrorPayload };
 
@@ -152,8 +96,9 @@ export function diagnosticsFailure(diagnostics: unknown[], fallbackCode: Diagnos
 
 export function validateMethod(pathname: string, method: string): { ok: true } | { ok: false; error: RuntimeError } {
   if (!pathname.startsWith(ApiPathPrefix)) return { ok: true };
-  const expected = pathname === ApiRoute.Settings || pathname === ApiRoute.ChangeEvents || pathname === ApiRoute.ChangeCheckRuns || pathname === ApiRoute.CanonRelated ? ["GET", "POST"] : [postApiRoutes.has(pathname) ? "POST" : "GET"];
-  if (expected.includes(method)) return { ok: true };
+  if (findProtocolOperation(method, pathname)) return { ok: true };
+  const expected = protocolMethodsForPath(pathname);
+  if (expected.length === 0) return { ok: true };
   return {
     ok: false,
     error: diagnostic(diagnosticCodes.invalidRuntimeResponse, `${pathname} requires ${expected.join(" or ")}.`),
@@ -184,7 +129,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function validateRuntimeAuth(request: Request, url: URL, authToken: string): { ok: true } | { ok: false; error: RuntimeError } {
-  if (!url.pathname.startsWith(ApiPathPrefix) || publicApiRoutes.has(url.pathname)) return { ok: true };
+  if (!url.pathname.startsWith(ApiPathPrefix)) return { ok: true };
+  const operation = findProtocolOperation(request.method, url.pathname);
+  if (operation?.authorization === ProtocolAuthorization.Public) return { ok: true };
   if (isAuthorizedRuntimeRequest(request, url, authToken)) return { ok: true };
   return {
     ok: false,
