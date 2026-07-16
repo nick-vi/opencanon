@@ -135,13 +135,10 @@ fn publication_commits_projection_events_revision_and_graph_visibility_together(
         "generation-two"
     );
     assert_eq!(result["event"]["sequence"], 1);
-    assert_eq!(
-        project
-            .search_symbols_json(json!({ "query": "publishedSymbol" }).to_string())
-            .unwrap()
-            .contains("publishedSymbol"),
-        true
-    );
+    assert!(project
+        .search_symbols_json(json!({ "query": "publishedSymbol" }).to_string())
+        .unwrap()
+        .contains("publishedSymbol"));
     let events: Value = serde_json::from_str(
         &project
             .list_protocol_events_json(json!({ "afterSequence": 0, "limit": 10 }).to_string())

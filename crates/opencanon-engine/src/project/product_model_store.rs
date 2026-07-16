@@ -14,11 +14,11 @@ pub(super) fn write_product_model_projection(
     root_dir: &str,
     projection: &Value,
 ) -> napi::Result<()> {
-    let indexed_at = json_string_field(&projection, "indexedAt")?.to_string();
-    let graph_hash = json_string_field(&projection, "graphHash")?.to_string();
-    let definitions_hash = json_string_field(&projection, "definitionsHash")?.to_string();
-    let counts = json_object_field(&projection, "counts")?;
-    let definition_graph = json_object_field(&projection, "definitionGraph")?;
+    let indexed_at = json_string_field(projection, "indexedAt")?.to_string();
+    let graph_hash = json_string_field(projection, "graphHash")?.to_string();
+    let definitions_hash = json_string_field(projection, "definitionsHash")?.to_string();
+    let counts = json_object_field(projection, "counts")?;
+    let definition_graph = json_object_field(projection, "definitionGraph")?;
     let nodes = json_array_field(definition_graph, "nodes")?;
     let edges = json_array_field(definition_graph, "edges")?;
     let diagnostics = json_array_field(definition_graph, "diagnostics")?;
