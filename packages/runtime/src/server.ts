@@ -76,6 +76,7 @@ import { TreeScope, buildTreeResponse, listProjectInventory, readFileResponse, t
 import { createEventBroadcaster, indexedEvent, indexingEvent, snapshotEvent, streamErrorEvent, type RuntimeStreamProgress } from "./server-events.ts";
 import { MaxRequestBodyBytes, serveRuntime } from "./server-http.ts";
 import { createRuntimeRouteHandler } from "./server-routes.ts";
+import { createRuntimeRequestAdmission } from "./request-admission.ts";
 import { assertRuntimePrerequisites, formatHttpBaseUrl, renderPrerequisiteFailure, requiredNodeRequirement, type RuntimePrerequisites } from "./runtime.ts";
 import { createProjectStore, type ProjectStore } from "./state.ts";
 import { readProjectSettings, writeProjectSettings } from "./settings.ts";
@@ -354,7 +355,8 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       buildIndexedSnapshot,
       restartStore,
     });
-    server = await serveRuntime({ host, port, routeRequest, beginActivity: beginTransportActivity });
+    const requestAdmission = createRuntimeRequestAdmission({ authToken });
+    server = await serveRuntime({ host, port, routeRequest, beginActivity: beginTransportActivity, requestAdmission });
     const pipeEndpoint =
       options.pipeEndpoint ??
       configuredPipeEndpoint ??
@@ -365,6 +367,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       host: "opencanon.runtime",
       maxFrameBytes: MaxRequestBodyBytes,
       beginActivity: beginTransportActivity,
+      requestAdmission,
     });
     resetIdleTimer();
   } catch (error) {

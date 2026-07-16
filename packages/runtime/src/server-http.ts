@@ -1,12 +1,14 @@
 import { createServer, type IncomingMessage, type Server as NodeHttpServer, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { diagnosticsFailure } from "./routes.ts";
+import type { RuntimeRequestAdmission } from "./request-admission.ts";
 
 export async function serveRuntime(input: {
   host: string;
   port: number;
   routeRequest(request: Request): Promise<Response>;
   beginActivity?(): () => void;
+  requestAdmission?: RuntimeRequestAdmission;
 }): Promise<{ port: number; stop(force?: boolean): Promise<void> }> {
   const sockets = new Set<Socket>();
   const nodeServer = createServer(async (nodeRequest, nodeResponse) => {
@@ -58,7 +60,7 @@ async function closeNodeServer(server: NodeHttpServer, sockets: Set<Socket>, for
 }
 
 async function handleNodeRequest(
-  input: { host: string; routeRequest(request: Request): Promise<Response>; beginActivity?(): () => void },
+  input: { host: string; routeRequest(request: Request): Promise<Response>; beginActivity?(): () => void; requestAdmission?: RuntimeRequestAdmission },
   nodeRequest: IncomingMessage,
   nodeResponse: ServerResponse,
 ): Promise<void> {
@@ -90,8 +92,17 @@ async function handleNodeRequest(
       body = read;
     }
     const request = incomingMessageToRequest(nodeRequest, input.host, abortController.signal, body);
-    const response = await input.routeRequest(request);
-    await writeNodeResponse(response, nodeResponse, abortController.signal);
+    const admission = input.requestAdmission?.admit(request);
+    if (admission && !admission.ok) {
+      await writeNodeResponse(admission.response, nodeResponse, abortController.signal);
+      return;
+    }
+    try {
+      const response = await input.routeRequest(request);
+      await writeNodeResponse(response, nodeResponse, abortController.signal);
+    } finally {
+      admission?.release();
+    }
   } catch (error) {
     if (abortController.signal.aborted) return;
     if (!nodeResponse.headersSent) {

@@ -15,6 +15,8 @@ export default [
       { kind: DefinitionTargetKind.File, path: "crates/opencanon-engine/src/state.rs" },
       { kind: DefinitionTargetKind.File, path: "crates/opencanon-engine/src/migrations/*.sql" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-events.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/request-admission.ts" },
+      { kind: DefinitionTargetKind.File, path: "packages/runtime/src/server-http.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/routes.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/local-protocol.ts" },
       { kind: DefinitionTargetKind.File, path: "packages/runtime/src/service-http.ts" },
@@ -70,6 +72,12 @@ export default [
         statement: "A project runtime bounds active operation admission and terminal run history without deleting non-terminal work.",
         acceptance: ["admission rejects a whole batch before capacity is exceeded", "terminal history is pruned by age and count", "run events cascade when their run is removed", "active operations leave process readiness running and expose work through operation resources", "process inspection cannot overwrite a concurrent lifecycle transition", "Project State allocates monotonic run-event sequences atomically across runtime connections"],
         checks: ["contracts-tests", "change-run-tests", "runtime-supervision-tests", "engine-tests"],
+      },
+      {
+        id: "heavy-responses-have-shared-admission",
+        statement: "Every transport shares one fail-fast capacity boundary for heavyweight project responses and holds capacity until delivery completes.",
+        acceptance: ["concurrent full snapshots cannot accumulate response copies", "overload returns an explicit diagnostic instead of queueing", "bounded health and projection routes remain available", "HTTP and pipe consume the same capacity"],
+        checks: ["runtime-client-tests"],
       },
       {
         id: "persisted-runs-remain-operable",

@@ -14,6 +14,8 @@ Long-running project operations expose bounded status, durable execution state, 
 - Files: `crates/opencanon-engine/src/state.rs`
 - Files: `crates/opencanon-engine/src/migrations/*.sql`
 - Files: `packages/runtime/src/server-events.ts`
+- Files: `packages/runtime/src/request-admission.ts`
+- Files: `packages/runtime/src/server-http.ts`
 - Files: `packages/runtime/src/routes.ts`
 - Files: `packages/runtime/src/local-protocol.ts`
 - Files: `packages/runtime/src/service-http.ts`
@@ -99,6 +101,13 @@ Rule `operation-resources-are-bounded`: A project runtime bounds active operatio
 - process inspection cannot overwrite a concurrent lifecycle transition
 - Project State allocates monotonic run-event sequences atomically across runtime connections
 Checks: `contracts-tests`, `change-run-tests`, `runtime-supervision-tests`, `engine-tests`
+
+Rule `heavy-responses-have-shared-admission`: Every transport shares one fail-fast capacity boundary for heavyweight project responses and holds capacity until delivery completes.
+- concurrent full snapshots cannot accumulate response copies
+- overload returns an explicit diagnostic instead of queueing
+- bounded health and projection routes remain available
+- HTTP and pipe consume the same capacity
+Checks: `runtime-client-tests`
 
 Rule `persisted-runs-remain-operable`: Clients can list, inspect, watch, and cancel persisted runs independently of the process that created them.
 - list and show responses are bounded

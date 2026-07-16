@@ -101,6 +101,7 @@ export const diagnosticCodes = {
   invalidRuntimeResponse: "invalid-runtime-response",
   lifecycleConflict: "lifecycle-conflict",
   operationCapacityExceeded: "operation-capacity-exceeded",
+  requestCapacityExceeded: "request-capacity-exceeded",
   inferenceError: "inference-error",
   projectInventoryFailed: "project-inventory-failed",
   semanticIndexBuildFailed: "semantic-index-build-failed",

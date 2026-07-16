@@ -12,6 +12,7 @@ import {
   serializeOpenCanonProblem,
 } from "@opencanon/core";
 import { runtimeAuthHeaders } from "./auth.ts";
+import type { RuntimeRequestAdmission } from "./request-admission.ts";
 
 export const LocalTransportKind = {
   Http: "http",
@@ -345,6 +346,7 @@ export async function serveLocalProtocolPipe(input: {
   host?: string;
   maxFrameBytes?: number;
   beginActivity?(): () => void;
+  requestAdmission?: RuntimeRequestAdmission;
 }): Promise<LocalProtocolPipeServer> {
   const sockets = new Set<Socket>();
   const nodeServer = net.createServer((socket) => {
@@ -487,7 +489,7 @@ async function streamPipeText(endpoint: LocalProtocolPipeEndpoint, request: Loca
 }
 
 async function handlePipeSocket(
-  input: { routeRequest(request: Request): Promise<Response>; host?: string; maxFrameBytes?: number; beginActivity?(): () => void },
+  input: { routeRequest(request: Request): Promise<Response>; host?: string; maxFrameBytes?: number; beginActivity?(): () => void; requestAdmission?: RuntimeRequestAdmission },
   socket: Socket,
 ): Promise<void> {
   const endActivity = input.beginActivity?.();
@@ -500,20 +502,25 @@ async function handlePipeSocket(
       return;
     }
     const request = pipeFrameToRequest(rawFrame, input.host ?? PipeHost);
-    const response = await input.routeRequest(request);
-    if (isEventStreamResponse(response)) {
-      await streamPipeResponse(socket, rawFrame.id, response);
-      return;
+    const admission = input.requestAdmission?.admit(request);
+    try {
+      const response = admission && !admission.ok ? admission.response : await input.routeRequest(request);
+      if (isEventStreamResponse(response)) {
+        await streamPipeResponse(socket, rawFrame.id, response);
+        return;
+      }
+      const responseFrame: PipeResponseFrame = {
+        protocol: PipeProtocolName,
+        id: rawFrame.id,
+        status: response.status,
+        statusText: response.statusText,
+        body: await responseBodyValue(response),
+      };
+      await writePipeFrame(socket, responseFrame);
+      socket.end();
+    } finally {
+      if (admission?.ok) admission.release();
     }
-    const responseFrame: PipeResponseFrame = {
-      protocol: PipeProtocolName,
-      id: rawFrame.id,
-      status: response.status,
-      statusText: response.statusText,
-      body: await responseBodyValue(response),
-    };
-    await writePipeFrame(socket, responseFrame);
-    socket.end();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await endPipeFrame(socket, errorFrame(requestId, 500, "Internal Server Error", message));
