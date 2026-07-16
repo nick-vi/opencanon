@@ -25,14 +25,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.authoring.factories"
+          "span": "opencanon.authoring.factories",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -209,14 +209,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.authoring.validators"
+          "span": "opencanon.authoring.validators",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -393,14 +393,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "unsafe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.authoring.validators.apply"
+          "span": "opencanon.authoring.validators.apply",
+          "idempotency": "unsafe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -548,14 +548,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.authoring.validators.preview"
+          "span": "opencanon.authoring.validators.preview",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -732,14 +732,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.authoring.validators.fixtures"
+          "span": "opencanon.authoring.validators.fixtures",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -916,14 +916,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.canon.history"
+          "span": "opencanon.canon.history",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -1100,14 +1100,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.canon.related.read"
+          "span": "opencanon.canon.related.read",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -1282,14 +1282,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.canon.related.query"
+          "span": "opencanon.canon.related.query",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -1466,14 +1466,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.changes.list"
+          "span": "opencanon.changes.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -1650,14 +1650,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.proof.runs.read"
+          "span": "opencanon.proof.runs.read",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -1832,14 +1832,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "unsafe",
           "cancellable": true,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.proof.runs.start"
+          "span": "opencanon.proof.runs.start",
+          "idempotency": "unsafe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -1987,14 +1987,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.proof.runs.cancel"
+          "span": "opencanon.proof.runs.cancel",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -2142,14 +2142,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.activity.list"
+          "span": "opencanon.activity.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -2324,14 +2324,20 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "keyed",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.activity.record"
+          "span": "opencanon.activity.record",
+          "idempotency": "keyed",
+          "idempotencyKey": {
+            "source": "body",
+            "path": [
+              "id"
+            ]
+          }
         },
         "x-opencanon-input": {
           "type": "object",
@@ -2479,14 +2485,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.changes.ready"
+          "span": "opencanon.changes.ready",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -2663,14 +2669,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.code.graph"
+          "span": "opencanon.code.graph",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -2847,14 +2853,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.code.symbols"
+          "span": "opencanon.code.symbols",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -3031,14 +3037,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "safe",
           "cancellable": true,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.knowledge.ask"
+          "span": "opencanon.knowledge.ask",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -3215,14 +3221,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.knowledge.backlinks"
+          "span": "opencanon.knowledge.backlinks",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -3399,14 +3405,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.knowledge.chunks"
+          "span": "opencanon.knowledge.chunks",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -3583,14 +3589,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.knowledge.coverage"
+          "span": "opencanon.knowledge.coverage",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -3767,14 +3773,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.context.packet"
+          "span": "opencanon.context.packet",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -3951,14 +3957,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "safe",
           "cancellable": true,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.knowledge.search"
+          "span": "opencanon.knowledge.search",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -4135,14 +4141,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.knowledge.status"
+          "span": "opencanon.knowledge.status",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -4535,14 +4541,14 @@
           "authorization": "project",
           "consistency": "lifecycle",
           "cost": "operation",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.doctor.run"
+          "span": "opencanon.doctor.run",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -4719,14 +4725,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.events.list"
+          "span": "opencanon.events.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -5013,14 +5019,14 @@
           "authorization": "project",
           "consistency": "lifecycle",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 65536,
             "concurrency": 32
           },
-          "span": "opencanon.events.stream"
+          "span": "opencanon.events.stream",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -5250,14 +5256,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.feedback.query"
+          "span": "opencanon.feedback.query",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -5434,14 +5440,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.findings.list"
+          "span": "opencanon.findings.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -5618,14 +5624,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.filesystem.file"
+          "span": "opencanon.filesystem.file",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -5802,14 +5808,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.filesystem.tree"
+          "span": "opencanon.filesystem.tree",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -5986,14 +5992,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "keyed",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.gates.approve"
+          "span": "opencanon.gates.approve",
+          "idempotency": "unsafe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -6141,14 +6147,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.gates.pending"
+          "span": "opencanon.gates.pending",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -6325,14 +6331,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.git.diff"
+          "span": "opencanon.git.diff",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -6509,14 +6515,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.git.history"
+          "span": "opencanon.git.history",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -6689,14 +6695,14 @@
           "authorization": "public",
           "consistency": "lifecycle",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.health.read"
+          "span": "opencanon.health.read",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -7076,14 +7082,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.hooks.feedback"
+          "span": "opencanon.hooks.feedback",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -7260,14 +7266,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "unsafe",
           "cancellable": false,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.knowledge.index"
+          "span": "opencanon.knowledge.index",
+          "idempotency": "unsafe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -7415,14 +7421,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.observability.list"
+          "span": "opencanon.observability.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -7599,14 +7605,14 @@
           "authorization": "project",
           "consistency": "lifecycle",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.producers.list"
+          "span": "opencanon.producers.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -7783,14 +7789,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.project.summary"
+          "span": "opencanon.project.summary",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -8735,14 +8741,14 @@
           "authorization": "project",
           "consistency": "lifecycle",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.service.projects"
+          "span": "opencanon.service.projects",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -8919,14 +8925,14 @@
           "authorization": "project",
           "consistency": "lifecycle",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.settings.read"
+          "span": "opencanon.settings.read",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -9101,14 +9107,14 @@
           "authorization": "project",
           "consistency": "lifecycle",
           "cost": "bounded",
-          "idempotency": "unsafe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.settings.write"
+          "span": "opencanon.settings.write",
+          "idempotency": "unsafe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -9256,14 +9262,14 @@
           "authorization": "project",
           "consistency": "lifecycle",
           "cost": "tiny",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 16384,
             "responseBytes": 262144,
             "concurrency": 32
           },
-          "span": "opencanon.project.state"
+          "span": "opencanon.project.state",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -10088,14 +10094,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "operation",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 1048576,
             "responseBytes": 4194304,
             "concurrency": 2
           },
-          "span": "opencanon.validation.run"
+          "span": "opencanon.validation.run",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -10272,14 +10278,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.validators.list"
+          "span": "opencanon.validators.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",
@@ -10541,14 +10547,14 @@
           "authorization": "project",
           "consistency": "published",
           "cost": "bounded",
-          "idempotency": "safe",
           "cancellable": false,
           "limits": {
             "requestBytes": 262144,
             "responseBytes": 4194304,
             "concurrency": 16
           },
-          "span": "opencanon.worktrees.list"
+          "span": "opencanon.worktrees.list",
+          "idempotency": "safe"
         },
         "x-opencanon-input": {
           "type": "object",

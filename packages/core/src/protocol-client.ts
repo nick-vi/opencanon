@@ -176,6 +176,12 @@ function protocolTransportRequest(
   if (operation.idempotency === ProtocolIdempotency.Keyed && !idempotencyKey) {
     throw new Error(`Operation ${operation.id} requires an idempotency key.`);
   }
+  if (operation.idempotency === ProtocolIdempotency.Keyed) {
+    const identity = protocolIdentity(parsed, operation.idempotencyKey.path);
+    if (identity !== idempotencyKey) {
+      throw new Error(`Operation ${operation.id} requires its idempotency key to equal body.${operation.idempotencyKey.path.join(".")}.`);
+    }
+  }
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(parsed.query ?? {})) {
     for (const item of Array.isArray(value) ? value : [value]) query.append(key, item);
@@ -194,6 +200,15 @@ function protocolTransportRequest(
     signal: options.signal,
     timeoutMs: options.timeoutMs,
   };
+}
+
+function protocolIdentity(input: ProtocolInput, path: readonly string[]): string | undefined {
+  let value: unknown = input.body;
+  for (const segment of path) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    value = (value as Record<string, unknown>)[segment];
+  }
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function requireOperation(operationId: ProtocolOperationId, kind: ProtocolOperationDefinition["kind"]): ProtocolOperationDefinition {

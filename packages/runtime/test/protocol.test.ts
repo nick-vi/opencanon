@@ -8,6 +8,7 @@ import {
   ProtocolAuthorization,
   ProtocolHeader,
   ProtocolHttpMethod,
+  ProtocolIdempotency,
   ProtocolOperationMetadataSchema,
   ProtocolOperations,
   ProtocolResponseFailure,
@@ -51,6 +52,10 @@ test("the protocol registry owns every route and method pair exactly once", () =
   assert.deepEqual(protocolMethodsForPath(ProtocolRoute.Health), [ProtocolHttpMethod.Get]);
   assert.equal(findProtocolOperation(ProtocolHttpMethod.Post, ProtocolRoute.Health), undefined);
   assert.equal(protocolOperationById("health.read")?.authorization, ProtocolAuthorization.Public);
+  const activityRecord = protocolOperationById("activity.record");
+  assert(activityRecord && activityRecord.idempotency === ProtocolIdempotency.Keyed);
+  assert.deepEqual(activityRecord.idempotencyKey, { source: "body", path: ["id"] });
+  assert.equal(protocolOperationById("gates.approve")?.idempotency, ProtocolIdempotency.Unsafe);
   assert.equal(findProtocolOperation(ProtocolHttpMethod.Get, "/api/snapshot"), undefined);
   assert.equal(protocolOperationById("project.snapshot"), undefined);
 });
@@ -208,6 +213,11 @@ test("keyed commands require and preserve their idempotency key across repair", 
   await assert.rejects(
     client.command("activity.record", { body: { id: "event-a" } }),
     /requires an idempotency key/,
+  );
+  assert.equal(keys.length, 0);
+  await assert.rejects(
+    client.command("activity.record", { body: { id: "event-a" } }, { idempotencyKey: "event-b" }),
+    /idempotency key.*body\.id/,
   );
   assert.equal(keys.length, 0);
 

@@ -5,9 +5,11 @@ import {
   ProtocolHeader,
   ProtocolHttpMethod,
   ProtocolRoute,
+  ProtocolTransportFailure,
+  ProtocolTransportFailureCode,
 } from "@opencanon/core";
 import { runtimeAuthHeaders } from "../src/auth.ts";
-import { LocalTransportKind, localPipeEndpoint, pipeProtocolTransport, serveLocalProtocolPipe } from "../src/local-protocol.ts";
+import { LocalTransportKind, httpLoopbackTransport, localPipeEndpoint, pipeProtocolTransport, serveLocalProtocolPipe } from "../src/local-protocol.ts";
 import { createRuntimeProtocolPolicy } from "../src/protocol-policy.ts";
 import { json } from "../src/routes.ts";
 import { serveRuntime } from "../src/server-http.ts";
@@ -35,7 +37,7 @@ test("protocol policy rejects unknown, unauthorized, unversioned, and invalid re
   assert.equal(handled, 0);
 });
 
-test("keyed commands require an explicit idempotency key", async () => {
+test("keyed commands bind the idempotency key to the declared domain identity", async () => {
   const policy = createRuntimeProtocolPolicy({ authToken: TestToken, currentRevision: () => 1 });
   const handler = async () => json({ ok: true, data: { recorded: true } });
   const request = (key?: string) => new Request(`http://opencanon.runtime${ProtocolRoute.ChangeEvents}`, {
@@ -45,11 +47,54 @@ test("keyed commands require an explicit idempotency key", async () => {
       "content-type": "application/json",
       ...(key ? { [ProtocolHeader.IdempotencyKey]: key } : {}),
     },
-    body: JSON.stringify({ changeId: "change", type: "started" }),
+    body: JSON.stringify({ id: "event-1", changeId: "change", type: "started" }),
   });
 
   assert.equal((await policy.execute(request(), handler)).status, 400);
   assert.equal((await policy.execute(request("event-1"), handler)).status, 200);
+  assert.equal((await policy.execute(request("event-2"), handler)).status, 400);
+});
+
+test("HTTP transport distinguishes caller cancellation from deadline expiry", async () => {
+  const entered: Array<() => void> = [];
+  const server = await serveRuntime({
+    host: "127.0.0.1",
+    port: 0,
+    preflightRequest: () => undefined,
+    requestBodyLimit: () => 16 * 1024,
+    routeRequest: async (request) => {
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        request.signal.addEventListener("abort", done, { once: true });
+        entered.push(done);
+      });
+      return json({ ok: true, data: {} });
+    },
+  });
+  const endpoint = { transport: LocalTransportKind.Http, url: `http://127.0.0.1:${server.port}` } as const;
+  try {
+    const caller = new AbortController();
+    const cancelled = httpLoopbackTransport.request(endpoint, {
+      method: ProtocolHttpMethod.Get,
+      path: ProtocolRoute.Health,
+      timeoutMs: 5_000,
+      signal: caller.signal,
+    });
+    setTimeout(() => caller.abort(), 10);
+    await assert.rejects(cancelled, (error: unknown) =>
+      error instanceof ProtocolTransportFailure && error.code === ProtocolTransportFailureCode.Cancelled);
+
+    const timedOut = httpLoopbackTransport.request(endpoint, {
+      method: ProtocolHttpMethod.Get,
+      path: ProtocolRoute.Health,
+      timeoutMs: 10,
+    });
+    await assert.rejects(timedOut, (error: unknown) =>
+      error instanceof ProtocolTransportFailure && error.code === ProtocolTransportFailureCode.Timeout);
+  } finally {
+    for (const release of entered) release();
+    await server.stop(true);
+  }
 });
 
 test("published queries retry against one stable revision and fail on repeated churn", async () => {

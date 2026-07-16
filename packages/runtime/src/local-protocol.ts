@@ -150,7 +150,11 @@ export const httpLoopbackTransport: LocalProtocolTransport = {
     const controller = timeout ? new AbortController() : undefined;
     const abortFromCaller = () => controller?.abort(request.signal?.reason);
     request.signal?.addEventListener("abort", abortFromCaller, { once: true });
-    const timer = timeout ? setTimeout(() => controller?.abort(), timeout) : undefined;
+    let timeoutFired = false;
+    const timer = timeout ? setTimeout(() => {
+      timeoutFired = true;
+      controller?.abort();
+    }, timeout) : undefined;
     try {
       const response = await fetch(`${endpoint.url.replace(/\/$/, "")}${request.path}`, {
         method: request.method,
@@ -168,7 +172,10 @@ export const httpLoopbackTransport: LocalProtocolTransport = {
         body: await parseResponseBody(response),
       };
     } catch (error) {
-      if (isAbortError(error) && timeout) {
+      if (isAbortError(error) && request.signal?.aborted && !timeoutFired) {
+        throw new ProtocolTransportFailure(ProtocolTransportFailureCode.Cancelled, "OpenCanon local request was cancelled.", { cause: error });
+      }
+      if (isAbortError(error) && timeoutFired) {
         throw new ProtocolTransportFailure(ProtocolTransportFailureCode.Timeout, `OpenCanon local request timed out after ${timeout}ms.`, { cause: error });
       }
       throw normalizeLocalTransportFailure(error);

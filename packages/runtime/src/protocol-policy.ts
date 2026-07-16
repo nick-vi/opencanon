@@ -130,7 +130,7 @@ async function validateOperationInput(
     ...(Object.keys(query).length > 0 ? { query } : {}),
     ...(body.value !== undefined ? { body: body.value } : {}),
   });
-  if (parsed.success) return undefined;
+  if (parsed.success) return validateIdempotencyIdentity(request, operation, parsed.data);
   return json(
     diagnosticsFailure([
       {
@@ -139,6 +139,31 @@ async function validateOperationInput(
         details: parsed.error.issues.slice(0, 8).map((issue) => `${issue.path.join(".") || "request"}: ${issue.message}`),
       },
     ], diagnosticCodes.invalidProtocolRequest),
+    400,
+  );
+}
+
+function validateIdempotencyIdentity(
+  request: Request,
+  operation: ProtocolOperationDefinition,
+  parsedInput: unknown,
+): Response | undefined {
+  if (operation.idempotency !== ProtocolIdempotency.Keyed) return undefined;
+  const key = request.headers.get(ProtocolHeader.IdempotencyKey)?.trim();
+  let value: unknown = parsedInput;
+  for (const segment of [operation.idempotencyKey.source, ...operation.idempotencyKey.path]) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      value = undefined;
+      break;
+    }
+    value = (value as Record<string, unknown>)[segment];
+  }
+  if (typeof value === "string" && value.trim() === key) return undefined;
+  return json(
+    diagnostic(
+      diagnosticCodes.invalidProtocolRequest,
+      `${ProtocolHeader.IdempotencyKey} for operation ${operation.id} must equal body.${operation.idempotencyKey.path.join(".")}.`,
+    ),
     400,
   );
 }

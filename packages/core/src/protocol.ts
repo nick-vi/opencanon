@@ -73,7 +73,13 @@ export const ProtocolLimitsSchema = z.object({
 }).strict();
 export type ProtocolLimits = z.infer<typeof ProtocolLimitsSchema>;
 
-export const ProtocolOperationMetadataSchema = z.object({
+export const ProtocolIdempotencyKeyBindingSchema = z.object({
+  source: z.literal("body"),
+  path: z.array(z.string().min(1).max(128)).min(1).max(8),
+}).strict();
+export type ProtocolIdempotencyKeyBinding = z.infer<typeof ProtocolIdempotencyKeyBindingSchema>;
+
+const ProtocolOperationMetadataBaseSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/),
   version: z.literal(DomainProtocolVersion),
   kind: ProtocolOperationKindSchema,
@@ -82,11 +88,20 @@ export const ProtocolOperationMetadataSchema = z.object({
   authorization: ProtocolAuthorizationSchema,
   consistency: ProtocolConsistencySchema,
   cost: ProtocolCostSchema,
-  idempotency: ProtocolIdempotencySchema,
   cancellable: z.boolean(),
   limits: ProtocolLimitsSchema,
   span: z.string().regex(/^opencanon\.[a-z][a-z0-9.-]*$/),
 }).strict();
+
+export const ProtocolOperationMetadataSchema = z.discriminatedUnion("idempotency", [
+  ProtocolOperationMetadataBaseSchema.extend({
+    idempotency: z.literal(ProtocolIdempotency.Keyed),
+    idempotencyKey: ProtocolIdempotencyKeyBindingSchema,
+  }).strict(),
+  ProtocolOperationMetadataBaseSchema.extend({
+    idempotency: z.union([z.literal(ProtocolIdempotency.Safe), z.literal(ProtocolIdempotency.Unsafe)]),
+  }).strict(),
+]);
 export type ProtocolOperationMetadata = z.infer<typeof ProtocolOperationMetadataSchema>;
 
 export const ProtocolQueryValueSchema = z.union([z.string(), z.array(z.string())]);
@@ -100,27 +115,43 @@ export type ProtocolInput = {
 };
 export type ParsedProtocolInput = z.output<typeof ProtocolInputSchema>;
 
+type ProtocolOperationPolicy = ProtocolOperationMetadata extends infer TMetadata
+  ? TMetadata extends ProtocolOperationMetadata
+    ? Omit<TMetadata, "id">
+    : never
+  : never;
+
 export type ProtocolOperationDefinition<
   TId extends string = string,
   TInput extends z.ZodType = z.ZodType,
   TOutput extends z.ZodType = z.ZodType,
-> = Readonly<Omit<ProtocolOperationMetadata, "id"> & {
+> = Readonly<ProtocolOperationPolicy & {
   id: TId;
   inputSchema: TInput;
   outputSchema: TOutput;
 }>;
 
+type ProtocolOperationDefinitionInput<
+  TId extends string,
+  TInput extends z.ZodType,
+  TOutput extends z.ZodType,
+> = ProtocolOperationPolicy & {
+  id: TId;
+  inputSchema: TInput;
+  outputSchema: TOutput;
+};
+
 export function defineProtocolOperation<
   const TId extends string,
   const TInput extends z.ZodType,
   const TOutput extends z.ZodType,
->(definition: Omit<ProtocolOperationMetadata, "id"> & { id: TId; inputSchema: TInput; outputSchema: TOutput }): ProtocolOperationDefinition<TId, TInput, TOutput> {
+>(definition: ProtocolOperationDefinitionInput<TId, TInput, TOutput>): ProtocolOperationDefinition<TId, TInput, TOutput> {
   ProtocolOperationMetadataSchema.parse(operationMetadata(definition));
   return Object.freeze(definition);
 }
 
 export function operationMetadata(operation: ProtocolOperationDefinition): ProtocolOperationMetadata {
-  return {
+  const metadata = {
     id: operation.id,
     version: operation.version,
     kind: operation.kind,
@@ -130,10 +161,12 @@ export function operationMetadata(operation: ProtocolOperationDefinition): Proto
     consistency: operation.consistency,
     cost: operation.cost,
     idempotency: operation.idempotency,
+    ...(operation.idempotency === ProtocolIdempotency.Keyed ? { idempotencyKey: operation.idempotencyKey } : {}),
     cancellable: operation.cancellable,
     limits: operation.limits,
     span: operation.span,
   };
+  return ProtocolOperationMetadataSchema.parse(metadata);
 }
 
 export function ProjectionResponseSchema<TSchema extends z.ZodType>(dataSchema: TSchema) {

@@ -93,6 +93,7 @@ type OperationInput<TId extends string = string> = {
   consistency?: (typeof ProtocolConsistency)[keyof typeof ProtocolConsistency];
   cost?: (typeof ProtocolCost)[keyof typeof ProtocolCost];
   idempotency?: (typeof ProtocolIdempotency)[keyof typeof ProtocolIdempotency];
+  idempotencyKey?: { source: "body"; path: string[] };
   cancellable?: boolean;
   limits?: (typeof Limits)[keyof typeof Limits];
   outputSchema?: z.ZodType;
@@ -101,7 +102,10 @@ type OperationInput<TId extends string = string> = {
 function operation<const TId extends string>(input: OperationInput<TId>): ProtocolOperationDefinition<TId> {
   const cost = input.cost ?? ProtocolCost.Bounded;
   const domainOutputSchema = input.outputSchema ?? JsonValueSchema;
-  return defineProtocolOperation({
+  const idempotency = input.idempotency ?? (input.kind === ProtocolOperationKind.Query || input.kind === ProtocolOperationKind.Stream
+    ? ProtocolIdempotency.Safe
+    : ProtocolIdempotency.Unsafe);
+  const definition = {
     id: input.id,
     version: DomainProtocolVersion,
     kind: input.kind,
@@ -110,15 +114,17 @@ function operation<const TId extends string>(input: OperationInput<TId>): Protoc
     authorization: input.authorization ?? ProtocolAuthorization.Project,
     consistency: input.consistency ?? ProtocolConsistency.Published,
     cost,
-    idempotency: input.idempotency ?? (input.kind === ProtocolOperationKind.Query || input.kind === ProtocolOperationKind.Stream
-      ? ProtocolIdempotency.Safe
-      : ProtocolIdempotency.Unsafe),
     cancellable: input.cancellable ?? false,
     limits: input.limits ?? (cost === ProtocolCost.Tiny ? Limits.Tiny : cost === ProtocolCost.Operation ? Limits.Operation : Limits.Bounded),
     span: `opencanon.${input.id}`,
     inputSchema: ProtocolInputSchema,
     outputSchema: input.kind === ProtocolOperationKind.Query ? ProjectionResponseSchema(domainOutputSchema) : domainOutputSchema,
-  });
+  };
+  if (idempotency === ProtocolIdempotency.Keyed) {
+    if (!input.idempotencyKey) throw new Error(`Keyed operation ${input.id} must declare its idempotency identity.`);
+    return defineProtocolOperation({ ...definition, idempotency, idempotencyKey: input.idempotencyKey });
+  }
+  return defineProtocolOperation({ ...definition, idempotency });
 }
 
 const query = <const TId extends string>(id: TId, path: OperationInput["path"], input: Omit<OperationInput, "id" | "kind" | "method" | "path"> = {}) =>
@@ -154,7 +160,10 @@ export const ProtocolOperations = Object.freeze([
   command("proof.runs.start", ProtocolRoute.ChangeCheckRuns, { cost: ProtocolCost.Operation, cancellable: true, limits: Limits.Operation }),
   command("proof.runs.cancel", ProtocolRoute.ChangeCheckRunsCancel, { idempotency: ProtocolIdempotency.Safe, cost: ProtocolCost.Tiny }),
   query("activity.list", ProtocolRoute.ChangeEvents),
-  command("activity.record", ProtocolRoute.ChangeEvents, { idempotency: ProtocolIdempotency.Keyed }),
+  command("activity.record", ProtocolRoute.ChangeEvents, {
+    idempotency: ProtocolIdempotency.Keyed,
+    idempotencyKey: { source: "body", path: ["id"] },
+  }),
   query("canon.related.read", ProtocolRoute.CanonRelated),
   postQuery("canon.related.query", ProtocolRoute.CanonRelated),
   operation({
@@ -192,7 +201,7 @@ export const ProtocolOperations = Object.freeze([
   query("filesystem.file", ProtocolRoute.FsFile, { limits: Limits.Bounded }),
   query("findings.list", ProtocolRoute.Findings),
   query("gates.pending", ProtocolRoute.GatePending),
-  command("gates.approve", ProtocolRoute.GateApprove, { idempotency: ProtocolIdempotency.Keyed }),
+  command("gates.approve", ProtocolRoute.GateApprove),
 ] satisfies ProtocolOperationDefinition[]);
 
 const operationsById = new Map<string, ProtocolOperationDefinition>(ProtocolOperations.map((item) => [item.id, item]));
