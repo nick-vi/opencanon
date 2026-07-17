@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.8 - 2026-07-17
+
+- Unified CLI, MCP, browser, and desktop clients behind a generated, versioned domain protocol with revisioned projections, replayable events, and operation-specific retry policy.
+- Made project-state publication atomic, bounded large-repository source analysis, and tightened cancellation, shutdown, health reporting, and project-runtime ownership.
+- Centralized native GGUF embedding inference in the shared service so concurrent project runtimes reuse one bounded model host with explicit overload, timeout, and lifecycle behavior.
+
 ## v0.4.7 - 2026-07-15
 
 - Removed a redundant recursive project-types watcher so atomic Project Knowledge publication cannot trigger an unhandled filesystem race on Linux.
