@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use opencanon_inference::{GenerateOptions, InferenceError};
 use opencanon_vector::{EmbedDbError, EmbeddingDb};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 use crate::contracts::{
-    EmbedSemanticTextsRequest, GenerateTextRequest, ListSemanticChunksRequest,
-    ReadSemanticIndexStatusRequest, SearchSemanticIndexRequest, SemanticChunkEmbeddingRequest,
-    SemanticIndexNodeRequest, WriteSemanticIndexDeltaRequest, WriteSemanticIndexRequest,
+    ListSemanticChunksRequest, ReadSemanticIndexStatusRequest, SearchSemanticIndexRequest,
+    SemanticChunkEmbeddingRequest, SemanticIndexNodeRequest, WriteSemanticIndexDeltaRequest,
+    WriteSemanticIndexRequest,
 };
 use crate::json::{decode, encode, napi_error, sqlite_error};
 use crate::state::timestamp;
@@ -395,55 +394,8 @@ fn semantic_fts_query(query: &str) -> Option<String> {
     )
 }
 
-pub(super) fn generation_options(request: &GenerateTextRequest) -> napi::Result<GenerateOptions> {
-    let defaults = GenerateOptions::default();
-    let max_tokens = request.max_tokens.unwrap_or(defaults.max_tokens);
-    if max_tokens == 0 || max_tokens > 4096 {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Generation maxTokens must be between 1 and 4096.",
-        ));
-    }
-    let temperature = request.temperature.unwrap_or(defaults.temperature);
-    if !(0.0..=2.0).contains(&temperature) {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Generation temperature must be between 0 and 2.",
-        ));
-    }
-    let top_p = request.top_p.unwrap_or(defaults.top_p);
-    if !(0.0..=1.0).contains(&top_p) {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Generation topP must be between 0 and 1.",
-        ));
-    }
-    if request.n_threads.is_some_and(|value| value <= 0) {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Generation nThreads must be a positive integer.",
-        ));
-    }
-    if request.n_ctx.is_some_and(|value| value == 0) {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Generation nCtx must be a positive integer.",
-        ));
-    }
-    Ok(GenerateOptions {
-        max_tokens,
-        temperature,
-        top_p,
-        seed: request.seed.unwrap_or(defaults.seed),
-    })
-}
-
 pub(super) fn vector_error(error: EmbedDbError) -> napi::Error {
     napi_error("invalid-engine-payload", &error.to_string())
-}
-
-pub(super) fn inference_error(error: InferenceError) -> napi::Error {
-    napi_error("inference-error", &error.to_string())
 }
 
 fn replace_semantic_nodes(
@@ -559,7 +511,7 @@ pub(super) fn upsert_semantic_chunk_rows(
         tx.execute(
                 "insert into knowledge_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
                    embedding_hash, kind, language, ordinal, start_line, start_column, start_byte,
-                   end_line, end_column, end_byte, heading, symbol, token_estimate, preview, payload, indexed_at, text)
+                   end_line, end_column, end_byte, heading, symbol, token_count, preview, payload, indexed_at, text)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
                  on conflict(root_dir, index_id, id) do update set
                    path = excluded.path,
@@ -577,7 +529,7 @@ pub(super) fn upsert_semantic_chunk_rows(
                    end_byte = excluded.end_byte,
                    heading = excluded.heading,
                    symbol = excluded.symbol,
-                   token_estimate = excluded.token_estimate,
+                   token_count = excluded.token_count,
                    preview = excluded.preview,
                    payload = excluded.payload,
                    indexed_at = excluded.indexed_at,
@@ -601,7 +553,7 @@ pub(super) fn upsert_semantic_chunk_rows(
                     metadata.range.end.byte,
                     metadata.heading,
                     metadata.symbol,
-                    metadata.token_estimate,
+                    metadata.token_count,
                     metadata.preview,
                     payload,
                     indexed_at,
@@ -733,7 +685,7 @@ pub(super) fn write_knowledge_index_json(
             tx.execute(
                 "insert into knowledge_chunks(root_dir, index_id, id, path, content_hash, chunk_hash,
                    embedding_hash, kind, language, ordinal, start_line, start_column, start_byte,
-                   end_line, end_column, end_byte, heading, symbol, token_estimate, preview, payload, indexed_at, text)
+                   end_line, end_column, end_byte, heading, symbol, token_count, preview, payload, indexed_at, text)
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
                  on conflict(root_dir, index_id, id) do update set
                    path = excluded.path,
@@ -751,7 +703,7 @@ pub(super) fn write_knowledge_index_json(
                    end_byte = excluded.end_byte,
                    heading = excluded.heading,
                    symbol = excluded.symbol,
-                   token_estimate = excluded.token_estimate,
+                   token_count = excluded.token_count,
                    preview = excluded.preview,
                    payload = excluded.payload,
                    indexed_at = excluded.indexed_at,
@@ -775,7 +727,7 @@ pub(super) fn write_knowledge_index_json(
                     metadata.range.end.byte,
                     metadata.heading,
                     metadata.symbol,
-                    metadata.token_estimate,
+                    metadata.token_count,
                     metadata.preview,
                     payload,
                     indexed_at,
@@ -1003,81 +955,4 @@ pub(super) fn search_knowledge_index_json(
         .map(|(_, result)| result)
         .collect::<Vec<_>>();
     encode(&json!({ "index": index, "results": results }))
-}
-
-pub(super) fn embed_semantic_texts_json(
-    handle: &EngineProjectHandle,
-    request: String,
-) -> napi::Result<String> {
-    let request: EmbedSemanticTextsRequest = decode(&request)?;
-    let model_id = request.model_id.trim();
-    if model_id.is_empty() {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Semantic embedding model id is required.",
-        ));
-    }
-    if request.texts.is_empty() {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Semantic embedding request must include at least one text.",
-        ));
-    }
-    if let Some(index) = request.texts.iter().position(|text| text.trim().is_empty()) {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            &format!("Semantic embedding text at index {index} is empty."),
-        ));
-    }
-    if request.task != "document" && request.task != "query" {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Semantic embedding task must be document or query.",
-        ));
-    }
-
-    let embedder = handle.semantic_embedder(&request)?;
-    let text_refs = request.texts.iter().map(String::as_str).collect::<Vec<_>>();
-    let vectors = match request.task.as_str() {
-        "document" => embedder.embed_batch(&text_refs),
-        "query" => embedder.embed_query_batch(&text_refs),
-        _ => unreachable!("semantic embedding task was validated before model loading"),
-    }
-    .map_err(inference_error)?;
-
-    encode(&json!({
-      "modelId": embedder.model_id(),
-      "dimensions": embedder.dimensions(),
-      "vectors": vectors,
-    }))
-}
-
-pub(super) fn generate_text_json(
-    handle: &EngineProjectHandle,
-    request: String,
-) -> napi::Result<String> {
-    let request: GenerateTextRequest = decode(&request)?;
-    let model_id = request.model_id.trim();
-    if model_id.is_empty() {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Generation model id is required.",
-        ));
-    }
-    if request.prompt.trim().is_empty() {
-        return Err(napi_error(
-            "invalid-engine-payload",
-            "Generation prompt is required.",
-        ));
-    }
-    let options = generation_options(&request)?;
-    let generator = handle.generator(&request)?;
-    let text = generator
-        .generate(&request.prompt, Some(options))
-        .map_err(inference_error)?;
-
-    encode(&json!({
-      "modelId": generator.model_id(),
-      "text": text,
-    }))
 }

@@ -460,11 +460,11 @@ test("semantic index contracts require provider identity and chunk metadata", ()
   const request = WriteSemanticIndexRequestSchema.parse({
     index: {
       id: "project",
-      version: "semantic-index-v2",
+      version: "semantic-index-v3",
       status: "ready",
       provider: {
-        id: "opencanon-native-jina-code-v2",
-        kind: "native",
+        id: "opencanon-gguf-jina-code-v2",
+        kind: "gguf",
         displayName: "Jina Code v2",
         modelId: "jina-code-v2",
         modelDigest: "model-hash",
@@ -495,7 +495,7 @@ test("semantic index contracts require provider identity and chunk metadata", ()
           language: "typescript",
           ordinal: 0,
           range: { start: { line: 1, column: 1, byte: 0 }, end: { line: 2, column: 1, byte: 20 } },
-          tokenEstimate: 5,
+          tokenCount: 5,
           preview: "company loader",
         },
         text: "company loader",
@@ -511,12 +511,12 @@ test("semantic index contracts require provider identity and chunk metadata", ()
   assert.equal(search.limit, 20);
 });
 
-test("semantic embedding model registry exposes native embedding models", () => {
-  const native = semanticEmbeddingModel(SemanticEmbeddingModelId.JinaCodeV2);
+test("semantic embedding model registry exposes GGUF embedding models", () => {
+  const model = semanticEmbeddingModel(SemanticEmbeddingModelId.JinaCodeV2);
 
-  assert.equal(native.providerKind, SemanticEmbeddingProviderKind.Native);
-  assert.equal(native.dimensions, 896);
-  assert.equal(semanticEmbeddingModelIds().every((id) => semanticEmbeddingModel(id).providerKind === SemanticEmbeddingProviderKind.Native), true);
+  assert.equal(model.providerKind, SemanticEmbeddingProviderKind.Gguf);
+  assert.equal(model.dimensions, 896);
+  assert.equal(semanticEmbeddingModelIds().every((id) => semanticEmbeddingModel(id).providerKind === SemanticEmbeddingProviderKind.Gguf), true);
   assert(semanticEmbeddingModelIds().includes(SemanticEmbeddingModelId.Qwen3Embed));
 });
 

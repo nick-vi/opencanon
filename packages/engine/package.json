@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "@opencanon/core": "*",
-    "@opencanon/observability": "*"
+    "@opencanon/observability": "*",
+    "@opencanon/service-contracts": "*"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.6.2"

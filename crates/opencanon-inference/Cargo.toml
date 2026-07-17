@@ -10,7 +10,6 @@ description = "OpenCanon native GGUF model runtime for embeddings and generation
 crate-type = ["rlib"]
 
 [dependencies]
-encoding_rs = "=0.8.35"
 hf-hub = "=0.3.2"
 llama-cpp-2 = { version = "=0.1.146", default-features = false }
 parking_lot = "=0.12.5"

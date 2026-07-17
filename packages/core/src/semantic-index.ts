@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-export const SemanticIndexVersion = "semantic-index-v2";
-export const SemanticChunkerVersion = "opencanon-fact-semantic-chunker-v1";
+export const SemanticIndexVersion = "semantic-index-v3";
+export const SemanticChunkerVersion = "opencanon-token-semantic-chunker-v1";
 export const SemanticEmbeddingProducerVersion = "opencanon-semantic-producer-v1";
 export const DefaultSemanticIndexId = "project";
 
@@ -91,12 +91,6 @@ export function semanticPreview(text: string, maxLength = PreviewMaxLength): str
   const compact = text.replace(/\s+/g, " ").trim();
   if (compact.length <= maxLength) return compact;
   return `${compact.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
-}
-
-export function estimateSemanticTokens(text: string): number {
-  const trimmed = text.trim();
-  if (!trimmed) return 0;
-  return Math.max(1, Math.ceil(trimmed.split(/\s+/u).length * 1.35));
 }
 
 function stableStringify(value: SemanticHashInput): string {

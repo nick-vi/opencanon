@@ -35,6 +35,13 @@ export type DoctorRuntimeHealth = {
     status: string;
     message?: string;
     registered: boolean;
+    inferencePolicy?: {
+      status: "valid" | "invalid";
+      path: string;
+      message: string;
+      source?: "default" | "file";
+      profileId?: string;
+    };
   };
   project?: {
     status: string;

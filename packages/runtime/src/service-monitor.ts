@@ -1,4 +1,5 @@
 import { RuntimeHealthSchema, RuntimeLiveStateSchema, resolveRootDir, type RuntimeHealth, type RuntimeLiveState } from "@opencanon/core";
+import { isInferenceDescribeResult } from "@opencanon/service-contracts";
 import { localProtocolEndpointFromEntry, requestLocalJson, requestLocalProjectionData } from "./local-protocol.ts";
 import { ServiceApiRoute } from "./service-types.ts";
 import {
@@ -293,10 +294,12 @@ function serviceHealthFromValue(value: unknown): ServiceHealth | undefined {
   if (processValue.kind !== "service") return undefined;
   if (typeof processValue.pid !== "number" || !Number.isInteger(processValue.pid) || processValue.pid <= 0) return undefined;
   if (typeof processValue.leaseId !== "string" || !processValue.leaseId.trim()) return undefined;
+  if (!isInferenceDescribeResult(record.inference)) return undefined;
   return {
     status: "ready",
     protocolVersion: LocalControlProtocolVersion,
     runtimeVersion: record.runtimeVersion,
+    inference: record.inference,
     process: {
       kind: "service",
       pid: processValue.pid,

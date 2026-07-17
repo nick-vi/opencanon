@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -59,6 +60,7 @@ test("project discovery governs every authored Rust crate source", () => {
   const authoredRust = tracked.stdout
     .split(/\r?\n/)
     .filter((filePath) => /^crates\/[^/]+\/src\/.*\.rs$/.test(filePath))
+    .filter((filePath) => existsSync(filePath))
     .sort();
   const discovery = discoverProjectFiles(createPaths(process.cwd()));
 
@@ -346,17 +348,17 @@ test("local and hosted gates audit every committed Rust lockfile", () => {
   assert.match(release, /cargo \+1\.95\.0 install cargo-audit --version 0\.22\.2 --locked/);
 });
 
-test("native embedding smoke is required unless explicitly optional", () => {
+test("service-owned GGUF inference smoke is required unless explicitly optional", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts?: Record<string, string>;
   };
-  const source = readFileSync("scripts/native-embedding-smoke.ts", "utf8");
+  const source = readFileSync("scripts/gguf-inference-smoke.ts", "utf8");
 
-  assert.match(expandedScript(packageJson, ["check:ci", "check:ci:quality"]), /npm run smoke:native-embedding/);
-  assert.equal(packageJson.scripts?.["smoke:native-embedding"], "node scripts/native-embedding-smoke.ts");
-  assert.equal(packageJson.scripts?.["smoke:native-embedding:optional"], "node scripts/native-embedding-smoke.ts --optional");
+  assert.match(expandedScript(packageJson, ["check:ci", "check:ci:quality"]), /npm run smoke:gguf-inference/);
+  assert.equal(packageJson.scripts?.["smoke:gguf-inference"], "node scripts/gguf-inference-smoke.ts");
+  assert.equal(packageJson.scripts?.["smoke:gguf-inference:optional"], "node scripts/gguf-inference-smoke.ts --optional");
   assert.match(source, /process\.argv\.includes\("--optional"\)/);
-  assert(!source.includes("OPENCANON_NATIVE_EMBEDDING_SMOKE"));
+  assert(source.includes("OPENCANON_GGUF_INFERENCE_MODEL"));
 });
 
 test("CI quality includes TypeScript contract checking", () => {

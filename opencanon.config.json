@@ -40,8 +40,7 @@
   "fileDiscovery": "git",
   "externalTools": {},
   "semanticEmbedding": {
-    "mode": "native",
-    "modelId": "jina-code-v2",
-    "showDownloadProgress": true
+    "provider": "gguf",
+    "modelId": "jina-code-v2"
   }
 }

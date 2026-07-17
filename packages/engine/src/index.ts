@@ -16,10 +16,6 @@ import {
   ExtractFactsResultSchema,
   EngineVersionSchema,
   EngineProjectStatusSchema,
-  EmbedSemanticTextsRequestSchema,
-  EmbedSemanticTextsResultSchema,
-  GenerateTextRequestSchema,
-  GenerateTextResultSchema,
   IndexCodeGraphRequestSchema,
   IndexCodeGraphResultSchema,
   ListSemanticChunksRequestSchema,
@@ -64,10 +60,6 @@ import {
   type ChangeCheckRunPruneRequest,
   type ChangeCheckRunPruneResult,
   type ChangeCheckRunQuery,
-  type EmbedSemanticTextsRequest,
-  type EmbedSemanticTextsResult,
-  type GenerateTextRequest,
-  type GenerateTextResult,
   type ExtractFactsRequest,
   type ExtractFactsResult,
   type EngineVersion,
@@ -103,6 +95,7 @@ import {
   type WriteSemanticIndexRequest,
 } from "@opencanon/core";
 import type { SpanRecord, TraceEventRecord, TraceRecord } from "@opencanon/observability";
+import { InferenceTaskKind, type InferenceTaskKind as InferenceTask } from "@opencanon/service-contracts";
 
 const require = createRequire(import.meta.url);
 const packageSourceDir = fileURLToPath(new URL(".", import.meta.url));
@@ -113,6 +106,40 @@ const EngineDiagnosticCode = {
 export type Engine = {
   version(): EngineVersion;
   openProject(request: OpenProjectRequest): EngineProject;
+  openInferenceRuntime(request: OpenInferenceRuntimeRequest): InferenceRuntime;
+};
+
+export type OpenInferenceRuntimeRequest = {
+  modelId: string;
+  nGpuLayers: number;
+  nThreads: number;
+  nCtx: number;
+  nBatch: number;
+  nUbatch: number;
+  nSeqMax: number;
+};
+
+export type InferenceRuntimeDescription = {
+  modelId: string;
+  dimensions: number;
+  maximumInputTokens: number;
+  contextTokens: number;
+  batchTokens: number;
+  microBatchTokens: number;
+  maximumSequences: number;
+  threads: number;
+  gpuLayers: number;
+};
+
+export type InferenceTextRequest = {
+  task: InferenceTask;
+  texts: string[];
+};
+
+export type InferenceRuntime = {
+  describe(): InferenceRuntimeDescription;
+  countTokens(request: InferenceTextRequest): { model: InferenceRuntimeDescription; tokenCounts: number[] };
+  embed(request: InferenceTextRequest): { model: InferenceRuntimeDescription; tokenCounts: number[]; vectors: number[][] };
 };
 
 export type ProjectExtractFactsRequest = ExtractFactsRequest;
@@ -135,8 +162,6 @@ export type EngineProject = {
   readSemanticIndexStatus(request?: ReadSemanticIndexStatusRequest): ReadSemanticIndexStatusResult;
   listSemanticChunks(request?: ListSemanticChunksRequest): ListSemanticChunksResult;
   searchSemanticIndex(request: SearchSemanticIndexRequest): SearchSemanticIndexResult;
-  embedSemanticTexts(request: EmbedSemanticTextsRequest): EmbedSemanticTextsResult;
-  generateText(request: GenerateTextRequest): GenerateTextResult;
   startWatcher(request: WatcherStartRequest, onBatch: (batch: WatcherEventBatch) => void): WatcherStartResult;
   drainWatcherEvents(): WatcherEventBatch[];
   stopWatcher(): void;
@@ -176,6 +201,13 @@ export type ObservabilityRecordResult = {
 type EngineJsonBinding = {
   versionJson(): string;
   openProjectJson(request: string): EngineProjectJsonBinding;
+  openInferenceRuntimeJson(request: string): InferenceRuntimeJsonBinding;
+};
+
+type InferenceRuntimeJsonBinding = {
+  describeJson(): string;
+  countTokensJson(request: string): string;
+  embedJson(request: string): string;
 };
 
 type EngineProjectJsonBinding = {
@@ -195,8 +227,6 @@ type EngineProjectJsonBinding = {
   readSemanticIndexStatusJson(request: string): string;
   listSemanticChunksJson(request: string): string;
   searchSemanticIndexJson(request: string): string;
-  embedSemanticTextsJson(request: string): string;
-  generateTextJson(request: string): string;
   startWatcherJson(request: string, callback: (error: unknown, batchJson?: string) => void): string;
   drainWatcherEventsJson(): string;
   stopWatcher(): void;
@@ -288,6 +318,30 @@ export function createEngine(binding: Partial<EngineJsonBinding>): Engine {
       const project = callEngine(() => binding.openProjectJson(JSON.stringify(OpenProjectRequestSchema.parse(request))));
       return createEngineProject(project);
     },
+    openInferenceRuntime: (request) => {
+      const runtime = callEngine(() => binding.openInferenceRuntimeJson(JSON.stringify(validateOpenInferenceRuntimeRequest(request))));
+      return createInferenceRuntime(runtime);
+    },
+  };
+}
+
+function createInferenceRuntime(runtime: InferenceRuntimeJsonBinding): InferenceRuntime {
+  assertInferenceRuntimeJsonBinding(runtime);
+  return {
+    describe: () => validateInferenceRuntimeDescription(parseJson(callEngine(() => runtime.describeJson()))),
+    countTokens: (request) => {
+      const result = parseJson(callEngine(() => runtime.countTokensJson(JSON.stringify(validateInferenceTextRequest(request))))) as Record<string, unknown>;
+      return {
+        model: validateInferenceRuntimeDescription(result.model),
+        tokenCounts: validateTokenCounts(result.tokenCounts, request.texts.length),
+      };
+    },
+    embed: (request) => {
+      const result = parseJson(callEngine(() => runtime.embedJson(JSON.stringify(validateInferenceTextRequest(request))))) as Record<string, unknown>;
+      const model = validateInferenceRuntimeDescription(result.model);
+      const vectors = validateVectors(result.vectors, request.texts.length, model.dimensions);
+      return { model, tokenCounts: validateTokenCounts(result.tokenCounts, request.texts.length), vectors };
+    },
   };
 }
 
@@ -340,14 +394,6 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
     searchSemanticIndex: (request) =>
       SearchSemanticIndexResultSchema.parse(
         parseJson(callEngine(() => project.searchSemanticIndexJson(JSON.stringify(SearchSemanticIndexRequestSchema.parse(request))))),
-      ),
-    embedSemanticTexts: (request) =>
-      EmbedSemanticTextsResultSchema.parse(
-        parseJson(callEngine(() => project.embedSemanticTextsJson(JSON.stringify(EmbedSemanticTextsRequestSchema.parse(request))))),
-      ),
-    generateText: (request) =>
-      GenerateTextResultSchema.parse(
-        parseJson(callEngine(() => project.generateTextJson(JSON.stringify(GenerateTextRequestSchema.parse(request))))),
       ),
     startWatcher: (request, onBatch) =>
       WatcherStartResultSchema.parse(
@@ -424,8 +470,76 @@ function createEngineProject(project: EngineProjectJsonBinding): EngineProject {
   };
 }
 
+function validateOpenInferenceRuntimeRequest(request: OpenInferenceRuntimeRequest): OpenInferenceRuntimeRequest {
+  if (!request.modelId.trim()) throw new Error("Inference model id is required.");
+  for (const [name, value] of Object.entries({
+    nGpuLayers: request.nGpuLayers,
+    nThreads: request.nThreads,
+    nCtx: request.nCtx,
+    nBatch: request.nBatch,
+    nUbatch: request.nUbatch,
+    nSeqMax: request.nSeqMax,
+  })) {
+    if (!Number.isInteger(value) || value < (name === "nGpuLayers" ? 0 : 1)) {
+      throw new Error(`Inference ${name} must be a valid integer.`);
+    }
+  }
+  if (request.nBatch > request.nCtx) throw new Error("Inference batch tokens cannot exceed context tokens.");
+  if (request.nUbatch > request.nBatch) throw new Error("Inference micro-batch tokens cannot exceed batch tokens.");
+  return request;
+}
+
+function validateInferenceTextRequest(request: InferenceTextRequest): InferenceTextRequest {
+  if (request.task !== InferenceTaskKind.Document && request.task !== InferenceTaskKind.Query) throw new Error("Inference task must be document or query.");
+  if (request.texts.length === 0 || request.texts.some((text) => !text.trim())) throw new Error("Inference texts must be non-empty.");
+  return request;
+}
+
+function validateInferenceRuntimeDescription(value: unknown): InferenceRuntimeDescription {
+  if (!value || typeof value !== "object") throw new Error("Inference runtime returned an invalid description.");
+  const record = value as Record<string, unknown>;
+  const integer = (key: string, minimum = 1): number => {
+    const item = record[key];
+    if (typeof item !== "number" || !Number.isInteger(item) || item < minimum) throw new Error(`Inference runtime returned invalid ${key}.`);
+    return item;
+  };
+  if (typeof record.modelId !== "string" || !record.modelId) throw new Error("Inference runtime returned an invalid model id.");
+  return {
+    modelId: record.modelId,
+    dimensions: integer("dimensions"),
+    maximumInputTokens: integer("maximumInputTokens"),
+    contextTokens: integer("contextTokens"),
+    batchTokens: integer("batchTokens"),
+    microBatchTokens: integer("microBatchTokens"),
+    maximumSequences: integer("maximumSequences"),
+    threads: integer("threads"),
+    gpuLayers: integer("gpuLayers", 0),
+  };
+}
+
+function validateTokenCounts(value: unknown, expected: number): number[] {
+  if (!Array.isArray(value) || value.length !== expected || value.some((item) => typeof item !== "number" || !Number.isInteger(item) || item < 1)) {
+    throw new Error("Inference runtime returned invalid token counts.");
+  }
+  return value as number[];
+}
+
+function validateVectors(value: unknown, expected: number, dimensions: number): number[][] {
+  if (!Array.isArray(value) || value.length !== expected || value.some((vector) => !Array.isArray(vector) || vector.length !== dimensions || vector.some((item) => typeof item !== "number" || !Number.isFinite(item)))) {
+    throw new Error("Inference runtime returned invalid vectors.");
+  }
+  return value as number[][];
+}
+
+function assertInferenceRuntimeJsonBinding(runtime: Partial<InferenceRuntimeJsonBinding>): asserts runtime is InferenceRuntimeJsonBinding {
+  const missing = ["describeJson", "countTokensJson", "embedJson"].filter(
+    (key) => typeof runtime[key as keyof InferenceRuntimeJsonBinding] !== "function",
+  );
+  if (missing.length > 0) throw new Error(`OpenCanon inference runtime exports are invalid: ${missing.join(", ")}.`);
+}
+
 function assertEngineJsonBinding(binding: Partial<EngineJsonBinding>): asserts binding is EngineJsonBinding {
-  const missing = ["versionJson", "openProjectJson"].filter(
+  const missing = ["versionJson", "openProjectJson", "openInferenceRuntimeJson"].filter(
     (key) => typeof binding[key as keyof EngineJsonBinding] !== "function",
   );
   if (missing.length === 0) return;
@@ -457,8 +571,6 @@ function assertEngineProjectJsonBinding(project: Partial<EngineProjectJsonBindin
     "readSemanticIndexStatusJson",
     "listSemanticChunksJson",
     "searchSemanticIndexJson",
-    "embedSemanticTextsJson",
-    "generateTextJson",
     "startWatcherJson",
     "drainWatcherEventsJson",
     "stopWatcher",

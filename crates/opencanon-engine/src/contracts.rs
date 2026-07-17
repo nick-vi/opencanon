@@ -223,44 +223,6 @@ pub(crate) struct SemanticEmbeddingProviderRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct EmbedSemanticTextsRequest {
-    pub(crate) model_id: String,
-    #[serde(default = "default_semantic_embedding_task")]
-    pub(crate) task: String,
-    pub(crate) texts: Vec<String>,
-    pub(crate) n_gpu_layers: Option<u32>,
-    pub(crate) n_threads: Option<i32>,
-    pub(crate) n_ctx: Option<u32>,
-    #[serde(default = "default_show_download_progress")]
-    pub(crate) show_download_progress: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GenerateTextRequest {
-    pub(crate) model_id: String,
-    pub(crate) prompt: String,
-    pub(crate) max_tokens: Option<usize>,
-    pub(crate) temperature: Option<f32>,
-    pub(crate) top_p: Option<f32>,
-    pub(crate) seed: Option<u32>,
-    pub(crate) n_gpu_layers: Option<u32>,
-    pub(crate) n_threads: Option<i32>,
-    pub(crate) n_ctx: Option<u32>,
-    #[serde(default = "default_show_download_progress")]
-    pub(crate) show_download_progress: bool,
-}
-
-fn default_semantic_embedding_task() -> String {
-    "document".to_string()
-}
-
-fn default_show_download_progress() -> bool {
-    true
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct SemanticChunkEmbeddingRequest {
     pub(crate) metadata: SemanticChunkMetadataRequest,
     pub(crate) text: String,
@@ -283,7 +245,7 @@ pub(crate) struct SemanticChunkMetadataRequest {
     pub(crate) heading: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) symbol: Option<String>,
-    pub(crate) token_estimate: u32,
+    pub(crate) token_count: u32,
     pub(crate) preview: String,
 }
 
@@ -330,7 +292,7 @@ pub(crate) struct ListSemanticChunksRequest {
 }
 
 fn default_semantic_provider_kind() -> String {
-    "local".to_string()
+    "gguf".to_string()
 }
 
 #[derive(Debug, Deserialize)]

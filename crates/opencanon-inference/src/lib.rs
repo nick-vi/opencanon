@@ -6,15 +6,10 @@
 
 pub mod embedder;
 pub mod error;
-pub mod generator;
 pub mod models;
 pub mod runtime;
 
 pub use embedder::{Embedder, EmbedderConfig};
 pub use error::{InferenceError, Result};
-pub use generator::{ChatMessage, GenerateOptions, Generator, GeneratorConfig};
-pub use models::{
-    EmbeddingModel, GeneratorModel, ModelFamily, DEFAULT_EMBEDDING_MODEL, DEFAULT_GENERATOR_MODEL,
-    EMBEDDING_MODELS, GENERATOR_MODELS,
-};
+pub use models::{EmbeddingModel, ModelFamily, DEFAULT_EMBEDDING_MODEL, EMBEDDING_MODELS};
 pub use runtime::{NativeModelRuntime, NativeRuntimeOptions};

@@ -3,17 +3,83 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticIndexProducerVersion, semanticSearchVectorForProvider } from "@opencanon/runtime";
-import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity } from "../src/knowledge-producers.ts";
+import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, buildRuntimeSnapshot, createKnowledgeIndexManager, createProjectStore, semanticIndexProducerVersion, semanticSearchVectorForProvider, withCliAstFactsProvider } from "@opencanon/runtime";
+import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity, type RuntimeKnowledgeChunk } from "../src/knowledge-producers.ts";
 import { collectKnowledgeChunksInBatches, KnowledgeSourceBatchSize } from "../src/knowledge-index-manager.ts";
 import { captureRuntimeSourceSnapshot, snapshotFiles } from "../src/project-source-snapshot.ts";
 import { cachedStartupSemanticIndexSnapshot } from "../src/semantic-index-snapshot.ts";
 import { createEngine } from "@opencanon/engine";
-import { createEphemeralValidationResultCache, createPaths, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
+import { createEphemeralValidationResultCache, createPaths, semanticEmbeddingConfigHash, semanticEmbeddingModel, type FileFacts, type ScanAndDiffResult, type SemanticEmbeddingConfig, type SemanticEmbeddingModelId, type SemanticIndexDiagnostic, type WriteSemanticIndexRequest } from "@opencanon/core";
 import { createAuthoringProject } from "./support.ts";
-import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication, fakeInferenceEngineBinding } from "./engine-binding-test-support.ts";
 
-test("runtime source snapshots feed captured bytes into fact extraction", () => {
+test("Project Knowledge splits chunks to the model's exact token budget without truncation", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-token-budget-"));
+  const embeddedTexts: string[] = [];
+  try {
+    const text = "alpha beta gamma delta epsilon zeta omega";
+    const runtimeChunk: RuntimeKnowledgeChunk = {
+      text,
+      metadata: {
+        id: "chunk:long",
+        path: "src/long.txt",
+        contentHash: "content-long",
+        chunkHash: "chunk-long",
+        kind: "file",
+        language: "text",
+        ordinal: 0,
+        range: {
+          start: { line: 1, column: 1, byte: 0 },
+          end: { line: 1, column: text.length + 1, byte: text.length },
+        },
+        preview: text,
+      },
+    };
+    const inference = {
+      async countTokens(request: { texts: string[]; modelId: string }) {
+        return {
+          model: { modelId: request.modelId, modelDigest: testModelDigest(request.modelId), dimensions: 896, maximumInputTokens: 3, maximumSequences: 16 },
+          tokenCounts: request.texts.map(wordCount),
+        };
+      },
+      async embed(request: { texts: string[]; modelId: string }) {
+        embeddedTexts.push(...request.texts);
+        return {
+          model: { modelId: request.modelId, modelDigest: testModelDigest(request.modelId), dimensions: 896, maximumInputTokens: 3, maximumSequences: 16 },
+          tokenCounts: request.texts.map(wordCount),
+          vectors: request.texts.map((_text, index) => ggufTestVector(index + 1)),
+        };
+      },
+    } as never;
+    const request = await buildProjectSemanticIndex({
+      rootDir,
+      scan: {
+        statePath: path.join(rootDir, "state.sqlite"),
+        schemaVersion: 6,
+        inventoryHash: "inventory",
+        files: [{ path: "src/long.txt", contentHash: "content-long", size: text.length, stale: false }],
+        changedFiles: ["src/long.txt"],
+        unchangedFiles: [],
+        deletedFiles: [],
+        staleFiles: 0,
+      },
+      facts: [],
+      runtimeChunks: [runtimeChunk],
+      inference,
+      semanticEmbedding: ggufEmbeddingConfig(),
+    });
+
+    assert.equal(request.index.status, "ready");
+    assert(request.chunks.length > 1);
+    assert(request.chunks.every((chunk) => chunk.metadata.tokenCount <= 3));
+    assert(embeddedTexts.every((chunk) => wordCount(chunk) <= 3));
+    assert.equal(embeddedTexts.join(" ").replace(/\s+/gu, " ").trim(), text);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime source snapshots feed captured bytes into fact extraction", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -56,7 +122,7 @@ test("runtime source snapshots feed captured bytes into fact extraction", () => 
   }
 });
 
-test("runtime source snapshot capture handles large file inventories deterministically", () => {
+test("runtime source snapshot capture handles large file inventories deterministically", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-runtime-source-snapshot-large-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -77,7 +143,7 @@ test("runtime source snapshot capture handles large file inventories determinist
   }
 });
 
-test("Project Knowledge extracts only required facts in bounded source batches", () => {
+test("Project Knowledge extracts only required facts in bounded source batches", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-batches-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -147,7 +213,7 @@ test("Project Knowledge extracts only required facts in bounded source batches",
   }
 });
 
-test("runtime semantic index chunks files with native vectors", () => {
+test("runtime semantic index chunks files with native vectors", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -175,7 +241,7 @@ test("runtime semantic index chunks files with native vectors", () => {
       },
     ];
 
-    const build = buildProjectSemanticIndex({
+    const build = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -191,14 +257,14 @@ test("runtime semantic index chunks files with native vectors", () => {
         staleFiles: 0,
       },
       facts,
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
 
     assert.equal(build.index.id, "project");
     assert.equal(build.index.status, "ready");
     assert.equal(build.index.provider.dimensions, 896);
-    assert.equal(build.index.provider.kind, "native");
+    assert.equal(build.index.provider.kind, "gguf");
     assert.equal(build.index.producerVersion, semanticIndexProducerVersion());
     assert.match(build.index.identityHash, /^[a-f0-9]{64}$/u);
     assert.equal(build.index.chunkTreeHash.length, 64);
@@ -228,7 +294,7 @@ test("runtime semantic index chunks files with native vectors", () => {
   }
 });
 
-test("Project Knowledge producers own markdown and typed fact chunking", () => {
+test("Project Knowledge producers own markdown and typed fact chunking", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-knowledge-producers-"));
   try {
     mkdirSync(path.join(rootDir, "docs"), { recursive: true });
@@ -284,7 +350,7 @@ test("Project Knowledge producers own markdown and typed fact chunking", () => {
   }
 });
 
-test("runtime snapshot reports a missing reusable semantic index as stale", async () => {
+test.sequential("runtime snapshot reports a missing reusable semantic index as stale", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-missing-"));
   try {
     createAuthoringProject(rootDir);
@@ -292,6 +358,7 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
     writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
     const statePath = path.join(rootDir, ".opencanon/state/test/state.sqlite");
     const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
       versionJson: () =>
         JSON.stringify({
           packageVersion: "0.4.0-test",
@@ -348,14 +415,6 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
         readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),
         listSemanticChunksJson: () => JSON.stringify({ index: null, chunks: [] }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
-        embedSemanticTextsJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
-          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
-        },
-        generateTextJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string };
-          return JSON.stringify({ modelId: request.modelId, text: "" });
-        },
         startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
         drainWatcherEventsJson: () => JSON.stringify([]),
         stopWatcher: () => undefined,
@@ -377,7 +436,7 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
     });
     const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine });
 
-    const snapshot = await buildRuntimeSnapshot({
+    const snapshot = await runtimeSnapshotWithAst({
       cwd: rootDir,
       engine,
       store,
@@ -394,12 +453,12 @@ test("runtime snapshot reports a missing reusable semantic index as stale", asyn
   }
 });
 
-test("startup Project Knowledge status is explicit about cached but unverified state", () => {
+test("startup Project Knowledge status is explicit about cached but unverified state", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-startup-status-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
     writeFileSync(path.join(rootDir, "src/company.ts"), "export function loadCompany() {\n  return 'active company';\n}\n");
-    const previous = buildProjectSemanticIndex({
+    const previous = (await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -430,13 +489,13 @@ test("startup Project Knowledge status is explicit about cached but unverified s
         duplicates: [],
         diagnostics: [],
       }],
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
-    }).index;
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
+    })).index;
     const store = {
       readSemanticIndexStatus: () => ({ index: previous }),
     } as Pick<Parameters<typeof cachedStartupSemanticIndexSnapshot>[0], "readSemanticIndexStatus"> as Parameters<typeof cachedStartupSemanticIndexSnapshot>[0];
-    const snapshot = cachedStartupSemanticIndexSnapshot(store, nativeEmbeddingConfig());
+    const snapshot = cachedStartupSemanticIndexSnapshot(store, ggufEmbeddingConfig());
 
     assert.equal(snapshot.status, "stale");
     assert.equal(snapshot.staleChunkCount, previous.chunkCount);
@@ -450,7 +509,7 @@ test("startup Project Knowledge status is explicit about cached but unverified s
   }
 });
 
-test("runtime semantic index makes duplicate fact chunk ids unique", () => {
+test("runtime semantic index makes duplicate fact chunk ids unique", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-duplicate-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -465,7 +524,7 @@ test("runtime semantic index makes duplicate fact chunk ids unique", () => {
       text: "export function loadCompany() {\n  return 'active company';\n}",
       members: [],
     };
-    const build = buildProjectSemanticIndex({
+    const build = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -496,8 +555,8 @@ test("runtime semantic index makes duplicate fact chunk ids unique", () => {
         duplicates: [],
         diagnostics: [],
       }],
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
 
     assert.equal(build.index.status, "ready");
@@ -508,7 +567,7 @@ test("runtime semantic index makes duplicate fact chunk ids unique", () => {
   }
 });
 
-test("runtime semantic index skips historical markdown knowledge", () => {
+test("runtime semantic index skips historical markdown knowledge", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-historical-md-"));
   try {
     mkdirSync(path.join(rootDir, "docs"), { recursive: true });
@@ -525,7 +584,7 @@ test("runtime semantic index skips historical markdown knowledge", () => {
     );
     writeFileSync(path.join(rootDir, "docs/current.md"), "# Current Canon\n\nProject Canon is current.\n");
 
-    const build = buildProjectSemanticIndex({
+    const build = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -541,8 +600,8 @@ test("runtime semantic index skips historical markdown knowledge", () => {
         staleFiles: 0,
       },
       facts: [],
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
 
     assert.equal(build.index.status, "ready");
@@ -553,23 +612,14 @@ test("runtime semantic index skips historical markdown knowledge", () => {
   }
 });
 
-test("runtime semantic index can use native engine embeddings when selected", () => {
+test("runtime semantic index can use native engine embeddings when selected", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-native-"));
   try {
     writeFileSync(path.join(rootDir, "README.md"), "# Company\n\nThe company search surface.\n");
     const calls: Array<{ task: string; texts: string[]; modelId: string }> = [];
-    const project = {
-      embedSemanticTexts(request: { task?: string; texts: string[]; modelId: string }) {
-        calls.push({ task: request.task ?? "document", texts: request.texts, modelId: request.modelId });
-        return {
-          modelId: request.modelId,
-          dimensions: 896,
-          vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)),
-        };
-      },
-    } as never;
+    const inference = testInferenceClient({ calls });
 
-    const build = buildProjectSemanticIndex({
+    const build = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -582,30 +632,29 @@ test("runtime semantic index can use native engine embeddings when selected", ()
         staleFiles: 0,
       },
       facts: [],
-      project,
+      inference,
       semanticEmbedding: {
-        mode: "native",
+        provider: "gguf",
         modelId: "jina-code-v2",
-        showDownloadProgress: false,
       },
     });
 
     assert.equal(build.index.status, "ready");
-    assert.equal(build.index.provider.kind, "native");
+    assert.equal(build.index.provider.kind, "gguf");
     assert.equal(build.index.provider.modelId, "jina-code-v2");
     assert.equal(build.index.provider.dimensions, 896);
     assert.equal(build.chunks.length, 1);
     assert.equal(build.chunks[0].vector.length, 896);
     assert.equal(calls[0].task, "document");
 
-    const queryVector = semanticSearchVectorForProvider({
+    const queryVector = await semanticSearchVectorForProvider({
       query: "company",
       provider: build.index.provider,
-      project,
+      inference,
+      rootDir,
       semanticEmbedding: {
-        mode: "native",
+        provider: "gguf",
         modelId: "jina-code-v2",
-        showDownloadProgress: false,
       },
     });
     assert.equal(queryVector.length, 896);
@@ -615,7 +664,7 @@ test("runtime semantic index can use native engine embeddings when selected", ()
   }
 });
 
-test("runtime semantic index batches native document embeddings", () => {
+test("runtime semantic index batches native document embeddings", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-batches-"));
   try {
     mkdirSync(path.join(rootDir, "docs"), { recursive: true });
@@ -626,7 +675,7 @@ test("runtime semantic index batches native document embeddings", () => {
     });
     const calls: Array<{ task: string; texts: string[]; modelId: string }> = [];
 
-    const build = buildProjectSemanticIndex({
+    const build = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -639,22 +688,22 @@ test("runtime semantic index batches native document embeddings", () => {
         staleFiles: 0,
       },
       facts: [],
-      project: nativeTestProject({ calls }),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient({ calls }),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
 
     assert.equal(build.index.status, "ready");
     assert.equal(build.chunks.length, 300);
     assert.equal(build.index.embeddingStats?.embeddedChunks, 300);
-    assert.equal(calls.length, 10);
-    assert.deepEqual(calls.map((call) => call.texts.length), [32, 32, 32, 32, 32, 32, 32, 32, 32, 12]);
+    assert.equal(calls.length, 19);
+    assert.deepEqual(calls.map((call) => call.texts.length), [...Array.from({ length: 18 }, () => 16), 12]);
     assert(build.chunks.every((chunk) => chunk.vector.length === 896));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
 
-test("runtime semantic index bounds code symbol chunks per file", () => {
+test("runtime semantic index bounds code symbol chunks per file", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-code-cap-"));
   try {
     mkdirSync(path.join(rootDir, "src"), { recursive: true });
@@ -672,7 +721,7 @@ test("runtime semantic index bounds code symbol chunks per file", () => {
       ...internalNames.map((name, index) => ({ line: exportedNames.length + index + 1, column: 10, name, kind: "function" as const, exported: false, endLine: exportedNames.length + index + 1, params: [] })),
     ];
 
-    const build = buildProjectSemanticIndex({
+    const build = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -703,8 +752,8 @@ test("runtime semantic index bounds code symbol chunks per file", () => {
         duplicates: [],
         diagnostics: [],
       }],
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
 
     assert.equal(build.index.status, "ready");
@@ -716,7 +765,7 @@ test("runtime semantic index bounds code symbol chunks per file", () => {
   }
 });
 
-test("runtime snapshot reports missing semantic index with project embedding config without rebuilding", async () => {
+test.sequential("runtime snapshot reports missing semantic index with project embedding config without rebuilding", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-config-"));
   try {
     createAuthoringProject(rootDir);
@@ -730,9 +779,8 @@ test("runtime snapshot reports missing semantic index with project embedding con
           projectFilePatterns: ["src/**/*.ts"],
           ignore: ["node_modules/**", ".opencanon/**"],
           semanticEmbedding: {
-            mode: "native",
+            provider: "gguf",
             modelId: "jina-code-v2",
-            showDownloadProgress: false,
           },
         },
         null,
@@ -773,6 +821,7 @@ test("runtime snapshot reports missing semantic index with project embedding con
     const writes: WriteSemanticIndexRequest[] = [];
     const embedCalls: Array<{ modelId: string; texts: string[]; task?: string }> = [];
     const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
       versionJson: () =>
         JSON.stringify({
           packageVersion: "0.4.0-test",
@@ -815,15 +864,6 @@ test("runtime snapshot reports missing semantic index with project embedding con
         readSemanticIndexStatusJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null }),
         listSemanticChunksJson: () => JSON.stringify({ index: writes.at(-1)?.index ?? null, chunks: writes.at(-1)?.chunks.map((chunk) => chunk.metadata) ?? [] }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
-        embedSemanticTextsJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string; texts: string[]; task?: string };
-          embedCalls.push(request);
-          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
-        },
-        generateTextJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string };
-          return JSON.stringify({ modelId: request.modelId, text: "" });
-        },
         startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
         drainWatcherEventsJson: () => JSON.stringify([]),
         stopWatcher: () => undefined,
@@ -845,7 +885,7 @@ test("runtime snapshot reports missing semantic index with project embedding con
     });
     const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scan.statePath });
 
-    const snapshot = await buildRuntimeSnapshot({
+    const snapshot = await runtimeSnapshotWithAst({
       cwd: rootDir,
       engine,
       store,
@@ -855,7 +895,7 @@ test("runtime snapshot reports missing semantic index with project embedding con
     assert.equal(writes.length, 0);
     assert.equal(embedCalls.length, 0);
     assert.equal(snapshot.semanticIndex.status, "missing");
-    assert.equal(snapshot.semanticIndex.provider.kind, "native");
+    assert.equal(snapshot.semanticIndex.provider.kind, "gguf");
     assert.equal(snapshot.semanticIndex.provider.modelId, "jina-code-v2");
     assert(snapshot.semanticIndex.diagnostics.some((diagnostic) => diagnostic.code === "semantic-index-missing-on-startup"));
     store.close();
@@ -864,11 +904,11 @@ test("runtime snapshot reports missing semantic index with project embedding con
   }
 });
 
-test("semantic index fails invalid embedding config without local vector output", () => {
+test("semantic index fails invalid embedding config without local vector output", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-invalid-config-"));
   try {
     writeFileSync(path.join(rootDir, "README.md"), "# Company\n\nThe company search surface.\n");
-    const build = buildProjectSemanticIndex({
+    const build = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -881,10 +921,10 @@ test("semantic index fails invalid embedding config without local vector output"
         staleFiles: 0,
       },
       facts: [],
+      inference: testInferenceClient(),
       semanticEmbedding: {
-        mode: "remote" as never,
+        provider: "remote" as never,
         modelId: "jina-code-v2",
-        showDownloadProgress: false,
       },
     });
 
@@ -897,30 +937,20 @@ test("semantic index fails invalid embedding config without local vector output"
   }
 });
 
-test("runtime semantic index reuses unchanged chunk embeddings", () => {
+test("runtime semantic index reuses unchanged chunk embeddings", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-reuse-"));
   try {
     mkdirSync(path.join(rootDir, "docs"), { recursive: true });
     writeFileSync(path.join(rootDir, "README.md"), "# Company\n\nThe company billing surface.\n");
     writeFileSync(path.join(rootDir, "docs/inventory.md"), "# Inventory\n\nThe first inventory model.\n");
     const calls: Array<{ task: string; texts: string[]; modelId: string }> = [];
-    const project = {
-      embedSemanticTexts(request: { task?: string; texts: string[]; modelId: string }) {
-        calls.push({ task: request.task ?? "document", texts: request.texts, modelId: request.modelId });
-        return {
-          modelId: request.modelId,
-          dimensions: 896,
-          vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)),
-        };
-      },
-    } as never;
+    const inference = testInferenceClient({ calls });
     const semanticEmbedding = {
-      mode: "native",
+      provider: "gguf",
       modelId: "jina-code-v2",
-      showDownloadProgress: false,
     } as const;
 
-    const first = buildProjectSemanticIndex({
+    const first = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -936,7 +966,7 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
         staleFiles: 0,
       },
       facts: [],
-      project,
+      inference,
       semanticEmbedding,
     });
     assert.equal(first.index.status, "ready");
@@ -959,7 +989,7 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
     assert(first.chunks.every((chunk) => chunk.vector.length === 896));
 
     writeFileSync(path.join(rootDir, "docs/inventory.md"), "# Inventory\n\nThe second inventory model adds stock counts.\n");
-    const second = buildProjectSemanticIndex({
+    const second = await buildProjectSemanticIndex({
       rootDir,
       scan: {
         statePath: path.join(rootDir, ".opencanon/state/test/state.sqlite"),
@@ -975,7 +1005,7 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
         staleFiles: 0,
       },
       facts: [],
-      project,
+      inference,
       semanticEmbedding,
       previousChunks: first.chunks.map((chunk) => chunk.metadata),
     });
@@ -1009,7 +1039,7 @@ test("runtime semantic index reuses unchanged chunk embeddings", () => {
   }
 });
 
-test("runtime snapshot startup reuses cached semantic index without rebuilding vectors", async () => {
+test.sequential("runtime snapshot startup reuses cached semantic index without rebuilding vectors", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-startup-reuse-"));
   try {
     createAuthoringProject(rootDir);
@@ -1052,15 +1082,16 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         diagnostics: [],
       },
     ];
-    const previous = buildProjectSemanticIndex({
+    const previous = await buildProjectSemanticIndex({
       rootDir,
       scan: previousScan,
       facts,
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
     const writes: WriteSemanticIndexRequest[] = [];
     const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
       versionJson: () =>
         JSON.stringify({
           packageVersion: "0.4.0-test",
@@ -1103,14 +1134,6 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
         readSemanticIndexStatusJson: () => JSON.stringify({ index: previous.index }),
         listSemanticChunksJson: () => JSON.stringify({ index: previous.index, chunks: previous.chunks.map((chunk) => chunk.metadata) }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
-        embedSemanticTextsJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
-          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
-        },
-        generateTextJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string };
-          return JSON.stringify({ modelId: request.modelId, text: "" });
-        },
         startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
         drainWatcherEventsJson: () => JSON.stringify([]),
         stopWatcher: () => undefined,
@@ -1132,7 +1155,7 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
     });
     const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: nextScan.statePath });
 
-    const snapshot = await buildRuntimeSnapshot({
+    const snapshot = await runtimeSnapshotWithAst({
       cwd: rootDir,
       engine,
       store,
@@ -1151,7 +1174,7 @@ test("runtime snapshot startup reuses cached semantic index without rebuilding v
   }
 });
 
-test("runtime snapshot marks cached semantic index stale after provider config changes without resetting state", async () => {
+test.sequential("runtime snapshot marks cached semantic index stale after provider config changes without resetting state", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-provider-change-"));
   try {
     createAuthoringProject(rootDir);
@@ -1186,14 +1209,14 @@ test("runtime snapshot marks cached semantic index stale after provider config c
       duplicates: [],
       diagnostics: [],
     }];
-    const previous = buildProjectSemanticIndex({
+    const previous = await buildProjectSemanticIndex({
       rootDir,
       scan,
       facts,
-      project: nativeTestProject({ dimensions: 1536 }),
-      semanticEmbedding: nativeEmbeddingConfig("jina-code-v2-large"),
+      inference: testInferenceClient({ dimensions: 1536 }),
+      semanticEmbedding: ggufEmbeddingConfig("jina-code-v2-large"),
     });
-    assert.equal(previous.index.provider.kind, "native");
+    assert.equal(previous.index.provider.kind, "gguf");
     assert.equal(previous.index.provider.modelId, "jina-code-v2-large");
     writeFileSync(
       path.join(rootDir, "opencanon.config.json"),
@@ -1205,9 +1228,8 @@ test("runtime snapshot marks cached semantic index stale after provider config c
           projectFilePatterns: ["src/**/*.ts"],
           ignore: ["node_modules/**", ".opencanon/**"],
           semanticEmbedding: {
-            mode: "native",
+            provider: "gguf",
             modelId: "jina-code-v2",
-            showDownloadProgress: false,
           },
         },
         null,
@@ -1216,6 +1238,7 @@ test("runtime snapshot marks cached semantic index stale after provider config c
     );
     const writes: WriteSemanticIndexRequest[] = [];
     const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
       versionJson: () =>
         JSON.stringify({
           packageVersion: "0.4.0-test",
@@ -1261,14 +1284,6 @@ test("runtime snapshot marks cached semantic index stale after provider config c
           return JSON.stringify({ index: latest?.index ?? previous.index, chunks: latest ? latest.chunks.map((chunk) => chunk.metadata) : previous.chunks.map((chunk) => chunk.metadata) });
         },
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
-        embedSemanticTextsJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
-          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
-        },
-        generateTextJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string };
-          return JSON.stringify({ modelId: request.modelId, text: "" });
-        },
         startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
         drainWatcherEventsJson: () => JSON.stringify([]),
         stopWatcher: () => undefined,
@@ -1290,7 +1305,7 @@ test("runtime snapshot marks cached semantic index stale after provider config c
     });
     const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scan.statePath });
 
-    const snapshot = await buildRuntimeSnapshot({
+    const snapshot = await runtimeSnapshotWithAst({
       cwd: rootDir,
       engine,
       store,
@@ -1310,7 +1325,7 @@ test("runtime snapshot marks cached semantic index stale after provider config c
   }
 });
 
-test("semantic index delta embeds zero chunks for a warm no-op inventory", () => {
+test("semantic index delta embeds zero chunks for a warm no-op inventory", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-delta-noop-"));
   try {
     writeFileSync(path.join(rootDir, "README.md"), "# Company\n\nThe company search surface.\n");
@@ -1324,15 +1339,15 @@ test("semantic index delta embeds zero chunks for a warm no-op inventory", () =>
       deletedFiles: [],
       staleFiles: 0,
     };
-    const previous = buildProjectSemanticIndex({
+    const previous = await buildProjectSemanticIndex({
       rootDir,
       scan,
       facts: [],
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
     const calls: Array<{ task: string; texts: string[]; modelId: string }> = [];
-    const delta = buildProjectSemanticIndexDelta({
+    const delta = await buildProjectSemanticIndexDelta({
       rootDir,
       scan: {
         ...scan,
@@ -1340,8 +1355,8 @@ test("semantic index delta embeds zero chunks for a warm no-op inventory", () =>
         unchangedFiles: ["README.md"],
       },
       facts: [],
-      project: nativeTestProject({ calls }),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient({ calls }),
+      semanticEmbedding: ggufEmbeddingConfig(),
       previousIndex: previous.index,
       previousChunks: previous.chunks.map((chunk) => chunk.metadata),
     });
@@ -1364,7 +1379,7 @@ test("semantic index delta embeds zero chunks for a warm no-op inventory", () =>
   }
 });
 
-test("semantic index delta embeds only changed file chunks", () => {
+test("semantic index delta embeds only changed file chunks", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-semantic-delta-one-file-"));
   try {
     mkdirSync(path.join(rootDir, "docs"), { recursive: true });
@@ -1383,16 +1398,16 @@ test("semantic index delta embeds only changed file chunks", () => {
       deletedFiles: [],
       staleFiles: 0,
     };
-    const previous = buildProjectSemanticIndex({
+    const previous = await buildProjectSemanticIndex({
       rootDir,
       scan: initialScan,
       facts: [],
-      project: nativeTestProject(),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient(),
+      semanticEmbedding: ggufEmbeddingConfig(),
     });
     writeFileSync(path.join(rootDir, "docs/inventory.md"), "# Inventory\n\nThe updated inventory workflow adds supplier review.\n");
     const calls: Array<{ task: string; texts: string[]; modelId: string }> = [];
-    const delta = buildProjectSemanticIndexDelta({
+    const delta = await buildProjectSemanticIndexDelta({
       rootDir,
       scan: {
         ...initialScan,
@@ -1405,8 +1420,8 @@ test("semantic index delta embeds only changed file chunks", () => {
         unchangedFiles: ["README.md"],
       },
       facts: [],
-      project: nativeTestProject({ calls }),
-      semanticEmbedding: nativeEmbeddingConfig(),
+      inference: testInferenceClient({ calls }),
+      semanticEmbedding: ggufEmbeddingConfig(),
       previousIndex: previous.index,
       previousChunks: previous.chunks.map((chunk) => chunk.metadata),
     });
@@ -1449,9 +1464,8 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
           projectFilePatterns: ["src/**/*.ts"],
           ignore: ["node_modules/**", ".opencanon/**"],
           semanticEmbedding: {
-            mode: "native",
+            provider: "gguf",
             modelId: "jina-code-v2",
-            showDownloadProgress: false,
           },
         },
         null,
@@ -1490,11 +1504,11 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
     const writes: WriteSemanticIndexRequest[] = [];
     const staleIndex = {
       id: "project",
-      version: "semantic-index-v2",
+      version: "semantic-index-v3",
       status: "stale",
       provider: {
-        id: "opencanon-native-jina-code-v2",
-        kind: "native",
+        id: "opencanon-gguf-jina-code-v2",
+        kind: "gguf",
         modelId: "jina-code-v2",
         modelDigest: "digest",
         dimensions: 896,
@@ -1515,6 +1529,7 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
     const embedCalls: Array<{ task?: string; texts: string[]; modelId: string }> = [];
     let publishedIndexReady = true;
     const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
       versionJson: () =>
         JSON.stringify({
           packageVersion: "0.4.0-test",
@@ -1560,15 +1575,6 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
           return JSON.stringify({ index: writes.at(-1)?.index ?? null, chunks: writes.at(-1)?.chunks.map((chunk) => chunk.metadata) ?? [] });
         },
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
-        embedSemanticTextsJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string; texts: string[]; task?: string };
-          embedCalls.push(request);
-          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
-        },
-        generateTextJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string };
-          return JSON.stringify({ modelId: request.modelId, text: "" });
-        },
         startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
         drainWatcherEventsJson: () => JSON.stringify([]),
         stopWatcher: () => undefined,
@@ -1590,7 +1596,7 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
     });
     const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scan.statePath });
     const progress: string[] = [];
-    const manager = createKnowledgeIndexManager({ rootDir, store });
+    const manager = createKnowledgeIndexManager({ rootDir, store, inference: testInferenceClient({ calls: embedCalls as never }) });
 
     const result = await manager.index({ onProgress: (event) => progress.push(event.phase) });
 
@@ -1599,8 +1605,8 @@ test("KnowledgeIndexManager rebuilds stale vector state with a full index", asyn
     assert.equal(writes.length, 1);
     assert((writes[0].nodes ?? []).some((node) => node.kind === "root"));
     assert(embedCalls.some((call) => call.task === "document"));
-    assert(embedCalls.some((call) => call.task === "query" && call.texts[0] === "Project Knowledge"));
-    assert.deepEqual(progress, ["scan", "diff", "chunk", "embed", "write", "prewarm", "ready"]);
+    assert(!embedCalls.some((call) => call.task === "query"));
+    assert.deepEqual(progress, ["scan", "diff", "chunk", "embed", "write", "ready"]);
     publishedIndexReady = false;
     await assert.rejects(
       () => manager.index({ force: true }),
@@ -1632,9 +1638,8 @@ for (const scenario of [
             projectFilePatterns: ["src/**/*.ts"],
             ignore: ["node_modules/**", ".opencanon/**"],
             semanticEmbedding: {
-              mode: "native",
+              provider: "gguf",
               modelId: "jina-code-v2",
-              showDownloadProgress: false,
             },
           },
           null,
@@ -1672,6 +1677,7 @@ for (const scenario of [
       }];
       const writes: WriteSemanticIndexRequest[] = [];
       const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
         versionJson: () =>
           JSON.stringify({
             packageVersion: "0.4.0-test",
@@ -1706,14 +1712,6 @@ for (const scenario of [
           readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),
           listSemanticChunksJson: () => JSON.stringify({ index: null, chunks: [] }),
           searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
-          embedSemanticTextsJson: (requestJson: string) => {
-            const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
-            return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => nativeTestVector(index + 1)) });
-          },
-          generateTextJson: (requestJson: string) => {
-            const request = JSON.parse(requestJson) as { modelId: string };
-            return JSON.stringify({ modelId: request.modelId, text: "" });
-          },
           startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
           drainWatcherEventsJson: () => JSON.stringify([]),
           stopWatcher: () => undefined,
@@ -1734,7 +1732,7 @@ for (const scenario of [
         }),
       });
       const store = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scan.statePath });
-      const manager = createKnowledgeIndexManager({ rootDir, store });
+      const manager = createKnowledgeIndexManager({ rootDir, store, inference: testInferenceClient() });
 
       await assert.rejects(() => manager.index(), new RegExp(scenario.message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
       assert.equal(writes.length, 1);
@@ -1746,28 +1744,45 @@ for (const scenario of [
   });
 }
 
-function nativeEmbeddingConfig(modelId: SemanticEmbeddingConfig["modelId"] = "jina-code-v2"): SemanticEmbeddingConfig {
+function ggufEmbeddingConfig(modelId: SemanticEmbeddingConfig["modelId"] = "jina-code-v2"): SemanticEmbeddingConfig {
   return {
-    mode: "native",
+    provider: "gguf",
     modelId,
-    showDownloadProgress: false,
   };
 }
 
-function nativeTestProject(input: { dimensions?: number; calls?: Array<{ task: string; texts: string[]; modelId: string }> } = {}) {
+async function runtimeSnapshotWithAst(input: Parameters<typeof buildRuntimeSnapshot>[0]) {
+  return await withCliAstFactsProvider(() => buildRuntimeSnapshot(input));
+}
+
+function testInferenceClient(input: { dimensions?: number; calls?: Array<{ task: string; texts: string[]; modelId: string }> } = {}) {
   const dimensions = input.dimensions ?? 896;
   return {
-    embedSemanticTexts(request: { task?: string; texts: string[]; modelId: string }) {
-      input.calls?.push({ task: request.task ?? "document", texts: request.texts, modelId: request.modelId });
+    async embed(request: { task: string; texts: string[]; modelId: string }) {
+      input.calls?.push({ task: request.task, texts: request.texts, modelId: request.modelId });
       return {
-        modelId: request.modelId,
-        dimensions,
-        vectors: request.texts.map((_text, index) => nativeTestVector(index + 1, dimensions)),
+        model: { modelId: request.modelId, modelDigest: testModelDigest(request.modelId), dimensions, maximumInputTokens: 512, maximumSequences: 16 },
+        tokenCounts: request.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))),
+        vectors: request.texts.map((_text, index) => ggufTestVector(index + 1, dimensions)),
+      };
+    },
+    async countTokens(request: { texts: string[]; modelId: string }) {
+      return {
+        model: { modelId: request.modelId, modelDigest: testModelDigest(request.modelId), dimensions, maximumInputTokens: 512, maximumSequences: 16 },
+        tokenCounts: request.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))),
       };
     },
   } as never;
 }
 
-function nativeTestVector(seed: number, dimensions = 896): number[] {
+function ggufTestVector(seed: number, dimensions = 896): number[] {
   return Array.from({ length: dimensions }, (_, index) => (index === 0 ? seed : 0));
+}
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function testModelDigest(modelId: string): string {
+  return semanticEmbeddingConfigHash(semanticEmbeddingModel(modelId as SemanticEmbeddingModelId).config);
 }

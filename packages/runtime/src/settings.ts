@@ -7,7 +7,7 @@ import {
   FileDiscoveryMode,
   ExternalToolSchema,
   relative,
-  DefaultNativeSemanticEmbeddingModelId,
+  DefaultGgufSemanticEmbeddingModelId,
   DefaultSemanticEmbeddingConfig,
   SemanticEmbeddingModelId,
   SemanticEmbeddingProviderKind,
@@ -284,26 +284,18 @@ function settingsDiagnostic(message: string) {
 function parseSemanticEmbeddingConfig(input: unknown): { ok: true; config: SemanticEmbeddingConfig } | { ok: false; diagnostics: unknown[] } {
   if (!isRecord(input)) return { ok: false, diagnostics: [settingsDiagnostic(`${ConfigField.SemanticEmbedding} must be an object.`)] };
   const diagnostics: unknown[] = [];
-  const allowedFields = new Set(["mode", "modelId", "nGpuLayers", "nThreads", "nCtx", "showDownloadProgress"]);
+  const allowedFields = new Set(["provider", "modelId"]);
   for (const key of Object.keys(input)) {
     if (!allowedFields.has(key)) diagnostics.push(settingsDiagnostic(`Unknown ${ConfigField.SemanticEmbedding} field: ${key}.`));
   }
-  const mode = parseSemanticEmbeddingMode(input.mode, diagnostics);
-  const modelId = parseSemanticEmbeddingModelId(input.modelId, mode, diagnostics);
-  const showDownloadProgress = parseOptionalBoolean(
-    input.showDownloadProgress,
-    `${ConfigField.SemanticEmbedding}.showDownloadProgress`,
-    DefaultSemanticEmbeddingConfig.showDownloadProgress,
-    diagnostics,
-  );
-  const config: SemanticEmbeddingConfig = { mode, modelId, showDownloadProgress };
-  const nativeFields = parseNativeSemanticEmbeddingFields(input, diagnostics);
-  Object.assign(config, nativeFields);
+  const provider = parseSemanticEmbeddingProvider(input.provider, diagnostics);
+  const modelId = parseSemanticEmbeddingModelId(input.modelId, provider, diagnostics);
+  const config: SemanticEmbeddingConfig = { provider, modelId };
 
-  if (semanticEmbeddingModel(modelId).providerKind !== mode) {
+  if (semanticEmbeddingModel(modelId).providerKind !== provider) {
     diagnostics.push(
       settingsDiagnostic(
-        `${ConfigField.SemanticEmbedding}.modelId must be a native model such as "${DefaultNativeSemanticEmbeddingModelId}".`,
+        `${ConfigField.SemanticEmbedding}.modelId must be a GGUF model such as "${DefaultGgufSemanticEmbeddingModelId}".`,
       ),
     );
   }
@@ -311,53 +303,28 @@ function parseSemanticEmbeddingConfig(input: unknown): { ok: true; config: Seman
   return diagnostics.length > 0 ? { ok: false, diagnostics } : { ok: true, config };
 }
 
-function parseSemanticEmbeddingMode(value: unknown, diagnostics: unknown[]): SemanticEmbeddingProviderKind {
-  if (value === undefined) return DefaultSemanticEmbeddingConfig.mode;
-  if (value === SemanticEmbeddingProviderKind.Native) return value;
-  diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.mode must be "${SemanticEmbeddingProviderKind.Native}".`));
-  return DefaultSemanticEmbeddingConfig.mode;
+function parseSemanticEmbeddingProvider(value: unknown, diagnostics: unknown[]): SemanticEmbeddingProviderKind {
+  if (value === undefined) return DefaultSemanticEmbeddingConfig.provider;
+  if (value === SemanticEmbeddingProviderKind.Gguf) return value;
+  diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.provider must be "${SemanticEmbeddingProviderKind.Gguf}".`));
+  return DefaultSemanticEmbeddingConfig.provider;
 }
 
-function parseSemanticEmbeddingModelId(value: unknown, _mode: SemanticEmbeddingProviderKind, diagnostics: unknown[]): SemanticEmbeddingModelId {
+function parseSemanticEmbeddingModelId(value: unknown, _provider: SemanticEmbeddingProviderKind, diagnostics: unknown[]): SemanticEmbeddingModelId {
   if (value === undefined) {
-    return DefaultNativeSemanticEmbeddingModelId;
+    return DefaultGgufSemanticEmbeddingModelId;
   }
   if (typeof value !== "string") {
     diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.modelId must be a string.`));
-    return DefaultNativeSemanticEmbeddingModelId;
+    return DefaultGgufSemanticEmbeddingModelId;
   }
   const modelId = value.trim();
   const ids = semanticEmbeddingModelIds();
   if (!ids.includes(modelId as SemanticEmbeddingModelId)) {
     diagnostics.push(settingsDiagnostic(`${ConfigField.SemanticEmbedding}.modelId must be one of: ${ids.join(", ")}.`));
-    return DefaultNativeSemanticEmbeddingModelId;
+    return DefaultGgufSemanticEmbeddingModelId;
   }
   return modelId as SemanticEmbeddingModelId;
-}
-
-function parseNativeSemanticEmbeddingFields(input: Record<string, unknown>, diagnostics: unknown[]): Partial<SemanticEmbeddingConfig> {
-  const fields: Partial<SemanticEmbeddingConfig> = {};
-  const nGpuLayers = parseOptionalInteger(input.nGpuLayers, `${ConfigField.SemanticEmbedding}.nGpuLayers`, 0, diagnostics);
-  const nThreads = parseOptionalInteger(input.nThreads, `${ConfigField.SemanticEmbedding}.nThreads`, 1, diagnostics);
-  const nCtx = parseOptionalInteger(input.nCtx, `${ConfigField.SemanticEmbedding}.nCtx`, 1, diagnostics);
-  if (nGpuLayers !== undefined) fields.nGpuLayers = nGpuLayers;
-  if (nThreads !== undefined) fields.nThreads = nThreads;
-  if (nCtx !== undefined) fields.nCtx = nCtx;
-  return fields;
-}
-
-function parseOptionalInteger(value: unknown, field: string, min: number, diagnostics: unknown[]): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === "number" && Number.isInteger(value) && value >= min) return value;
-  diagnostics.push(settingsDiagnostic(`${field} must be a ${min === 0 ? "non-negative" : "positive"} integer.`));
-  return undefined;
-}
-
-function parseOptionalBoolean(value: unknown, field: string, fallback: boolean, diagnostics: unknown[]): boolean {
-  if (value === undefined) return fallback;
-  if (typeof value === "boolean") return value;
-  diagnostics.push(settingsDiagnostic(`${field} must be a boolean.`));
-  return fallback;
 }
 
 function diagnosticMessage(diagnostic: unknown): string {

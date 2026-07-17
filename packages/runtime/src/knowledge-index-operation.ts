@@ -16,6 +16,7 @@ const ReadySemanticIndexStatus = "ready";
 export type KnowledgeIndexOperationInput = {
   rootDir: string;
   statePath: string;
+  registryPath: string;
   force?: boolean;
   changedPaths?: string[];
   signal?: AbortSignal;
@@ -46,6 +47,7 @@ export async function runKnowledgeIndexOperation(input: KnowledgeIndexOperationI
 async function runKnowledgeWorker(input: {
   rootDir: string;
   statePath: string;
+  registryPath: string;
   args: string[];
   operation: "index";
   signal?: AbortSignal;
@@ -54,7 +56,11 @@ async function runKnowledgeWorker(input: {
   const child = spawn(nodeCommandForCliInvocation(), [knowledgeIndexWorkerPath(), ...input.args], {
     cwd: input.rootDir,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, [ProjectRuntimeEnv.StatePath]: input.statePath },
+    env: {
+      ...process.env,
+      [ProjectRuntimeEnv.StatePath]: input.statePath,
+      [ProjectRuntimeEnv.RegistryPath]: input.registryPath,
+    },
   });
   let stdout = "";
   let stderr = "";

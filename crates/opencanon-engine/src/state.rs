@@ -199,6 +199,7 @@ fn repair_knowledge_index_schema(conn: &Connection) -> napi::Result<()> {
     };
     let has_current_shape = snapshot_columns.contains("chunk_tree_hash")
         && chunk_columns.contains("text")
+        && chunk_columns.contains("token_count")
         && table_exists(conn, "knowledge_chunks_fts")?
         && table_exists(conn, "knowledge_nodes")?;
     if !has_current_shape {
@@ -221,7 +222,7 @@ fn repair_knowledge_index_schema(conn: &Connection) -> napi::Result<()> {
     let unsupported_providers: i64 = conn
         .query_row(
             "select count(*) from knowledge_snapshots
-             where coalesce(json_extract(payload, '$.provider.kind'), '') not in ('native', 'remote')",
+             where coalesce(json_extract(payload, '$.provider.kind'), '') != 'gguf'",
             [],
             |row| row.get(0),
         )

@@ -79,7 +79,7 @@ export function renderRuntimeListMarkdown(inspections: RuntimeInspection[], diag
 
 export function renderServiceStatusMarkdown(inspection: ServiceInspection | undefined): string {
   if (!inspection) return ["# OpenCanon Service", "", "Status: not-running", "", "Run: opencanon service start"].join("\n");
-  return [
+  const lines = [
     "# OpenCanon Service",
     "",
     `Status: ${inspection.status}`,
@@ -92,7 +92,25 @@ export function renderServiceStatusMarkdown(inspection: ServiceInspection | unde
     `Started: ${inspection.entry.startedAt}`,
     `Log: ${inspection.entry.logPath}`,
     `Message: ${inspection.message}`,
-  ].join("\n");
+  ];
+  if (inspection.health) {
+    const inference = inspection.health.inference;
+    lines.push(
+      "",
+      "## Inference",
+      "",
+      `Status: ${inference.status}`,
+      `Profile: ${inference.profile.id} (${inference.profile.backend})`,
+      `Policy: ${inference.configurationSource} (${inference.configurationPath})`,
+      `Queue: ${inference.queueRequests} requests, ${inference.queueBytes} bytes`,
+      `Resident model: ${inference.residentModel?.modelId ?? "none"}`,
+      `Operations: ${inference.metrics.completedOperations} completed, ${inference.metrics.failedOperations} failed, ${inference.metrics.cancelledOperations} cancelled, ${inference.metrics.rejectedOperations} rejected`,
+      `Hosts: ${inference.metrics.hostStarts} starts, ${inference.metrics.hostRetirements} retirements, ${inference.metrics.idleEvictions} idle evictions`,
+    );
+    if (inference.idleEvictionAt) lines.push(`Idle eviction: ${inference.idleEvictionAt}`);
+    if (inference.lastFailure) lines.push(`Last failure: ${inference.lastFailure}`);
+  }
+  return lines.join("\n");
 }
 
 export function renderLifecycleEventsMarkdown(events: ProcessLifecycleEvent[], limit = 50): string {

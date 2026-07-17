@@ -2,14 +2,14 @@
 
 ## Summary
 
-Release publication is an explicit, version-locked operation gated by the same proof path used for local readiness, dependency security, runtime build, validation, Doctor, install rehearsal, and native embedding smoke coverage.
+Release publication is an explicit, version-locked operation gated by the same proof path used for local readiness, dependency security, runtime build, validation, Doctor, install rehearsal, and service-owned GGUF inference smoke coverage.
 
 ## Scope
 
 - Files: `.github/workflows/release.yml`
 - Files: `.github/workflows/ci.yml`
 - Files: `package.json`
-- Files: `scripts/native-embedding-smoke.ts`
+- Files: `scripts/gguf-inference-smoke.ts`
 - Files: `scripts/prepare-opencanon-release.ts`
 - Files: `scripts/publish-opencanon-release.ts`
 - Files: `scripts/check-release-consistency.ts`
@@ -35,7 +35,7 @@ Release publication is an explicit, version-locked operation gated by the same p
 
 - `release-tests` test `tests/release.test.ts`
 - `release-check` command `npm run release:check`
-- `native-embedding-smoke` command `npm run smoke:native-embedding`
+- `gguf-inference-smoke` command `npm run smoke:gguf-inference`
 
 ## Rules
 
@@ -65,11 +65,11 @@ Rule `release-supply-chain-is-audited`: The local and release gates audit shippe
 - workflow actions use immutable SHAs
 Checks: `release-tests`, `release-check`
 
-Rule `native-embedding-smoke-is-explicit`: Native embedding smoke coverage must either run and fail on error or be invoked through an explicitly optional command.
-- check:ci invokes the required native embedding smoke
+Rule `gguf-inference-smoke-is-explicit`: Service-owned GGUF inference smoke coverage must either run and fail on error or be invoked through an explicitly optional command.
+- check:ci invokes the required GGUF inference smoke
 - the smoke script does not silently skip
 - optional smoke uses an explicit optional flag
-Checks: `release-tests`, `native-embedding-smoke`
+Checks: `release-tests`, `gguf-inference-smoke`
 
 ## Scenarios
 
@@ -89,11 +89,11 @@ Scenario `tag-push-is-inert`
 Checks: `release-tests`, `release-check`
 
 Scenario `embedding-config-regression-is-caught`
-- Given Project Knowledge uses a configured native embedding model
+- Given Project Knowledge uses a configured GGUF embedding model
 - When the release gate runs
-- Then native embedding code loads the configured model path
-- Then invalid vectors or loading failures fail the gate
-Checks: `native-embedding-smoke`
+- Then the isolated inference host loads the configured model
+- Then invalid vectors, duplicate model residency, missing eviction, or loading failures fail the gate
+Checks: `gguf-inference-smoke`
 
 ## Governance
 

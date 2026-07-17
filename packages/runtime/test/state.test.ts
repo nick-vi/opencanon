@@ -6,13 +6,14 @@ import { test } from "vitest";
 import { createPaths } from "@opencanon/core";
 import { createProjectStore, projectRuntimeStatePath, StableRuntimeNamespace } from "@opencanon/runtime";
 import { createEngine } from "@opencanon/engine";
-import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication, fakeInferenceEngineBinding } from "./engine-binding-test-support.ts";
 
 test("runtime store can use an isolated state path", () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-store-"));
   const statePath = path.join(rootDir, "isolated", "state.sqlite");
   let openedStatePath = "";
   const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
     versionJson: () => JSON.stringify({ packageVersion: "0.1.0", engineVersion: "0.1.0", napiVersion: "3.9.0", schemaVersion: 1 }),
     openProjectJson: (requestJson: string) => {
       openedStatePath = (JSON.parse(requestJson) as { statePath: string }).statePath;
@@ -51,18 +52,6 @@ test("runtime store can use an isolated state path", () => {
         readSemanticIndexStatusJson: () => JSON.stringify({ index: null }),
         listSemanticChunksJson: () => JSON.stringify({ index: null, chunks: [] }),
         searchSemanticIndexJson: () => JSON.stringify({ index: null, results: [] }),
-        embedSemanticTextsJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string; texts: string[] };
-          return JSON.stringify({
-            modelId: request.modelId,
-            dimensions: 2,
-            vectors: request.texts.map(() => [1, 0]),
-          });
-        },
-        generateTextJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string };
-          return JSON.stringify({ modelId: request.modelId, text: "" });
-        },
         startWatcherJson: () => JSON.stringify({ running: false, debounceMs: 250, bufferCapacity: 128 }),
         drainWatcherEventsJson: () => JSON.stringify([]),
         stopWatcher: () => undefined,

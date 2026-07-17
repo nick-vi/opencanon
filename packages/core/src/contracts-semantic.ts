@@ -16,7 +16,7 @@ export type SemanticDistance = z.infer<typeof SemanticDistanceSchema>;
 
 export const SemanticEmbeddingProviderSchema = z.object({
   id: z.string().min(1),
-  kind: z.enum(["native", "remote"]).default("native"),
+  kind: z.literal("gguf").default("gguf"),
   displayName: z.string().min(1).optional(),
   modelId: z.string().min(1),
   modelDigest: z.string().min(1).optional(),
@@ -25,48 +25,6 @@ export const SemanticEmbeddingProviderSchema = z.object({
   configHash: z.string().min(1),
 });
 export type SemanticEmbeddingProvider = z.infer<typeof SemanticEmbeddingProviderSchema>;
-
-export const semanticEmbeddingTaskValues = ["document", "query"] as const;
-export const SemanticEmbeddingTaskSchema = z.enum(semanticEmbeddingTaskValues);
-export type SemanticEmbeddingTask = z.infer<typeof SemanticEmbeddingTaskSchema>;
-
-export const EmbedSemanticTextsRequestSchema = z.object({
-  modelId: z.string().min(1),
-  task: SemanticEmbeddingTaskSchema.default("document"),
-  texts: z.array(z.string()).min(1),
-  nGpuLayers: z.number().int().min(0).optional(),
-  nThreads: z.number().int().min(1).optional(),
-  nCtx: z.number().int().min(1).optional(),
-  showDownloadProgress: z.boolean().default(true),
-});
-export type EmbedSemanticTextsRequest = z.input<typeof EmbedSemanticTextsRequestSchema>;
-
-export const EmbedSemanticTextsResultSchema = z.object({
-  modelId: z.string().min(1),
-  dimensions: z.number().int().min(1),
-  vectors: z.array(z.array(z.number()).min(1)).min(1),
-});
-export type EmbedSemanticTextsResult = z.infer<typeof EmbedSemanticTextsResultSchema>;
-
-export const GenerateTextRequestSchema = z.object({
-  modelId: z.string().min(1),
-  prompt: z.string().min(1),
-  maxTokens: z.number().int().min(1).max(4096).optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  topP: z.number().min(0).max(1).optional(),
-  seed: z.number().int().min(0).optional(),
-  nGpuLayers: z.number().int().min(0).optional(),
-  nThreads: z.number().int().min(1).optional(),
-  nCtx: z.number().int().min(1).optional(),
-  showDownloadProgress: z.boolean().default(true),
-});
-export type GenerateTextRequest = z.input<typeof GenerateTextRequestSchema>;
-
-export const GenerateTextResultSchema = z.object({
-  modelId: z.string().min(1),
-  text: z.string(),
-});
-export type GenerateTextResult = z.infer<typeof GenerateTextResultSchema>;
 
 export const SemanticIndexDiagnosticSchema = z.object({
   code: z.string().min(1),
@@ -132,7 +90,7 @@ export const SemanticChunkMetadataSchema = z.object({
   range: SymbolRangeSchema,
   heading: z.string().min(1).optional(),
   symbol: z.string().min(1).optional(),
-  tokenEstimate: z.number().int().min(0),
+  tokenCount: z.number().int().min(1),
   preview: z.string(),
 });
 export type SemanticChunkMetadata = z.infer<typeof SemanticChunkMetadataSchema>;

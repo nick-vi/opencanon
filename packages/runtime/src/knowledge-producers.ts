@@ -4,7 +4,6 @@ import {
   createSemanticChunkId,
   DiagnosticSeverity,
   engineSourceLanguage,
-  estimateSemanticTokens,
   isEngineExtractableFile,
   semanticPreview,
   semanticTextHash,
@@ -32,7 +31,7 @@ export type KnowledgeSourceFile = {
 
 export type RuntimeKnowledgeChunk = {
   text: string;
-  metadata: Omit<SemanticChunkEmbedding["metadata"], "embeddingHash">;
+  metadata: Omit<SemanticChunkEmbedding["metadata"], "embeddingHash" | "tokenCount">;
 };
 
 export type KnowledgeProducerContext = {
@@ -300,7 +299,6 @@ function markdownChunksForFile(input: { path: string; content: string; contentHa
           start: { line: startLine, column: startColumn, byte: startByte },
           end: { line: endLine, column: endColumn, byte: endByte },
         },
-        tokenEstimate: estimateSemanticTokens(text),
         preview: semanticPreview(text),
         ...(currentHeading ? { heading: currentHeading } : {}),
       },
@@ -368,7 +366,6 @@ function createRuntimeKnowledgeChunk(input: {
       language: semanticLanguage(input.path),
       ordinal: input.ordinal,
       range: { start, end },
-      tokenEstimate: estimateSemanticTokens(text),
       preview: semanticPreview(text),
       ...(input.symbol ? { symbol: input.symbol } : {}),
     },

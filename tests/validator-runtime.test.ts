@@ -514,11 +514,11 @@ test("doctor reports Project Knowledge inspection outcomes explicitly", () => {
 function doctorKnowledgeSnapshot(status: SemanticIndexSnapshot["status"]): SemanticIndexSnapshot {
   return {
     id: "project",
-    version: "semantic-index-v2",
+    version: "semantic-index-v3",
     status,
     provider: {
-      id: "native-test",
-      kind: "native",
+      id: "gguf-test",
+      kind: "gguf",
       modelId: "test-model",
       dimensions: 3,
       distance: "cosine",
@@ -589,6 +589,35 @@ test("doctor fails registered unhealthy runtime state", () => {
     assert.equal(report.status, DoctorStatus.Fail);
     assert.equal(check?.status, DoctorStatus.Fail);
     assert(check?.details?.some((detail) => detail.includes("Project runtime is stale")));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("doctor fails an invalid machine inference policy even when no service is running", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "opencanon-doctor-inference-policy-"));
+  try {
+    const report = buildDoctorReport({
+      paths: createPaths(rootDir),
+      conventions: [],
+      validators: [],
+      runtimeHealth: {
+        service: {
+          status: "not-running",
+          registered: false,
+          inferencePolicy: {
+            status: "invalid",
+            path: "/machine/inference-policy.json",
+            message: "profile.batchTokens cannot exceed profile.contextTokens.",
+          },
+        },
+      },
+    });
+    const check = report.checks.find((item) => item.id === "runtime-health");
+
+    assert.equal(report.status, DoctorStatus.Fail);
+    assert.equal(check?.status, DoctorStatus.Fail);
+    assert(check?.details?.some((detail) => detail.includes("Machine inference policy is invalid")));
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

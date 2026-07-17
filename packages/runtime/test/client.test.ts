@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 import { createEngine } from "@opencanon/engine";
-import { createPaths } from "@opencanon/core";
+import { createPaths, semanticEmbeddingConfigHash, semanticEmbeddingModel, type SemanticEmbeddingModelId } from "@opencanon/core";
 import { createKnowledgeIndexManager, createProjectStore, inspectProjectRuntime, openProjectStore, projectRuntimeStatePath, runtimeAuthHeaders, runtimeNamespaceForRegistry, startOpenCanonRuntime, stopService, stopProjectRuntime } from "@opencanon/runtime";
 import { createAuthoringProject } from "./support.ts";
-import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication } from "./engine-binding-test-support.ts";
+import { admittedJobs, assignedJobEvent, assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, emptyPruneResult, initialProjectPublication, fakeInferenceEngineBinding } from "./engine-binding-test-support.ts";
 import {
   activityRoutesCheckSource,
   canonHistoryRouteCheckSource,
@@ -207,9 +207,8 @@ test("Project Knowledge routes expose search, ask, chunks, coverage, and backlin
         projectFilePatterns: ["src/**/*.ts", "opencanon/areas/**/*.ts"],
         ignore: ["node_modules/**", ".opencanon/**"],
         semanticEmbedding: {
-          mode: "native",
+          provider: "gguf",
           modelId: "jina-code-v2",
-          showDownloadProgress: false,
         },
       },
       null,
@@ -253,6 +252,7 @@ test("Project Knowledge worker failure leaves the serving runtime healthy", asyn
   const server = await startOpenCanonRuntime({
     cwd: rootDir,
     port: 0,
+    registryPath: path.join(rootDir, ".opencanon/test-service-registry.json"),
     async runKnowledgeIndexOperation() {
       throw new Error("isolated index failure");
     },
@@ -297,6 +297,7 @@ test("runtime shutdown cancels Project Knowledge before waiting for operation se
   const server = await startOpenCanonRuntime({
     cwd: rootDir,
     port: 0,
+    registryPath: path.join(rootDir, ".opencanon/test-service-registry.json"),
     onStopped() {
       stopped = true;
     },
@@ -349,6 +350,7 @@ test("runtime shutdown fails explicitly when an operation misses the cancellatio
   const server = await startOpenCanonRuntime({
     cwd: rootDir,
     port: 0,
+    registryPath: path.join(rootDir, ".opencanon/test-service-registry.json"),
     shutdownTimeoutMs: 20,
     onStopped: markStopped,
     async runKnowledgeIndexOperation() {
@@ -404,9 +406,8 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
           projectFilePatterns: ["docs/**/*.md"],
           ignore: ["node_modules/**", ".opencanon/**"],
           semanticEmbedding: {
-            mode: "native",
+            provider: "gguf",
             modelId: "jina-code-v2",
-            showDownloadProgress: false,
           },
         },
         null,
@@ -422,6 +423,7 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
     const previousHashes = new Map<string, string>();
     const embedCalls: Array<{ task?: string; texts: string[] }> = [];
     const engine = createEngine({
+    ...fakeInferenceEngineBinding(),
       versionJson: () =>
         JSON.stringify({
           packageVersion: "0.4.0-test",
@@ -497,15 +499,6 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
         readSemanticIndexStatusJson: () => JSON.stringify({ index: semanticIndex }),
         listSemanticChunksJson: () => JSON.stringify({ index: semanticIndex, chunks: semanticChunks.map((chunk) => chunk.metadata) }),
         searchSemanticIndexJson: () => JSON.stringify({ index: semanticIndex, results: semanticChunks.map((chunk) => ({ chunk: chunk.metadata, score: 1 })) }),
-        embedSemanticTextsJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { task?: string; texts: string[]; modelId: string };
-          embedCalls.push({ task: request.task, texts: request.texts });
-          return JSON.stringify({ modelId: request.modelId, dimensions: 896, vectors: request.texts.map((_text, index) => runtimeTestVector(index + 1)) });
-        },
-        generateTextJson: (requestJson: string) => {
-          const request = JSON.parse(requestJson) as { modelId: string };
-          return JSON.stringify({ modelId: request.modelId, text: "" });
-        },
         startWatcherJson: (_requestJson: string, callback: (error: unknown, batchJson?: string) => void) => {
           watcherCallback = callback;
           return JSON.stringify({ running: true, debounceMs: 250, bufferCapacity: 128 });
@@ -537,7 +530,26 @@ test("Project Knowledge watcher refreshes an existing index after file changes",
       async runKnowledgeIndexOperation(input) {
         const workerStore = createProjectStore({ rootDir, paths: createPaths(rootDir), engine, statePath: scanStatePath });
         try {
-          const result = await createKnowledgeIndexManager({ rootDir, store: workerStore }).index({ force: input.force, changedPaths: input.changedPaths, onProgress: input.onProgress });
+          const result = await createKnowledgeIndexManager({
+            rootDir,
+            store: workerStore,
+            inference: {
+              async embed(request) {
+                embedCalls.push({ task: request.task, texts: [...request.texts] });
+                return {
+                  model: { modelId: request.modelId, modelDigest: semanticEmbeddingConfigHash(semanticEmbeddingModel(request.modelId as SemanticEmbeddingModelId).config), dimensions: 896, maximumInputTokens: 512, maximumSequences: 16 },
+                  tokenCounts: request.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))),
+                  vectors: request.texts.map((_text, index) => runtimeTestVector(index + 1)),
+                } as never;
+              },
+              async countTokens(request) {
+                return {
+                  model: { modelId: request.modelId, modelDigest: semanticEmbeddingConfigHash(semanticEmbeddingModel(request.modelId as SemanticEmbeddingModelId).config), dimensions: 896, maximumInputTokens: 512, maximumSequences: 16 },
+                  tokenCounts: request.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))),
+                } as never;
+              },
+            },
+          }).index({ force: input.force, changedPaths: input.changedPaths, onProgress: input.onProgress });
           return { index: result.index, files: result.scan.files.map((file) => file.path) };
         } finally {
           workerStore.close();

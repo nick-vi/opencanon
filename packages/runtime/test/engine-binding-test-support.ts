@@ -44,3 +44,37 @@ export function assignedProjectPublication(requestJson: string, sequence = 1): s
     event: { ...request.protocolEvent, sequence },
   });
 }
+
+export function fakeInferenceEngineBinding(dimensions = 896) {
+  return {
+    openInferenceRuntimeJson(requestJson: string) {
+      const request = JSON.parse(requestJson) as { modelId: string; nCtx: number; nBatch: number; nUbatch: number; nSeqMax: number; nThreads: number; nGpuLayers: number };
+      const description = {
+        modelId: request.modelId,
+        dimensions,
+        maximumInputTokens: Math.min(request.nCtx, request.nBatch, request.nUbatch),
+        contextTokens: request.nCtx,
+        batchTokens: request.nBatch,
+        microBatchTokens: request.nUbatch,
+        maximumSequences: request.nSeqMax,
+        threads: request.nThreads,
+        gpuLayers: request.nGpuLayers,
+      };
+      return {
+        describeJson: () => JSON.stringify(description),
+        countTokensJson(textsJson: string) {
+          const input = JSON.parse(textsJson) as { texts: string[] };
+          return JSON.stringify({ model: description, tokenCounts: input.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))) });
+        },
+        embedJson(textsJson: string) {
+          const input = JSON.parse(textsJson) as { texts: string[] };
+          return JSON.stringify({
+            model: description,
+            tokenCounts: input.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))),
+            vectors: input.texts.map((_text, index) => Array.from({ length: dimensions }, (_value, dimension) => dimension === 0 ? index + 1 : 0)),
+          });
+        },
+      };
+    },
+  };
+}

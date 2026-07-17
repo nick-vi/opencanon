@@ -366,6 +366,9 @@ export function validateRuntimeHealth(runtimeHealth: DoctorRuntimeHealth | undef
   if (!runtimeHealth) return undefined;
   const details: string[] = [];
   const service = runtimeHealth.service;
+  if (service?.inferencePolicy?.status === "invalid") {
+    details.push(`Machine inference policy is invalid at ${service.inferencePolicy.path}: ${service.inferencePolicy.message}`);
+  }
   if (service?.registered && service.status !== "running") {
     details.push(`Service is ${service.status}${service.message ? `: ${service.message}` : ""}`);
   }
@@ -375,7 +378,7 @@ export function validateRuntimeHealth(runtimeHealth: DoctorRuntimeHealth | undef
     details.push(`Project runtime is ${project.status}${lifecycle}${project.message ? `: ${project.message}` : ""}`);
   }
   const registered = Boolean(service?.registered || project?.registered);
-  if (!registered) {
+  if (!registered && details.length === 0) {
     return {
       status: DoctorStatus.Pass,
       message: "No OpenCanon service or project runtime is registered.",
@@ -384,7 +387,7 @@ export function validateRuntimeHealth(runtimeHealth: DoctorRuntimeHealth | undef
   }
   return {
     status: details.length > 0 ? DoctorStatus.Fail : DoctorStatus.Pass,
-    message: details.length > 0 ? "Registered OpenCanon runtime state is unhealthy." : "Registered OpenCanon runtime state is healthy.",
+    message: details.length > 0 ? "OpenCanon runtime or machine inference state is unhealthy." : "Registered OpenCanon runtime state is healthy.",
     details,
   };
 }

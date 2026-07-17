@@ -15,7 +15,7 @@ import { validateImpactSurfaces } from "./context-validation.ts";
 export { ContextDiagnosticCode, validateContext, validateContextDiagnostics, validateImpactSurfaces } from "./context-validation.ts";
 export type { ContextDiagnostic } from "./context-validation.ts";
 import {
-  DefaultNativeSemanticEmbeddingModelId,
+  DefaultGgufSemanticEmbeddingModelId,
   DefaultSemanticEmbeddingConfig,
   SemanticEmbeddingProviderKind,
   semanticEmbeddingModel,
@@ -459,8 +459,8 @@ function validateSemanticEmbeddingConfig(config: unknown): string[] {
   const diagnostics: string[] = [];
   if (!isRecord(config)) return ["semanticEmbedding must be an object."];
   const ids = semanticEmbeddingModelIds();
-  if (config.mode !== SemanticEmbeddingProviderKind.Native) {
-    diagnostics.push(`semanticEmbedding.mode must be "${SemanticEmbeddingProviderKind.Native}".`);
+  if (config.provider !== SemanticEmbeddingProviderKind.Gguf) {
+    diagnostics.push(`semanticEmbedding.provider must be "${SemanticEmbeddingProviderKind.Gguf}".`);
   }
   if (typeof config.modelId !== "string" || !ids.includes(config.modelId as SemanticEmbeddingModelId)) {
     diagnostics.push(`semanticEmbedding.modelId must be one of: ${ids.join(", ")}.`);
@@ -469,19 +469,9 @@ function validateSemanticEmbeddingConfig(config: unknown): string[] {
 
   const modelId = config.modelId as SemanticEmbeddingModelId;
   const model = semanticEmbeddingModel(modelId);
-  if (config.mode === SemanticEmbeddingProviderKind.Native && model.providerKind !== SemanticEmbeddingProviderKind.Native) {
-    diagnostics.push(`semanticEmbedding.modelId must be a native model such as "${DefaultNativeSemanticEmbeddingModelId}" when mode is "${SemanticEmbeddingProviderKind.Native}".`);
+  if (config.provider === SemanticEmbeddingProviderKind.Gguf && model.providerKind !== SemanticEmbeddingProviderKind.Gguf) {
+    diagnostics.push(`semanticEmbedding.modelId must be a GGUF model such as "${DefaultGgufSemanticEmbeddingModelId}" when provider is "${SemanticEmbeddingProviderKind.Gguf}".`);
   }
-  for (const field of ["nGpuLayers", "nThreads", "nCtx"] as const) {
-    const value = config[field];
-    if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || (field !== "nGpuLayers" && value === 0))) {
-      diagnostics.push(`semanticEmbedding.${field} must be a ${field === "nGpuLayers" ? "non-negative" : "positive"} integer.`);
-    }
-  }
-  if (typeof config.nCtx === "number" && Number.isInteger(config.nCtx) && config.nCtx > model.contextLength) {
-    diagnostics.push(`semanticEmbedding.nCtx must not exceed ${model.contextLength} for ${model.id}.`);
-  }
-  if (typeof config.showDownloadProgress !== "boolean") diagnostics.push("semanticEmbedding.showDownloadProgress must be a boolean.");
   return diagnostics;
 }
 

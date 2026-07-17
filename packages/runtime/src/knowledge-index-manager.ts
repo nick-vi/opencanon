@@ -9,11 +9,12 @@ import {
   type SemanticIndexDiagnostic,
   type SemanticIndexSnapshot,
 } from "@opencanon/core";
-import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta, semanticSearchVectorForProvider } from "./semantic-index.ts";
+import { buildProjectSemanticIndex, buildProjectSemanticIndexDelta } from "./semantic-index.ts";
 import { listPreviousSemanticChunks } from "./semantic-index-snapshot.ts";
 import { applyChangeHint, extractRuntimeFacts, factFilesFromSnapshots, snapshotFiles } from "./project-source-snapshot.ts";
 import { collectRuntimeKnowledgeChunks, type RuntimeKnowledgeChunk } from "./knowledge-producers.ts";
 import type { ProjectStore } from "./state.ts";
+import type { ServiceInferenceClient } from "./service-inference-client.ts";
 
 export const KnowledgeIndexPhase = {
   Scan: "scan",
@@ -21,7 +22,6 @@ export const KnowledgeIndexPhase = {
   Chunk: "chunk",
   Embed: "embed",
   Write: "write",
-  Prewarm: "prewarm",
   Ready: "ready",
 } as const;
 export type KnowledgeIndexPhase = (typeof KnowledgeIndexPhase)[keyof typeof KnowledgeIndexPhase];
@@ -38,6 +38,7 @@ export type KnowledgeIndexRunOptions = {
   force?: boolean;
   changedPaths?: string[];
   onProgress?: (progress: KnowledgeIndexProgress) => void;
+  signal?: AbortSignal;
 };
 
 export type KnowledgeIndexRunResult = {
@@ -59,6 +60,7 @@ const KnowledgeFactKinds: FactKind[] = ["imports", "exports", "symbols", "declar
 export function createKnowledgeIndexManager(input: {
   rootDir: string;
   store: ProjectStore;
+  inference: ServiceInferenceClient;
 }): KnowledgeIndexManager {
   return {
     async index(options = {}) {
@@ -89,7 +91,7 @@ export function createKnowledgeIndexManager(input: {
       let mode: KnowledgeIndexRunResult["mode"];
       if (options.force || !previousIndex || previousIndex.status !== SemanticIndexStatus.Ready) {
         mode = "full";
-        const request = buildProjectSemanticIndex({
+        const request = await buildProjectSemanticIndex({
           rootDir: project.paths.rootDir,
           scan,
           facts: [],
@@ -98,15 +100,20 @@ export function createKnowledgeIndexManager(input: {
           onEmbeddingProgress(current, total) {
             emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding Project Knowledge", current, total, unit: "chunks" });
           },
-          project: input.store.project,
+          inference: input.inference,
+          signal: options.signal,
           semanticEmbedding: project.paths.semanticEmbedding,
           previousChunks,
         });
+        if (request.index.status === "failed") {
+          const failure = request.index.diagnostics.find((diagnostic) => diagnostic.severity === "error")?.message;
+          throw new Error(failure ?? "Project Knowledge full index build failed.");
+        }
         emit({ phase: KnowledgeIndexPhase.Write, label: "Writing Project Knowledge index", current: request.chunks.length, total: request.index.chunkCount, unit: "chunks" });
         input.store.writeSemanticIndex(request);
       } else {
         mode = "delta";
-        const request = buildProjectSemanticIndexDelta({
+        const request = await buildProjectSemanticIndexDelta({
           rootDir: project.paths.rootDir,
           scan,
           facts: [],
@@ -115,7 +122,8 @@ export function createKnowledgeIndexManager(input: {
           onEmbeddingProgress(current, total) {
             emit({ phase: KnowledgeIndexPhase.Embed, label: "Embedding changed Project Knowledge", current, total, unit: "chunks" });
           },
-          project: input.store.project,
+          inference: input.inference,
+          signal: options.signal,
           semanticEmbedding: project.paths.semanticEmbedding,
           previousIndex,
           previousChunks,
@@ -134,13 +142,6 @@ export function createKnowledgeIndexManager(input: {
           `Project Knowledge index write completed with status ${index.status}; the published index is not ready. Run a full rebuild.`,
         );
       }
-      emit({ phase: KnowledgeIndexPhase.Prewarm, label: "Prewarming Project Knowledge query model" });
-      semanticSearchVectorForProvider({
-        query: "Project Knowledge",
-        provider: index.provider,
-        project: input.store.project,
-        semanticEmbedding: project.paths.semanticEmbedding,
-      });
       emit({ phase: KnowledgeIndexPhase.Ready, label: "Project Knowledge ready", current: index.chunkCount, total: index.chunkCount, unit: "chunks" });
       return { index, scan, mode };
     },

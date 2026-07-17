@@ -1,6 +1,8 @@
 // Portable local-service contracts shared by runtime clients. Keep this module
 // free of Node and framework imports so browser or native clients can consume it.
 
+export * from "./inference.ts";
+
 export const ServiceProjectStatusValue = {
   Discovered: "discovered",
   Failed: "failed",

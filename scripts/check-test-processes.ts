@@ -9,6 +9,7 @@ type ProcessRecord = {
 };
 
 const SourceCliPath = path.resolve("packages/cli/src/index.ts");
+const SourceInferenceHostPath = path.resolve("packages/runtime/src/inference-host-main.ts");
 const TestProcessRetirementTimeoutMs = 3_000;
 const TestProcessPollMs = 100;
 
@@ -31,10 +32,13 @@ console.log("OpenCanon test process steady state passed.");
 function testOwnedOpenCanonProcesses(): ProcessRecord[] {
   const tempRoot = path.resolve(tmpdir());
   return listProcesses().filter((entry) => {
-    if (!entry.command.includes(SourceCliPath)) return false;
-    const registryPath = commandOption(entry.command, "--registry");
-    if (!registryPath) return false;
-    const relative = path.relative(tempRoot, path.resolve(registryPath));
+    const ownershipPath = entry.command.includes(SourceCliPath)
+      ? commandOption(entry.command, "--registry")
+      : entry.command.includes(SourceInferenceHostPath) || entry.command.includes("inference-host-main.js")
+        ? commandOption(entry.command, "--policy")
+        : undefined;
+    if (!ownershipPath) return false;
+    const relative = path.relative(tempRoot, path.resolve(ownershipPath));
     return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
   });
 }

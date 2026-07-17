@@ -1,6 +1,5 @@
 import {
   createSemanticChunkId,
-  DefaultSemanticEmbeddingContextLength,
   DefaultSemanticIndexId,
   DiagnosticSeverity,
   semanticChunkTreeHash,
@@ -9,6 +8,8 @@ import {
   semanticEmbeddingConfigHash,
   semanticEmbeddingIdentityHash,
   semanticEmbeddingRecordHash,
+  semanticPreview,
+  semanticTextHash,
   SemanticEmbeddingProviderKind,
   semanticEmbeddingModelIds,
   SemanticChunkerVersion,
@@ -26,18 +27,20 @@ import {
   type WriteSemanticIndexDeltaRequest,
   type WriteSemanticIndexRequest,
 } from "@opencanon/core";
-import type { EngineProject } from "@opencanon/engine";
+import { InferencePriority, InferenceTaskKind, MaximumInferenceBatchSequences } from "@opencanon/service-contracts";
 import { collectRuntimeKnowledgeChunks, knowledgeProducerIdentity, type RuntimeKnowledgeChunk } from "./knowledge-producers.ts";
 import { semanticIndexAncestorNodeKeys, semanticIndexNodesForChunks } from "./semantic-index-nodes.ts";
+import type { ServiceInferenceClient } from "./service-inference-client.ts";
 
-const MaxEmbeddingBatchTexts = 32;
+const MaxEmbeddingBatchTexts = MaximumInferenceBatchSequences;
 const MaxEmbeddingBatchChars = 64_000;
 
 export type ProjectSemanticIndexBuildInput = {
   rootDir: string;
   scan: ScanAndDiffResult;
   facts: FileFacts[];
-  project?: EngineProject | undefined;
+  inference: ServiceInferenceClient;
+  signal?: AbortSignal | undefined;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
   previousChunks?: SemanticChunkMetadata[] | undefined;
   runtimeChunks?: RuntimeKnowledgeChunk[] | undefined;
@@ -50,13 +53,30 @@ export type ProjectSemanticIndexDeltaInput = ProjectSemanticIndexBuildInput & {
   previousChunks: SemanticChunkMetadata[];
 };
 
-export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput): WriteSemanticIndexRequest {
-  const backend = createSemanticEmbeddingBackend(input.project, input.semanticEmbedding);
+type PlannedKnowledgeChunk = {
+  text: string;
+  metadata: Omit<SemanticChunkMetadata, "embeddingHash">;
+};
+
+export async function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput): Promise<WriteSemanticIndexRequest> {
+  const backend = createSemanticEmbeddingBackend(input.inference, input.rootDir, input.semanticEmbedding, input.signal);
   const provider = backend.provider;
   const producerVersion = semanticIndexProducerVersion();
   const diagnostics: SemanticIndexDiagnostic[] = [...(input.diagnostics ?? [])];
   diagnostics.push(...backend.diagnostics);
-  const runtimeChunks = collectRuntimeSemanticChunks(input, diagnostics);
+  const sourceChunks = collectRuntimeSemanticChunks(input, diagnostics);
+  let runtimeChunks: PlannedKnowledgeChunk[] = [];
+  if (sourceChunks.length > 0 && !hasSemanticIndexError(diagnostics)) {
+    try {
+      runtimeChunks = await fitRuntimeChunksToTokenBudget(backend, sourceChunks);
+    } catch (error) {
+      diagnostics.push({
+        code: "semantic-token-budget-failed",
+        message: `Could not plan semantic chunks with ${provider.modelId}: ${error instanceof Error ? error.message : String(error)}`,
+        severity: DiagnosticSeverity.Error,
+      });
+    }
+  }
 
   const chunksWithEmbeddingHash = runtimeChunksWithEmbeddingHash(runtimeChunks, provider);
   const previousEmbeddingHashes = new Map((input.previousChunks ?? []).map((chunk) => [chunk.id, chunk.embeddingHash]));
@@ -66,7 +86,7 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   let vectors: number[][] = [];
   if (chunksNeedingEmbedding.length > 0 && !hasSemanticIndexError(diagnostics)) {
     try {
-      vectors = embedDocumentsInBatches(backend, chunksNeedingEmbedding.map((chunk) => chunk.text), input.onEmbeddingProgress);
+      vectors = await embedDocumentsInBatches(backend, chunksNeedingEmbedding.map((chunk) => chunk.text), input.onEmbeddingProgress);
     } catch (error) {
       diagnostics.push({
         code: "semantic-embedding-failed",
@@ -140,8 +160,8 @@ export function buildProjectSemanticIndex(input: ProjectSemanticIndexBuildInput)
   return { index, chunks, nodes: semanticIndexNodesForChunks(chunks.map((chunk) => chunk.metadata)) };
 }
 
-export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaInput): WriteSemanticIndexDeltaRequest {
-  const backend = createSemanticEmbeddingBackend(input.project, input.semanticEmbedding);
+export async function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaInput): Promise<WriteSemanticIndexDeltaRequest> {
+  const backend = createSemanticEmbeddingBackend(input.inference, input.rootDir, input.semanticEmbedding, input.signal);
   const provider = backend.provider;
   const producerVersion = semanticIndexProducerVersion();
   const diagnostics: SemanticIndexDiagnostic[] = [...(input.diagnostics ?? [])];
@@ -165,7 +185,19 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
 
   const changedPaths = new Set(input.scan.changedFiles);
   const deletedPaths = new Set(input.scan.deletedFiles);
-  const changedRuntimeChunks = collectRuntimeSemanticChunks(input, diagnostics, changedPaths);
+  const changedSourceChunks = collectRuntimeSemanticChunks(input, diagnostics, changedPaths);
+  let changedRuntimeChunks: PlannedKnowledgeChunk[] = [];
+  if (changedSourceChunks.length > 0 && !hasSemanticIndexError(diagnostics)) {
+    try {
+      changedRuntimeChunks = await fitRuntimeChunksToTokenBudget(backend, changedSourceChunks);
+    } catch (error) {
+      diagnostics.push({
+        code: "semantic-token-budget-failed",
+        message: `Could not plan changed semantic chunks with ${provider.modelId}: ${error instanceof Error ? error.message : String(error)}`,
+        severity: DiagnosticSeverity.Error,
+      });
+    }
+  }
   const changedChunksWithEmbeddingHash = runtimeChunksWithEmbeddingHash(changedRuntimeChunks, provider);
   const previousRemovedChunks = input.previousChunks.filter((chunk) => changedPaths.has(chunk.path) || deletedPaths.has(chunk.path));
   const previousRetainedChunks = input.previousChunks.filter((chunk) => !changedPaths.has(chunk.path) && !deletedPaths.has(chunk.path));
@@ -175,7 +207,7 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
   let vectors: number[][] = [];
   if (changedChunksWithEmbeddingHash.length > 0 && !hasSemanticIndexError(diagnostics)) {
     try {
-      vectors = embedDocumentsInBatches(backend, changedChunksWithEmbeddingHash.map((chunk) => chunk.text), input.onEmbeddingProgress);
+      vectors = await embedDocumentsInBatches(backend, changedChunksWithEmbeddingHash.map((chunk) => chunk.text), input.onEmbeddingProgress);
     } catch (error) {
       diagnostics.push({
         code: "semantic-embedding-failed",
@@ -242,11 +274,130 @@ export function buildProjectSemanticIndexDelta(input: ProjectSemanticIndexDeltaI
   };
 }
 
-function embedDocumentsInBatches(
+async function fitRuntimeChunksToTokenBudget(
+  backend: SemanticEmbeddingBackend,
+  chunks: RuntimeKnowledgeChunk[],
+): Promise<PlannedKnowledgeChunk[]> {
+  const counts: number[] = [];
+  let maximumInputTokens = 0;
+  for (let start = 0; start < chunks.length; start += MaxEmbeddingBatchTexts) {
+    const batch = chunks.slice(start, start + MaxEmbeddingBatchTexts);
+    const result = await backend.countDocuments(batch.map((chunk) => chunk.text));
+    if (result.tokenCounts.length !== batch.length || result.maximumInputTokens < 1) {
+      throw new Error("Inference service returned invalid token planning metadata.");
+    }
+    if (result.tokenCounts.some((count) => !Number.isSafeInteger(count) || count < 1)) {
+      throw new Error("Inference service returned invalid token counts.");
+    }
+    if (maximumInputTokens > 0 && maximumInputTokens !== result.maximumInputTokens) {
+      throw new Error("Inference model token budget changed during Project Knowledge planning.");
+    }
+    maximumInputTokens = result.maximumInputTokens;
+    counts.push(...result.tokenCounts);
+  }
+  const planned: PlannedKnowledgeChunk[] = [];
+  for (const [index, chunk] of chunks.entries()) {
+    const count = counts[index];
+    if (count === undefined) throw new Error(`Inference service omitted token count ${index}.`);
+    if (count <= maximumInputTokens) {
+      planned.push({ ...chunk, metadata: { ...chunk.metadata, tokenCount: count } });
+      continue;
+    }
+    planned.push(...await splitRuntimeChunk(backend, chunk, maximumInputTokens));
+  }
+  const ordinals = new Map<string, number>();
+  return planned.map((chunk) => {
+    const ordinal = ordinals.get(chunk.metadata.path) ?? 0;
+    ordinals.set(chunk.metadata.path, ordinal + 1);
+    return { ...chunk, metadata: { ...chunk.metadata, ordinal } };
+  });
+}
+
+async function splitRuntimeChunk(
+  backend: SemanticEmbeddingBackend,
+  chunk: RuntimeKnowledgeChunk,
+  maximumInputTokens: number,
+): Promise<PlannedKnowledgeChunk[]> {
+  const parts: Array<{ text: string; tokenCount: number }> = [];
+  let remaining = chunk.text.trim();
+  while (remaining) {
+    const complete = await backend.countDocuments([remaining]);
+    const completeCount = complete.tokenCounts[0];
+    if (completeCount === undefined) throw new Error("Inference service omitted an oversized chunk token count.");
+    if (completeCount <= maximumInputTokens) {
+      parts.push({ text: remaining, tokenCount: completeCount });
+      break;
+    }
+    const boundary = await largestFittingBoundary(backend, remaining, maximumInputTokens);
+    const preferred = preferredTextBoundary(remaining, boundary);
+    const text = remaining.slice(0, preferred).trim();
+    if (!text) throw new Error(`Could not split oversized semantic chunk ${chunk.metadata.id}.`);
+    const counted = await backend.countDocuments([text]);
+    const tokenCount = counted.tokenCounts[0];
+    if (tokenCount === undefined || tokenCount > maximumInputTokens) {
+      throw new Error(`Tokenizer split for ${chunk.metadata.id} exceeded the active model budget.`);
+    }
+    parts.push({ text, tokenCount });
+    remaining = remaining.slice(preferred).trim();
+  }
+  return parts.map((part, index) => {
+    const chunkHash = semanticTextHash(part.text);
+    return {
+      text: part.text,
+      metadata: {
+        ...chunk.metadata,
+        id: createSemanticChunkId({
+          path: chunk.metadata.path,
+          key: `${chunk.metadata.id}:token-part:${index}`,
+          chunkHash,
+          startByte: chunk.metadata.range.start.byte,
+          endByte: chunk.metadata.range.end.byte,
+        }),
+        chunkHash,
+        tokenCount: part.tokenCount,
+        preview: semanticPreview(part.text),
+      },
+    };
+  });
+}
+
+async function largestFittingBoundary(
+  backend: SemanticEmbeddingBackend,
+  text: string,
+  maximumInputTokens: number,
+): Promise<number> {
+  let low = 1;
+  let high = text.length - 1;
+  let best = 0;
+  while (low <= high) {
+    const middle = low + Math.floor((high - low) / 2);
+    const result = await backend.countDocuments([text.slice(0, middle)]);
+    const count = result.tokenCounts[0];
+    if (count === undefined) throw new Error("Inference service omitted a token split count.");
+    if (count <= maximumInputTokens) {
+      best = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (best < 1) throw new Error("The active embedding model cannot fit a single character after its document prefix.");
+  return best;
+}
+
+function preferredTextBoundary(text: string, maximumBoundary: number): number {
+  const newline = text.lastIndexOf("\n", maximumBoundary);
+  if (newline >= Math.floor(maximumBoundary / 2)) return newline + 1;
+  const whitespace = text.lastIndexOf(" ", maximumBoundary);
+  if (whitespace >= Math.floor(maximumBoundary / 2)) return whitespace + 1;
+  return maximumBoundary;
+}
+
+async function embedDocumentsInBatches(
   backend: SemanticEmbeddingBackend,
   texts: string[],
   onProgress?: ((completed: number, total: number) => void) | undefined,
-): number[][] {
+): Promise<number[][]> {
   const vectors: number[][] = [];
   let batch: string[] = [];
   let batchChars = 0;
@@ -255,7 +406,7 @@ function embedDocumentsInBatches(
     const nextWouldExceedCount = batch.length >= MaxEmbeddingBatchTexts;
     const nextWouldExceedChars = batch.length > 0 && batchChars + textChars > MaxEmbeddingBatchChars;
     if (nextWouldExceedCount || nextWouldExceedChars) {
-      vectors.push(...backend.embedDocuments(batch));
+      vectors.push(...await backend.embedDocuments(batch));
       onProgress?.(vectors.length, texts.length);
       batch = [];
       batchChars = 0;
@@ -264,13 +415,13 @@ function embedDocumentsInBatches(
     batchChars += textChars;
   }
   if (batch.length > 0) {
-    vectors.push(...backend.embedDocuments(batch));
+    vectors.push(...await backend.embedDocuments(batch));
     onProgress?.(vectors.length, texts.length);
   }
   return vectors;
 }
 
-function uniquifySemanticChunkIds(chunks: RuntimeSemanticChunk[]): RuntimeSemanticChunk[] {
+function uniquifySemanticChunkIds(chunks: PlannedKnowledgeChunk[]): PlannedKnowledgeChunk[] {
   const seenIds = new Set<string>();
   const duplicateCounts = new Map<string, number>();
   return chunks.map((chunk) => {
@@ -323,7 +474,7 @@ function collectRuntimeSemanticChunks(
   return collectRuntimeKnowledgeChunks({ ...input, onlyPaths }, diagnostics);
 }
 
-function runtimeChunksWithEmbeddingHash(runtimeChunks: RuntimeSemanticChunk[], provider: SemanticEmbeddingProvider): Array<{
+function runtimeChunksWithEmbeddingHash(runtimeChunks: PlannedKnowledgeChunk[], provider: SemanticEmbeddingProvider): Array<{
   metadata: SemanticChunkMetadata;
   text: string;
 }> {
@@ -345,20 +496,19 @@ function runtimeChunksWithEmbeddingHash(runtimeChunks: RuntimeSemanticChunk[], p
   }));
 }
 
-export function semanticSearchVectorForProvider(input: {
+export async function semanticSearchVectorForProvider(input: {
   query: string;
   provider?: SemanticEmbeddingProvider | null | undefined;
-  project?: EngineProject | undefined;
+  inference: ServiceInferenceClient;
+  rootDir: string;
   semanticEmbedding?: SemanticEmbeddingConfig | undefined;
-}): number[] {
+  signal?: AbortSignal | undefined;
+}): Promise<number[]> {
   if (!input.provider) {
     throw new Error("Semantic search requires ready Project Knowledge. Run opencanon project index.");
   }
-  if (input.provider.kind === SemanticEmbeddingProviderKind.Native) {
-    if (!input.project) {
-      throw new Error(`Semantic search index uses ${input.provider.modelId}, but no native engine project is available.`);
-    }
-    return nativeEmbeddingBackend(input.project, nativeSemanticEmbeddingConfig(input.provider, input.semanticEmbedding)).embedQuery(input.query);
+  if (input.provider.kind === SemanticEmbeddingProviderKind.Gguf) {
+    return await serviceEmbeddingBackend(input.inference, input.rootDir, ggufSemanticEmbeddingConfig(input.provider, input.semanticEmbedding), input.signal).embedQuery(input.query);
   }
   throw new Error(`Unsupported semantic search provider ${input.provider.kind}.`);
 }
@@ -366,8 +516,9 @@ export function semanticSearchVectorForProvider(input: {
 export type SemanticEmbeddingBackend = {
   provider: SemanticEmbeddingProvider;
   diagnostics: SemanticIndexDiagnostic[];
-  embedDocuments(texts: string[]): number[][];
-  embedQuery(text: string): number[];
+  countDocuments(texts: string[]): Promise<{ tokenCounts: number[]; maximumInputTokens: number }>;
+  embedDocuments(texts: string[]): Promise<number[][]>;
+  embedQuery(text: string): Promise<number[]>;
 };
 
 export function configuredSemanticEmbeddingProvider(inputConfig?: SemanticEmbeddingConfig | undefined): {
@@ -376,12 +527,17 @@ export function configuredSemanticEmbeddingProvider(inputConfig?: SemanticEmbedd
 } {
   const selection = resolveSemanticEmbeddingConfig(inputConfig);
   if (!selection.ok) {
-    return { provider: nativeEmbeddingProvider(DefaultSemanticEmbeddingConfig), diagnostics: selection.diagnostics };
+    return { provider: ggufEmbeddingProvider(DefaultSemanticEmbeddingConfig), diagnostics: selection.diagnostics };
   }
-  return { provider: nativeEmbeddingProvider(selection.config), diagnostics: selection.diagnostics };
+  return { provider: ggufEmbeddingProvider(selection.config), diagnostics: selection.diagnostics };
 }
 
-export function createSemanticEmbeddingBackend(project?: EngineProject | undefined, inputConfig?: SemanticEmbeddingConfig | undefined): SemanticEmbeddingBackend {
+export function createSemanticEmbeddingBackend(
+  inference: ServiceInferenceClient,
+  rootDir: string,
+  inputConfig?: SemanticEmbeddingConfig | undefined,
+  signal?: AbortSignal | undefined,
+): SemanticEmbeddingBackend {
   const selection = resolveSemanticEmbeddingConfig(inputConfig);
   if (!selection.ok) {
     const provider = configuredSemanticEmbeddingProvider(inputConfig).provider;
@@ -389,59 +545,76 @@ export function createSemanticEmbeddingBackend(project?: EngineProject | undefin
   }
   const modelId = selection.config.modelId;
   const model = semanticEmbeddingModel(modelId);
-  if (model.providerKind === SemanticEmbeddingProviderKind.Native && project) {
-    const backend = nativeEmbeddingBackend(project, selection.config);
+  if (model.providerKind === SemanticEmbeddingProviderKind.Gguf) {
+    const backend = serviceEmbeddingBackend(inference, rootDir, selection.config, signal);
     return { ...backend, diagnostics: selection.diagnostics };
   }
-  return unavailableEmbeddingBackend(nativeEmbeddingProvider(selection.config), [
+  return unavailableEmbeddingBackend(ggufEmbeddingProvider(selection.config), [
     ...selection.diagnostics,
     {
-      code: "semantic-native-provider-unavailable",
-      message: `Semantic embedding model ${modelId} requires a native engine project.`,
+      code: "semantic-service-provider-unavailable",
+      message: `Semantic embedding model ${modelId} is not supported by the service inference provider.`,
       severity: DiagnosticSeverity.Error,
     },
   ]);
 }
 
-function nativeEmbeddingBackend(project: EngineProject, config: SemanticEmbeddingConfig): SemanticEmbeddingBackend {
-  const provider = nativeEmbeddingProvider(config);
-  const requestOptions = nativeEmbeddingOptions(config);
+function serviceEmbeddingBackend(
+  inference: ServiceInferenceClient,
+  rootDir: string,
+  config: SemanticEmbeddingConfig,
+  signal?: AbortSignal | undefined,
+): SemanticEmbeddingBackend {
+  const provider = ggufEmbeddingProvider(config);
   return {
     provider,
     diagnostics: [],
-    embedDocuments(texts) {
-      const result = project.embedSemanticTexts({
+    async countDocuments(texts) {
+      const result = await inference.countTokens({
+        rootDir,
         modelId: config.modelId,
-        task: "document",
+        task: InferenceTaskKind.Document,
+        priority: InferencePriority.Background,
         texts,
-        ...requestOptions,
+        signal,
       });
-      assertEmbeddingResult(provider, result.vectors);
+      return { tokenCounts: result.tokenCounts, maximumInputTokens: result.model.maximumInputTokens };
+    },
+    async embedDocuments(texts) {
+      const result = await inference.embed({
+        rootDir,
+        modelId: config.modelId,
+        task: InferenceTaskKind.Document,
+        priority: InferencePriority.Background,
+        texts,
+        expectedModelDigest: provider.modelDigest,
+        signal,
+      });
+      assertEmbeddingResult(provider, result);
       return result.vectors;
     },
-    embedQuery(text) {
-      const result = project.embedSemanticTexts({
+    async embedQuery(text) {
+      const result = await inference.embed({
+        rootDir,
         modelId: config.modelId,
-        task: "query",
+        task: InferenceTaskKind.Query,
+        priority: InferencePriority.Interactive,
         texts: [text],
-        ...requestOptions,
+        expectedModelDigest: provider.modelDigest,
+        signal,
       });
-      assertEmbeddingResult(provider, result.vectors);
+      assertEmbeddingResult(provider, result);
       return result.vectors[0] ?? [];
     },
   };
 }
 
-function nativeEmbeddingProvider(config: SemanticEmbeddingConfig): SemanticEmbeddingProvider {
+function ggufEmbeddingProvider(config: SemanticEmbeddingConfig): SemanticEmbeddingProvider {
   const model = semanticEmbeddingModel(config.modelId);
-  const options = nativeEmbeddingOptions(config);
   const modelDigest = semanticEmbeddingConfigHash(model.config);
-  const configHash = semanticEmbeddingConfigHash({
-    ...model.config,
-    nCtx: options.nCtx ?? model.contextLength,
-  });
+  const configHash = semanticEmbeddingConfigHash(model.config);
   return {
-    id: `opencanon-native-${model.id}`,
+    id: `opencanon-gguf-${model.id}`,
     kind: model.providerKind,
     displayName: model.displayName,
     modelId: model.id,
@@ -457,6 +630,9 @@ function unavailableEmbeddingBackend(provider: SemanticEmbeddingProvider, diagno
   return {
     provider,
     diagnostics,
+    countDocuments() {
+      throw new Error(message);
+    },
     embedDocuments() {
       throw new Error(message);
     },
@@ -483,12 +659,12 @@ function resolveSemanticEmbeddingConfig(input?: SemanticEmbeddingConfig | undefi
     };
   }
   const model = semanticEmbeddingModel(config.modelId);
-  if (config.mode !== model.providerKind) {
+  if (config.provider !== model.providerKind) {
     return {
       ok: false,
       diagnostics: [{
         code: "semantic-embedding-config-invalid",
-        message: `Semantic embedding mode ${config.mode} does not match model ${config.modelId}.`,
+        message: `Semantic embedding provider ${config.provider} does not match model ${config.modelId}.`,
         severity: DiagnosticSeverity.Error,
       }],
     };
@@ -496,11 +672,11 @@ function resolveSemanticEmbeddingConfig(input?: SemanticEmbeddingConfig | undefi
   return { ok: true, config, diagnostics: [] };
 }
 
-function nativeSemanticEmbeddingConfig(provider: SemanticEmbeddingProvider, input?: SemanticEmbeddingConfig | undefined): SemanticEmbeddingConfig {
+function ggufSemanticEmbeddingConfig(provider: SemanticEmbeddingProvider, input?: SemanticEmbeddingConfig | undefined): SemanticEmbeddingConfig {
   const config = input ?? DefaultSemanticEmbeddingConfig;
   const ids = semanticEmbeddingModelIds();
-  if (config.mode !== SemanticEmbeddingProviderKind.Native) {
-    throw new Error(`Semantic search index uses native model ${provider.modelId}, but project semanticEmbedding is not native.`);
+  if (config.provider !== SemanticEmbeddingProviderKind.Gguf) {
+    throw new Error(`Semantic search index uses GGUF model ${provider.modelId}, but project semanticEmbedding is not GGUF.`);
   }
   if (!ids.includes(config.modelId)) {
     throw new Error(`Unknown semantic embedding model ${config.modelId}.`);
@@ -511,22 +687,14 @@ function nativeSemanticEmbeddingConfig(provider: SemanticEmbeddingProvider, inpu
   return config;
 }
 
-function nativeEmbeddingOptions(config: SemanticEmbeddingConfig): {
-  nGpuLayers?: number | undefined;
-  nThreads?: number | undefined;
-  nCtx?: number | undefined;
-  showDownloadProgress: boolean;
-} {
-  return {
-    nGpuLayers: config.nGpuLayers,
-    nThreads: config.nThreads,
-    nCtx: config.nCtx ?? DefaultSemanticEmbeddingContextLength,
-    showDownloadProgress: config.showDownloadProgress,
-  };
-}
-
-function assertEmbeddingResult(provider: SemanticEmbeddingProvider, vectors: number[][]): void {
-  for (const vector of vectors) {
+function assertEmbeddingResult(
+  provider: SemanticEmbeddingProvider,
+  result: { model: { modelId: string; modelDigest?: string; dimensions: number }; vectors: number[][] },
+): void {
+  if (result.model.modelId !== provider.modelId || result.model.dimensions !== provider.dimensions || result.model.modelDigest !== provider.modelDigest) {
+    throw new Error(`Inference response identity does not match Project Knowledge provider ${provider.modelId}.`);
+  }
+  for (const vector of result.vectors) {
     if (vector.length !== provider.dimensions) {
       throw new Error(`Expected ${provider.dimensions} dimensions from ${provider.modelId}, got ${vector.length}.`);
     }

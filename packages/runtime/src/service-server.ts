@@ -1,4 +1,9 @@
 import { RuntimeProjectSummarySchema, createOpenCanonProblem, OpenCanonProblemCode, OpenCanonProblemSource } from "@opencanon/core";
+import {
+  parseInferenceCancelRequest,
+  parseInferenceCountTokensRequest,
+  parseInferenceEmbedRequest,
+} from "@opencanon/service-contracts";
 import { assertSafeRuntimeHost, createRuntimeAuthToken, isAuthorizedRuntimeRequest, usableRuntimeAuthToken } from "./auth.ts";
 import { localPipeEndpoint, localProtocolEndpointFromEntry, localProtocolTransport, requestLocalJson, requestLocalProjectionData, serveLocalProtocolPipe } from "./local-protocol.ts";
 import { formatHttpBaseUrl } from "./runtime.ts";
@@ -29,6 +34,9 @@ import {
 import { startProjectRuntime } from "./service-start.ts";
 import { serviceRegistryPath } from "./service-storage.ts";
 import { stopProjectRuntime } from "./service-control.ts";
+import { createInferenceCoordinator, isInferenceCoordinatorFailure } from "./inference-coordinator.ts";
+import type { InferenceCoordinator } from "./inference-coordinator.ts";
+import { loadMachineInferenceConfiguration } from "./inference-policy.ts";
 import {
   LocalControlProtocolVersion,
   ProcessLifecycleScope,
@@ -51,6 +59,7 @@ export async function startServiceServer(options: {
   leaseId?: string;
   allowRemote?: boolean;
   reconcileIntervalMs?: number | false;
+  inferenceCoordinator?: InferenceCoordinator;
 } = {}): Promise<ServiceServer> {
   const host = options.host ?? "127.0.0.1";
   assertSafeRuntimeHost(host, options.allowRemote);
@@ -58,10 +67,13 @@ export async function startServiceServer(options: {
   const registryPath = options.registryPath ?? process.env[ServiceEnv.RegistryPath] ?? serviceRegistryPath();
   const pipeEndpoint = process.env[ServiceEnv.PipeEndpoint] ?? localPipeEndpoint({ scope: "service", key: registryPath });
   const leaseId = options.leaseId?.trim() || process.env[ServiceEnv.LeaseId]?.trim() || createProcessLeaseId();
+  const inferenceConfiguration = loadMachineInferenceConfiguration(registryPath);
+  const inference = options.inferenceCoordinator ?? createInferenceCoordinator(inferenceConfiguration);
   const serviceHealth: ServiceHealth = {
     status: "ready",
     protocolVersion: LocalControlProtocolVersion,
     runtimeVersion: openCanonRuntimeVersion(),
+    inference: inference.describe(),
     process: {
       kind: ProcessLifecycleScope.Service,
       pid: process.pid,
@@ -91,7 +103,43 @@ export async function startServiceServer(options: {
     }
 
     if (url.pathname === ServiceApiRoute.Health) {
-      return serviceJson({ ok: true, data: serviceHealth });
+      return serviceJson({ ok: true, data: { ...serviceHealth, inference: inference.describe() } });
+    }
+
+    if (url.pathname === ServiceApiRoute.InferenceDescribe && request.method === "GET") {
+      return serviceJson({ ok: true, data: inference.describe() });
+    }
+
+    if (url.pathname === ServiceApiRoute.InferenceCountTokens && request.method === "POST") {
+      const body = await readServiceJsonObject(request);
+      if (!body.ok) return serviceJson(serviceDiagnostic("service-malformed-request", body.message), 400);
+      const parsed = parseInferenceCountTokensRequest(body.body);
+      if (!parsed.ok) return serviceJson(serviceDiagnostic("service-malformed-request", parsed.message), 400);
+      try {
+        return serviceJson({ ok: true, data: await inference.countTokens(parsed.value, request.signal) });
+      } catch (error) {
+        return inferenceFailureResponse(error);
+      }
+    }
+
+    if (url.pathname === ServiceApiRoute.InferenceEmbed && request.method === "POST") {
+      const body = await readServiceJsonObject(request);
+      if (!body.ok) return serviceJson(serviceDiagnostic("service-malformed-request", body.message), 400);
+      const parsed = parseInferenceEmbedRequest(body.body);
+      if (!parsed.ok) return serviceJson(serviceDiagnostic("service-malformed-request", parsed.message), 400);
+      try {
+        return serviceJson({ ok: true, data: await inference.embed(parsed.value, request.signal) });
+      } catch (error) {
+        return inferenceFailureResponse(error);
+      }
+    }
+
+    if (url.pathname === ServiceApiRoute.InferenceCancel && request.method === "POST") {
+      const body = await readServiceJsonObject(request);
+      if (!body.ok) return serviceJson(serviceDiagnostic("service-malformed-request", body.message), 400);
+      const parsed = parseInferenceCancelRequest(body.body);
+      if (!parsed.ok) return serviceJson(serviceDiagnostic("service-malformed-request", parsed.message), 400);
+      return serviceJson({ ok: true, data: { cancelled: inference.cancel(parsed.value) } });
     }
 
     if (url.pathname === ServiceApiRoute.Overview && request.method === "POST") {
@@ -255,7 +303,7 @@ export async function startServiceServer(options: {
     async stop() {
       stopped = true;
       if (reconcileTimer) clearTimeout(reconcileTimer);
-      await Promise.all([server.stop(true), pipeServer.stop(true)]);
+      await Promise.all([server.stop(true), pipeServer.stop(true), inference.stop()]);
     },
   };
 }
@@ -263,4 +311,15 @@ export async function startServiceServer(options: {
 function runtimeUnavailableResponse(rootDir: string, error: unknown): Response {
   const problem = runtimeUnavailableProblem(rootDir, error);
   return serviceJson(serviceProblem(problem), problem.status ?? 500);
+}
+
+function inferenceFailureResponse(error: unknown): Response {
+  if (isInferenceCoordinatorFailure(error)) {
+    return serviceJson(serviceDiagnostic(error.code, error.message), error.status);
+  }
+  return serviceJson(serviceDiagnostic("inference-host-unavailable", errorMessage(error)), 503);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

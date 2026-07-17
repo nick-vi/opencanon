@@ -19,6 +19,41 @@ export const testRuntimeIdentity = {
   cliPath: process.execPath,
 };
 
+export function testInferenceDescription() {
+  return {
+    status: "stopped" as const,
+    configurationSource: "default" as const,
+    configurationPath: "/test/inference-policy.json",
+    profile: {
+      id: "test-cpu-v1",
+      provider: "gguf" as const,
+      backend: "cpu" as const,
+      contextTokens: 2048,
+      batchTokens: 2048,
+      microBatchTokens: 512,
+      maximumSequences: 16,
+      threads: 1,
+      gpuLayers: 0,
+    },
+    policy: {
+      version: 1 as const,
+      profileId: "test-cpu-v1",
+      maximumRequestBytes: 131072,
+      maximumQueueRequests: 8,
+      maximumQueueBytes: 1048576,
+      maximumRequestTokens: 65536,
+      maximumConcurrentOperations: 1,
+      maximumResidentModels: 1 as const,
+      idleEvictionMs: 1000,
+      requestTimeoutMs: 30000,
+      hostStartupTimeoutMs: 30000,
+    },
+    queueRequests: 0,
+    queueBytes: 0,
+    metrics: { completedOperations: 0, failedOperations: 0, cancelledOperations: 0, rejectedOperations: 0, coldLoads: 0, hostStarts: 0, hostRetirements: 0, idleEvictions: 0, totalQueueWaitMs: 0, totalModelLoadMs: 0, totalInferenceMs: 0 },
+  };
+}
+
 export function testLifecycle(status: ProcessLifecycleStatus = ProcessLifecycleStatus.Running) {
   return {
     status,
@@ -128,7 +163,8 @@ export function readyFakeServiceCliSource(options: { exitOnceMarkerPath?: string
     "const port = Number(process.argv[portArg + 1]);",
     'const host = hostArg >= 0 ? process.argv[hostArg + 1] : "127.0.0.1";',
     "const pipeEndpoint = process.env.OPENCANON_SERVICE_PIPE_ENDPOINT;",
-    "const ready = { ok: true, data: { status: 'ready', protocolVersion: 2, runtimeVersion: '0.4.0-test', process: { kind: 'service', pid: process.pid, leaseId: process.env.OPENCANON_SERVICE_LEASE_ID } } };",
+    `const inference = ${JSON.stringify(testInferenceDescription())};`,
+    "const ready = { ok: true, data: { status: 'ready', protocolVersion: 2, runtimeVersion: '0.4.0-test', inference, process: { kind: 'service', pid: process.pid, leaseId: process.env.OPENCANON_SERVICE_LEASE_ID } } };",
     "createServer((_request, response) => {",
     '  response.writeHead(200, { "content-type": "application/json; charset=utf-8" });',
     "  response.end(JSON.stringify(ready));",

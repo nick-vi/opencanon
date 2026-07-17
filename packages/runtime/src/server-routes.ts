@@ -34,6 +34,8 @@ import type { ProjectStore } from "./state.ts";
 import type { createProjectTypesRuntime } from "./project-types-runtime.ts";
 import type { createTypeProducerRuntime } from "./type-producer/runtime.ts";
 import type { ChangeCheckRunner } from "./change-check-runner.ts";
+import type { ServiceInferenceClient } from "./service-inference-client.ts";
+import { semanticSearchVectorForProvider } from "./semantic-index.ts";
 import {
   activeTaskLeaseSummaries,
   listWorktreeOverview,
@@ -66,7 +68,6 @@ import {
   optionalStringParam,
   validateRelatedSelectors,
 } from "./server-query.ts";
-import type { KnowledgeQueryRuntime } from "./knowledge-query-runtime.ts";
 
 type RuntimePaths = ReturnType<typeof createPaths>;
 
@@ -83,7 +84,7 @@ export type RuntimeRouteHandlerInput = {
   projectTypesRuntime: ReturnType<typeof createProjectTypesRuntime>;
   typeProducerRuntime?: ReturnType<typeof createTypeProducerRuntime>;
   changeCheckRunner: ChangeCheckRunner;
-  knowledgeQueryRuntime: KnowledgeQueryRuntime;
+  inference: ServiceInferenceClient;
   paths(): RuntimePaths;
   setPaths(paths: RuntimePaths): void;
   store(): ProjectStore;
@@ -98,7 +99,7 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
   routeRequest(request: Request): Promise<Response>;
   requestBodyLimit(method: string, pathname: string): number;
 } {
-  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, knowledgeQueryRuntime, resetIdleTimer, refreshCurrentSnapshot, buildIndexedSnapshot, restartStore } = input;
+  const { rootDir, authToken, tracer, events, stateManager, projectTypesRuntime, typeProducerRuntime, changeCheckRunner, inference, resetIdleTimer, refreshCurrentSnapshot, buildIndexedSnapshot, restartStore } = input;
   let paths = input.paths();
   const currentStore = () => input.store();
   const protocolPolicy = createRuntimeProtocolPolicy({
@@ -243,7 +244,14 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
           const pathFilter = validateOptionalRelativePaths(url.searchParams.getAll(UrlSearchParam.Path));
           if (!pathFilter.ok) return json(pathFilter.error, 400);
           try {
-            const vector = await knowledgeQueryRuntime.query(query, request.signal);
+            const vector = await semanticSearchVectorForProvider({
+              query,
+              provider: snapshot.semanticIndex?.provider,
+              inference,
+              rootDir,
+              semanticEmbedding: paths.semanticEmbedding,
+              signal: request.signal,
+            });
             const result = searchProjectContext({
               store: currentStore(),
               snapshot,
@@ -273,7 +281,14 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
           const question = (url.searchParams.get(UrlSearchParam.Query) ?? "").trim();
           if (!question) return json(diagnostic(diagnosticCodes.invalidRuntimeResponse, "Project Knowledge Ask requires a query."), 400);
           try {
-            const vector = await knowledgeQueryRuntime.query(question, request.signal);
+            const vector = await semanticSearchVectorForProvider({
+              query: question,
+              provider: snapshot.semanticIndex?.provider,
+              inference,
+              rootDir,
+              semanticEmbedding: paths.semanticEmbedding,
+              signal: request.signal,
+            });
             const result = askProjectContext({ store: currentStore(), snapshot, question, vector });
             span.setOutput({ evidence: result.evidence.length, indexed: Boolean(result.index) });
             return json({ ok: true, data: result });
@@ -660,7 +675,6 @@ export function createRuntimeRouteHandler(input: RuntimeRouteHandlerInput): {
         if (!result.ok) return json(diagnosticsFailure(result.diagnostics), 400);
         paths = createPaths(rootDir);
         stateManager.replaceValidationResultCache(createValidationResultCache(paths));
-        await knowledgeQueryRuntime.reset();
         await restartStore();
         projectTypesRuntime.generateNow("Project authoring types regenerated after settings changed.");
         await stateManager.rebuildAndPublish("Project settings saved.");

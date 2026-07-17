@@ -43,7 +43,7 @@ create table knowledge_chunks (
   end_byte integer not null,
   heading text,
   symbol text,
-  token_estimate integer not null,
+  token_count integer not null,
   preview text not null,
   payload text not null,
   indexed_at text not null,

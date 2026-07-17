@@ -505,10 +505,17 @@ export function safeEnumReplacement(
   return `export const ${declaration.name} = {\n${properties}\n} as const;\n\nexport type ${declaration.name} = (typeof ${declaration.name})[keyof typeof ${declaration.name}];`;
 }
 
-export function paramsContain(params: string[], param: string | RegExp, position: "any" | "first" | "last"): boolean {
+export const ParameterPosition = {
+  Any: "any",
+  First: "first",
+  Last: "last",
+} as const;
+export type ParameterPosition = (typeof ParameterPosition)[keyof typeof ParameterPosition];
+
+export function paramsContain(params: string[], param: string | RegExp, position: ParameterPosition): boolean {
   if (params.length === 0) return false;
-  if (position === "first") return valueMatches(params[0], param);
-  if (position === "last") return valueMatches(params[params.length - 1], param);
+  if (position === ParameterPosition.First) return valueMatches(params[0], param);
+  if (position === ParameterPosition.Last) return valueMatches(params[params.length - 1], param);
   return params.some((item) => valueMatches(item, param));
 }
 

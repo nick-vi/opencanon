@@ -24,6 +24,13 @@ const phases: TestPhase[] = [
     filter: "^(?!changes ready and brief expose agent-ready task work$).*",
   },
   { name: "Service lifecycle", files: ["packages/runtime/test/service.test.ts"] },
+  {
+    name: "Inference coordination",
+    files: [
+      "packages/runtime/test/inference-coordinator.test.ts",
+      "packages/runtime/test/service-inference.test.ts",
+    ],
+  },
   { name: "Semantic index", files: ["packages/runtime/test/semantic-index.test.ts"] },
   { name: "Validator runtime", files: ["tests/validator-runtime.test.ts"] },
   { name: "Change runs", files: ["packages/runtime/test/change-runs.test.ts"] },

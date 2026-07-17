@@ -52,6 +52,10 @@ await buildRuntimeEntry(
   path.join(runtimeRoot, "knowledge-index-worker-main.js"),
 );
 await buildRuntimeEntry(
+  path.join(rootDir, "packages/runtime/src/inference-host-main.ts"),
+  path.join(runtimeRoot, "inference-host-main.js"),
+);
+await buildRuntimeEntry(
   path.join(rootDir, "packages/runtime/src/project-analysis-worker-main.ts"),
   path.join(runtimeRoot, "project-analysis-worker-main.js"),
 );

@@ -181,7 +181,7 @@ Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never
 - source and embedding batches have fixed token bounds
 - no-op indexing performs no inference work
 - host failures preserve service and project-runtime availability plus the last published index
-- native embedding models are never loaded into the service, project runtime, or project-specific workers
+- GGUF models are loaded only by the isolated machine inference host
 - multiple projects share one admitted resident model without sharing Project State
 Checks: `inference-tests`, `semantic-index-tests`, `runtime-client-tests`, `service-lifecycle-tests`
 

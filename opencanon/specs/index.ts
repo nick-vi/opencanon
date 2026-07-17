@@ -226,7 +226,7 @@ export default [
       {
         id: "knowledge-builds-are-explicit-and-isolated",
         statement: "Project Knowledge reads never start indexing, while one service-owned inference coordinator executes native index and query work in an isolated, bounded, shared host.",
-        acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed token bounds", "no-op indexing performs no inference work", "host failures preserve service and project-runtime availability plus the last published index", "native embedding models are never loaded into the service, project runtime, or project-specific workers", "multiple projects share one admitted resident model without sharing Project State"],
+        acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed token bounds", "no-op indexing performs no inference work", "host failures preserve service and project-runtime availability plus the last published index", "GGUF models are loaded only by the isolated machine inference host", "multiple projects share one admitted resident model without sharing Project State"],
         checks: ["inference-tests", "semantic-index-tests", "runtime-client-tests", "service-lifecycle-tests"],
       },
       {
@@ -307,13 +307,13 @@ export default [
   defineSpec({
     id: "release-integrity-spec",
     title: "Release Integrity Spec",
-    summary: "Release publication is an explicit, version-locked operation gated by the same proof path used for local readiness, dependency security, runtime build, validation, Doctor, install rehearsal, and native embedding smoke coverage.",
+    summary: "Release publication is an explicit, version-locked operation gated by the same proof path used for local readiness, dependency security, runtime build, validation, Doctor, install rehearsal, and service-owned GGUF inference smoke coverage.",
     surfaces: ["release-update", "project-knowledge-index"],
     scope: [
       { kind: DefinitionTargetKind.File, path: ".github/workflows/release.yml" },
       { kind: DefinitionTargetKind.File, path: ".github/workflows/ci.yml" },
       { kind: DefinitionTargetKind.File, path: "package.json" },
-      { kind: DefinitionTargetKind.File, path: "scripts/native-embedding-smoke.ts" },
+      { kind: DefinitionTargetKind.File, path: "scripts/gguf-inference-smoke.ts" },
       { kind: DefinitionTargetKind.File, path: "scripts/prepare-opencanon-release.ts" },
       { kind: DefinitionTargetKind.File, path: "scripts/publish-opencanon-release.ts" },
       { kind: DefinitionTargetKind.File, path: "scripts/check-release-consistency.ts" },
@@ -352,10 +352,10 @@ export default [
         checks: ["release-tests", "release-check"],
       },
       {
-        id: "native-embedding-smoke-is-explicit",
-        statement: "Native embedding smoke coverage must either run and fail on error or be invoked through an explicitly optional command.",
-        acceptance: ["check:ci invokes the required native embedding smoke", "the smoke script does not silently skip", "optional smoke uses an explicit optional flag"],
-        checks: ["release-tests", "native-embedding-smoke"],
+        id: "gguf-inference-smoke-is-explicit",
+        statement: "Service-owned GGUF inference smoke coverage must either run and fail on error or be invoked through an explicitly optional command.",
+        acceptance: ["check:ci invokes the required GGUF inference smoke", "the smoke script does not silently skip", "optional smoke uses an explicit optional flag"],
+        checks: ["release-tests", "gguf-inference-smoke"],
       },
     ],
     scenarios: [
@@ -375,16 +375,16 @@ export default [
       },
       {
         id: "embedding-config-regression-is-caught",
-        given: ["Project Knowledge uses a configured native embedding model"],
+        given: ["Project Knowledge uses a configured GGUF embedding model"],
         when: "the release gate runs",
-        then: ["native embedding code loads the configured model path", "invalid vectors or loading failures fail the gate"],
-        checks: ["native-embedding-smoke"],
+        then: ["the isolated inference host loads the configured model", "invalid vectors, duplicate model residency, missing eviction, or loading failures fail the gate"],
+        checks: ["gguf-inference-smoke"],
       },
     ],
     checks: [
       { id: "release-tests", kind: "test", target: "tests/release.test.ts" },
       { id: "release-check", kind: "command", command: "npm run release:check" },
-      { id: "native-embedding-smoke", kind: "command", command: "npm run smoke:native-embedding" },
+      { id: "gguf-inference-smoke", kind: "command", command: "npm run smoke:gguf-inference" },
     ],
     governedBy: { inferFromScope: true, conventions: ["state-ownership-current", "tests-follow-risk"] },
     render: { kind: "generated", docs: "docs/opencanon/specs/release-integrity-spec.md", style: "reference" },

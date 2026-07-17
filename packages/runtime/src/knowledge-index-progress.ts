@@ -13,7 +13,6 @@ export function knowledgeIndexProtocolPhase(phase: KnowledgeIndexProgress["phase
     case "embed":
       return "embedding";
     case "write":
-    case "prewarm":
       return "product-graph";
     case "ready":
       return "ready";

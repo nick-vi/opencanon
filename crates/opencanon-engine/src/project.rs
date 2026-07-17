@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex};
@@ -9,7 +9,6 @@ use napi::bindgen_prelude::AsyncTask;
 use napi::{Env, Task};
 use napi_derive::napi;
 use notify::{Config, Event, EventKindMask, RecursiveMode, Watcher};
-use opencanon_inference::{Embedder, EmbedderConfig, Generator, GeneratorConfig};
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde_json::json;
 
@@ -18,10 +17,10 @@ use crate::constants::{
     WATCHER_MAX_BUFFER_CAPACITY, WATCHER_MAX_DEBOUNCE_MS, WATCHER_MIN_DEBOUNCE_MS,
 };
 use crate::contracts::{
-    BuildRepoGraphRequest, EmbedSemanticTextsRequest, ExtractFactsRequest, FactDiagnostic,
-    GenerateTextRequest, ListEventsRequest, ListObservabilityRecordsRequest, OpenProjectRequest,
-    ProjectRefreshStatus, ResolvedProjectSettings, ScanAndDiffRequest, StartWatcherRequest,
-    WatcherStartResult, WriteEventRequest, WriteObservabilityRecordsRequest,
+    BuildRepoGraphRequest, ExtractFactsRequest, FactDiagnostic, ListEventsRequest,
+    ListObservabilityRecordsRequest, OpenProjectRequest, ProjectRefreshStatus,
+    ResolvedProjectSettings, ScanAndDiffRequest, StartWatcherRequest, WatcherStartResult,
+    WriteEventRequest, WriteObservabilityRecordsRequest,
 };
 use crate::facts::{package_nodes, scan_file_facts};
 use crate::json::{decode, encode, napi_error, notify_error, sqlite_error};
@@ -55,7 +54,6 @@ use code_graph_connection::{
 use connection::open_project_connection;
 use json_fields::root_path;
 use observability_store::{list_observability_payloads, SqliteObservationSink};
-use semantic_store::inference_error;
 
 #[napi]
 pub struct EngineProjectHandle {
@@ -68,8 +66,6 @@ pub struct EngineProjectHandle {
     graph_conn: Mutex<Connection>,
     watcher_queue: WatcherQueue,
     watcher: Mutex<Option<NativeWatcher>>,
-    embedding_cache: Mutex<HashMap<String, Embedder>>,
-    generation_cache: Mutex<HashMap<String, Generator>>,
 }
 
 pub struct IndexCodeGraphTask {
@@ -684,16 +680,6 @@ impl EngineProjectHandle {
         semantic_store::search_knowledge_index_json(self, request)
     }
 
-    #[napi(js_name = "embedSemanticTextsJson")]
-    pub fn embed_semantic_texts_json(&self, request: String) -> napi::Result<String> {
-        semantic_store::embed_semantic_texts_json(self, request)
-    }
-
-    #[napi(js_name = "generateTextJson")]
-    pub fn generate_text_json(&self, request: String) -> napi::Result<String> {
-        semantic_store::generate_text_json(self, request)
-    }
-
     #[napi(js_name = "readProductModelProjectionJson")]
     pub fn read_product_model_projection_json(&self) -> napi::Result<String> {
         product_model_store::read_product_model_projection_json(self)
@@ -733,81 +719,7 @@ impl EngineProjectHandle {
             graph_conn: Mutex::new(graph_conn),
             watcher_queue: Arc::new(Mutex::new(VecDeque::new())),
             watcher: Mutex::new(None),
-            embedding_cache: Mutex::new(HashMap::new()),
-            generation_cache: Mutex::new(HashMap::new()),
         })
-    }
-
-    fn semantic_embedder(&self, request: &EmbedSemanticTextsRequest) -> napi::Result<Embedder> {
-        let model_id = request.model_id.trim();
-        let n_gpu_layers = request.n_gpu_layers.unwrap_or(u32::MAX);
-        let n_threads = request.n_threads.unwrap_or(8);
-        let n_ctx = request.n_ctx;
-        let cache_key = format!(
-            "model={model_id};gpu={n_gpu_layers};threads={n_threads};ctx={}",
-            n_ctx.map_or_else(|| "default".to_string(), |value| value.to_string())
-        );
-        {
-            let cache = self.embedding_cache.lock().map_err(|_| {
-                napi_error(
-                    "inference-error",
-                    "Semantic embedding cache lock is poisoned.",
-                )
-            })?;
-            if let Some(embedder) = cache.get(&cache_key) {
-                return Ok(embedder.clone());
-            }
-        }
-
-        let mut config = EmbedderConfig::default()
-            .with_model(model_id)
-            .map_err(inference_error)?;
-        config.n_gpu_layers = n_gpu_layers;
-        config.n_threads = n_threads;
-        config.n_ctx = n_ctx;
-        config.show_download_progress = request.show_download_progress;
-        let embedder = Embedder::new(config).map_err(inference_error)?;
-        let mut cache = self.embedding_cache.lock().map_err(|_| {
-            napi_error(
-                "inference-error",
-                "Semantic embedding cache lock is poisoned.",
-            )
-        })?;
-        let cached = cache.entry(cache_key).or_insert(embedder).clone();
-        Ok(cached)
-    }
-
-    fn generator(&self, request: &GenerateTextRequest) -> napi::Result<Generator> {
-        let model_id = request.model_id.trim();
-        let n_gpu_layers = request.n_gpu_layers.unwrap_or(u32::MAX);
-        let n_threads = request.n_threads.unwrap_or(8);
-        let n_ctx = request.n_ctx.unwrap_or(2048);
-        let cache_key =
-            format!("model={model_id};gpu={n_gpu_layers};threads={n_threads};ctx={n_ctx}");
-        {
-            let cache = self
-                .generation_cache
-                .lock()
-                .map_err(|_| napi_error("inference-error", "Generation cache lock is poisoned."))?;
-            if let Some(generator) = cache.get(&cache_key) {
-                return Ok(generator.clone());
-            }
-        }
-
-        let mut config = GeneratorConfig::default()
-            .with_model(model_id)
-            .map_err(inference_error)?;
-        config.n_gpu_layers = n_gpu_layers;
-        config.n_threads = n_threads;
-        config.n_ctx = n_ctx;
-        config.show_download_progress = request.show_download_progress;
-        let generator = Generator::new(config).map_err(inference_error)?;
-        let mut cache = self
-            .generation_cache
-            .lock()
-            .map_err(|_| napi_error("inference-error", "Generation cache lock is poisoned."))?;
-        let cached = cache.entry(cache_key).or_insert(generator).clone();
-        Ok(cached)
     }
 
     fn project_refresh_status(&self) -> napi::Result<ProjectRefreshStatus> {

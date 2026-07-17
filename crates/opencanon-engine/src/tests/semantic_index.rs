@@ -10,12 +10,12 @@ fn complete_semantic_request() -> Value {
     json!({
         "index": {
             "id": "project",
-            "version": "semantic-index-v2",
+            "version": "semantic-index-v3",
             "status": "ready",
             "provider": {
-                "id": "opencanon-native-test",
-                "kind": "native",
-                "modelId": "test-native-embedding-2",
+                "id": "opencanon-gguf-test",
+                "kind": "gguf",
+                "modelId": "test-gguf-embedding-2",
                 "dimensions": 2,
                 "distance": "cosine",
                 "configHash": "config"
@@ -46,7 +46,7 @@ fn complete_semantic_request() -> Value {
                         "start": { "line": 1, "column": 1, "byte": 0 },
                         "end": { "line": 1, "column": 10, "byte": 10 }
                     },
-                    "tokenEstimate": 2,
+                    "tokenCount": 2,
                     "preview": "first chunk"
                 },
                 "text": "first chunk",
@@ -66,7 +66,7 @@ fn complete_semantic_request() -> Value {
                         "start": { "line": 1, "column": 1, "byte": 0 },
                         "end": { "line": 1, "column": 10, "byte": 10 }
                     },
-                    "tokenEstimate": 2,
+                    "tokenCount": 2,
                     "preview": "second chunk"
                 },
                 "text": "second chunk",
@@ -172,12 +172,12 @@ fn obsolete_vector_format_is_stale_and_full_write_rebuilds_it() {
     let request = json!({
         "index": {
             "id": "project",
-            "version": "semantic-index-v2",
+            "version": "semantic-index-v3",
             "status": "ready",
             "provider": {
-                "id": "opencanon-native-test",
-                "kind": "native",
-                "modelId": "test-native-embedding-2",
+                "id": "opencanon-gguf-test",
+                "kind": "gguf",
+                "modelId": "test-gguf-embedding-2",
                 "dimensions": 2,
                 "distance": "cosine",
                 "configHash": "config"
@@ -207,7 +207,7 @@ fn obsolete_vector_format_is_stale_and_full_write_rebuilds_it() {
                     "start": { "line": 1, "column": 1, "byte": 0 },
                     "end": { "line": 1, "column": 10, "byte": 10 }
                 },
-                "tokenEstimate": 2,
+                "tokenCount": 2,
                 "preview": "active company"
             },
             "text": "active company",
@@ -260,12 +260,12 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
             json!({
                 "index": {
                     "id": "project",
-                    "version": "semantic-index-v2",
+                    "version": "semantic-index-v3",
                     "status": "ready",
                     "provider": {
-                        "id": "opencanon-native-test",
-                        "kind": "native",
-                        "modelId": "test-native-embedding-2",
+                        "id": "opencanon-gguf-test",
+                        "kind": "gguf",
+                        "modelId": "test-gguf-embedding-2",
                         "dimensions": 2,
                         "distance": "cosine",
                         "configHash": "config"
@@ -309,7 +309,7 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
                                 "start": { "line": 1, "column": 1, "byte": 0 },
                                 "end": { "line": 1, "column": 10, "byte": 10 }
                             },
-                            "tokenEstimate": 2,
+                            "tokenCount": 2,
                             "preview": "active company"
                         },
                         "text": "active company billing loader",
@@ -329,7 +329,7 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
                                 "start": { "line": 1, "column": 1, "byte": 0 },
                                 "end": { "line": 1, "column": 10, "byte": 10 }
                             },
-                            "tokenEstimate": 2,
+                            "tokenCount": 2,
                             "preview": "other record"
                         },
                         "text": "other record",
@@ -354,7 +354,7 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
     assert_eq!(status["index"]["embeddingStats"]["vectorsWritten"], 2);
     assert_eq!(
         status["index"]["provider"]["modelId"],
-        "test-native-embedding-2"
+        "test-gguf-embedding-2"
     );
 
     let search = project
@@ -410,12 +410,12 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
     let reuse_request = json!({
         "index": {
             "id": "project",
-            "version": "semantic-index-v2",
+            "version": "semantic-index-v3",
             "status": "ready",
             "provider": {
-                "id": "opencanon-native-test",
-                "kind": "native",
-                "modelId": "test-native-embedding-2",
+                "id": "opencanon-gguf-test",
+                "kind": "gguf",
+                "modelId": "test-gguf-embedding-2",
                 "dimensions": 2,
                 "distance": "cosine",
                 "configHash": "config"
@@ -451,7 +451,7 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
                         "start": { "line": 1, "column": 1, "byte": 0 },
                         "end": { "line": 1, "column": 10, "byte": 10 }
                     },
-                    "tokenEstimate": 2,
+                    "tokenCount": 2,
                     "preview": "active company"
                 },
                 "text": "active company billing loader",
@@ -471,7 +471,7 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
                         "start": { "line": 1, "column": 1, "byte": 0 },
                         "end": { "line": 1, "column": 10, "byte": 10 }
                     },
-                    "tokenEstimate": 2,
+                    "tokenCount": 2,
                     "preview": "other record"
                 },
                 "text": "other record",
@@ -491,12 +491,12 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
             json!({
                 "index": {
                     "id": "project",
-                    "version": "semantic-index-v2",
+                    "version": "semantic-index-v3",
                     "status": "ready",
                     "provider": {
-                        "id": "opencanon-native-test",
-                        "kind": "native",
-                        "modelId": "test-native-embedding-2",
+                        "id": "opencanon-gguf-test",
+                        "kind": "gguf",
+                        "modelId": "test-gguf-embedding-2",
                         "dimensions": 2,
                         "distance": "cosine",
                         "configHash": "config"
@@ -527,7 +527,7 @@ fn knowledge_index_round_trips_metadata_and_searches_vectors() {
                                 "start": { "line": 1, "column": 1, "byte": 0 },
                                 "end": { "line": 1, "column": 10, "byte": 10 }
                             },
-                            "tokenEstimate": 2,
+                            "tokenCount": 2,
                             "preview": "other record"
                         },
                         "text": "other record",
@@ -570,12 +570,12 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
             json!({
                 "index": {
                     "id": "project",
-                    "version": "semantic-index-v2",
+                    "version": "semantic-index-v3",
                     "status": "ready",
                     "provider": {
-                        "id": "opencanon-native-test",
-                        "kind": "native",
-                        "modelId": "test-native-embedding-2",
+                        "id": "opencanon-gguf-test",
+                        "kind": "gguf",
+                        "modelId": "test-gguf-embedding-2",
                         "dimensions": 2,
                         "distance": "cosine",
                         "configHash": "config"
@@ -618,7 +618,7 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
                                 "start": { "line": 1, "column": 1, "byte": 0 },
                                 "end": { "line": 1, "column": 10, "byte": 10 }
                             },
-                            "tokenEstimate": 2,
+                            "tokenCount": 2,
                             "preview": "active company"
                         },
                         "text": "active company billing loader",
@@ -638,7 +638,7 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
                                 "start": { "line": 1, "column": 1, "byte": 0 },
                                 "end": { "line": 1, "column": 10, "byte": 10 }
                             },
-                            "tokenEstimate": 2,
+                            "tokenCount": 2,
                             "preview": "other record"
                         },
                         "text": "other record",
@@ -655,12 +655,12 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
             json!({
                 "index": {
                     "id": "project",
-                    "version": "semantic-index-v2",
+                    "version": "semantic-index-v3",
                     "status": "ready",
                     "provider": {
-                        "id": "opencanon-native-test",
-                        "kind": "native",
-                        "modelId": "test-native-embedding-2",
+                        "id": "opencanon-gguf-test",
+                        "kind": "gguf",
+                        "modelId": "test-gguf-embedding-2",
                         "dimensions": 2,
                         "distance": "cosine",
                         "configHash": "config"
@@ -710,7 +710,7 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
                                 "start": { "line": 1, "column": 1, "byte": 0 },
                                 "end": { "line": 1, "column": 12, "byte": 12 }
                             },
-                            "tokenEstimate": 3,
+                            "tokenCount": 3,
                             "preview": "active company updated"
                         },
                         "text": "active company billing loader updated",
@@ -778,12 +778,12 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
         json!({
             "index": {
                 "id": "project",
-                "version": "semantic-index-v2",
+                "version": "semantic-index-v3",
                 "status": "ready",
                 "provider": {
-                    "id": "opencanon-native-test",
-                    "kind": "native",
-                    "modelId": "test-native-embedding-2",
+                    "id": "opencanon-gguf-test",
+                    "kind": "gguf",
+                    "modelId": "test-gguf-embedding-2",
                     "dimensions": 2,
                     "distance": "cosine",
                     "configHash": "config"
@@ -813,7 +813,7 @@ fn knowledge_index_delta_updates_changed_paths_and_knowledge_nodes() {
                         "start": { "line": 1, "column": 1, "byte": 0 },
                         "end": { "line": 1, "column": 12, "byte": 12 }
                     },
-                    "tokenEstimate": 3,
+                    "tokenCount": 3,
                     "preview": "active company updated again"
                 },
                 "text": "active company billing loader updated again",
@@ -841,12 +841,12 @@ fn knowledge_index_delta_retains_unchanged_vectors_on_changed_paths() {
             json!({
                 "index": {
                     "id": "project",
-                    "version": "semantic-index-v2",
+                    "version": "semantic-index-v3",
                     "status": "ready",
                     "provider": {
-                        "id": "opencanon-native-test",
-                        "kind": "native",
-                        "modelId": "test-native-embedding-2",
+                        "id": "opencanon-gguf-test",
+                        "kind": "gguf",
+                        "modelId": "test-gguf-embedding-2",
                         "dimensions": 2,
                         "distance": "cosine",
                         "configHash": "config"
@@ -892,7 +892,7 @@ fn knowledge_index_delta_retains_unchanged_vectors_on_changed_paths() {
                             "start": { "line": 1, "column": 1, "byte": 0 },
                             "end": { "line": 1, "column": 12, "byte": 12 }
                         },
-                        "tokenEstimate": 3,
+                        "tokenCount": 3,
                         "preview": "first chunk updated"
                     },
                     "text": "first chunk updated",
@@ -930,12 +930,12 @@ fn knowledge_index_recovers_when_vector_store_has_stale_duplicate_id() {
     let request = json!({
         "index": {
             "id": "project",
-            "version": "semantic-index-v2",
+            "version": "semantic-index-v3",
             "status": "ready",
             "provider": {
-                "id": "opencanon-native-test",
-                "kind": "native",
-                "modelId": "test-native-embedding-2",
+                "id": "opencanon-gguf-test",
+                "kind": "gguf",
+                "modelId": "test-gguf-embedding-2",
                 "dimensions": 2,
                 "distance": "cosine",
                 "configHash": "config"
@@ -971,7 +971,7 @@ fn knowledge_index_recovers_when_vector_store_has_stale_duplicate_id() {
                         "start": { "line": 1, "column": 1, "byte": 0 },
                         "end": { "line": 1, "column": 10, "byte": 10 }
                     },
-                    "tokenEstimate": 2,
+                    "tokenCount": 2,
                     "preview": "active company"
                 },
                 "text": "active company billing loader",
@@ -1022,7 +1022,7 @@ fn knowledge_index_repair_clears_unsupported_provider_state() {
                 json!({
                     "index": {
                         "id": "project",
-                        "version": "semantic-index-v2",
+                        "version": "semantic-index-v3",
                         "status": "ready",
                         "provider": {
                             "id": "unsupported-provider",
@@ -1058,7 +1058,7 @@ fn knowledge_index_repair_clears_unsupported_provider_state() {
                                     "start": { "line": 1, "column": 1, "byte": 0 },
                                     "end": { "line": 1, "column": 10, "byte": 10 }
                                 },
-                                "tokenEstimate": 2,
+                                "tokenCount": 2,
                                 "preview": "active company"
                             },
                             "text": "active company",
@@ -1094,66 +1094,49 @@ fn knowledge_index_repair_clears_unsupported_provider_state() {
 }
 
 #[test]
-fn semantic_embedding_rejects_invalid_requests_before_loading_model() {
-    let root = test_root("semantic-embedding-invalid");
-    let project = open_test_project(&root);
+fn knowledge_index_rebuilds_obsolete_token_metadata_schema() {
+    let root = test_root("semantic-index-obsolete-token-metadata");
+    {
+        let _project = open_test_project(&root);
+    }
+    let state_path = root.join(".opencanon/state/test/state.sqlite");
+    {
+        let conn = Connection::open(&state_path).unwrap();
+        conn.execute_batch(
+            "alter table knowledge_chunks rename column token_count to token_estimate;",
+        )
+        .unwrap();
+    }
 
-    let missing_texts = project.embed_semantic_texts_json(
-        json!({
-            "modelId": "jina-code-v2",
-            "task": "document",
-            "texts": []
-        })
-        .to_string(),
-    );
-    assert!(missing_texts
-        .unwrap_err()
-        .to_string()
-        .contains("at least one text"));
-
-    let invalid_task = project.embed_semantic_texts_json(
-        json!({
-            "modelId": "jina-code-v2",
-            "task": "other",
-            "texts": ["company"]
-        })
-        .to_string(),
-    );
-    assert!(invalid_task
-        .unwrap_err()
-        .to_string()
-        .contains("document or query"));
+    let _reopened = open_test_project(&root);
+    let conn = Connection::open(state_path).unwrap();
+    let mut statement = conn.prepare("pragma table_info(knowledge_chunks)").unwrap();
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(columns.iter().any(|column| column == "token_count"));
+    assert!(!columns.iter().any(|column| column == "token_estimate"));
 }
 
 #[test]
-fn generation_rejects_invalid_requests_before_loading_model() {
-    let root = test_root("generation-invalid");
-    let project = open_test_project(&root);
+fn gguf_knowledge_survives_project_reopen() {
+    let root = test_root("semantic-gguf-reopen");
+    {
+        let project = open_test_project(&root);
+        project
+            .write_semantic_index_json(complete_semantic_request().to_string())
+            .unwrap();
+    }
 
-    let missing_prompt = project.generate_text_json(
-        json!({
-            "modelId": "qwen-coder-0.5b",
-            "prompt": "",
-            "showDownloadProgress": false
-        })
-        .to_string(),
-    );
-    assert!(missing_prompt
-        .unwrap_err()
-        .to_string()
-        .contains("prompt is required"));
-
-    let invalid_temperature = project.generate_text_json(
-        json!({
-            "modelId": "qwen-coder-0.5b",
-            "prompt": "Plan the change.",
-            "temperature": 3,
-            "showDownloadProgress": false
-        })
-        .to_string(),
-    );
-    assert!(invalid_temperature
-        .unwrap_err()
-        .to_string()
-        .contains("temperature"));
+    let reopened = open_test_project(&root);
+    let status: Value = serde_json::from_str(
+        &reopened
+            .read_semantic_index_status_json(json!({ "indexId": "project" }).to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status["index"]["status"], "ready");
+    assert_eq!(status["index"]["chunkCount"], 2);
 }

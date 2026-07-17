@@ -13,6 +13,8 @@ export {
 } from "./semantic-index.ts";
 export type { ProjectSemanticIndexDeltaInput, SemanticEmbeddingBackend } from "./semantic-index.ts";
 export { createKnowledgeIndexManager } from "./knowledge-index-manager.ts";
+export { defaultMachineInferenceConfiguration, inferencePolicyPath, loadMachineInferenceConfiguration } from "./inference-policy.ts";
+export { createInferenceCoordinator } from "./inference-coordinator.ts";
 export type { KnowledgeIndexManager, KnowledgeIndexProgress, KnowledgeIndexRunOptions, KnowledgeIndexRunResult } from "./knowledge-index-manager.ts";
 export { snapshotFiles } from "./project-source-snapshot.ts";
 export type { RuntimeSourceSnapshot, RuntimeFactFile } from "./project-source-snapshot.ts";

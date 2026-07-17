@@ -2,7 +2,7 @@
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { cac } from "cac";
-import { inspectProjectRuntime, inspectService, privateProjectRuntimeStatePath, projectRuntimeStatePath, ProjectRuntimeEnv, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, runtimeNamespaceForRegistry, RuntimeStartupHealthBudgetMs, RuntimeStatus, serviceRegistryPath, stopProjectRuntime, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
+import { inferencePolicyPath, inspectProjectRuntime, inspectService, loadMachineInferenceConfiguration, privateProjectRuntimeStatePath, projectRuntimeStatePath, ProjectRuntimeEnv, reconcileProjectRuntimes, runOpenCanonStatusCommand, runProjectCommand, runServiceCommand, runtimeNamespaceForRegistry, RuntimeStartupHealthBudgetMs, RuntimeStatus, serviceRegistryPath, stopProjectRuntime, waitForProjectRuntimeReady, withCliAstFactsProvider } from "@opencanon/runtime";
 import { fail, formatOpenCanonProblem, Format, parseOpenCanonProblemFromError, resolveRootDir } from "@opencanon/core";
 import { applyDoctorFixes, buildDoctorReport, DoctorStatus, renderDoctorFixMarkdown, renderDoctorMarkdown } from "@opencanon/core";
 import type { DoctorRuntimeHealth, ProducerStatus } from "@opencanon/core";
@@ -273,10 +273,29 @@ async function buildDoctorRuntimeHealth(rootDir: string): Promise<DoctorRuntimeH
   await reconcileProjectRuntimes();
   await settleRuntimeForDoctor(rootDir);
   const [service, project] = await Promise.all([inspectService(), inspectProjectRuntime(rootDir)]);
+  const registryPath = serviceRegistryPath();
+  let inferencePolicy: NonNullable<NonNullable<DoctorRuntimeHealth["service"]>["inferencePolicy"]>;
+  try {
+    const configuration = loadMachineInferenceConfiguration(registryPath);
+    inferencePolicy = {
+      status: "valid",
+      path: configuration.path,
+      source: configuration.source,
+      profileId: configuration.profile.id,
+      message: `${configuration.profile.id} (${configuration.source}).`,
+    };
+  } catch (error) {
+    inferencePolicy = {
+      status: "invalid",
+      path: inferencePolicyPath(registryPath),
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   return {
     service: {
       status: service?.status ?? "not-running",
       registered: Boolean(service),
+      inferencePolicy,
       ...(service?.message ? { message: service.message } : {}),
     },
     project: {

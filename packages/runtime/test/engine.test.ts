@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createEngine, loadEngine, engineBindingName, validateEngineVersion } from "@opencanon/engine";
-import { assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, initialProjectPublication } from "./engine-binding-test-support.ts";
+import { assignedProjectPublication, assignedProtocolEvent, emptyProtocolEventWindow, initialProjectPublication, fakeInferenceEngineBinding } from "./engine-binding-test-support.ts";
 
 test("engine loader names pinned platform binaries and validates version payload", () => {
   assert.equal(engineBindingName("opencanon", "darwin", "arm64"), "opencanon.darwin-arm64.node");
@@ -36,6 +36,7 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
   let job: unknown = null;
   const jobEvents: unknown[] = [];
   const engine = createEngine({
+    ...fakeInferenceEngineBinding(2),
     versionJson: () => JSON.stringify({ packageVersion: "0.1.0", engineVersion: "0.1.0", napiVersion: "3.9.0", schemaVersion: 1 }),
     openProjectJson: () => ({
       statusJson: () =>
@@ -92,21 +93,6 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
       readSemanticIndexStatusJson: () => JSON.stringify({ index: semanticIndex }),
       listSemanticChunksJson: () => JSON.stringify({ index: semanticIndex, chunks: (semanticResults as Array<{ chunk: unknown }>).map((result) => result.chunk) }),
       searchSemanticIndexJson: () => JSON.stringify({ index: semanticIndex, results: semanticResults }),
-      embedSemanticTextsJson: (requestJson: string) => {
-        const request = JSON.parse(requestJson) as { texts: string[]; modelId: string };
-        return JSON.stringify({
-          modelId: request.modelId,
-          dimensions: 2,
-          vectors: request.texts.map((text) => [text.length, 1]),
-        });
-      },
-      generateTextJson: (requestJson: string) => {
-        const request = JSON.parse(requestJson) as { prompt: string; modelId: string };
-        return JSON.stringify({
-          modelId: request.modelId,
-          text: `generated:${request.prompt}`,
-        });
-      },
       startWatcherJson: (_request: string, callback: (error: unknown, batchJson?: string) => void) => {
         callback(null, JSON.stringify({ rootDir: "/repo", paths: ["src/company.ts"], stale: false, timestamp: "123" }));
         return JSON.stringify({ running: true, debounceMs: 250, bufferCapacity: 128 });
@@ -274,11 +260,11 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
   project.writeSemanticIndex({
     index: {
       id: "project",
-      version: "semantic-index-v2",
+      version: "semantic-index-v3",
       status: "ready",
       provider: {
-        id: "opencanon-native-jina-code-v2",
-        kind: "native",
+        id: "opencanon-gguf-jina-code-v2",
+        kind: "gguf",
         displayName: "Jina Code v2",
         modelId: "jina-code-v2",
         modelDigest: "model",
@@ -309,7 +295,7 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
           language: "typescript",
           ordinal: 0,
           range: { start: { line: 1, column: 1, byte: 0 }, end: { line: 1, column: 10, byte: 10 } },
-          tokenEstimate: 2,
+          tokenCount: 2,
           preview: "company code",
         },
         text: "company code",
@@ -320,16 +306,18 @@ test("engine JSON binding is wrapped in typed contracts", async () => {
   assert.equal(project.readSemanticIndexStatus().index?.chunkCount, 1);
   assert.equal(project.searchSemanticIndex({ vector: [1, ...Array.from({ length: 895 }, () => 0)] }).results[0].chunk.path, "src/company.ts");
   assert.equal(project.listSemanticChunks({ paths: ["src/company.ts"] }).chunks[0].path, "src/company.ts");
-  assert.deepEqual(
-    project.embedSemanticTexts({
-      modelId: "jina-code-v2",
-      task: "query",
-      texts: ["company"],
-      showDownloadProgress: false,
-    }).vectors[0],
-    [7, 1],
-  );
-  assert.equal(project.generateText({ modelId: "qwen-coder-0.5b", prompt: "Plan", showDownloadProgress: false }).text, "generated:Plan");
+  const inference = engine.openInferenceRuntime({
+    modelId: "jina-code-v2",
+    nGpuLayers: 0,
+    nThreads: 2,
+    nCtx: 128,
+    nBatch: 128,
+    nUbatch: 64,
+    nSeqMax: 16,
+  });
+  assert.equal(inference.describe().dimensions, 2);
+  assert.deepEqual(inference.countTokens({ task: "query", texts: ["company"] }).tokenCounts, [2]);
+  assert.equal(inference.embed({ task: "query", texts: ["company"] }).vectors[0].length, 2);
 
   productModelProjection = {
     indexedAt: "2026-06-05T00:00:00.000Z",

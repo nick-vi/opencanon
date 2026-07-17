@@ -89,7 +89,7 @@ import { createTypeProducerRuntime, defaultTsconfigPath } from "./type-producer/
 import { LiveTypeProducerProvider } from "./type-producer/live-provider.ts";
 import { createRuntimeStateManager, type RuntimeRebuildCandidate, type RuntimeRebuildOptions } from "./state-manager.ts";
 import { createChangeCheckRunner } from "./change-check-runner.ts";
-import { createKnowledgeQueryRuntime } from "./knowledge-query-runtime.ts";
+import { createServiceInferenceClient } from "./service-inference-client.ts";
 import { refreshActiveWorkProjection } from "./activity-projection.ts";
 import type { KnowledgeIndexProgress } from "./knowledge-index-manager.ts";
 import { knowledgeIndexProtocolPhase } from "./knowledge-index-progress.ts";
@@ -136,6 +136,7 @@ export type RuntimeServerOptions = {
   port?: number;
   pipeEndpoint?: string;
   statePath?: string;
+  registryPath?: string;
   authToken?: string;
   allowRemote?: boolean;
   idleTimeoutMs?: number;
@@ -171,7 +172,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
   const port = options.port ?? 4767;
   const shutdownTimeoutMs = resolveRuntimeShutdownTimeout(options.shutdownTimeoutMs);
   const runtimeEnvironment = readRuntimeProcessEnvironment();
-  const runtimeRegistryPath = runtimeEnvironment.registryPath;
+  const runtimeRegistryPath = options.registryPath ?? runtimeEnvironment.registryPath;
   const configuredPipeEndpoint = runtimeEnvironment.pipeEndpoint;
   const processIdentity = {
     kind: "runtime" as const,
@@ -321,7 +322,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       events.broadcast(failureEvent(ProtocolDomain.Proof, `Change check runtime failed: ${errorMessage(error)}`));
     },
   });
-  const knowledgeQueryRuntime = createKnowledgeQueryRuntime({ rootDir, statePath: () => store.statePath });
+  const inference = createServiceInferenceClient(runtimeRegistryPath);
   let coordinationDirectoryWatcher: FSWatcher | undefined;
   let coordinationSignalWatcher: FSWatcher | undefined;
   let coordinationRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -354,7 +355,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       projectTypesRuntime,
       typeProducerRuntime,
       changeCheckRunner,
-      knowledgeQueryRuntime,
+      inference,
       paths: () => paths,
       setPaths(nextPaths) {
         paths = nextPaths;
@@ -397,7 +398,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
     setProjectAstFactsProviderFactory(undefined);
     fixtureAst.dispose();
     await typeProducerRuntime?.stop();
-    await knowledgeQueryRuntime.stop();
     events.close();
     await tracer.shutdown().catch(() => undefined);
     await storeResource.dispose();
@@ -420,6 +420,7 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         const result = await executeKnowledgeIndex({
           rootDir,
           statePath: store.statePath,
+          registryPath: requiredServiceRegistryPath(runtimeRegistryPath),
           force: options.force,
           changedPaths: options.changedPaths,
           signal,
@@ -875,7 +876,6 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
         { label: "Project Knowledge watch queue", operation: knowledgeWatchQueue },
         { label: "Change checks", operation: changeCheckRunner.stop() },
         { label: "TypeScript producer", operation: typeProducerRuntime?.stop() ?? Promise.resolve() },
-        { label: "Project Knowledge queries", operation: knowledgeQueryRuntime.stop() },
         {
           label: "Project coordinator",
           operation: stateManager.waitForIdle().then(() => stateManager.finishShutdown()),
@@ -894,6 +894,11 @@ export async function startOpenCanonRuntime(options: RuntimeServerOptions = {}):
       { label: "stopped observer", operation: () => options.onStopped?.() },
     ]);
   }
+}
+
+function requiredServiceRegistryPath(value: string | undefined): string {
+  if (!value) throw new Error("Project Knowledge inference requires a project runtime managed by the OpenCanon service.");
+  return value;
 }
 
 function errorMessage(error: unknown): string {

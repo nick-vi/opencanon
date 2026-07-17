@@ -129,12 +129,95 @@ export function codeGraphRouteCheckSource(): string {
 
 export function projectContextRouteCheckSource(): string {
   const runtimeUrl = pathToFileURL(path.join(process.cwd(), "packages/runtime/src/index.ts")).href;
+  const coreUrl = pathToFileURL(path.join(process.cwd(), "packages/core/src/index.ts")).href;
   return `
     import assert from "node:assert/strict";
-    import { runtimeAuthHeaders, startOpenCanonRuntime } from ${JSON.stringify(runtimeUrl)};
+    import path from "node:path";
+    import { semanticEmbeddingConfigHash, semanticEmbeddingModel } from ${JSON.stringify(coreUrl)};
+    import {
+      forgetServiceEntry,
+      LocalControlProtocolVersion,
+      LocalTransportKind,
+      readServiceEntry,
+      runtimeAuthHeaders,
+      startOpenCanonRuntime,
+      startServiceServer,
+      upsertServiceEntry,
+    } from ${JSON.stringify(runtimeUrl)};
 
     const rootDir = process.argv[1];
-    const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0 });
+    const registryPath = path.join(rootDir, ".opencanon", "cache", "test-service-registry.json");
+    const statePath = path.join(rootDir, ".opencanon", "cache", "test-state.sqlite");
+    const modelDefinition = semanticEmbeddingModel("jina-code-v2");
+    const model = {
+      provider: "gguf",
+      modelId: modelDefinition.id,
+      modelDigest: semanticEmbeddingConfigHash(modelDefinition.config),
+      dimensions: modelDefinition.dimensions,
+      distance: "cosine",
+      pooling: "last",
+      documentPrefix: modelDefinition.config.documentPrefix,
+      queryPrefix: modelDefinition.config.queryPrefix,
+      maximumInputTokens: 512,
+      maximumSequences: 16,
+      chunkProfileId: modelDefinition.config.chunkProfileId,
+    };
+    const vectorFor = (text) => {
+      const vector = Array.from({ length: model.dimensions }, () => 0);
+      vector[/invoice|billing|company/iu.test(text) ? 0 : 1] = 1;
+      return vector;
+    };
+    const inferenceCoordinator = {
+      describe() {
+        return {
+          status: "stopped",
+          configurationSource: "default",
+          configurationPath: "/inference-policy.json",
+          profile: { id: "test", provider: "gguf", backend: "cpu", contextTokens: 2048, batchTokens: 2048, microBatchTokens: 512, maximumSequences: 16, threads: 1, gpuLayers: 0 },
+          policy: { version: 1, profileId: "test", maximumRequestBytes: 131072, maximumQueueRequests: 8, maximumQueueBytes: 1048576, maximumRequestTokens: 65536, maximumConcurrentOperations: 1, maximumResidentModels: 1, idleEvictionMs: 1000, requestTimeoutMs: 30000, hostStartupTimeoutMs: 30000 },
+          queueRequests: 0,
+          queueBytes: 0,
+          metrics: { completedOperations: 0, failedOperations: 0, cancelledOperations: 0, rejectedOperations: 0, coldLoads: 0, hostStarts: 0, hostRetirements: 0, idleEvictions: 0, totalQueueWaitMs: 0, totalModelLoadMs: 0, totalInferenceMs: 0 },
+        };
+      },
+      async countTokens(request) {
+        return { model, tokenCounts: request.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))) };
+      },
+      async embed(request) {
+        return {
+          model,
+          tokenCounts: request.texts.map((text) => Math.max(1, Math.ceil(text.length / 4))),
+          vectors: request.texts.map(vectorFor),
+          queueWaitMs: 0,
+          modelLoadMs: 0,
+          inferenceMs: 0,
+          coldLoad: false,
+        };
+      },
+      cancel() { return false; },
+      async stop() {},
+    };
+    const service = await startServiceServer({ port: 0, registryPath, reconcileIntervalMs: false, inferenceCoordinator });
+    upsertServiceEntry({
+      host: "127.0.0.1",
+      port: service.port,
+      url: service.url,
+      pipeEndpoint: service.pipeEndpoint,
+      pid: process.pid,
+      leaseId: service.leaseId,
+      startedAt: new Date().toISOString(),
+      logPath: path.join(rootDir, ".opencanon", "cache", "test-service.log"),
+      authToken: service.authToken,
+      lifecycle: { status: "running", updatedAt: new Date().toISOString(), restart: { attempts: 0 } },
+      transport: LocalTransportKind.Pipe,
+      protocolVersion: LocalControlProtocolVersion,
+      runtimeVersion: "test",
+      runtimeFingerprint: "test",
+      cliPath: process.execPath,
+    }, registryPath);
+    assert(readServiceEntry(registryPath), "test service registry entry must be readable before project startup");
+    const server = await startOpenCanonRuntime({ cwd: rootDir, port: 0, registryPath, statePath });
+    assert(readServiceEntry(registryPath), "test service registry entry must survive project startup");
     const headers = runtimeAuthHeaders(server.authToken);
     async function get(path) {
       const response = await fetch(server.url + path, { headers });
@@ -172,7 +255,8 @@ export function projectContextRouteCheckSource(): string {
       const compactBody = JSON.parse(compactText);
       assert.equal(compactBody.ok, true, compactText);
       assert.equal(typeof compactBody.data.semanticIndex.status, "string");
-      assert.equal(compactBody.data.semanticIndex.provider.kind, "native");
+      assert.equal(compactBody.data.semanticIndex.status, "ready", compactText);
+      assert.equal(compactBody.data.semanticIndex.provider.kind, "gguf");
       assert.equal("state" in compactBody.data, false);
       assert.equal("files" in compactBody.data, false);
 
@@ -181,7 +265,11 @@ export function projectContextRouteCheckSource(): string {
       const summary = await get("/api/project/summary");
       assert.equal(summary.files, 2);
 
+      const indexedChunks = await get("/api/context/chunks?path=src/company.ts");
+      assert(indexedChunks.chunks.length > 0, JSON.stringify(indexedChunks));
+
       const search = await get("/api/context/search?query=invoice%20search%20term&limit=5");
+      assert(search.results.length > 0, JSON.stringify(search));
       assert.equal(search.results[0].file, "src/company.ts");
       assert(search.results[0].definitions.length >= 0);
       const definitionSearch = await get("/api/context/search?query=Billing%20Context&limit=5");
@@ -208,6 +296,8 @@ export function projectContextRouteCheckSource(): string {
       assert(definitionBacklinks.links.some((link) => link.kind === "area" && link.id === "billing-context"));
     } finally {
       await server.stop();
+      forgetServiceEntry(registryPath);
+      await service.stop();
     }
   `;
 }

@@ -1,5 +1,5 @@
 import type { OpenCanonProblem, RuntimeHealth, RuntimeLifecycleState, RuntimeLiveState } from "@opencanon/core";
-import type { ServiceActionDefinition, ServiceProjectStatus } from "@opencanon/service-contracts";
+import type { InferenceDescribeResult, ServiceActionDefinition, ServiceProjectStatus } from "@opencanon/service-contracts";
 import type { LocalTransportKind } from "./local-protocol.ts";
 import { HiddenServiceRegistryArg } from "./service-peer-discovery.ts";
 
@@ -246,6 +246,7 @@ export type ServiceHealth = {
   status: "ready";
   protocolVersion: number;
   runtimeVersion: string;
+  inference: InferenceDescribeResult;
   process: {
     kind: "service";
     pid: number;
@@ -354,6 +355,10 @@ export const ServiceApiRoute = {
   EnsureProject: "/api/projects/ensure",
   EventsStream: "/api/projects/events/stream",
   Health: "/api/health",
+  InferenceCancel: "/api/inference/cancel",
+  InferenceCountTokens: "/api/inference/count-tokens",
+  InferenceDescribe: "/api/inference/describe",
+  InferenceEmbed: "/api/inference/embed",
   Overview: "/api/overview",
   Request: "/api/projects/request",
   SetupProject: "/api/projects/setup",

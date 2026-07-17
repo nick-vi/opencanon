@@ -27,10 +27,8 @@ test("runtime project settings read and write opencanon config", () => {
           },
         },
         semanticEmbedding: {
-          mode: "native",
+          provider: "gguf",
           modelId: "jina-code-v2",
-          nGpuLayers: 0,
-          showDownloadProgress: false,
         },
       },
     });
@@ -50,10 +48,8 @@ test("runtime project settings read and write opencanon config", () => {
       },
     });
     assert.deepEqual(saved.semanticEmbedding, {
-      mode: "native",
+      provider: "gguf",
       modelId: "jina-code-v2",
-      nGpuLayers: 0,
-      showDownloadProgress: false,
     });
     assert.equal(result.settings.effective.semanticEmbedding.modelId, "jina-code-v2");
 
@@ -61,7 +57,7 @@ test("runtime project settings read and write opencanon config", () => {
     assert.equal(invalid.ok, false);
     const invalidSemantic = writeProjectSettings(rootDir, {
       overrides: {
-        semanticEmbedding: { mode: "native", modelId: "unknown-embedding-model", showDownloadProgress: true },
+        semanticEmbedding: { provider: "gguf", modelId: "unknown-embedding-model" },
       },
     });
     assert.equal(invalidSemantic.ok, false);
