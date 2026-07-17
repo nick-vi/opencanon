@@ -225,9 +225,15 @@ export default [
       },
       {
         id: "knowledge-builds-are-explicit-and-isolated",
-        statement: "Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.",
-        acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed bounds", "index and query worker failures preserve runtime availability and the last published index", "native embedding models are never loaded into the serving runtime"],
-        checks: ["semantic-index-tests", "runtime-client-tests", "service-lifecycle-tests"],
+        statement: "Project Knowledge reads never start indexing, while one service-owned inference coordinator executes native index and query work in an isolated, bounded, shared host.",
+        acceptance: ["missing or stale Knowledge fails read commands immediately", "only project index starts a build", "source and embedding batches have fixed token bounds", "no-op indexing performs no inference work", "host failures preserve service and project-runtime availability plus the last published index", "native embedding models are never loaded into the service, project runtime, or project-specific workers", "multiple projects share one admitted resident model without sharing Project State"],
+        checks: ["inference-tests", "semantic-index-tests", "runtime-client-tests", "service-lifecycle-tests"],
+      },
+      {
+        id: "inference-is-explicit-and-machine-owned",
+        statement: "Projects select durable Knowledge model identity while the global service owns explicit machine-local execution policy, scheduling, cancellation, residency, and observability.",
+        acceptance: ["project config contains no hardware or scheduler controls", "the machine policy names one supported backend and complete execution profile", "unknown or unavailable backends fail before model work", "tokenization and embedding reject over-budget text instead of truncating it", "queue count and token admission are bounded and fail fast", "interactive queries do not starve behind document indexing", "queued and active operations can be cancelled", "the resident model evicts after the configured idle deadline", "execution-only profile changes do not stale vectors unless output semantics change"],
+        checks: ["inference-tests", "service-lifecycle-tests", "semantic-index-tests", "project-doctor"],
       },
       {
         id: "mutating-runtime-requests-are-idempotent",
@@ -272,9 +278,17 @@ export default [
         then: ["the request returns semantic-index-not-ready without scanning the repository", "the project runtime stays healthy", "the response points to opencanon project index"],
         checks: ["semantic-index-tests", "runtime-client-tests", "cli-tests"],
       },
+      {
+        id: "projects-share-bounded-inference",
+        given: ["two projects request native Knowledge work", "the machine permits one resident model"],
+        when: "indexing and an interactive search overlap",
+        then: ["one service coordinator admits both projects fairly", "the interactive query is not starved", "only one isolated inference host owns model memory", "each project publishes or reads only its own Knowledge", "service and project transports stay responsive"],
+        checks: ["inference-tests", "service-lifecycle-tests", "runtime-client-tests"],
+      },
     ],
     checks: [
       { id: "contracts-tests", kind: "test", target: "tests/contracts.test.ts" },
+      { id: "inference-tests", kind: "command", command: "npm run check:inference" },
       { id: "engine-tests", kind: "command", command: "npm run check:engine" },
       { id: "runtime-client-tests", kind: "test", target: "packages/runtime/test/client.test.ts" },
       { id: "semantic-index-tests", kind: "test", target: "packages/runtime/test/semantic-index.test.ts" },

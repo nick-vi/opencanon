@@ -1,6 +1,7 @@
 import { DefinitionTargetKind, defineChange } from "@opencanon/core";
 import { domainProtocolChanges } from "./domain-protocol.ts";
 import { runtimeSupervisionChanges } from "./runtime-supervision.ts";
+import { serviceOwnedInferenceChanges } from "./service-owned-inference.ts";
 
 export default [
   ...domainProtocolChanges,
@@ -758,6 +759,7 @@ export default [
     ],
     render: { kind: "none" },
   }),
+  ...serviceOwnedInferenceChanges,
   defineChange({
     id: "project-types-watcher-race",
     title: "Remove the duplicate project types watcher",

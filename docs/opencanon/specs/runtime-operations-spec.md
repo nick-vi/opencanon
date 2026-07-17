@@ -55,6 +55,7 @@ Long-running project operations expose bounded status, durable execution state, 
 ## Checks
 
 - `contracts-tests` test `tests/contracts.test.ts`
+- `inference-tests` command `npm run check:inference`
 - `engine-tests` command `npm run check:engine`
 - `runtime-client-tests` test `packages/runtime/test/client.test.ts`
 - `semantic-index-tests` test `packages/runtime/test/semantic-index.test.ts`
@@ -174,13 +175,27 @@ Rule `source-refresh-preserves-transports`: Project source refresh keeps pipe an
 - a long refresh does not replace the serving runtime
 Checks: `engine-tests`, `project-analysis-tests`, `runtime-client-tests`, `service-lifecycle-tests`
 
-Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while native index and query inference execute with bounded memory outside the serving runtime.
+Rule `knowledge-builds-are-explicit-and-isolated`: Project Knowledge reads never start indexing, while one service-owned inference coordinator executes native index and query work in an isolated, bounded, shared host.
 - missing or stale Knowledge fails read commands immediately
 - only project index starts a build
-- source and embedding batches have fixed bounds
-- index and query worker failures preserve runtime availability and the last published index
-- native embedding models are never loaded into the serving runtime
-Checks: `semantic-index-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+- source and embedding batches have fixed token bounds
+- no-op indexing performs no inference work
+- host failures preserve service and project-runtime availability plus the last published index
+- native embedding models are never loaded into the service, project runtime, or project-specific workers
+- multiple projects share one admitted resident model without sharing Project State
+Checks: `inference-tests`, `semantic-index-tests`, `runtime-client-tests`, `service-lifecycle-tests`
+
+Rule `inference-is-explicit-and-machine-owned`: Projects select durable Knowledge model identity while the global service owns explicit machine-local execution policy, scheduling, cancellation, residency, and observability.
+- project config contains no hardware or scheduler controls
+- the machine policy names one supported backend and complete execution profile
+- unknown or unavailable backends fail before model work
+- tokenization and embedding reject over-budget text instead of truncating it
+- queue count and token admission are bounded and fail fast
+- interactive queries do not starve behind document indexing
+- queued and active operations can be cancelled
+- the resident model evicts after the configured idle deadline
+- execution-only profile changes do not stale vectors unless output semantics change
+Checks: `inference-tests`, `service-lifecycle-tests`, `semantic-index-tests`, `project-doctor`
 
 Rule `mutating-runtime-requests-are-idempotent`: A repaired client may retry a mutating runtime request with the same request identity without duplicating or contradicting committed Activity.
 - an identical event retry returns the committed event
@@ -229,6 +244,17 @@ Scenario `search-observes-missing-knowledge`
 - Then the project runtime stays healthy
 - Then the response points to opencanon project index
 Checks: `semantic-index-tests`, `runtime-client-tests`, `cli-tests`
+
+Scenario `projects-share-bounded-inference`
+- Given two projects request native Knowledge work
+- Given the machine permits one resident model
+- When indexing and an interactive search overlap
+- Then one service coordinator admits both projects fairly
+- Then the interactive query is not starved
+- Then only one isolated inference host owns model memory
+- Then each project publishes or reads only its own Knowledge
+- Then service and project transports stay responsive
+Checks: `inference-tests`, `service-lifecycle-tests`, `runtime-client-tests`
 
 ## Governance
 
